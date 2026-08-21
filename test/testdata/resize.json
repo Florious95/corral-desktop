@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "resize",
+  "payload": {
+    "ref": "s1",
+    "rows": 48,
+    "cols": 120
+  }
+}

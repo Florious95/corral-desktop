@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "input",
+  "payload": {
+    "req_id": 9,
+    "ref": "s1",
+    "text": "/model opus"
+  }
+}

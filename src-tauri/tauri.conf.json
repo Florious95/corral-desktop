@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgentMirror",
+  "version": "0.1.0",
+  "identifier": "com.agentmirror.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1430",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "AgentMirror",
+        "width": 1400,
+        "height": 860,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Remote Agent CLI client",
+    "longDescription": "Mirror and control Agent CLI sessions running in tmux.",
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"]
+  }
+}

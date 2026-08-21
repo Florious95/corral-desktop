@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "input_ack",
+  "payload": {
+    "req_id": 9,
+    "ok": false,
+    "reason": "inject_failed"
+  }
+}

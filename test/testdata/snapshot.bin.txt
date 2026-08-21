@@ -1,0 +1,7 @@
+REMOTE-AGENT WIRE FIXTURE (binary stream frame)
+Kind:     snapshot
+Ref:      "s1"
+Payload:  ANSI-colored screen: ESC[31mred screen ESC[0m\n
+
+Hex dump of the fixture bytes:
+  52 41 01 01 02 73 31 1b 5b 33 31 6d 72 65 64 20 73 63 72 65 65 6e 1b 5b 30 6d 0a

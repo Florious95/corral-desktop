@@ -1,0 +1,36 @@
+{
+  "v": 1,
+  "type": "list_delta",
+  "payload": {
+    "seq": 45,
+    "added_sessions": [
+      {
+        "ref": "s4",
+        "name": "claude",
+        "cwd": "/proj/c",
+        "title": "",
+        "rows": 25,
+        "cols": 100
+      }
+    ],
+    "removed_refs": [
+      "s1"
+    ],
+    "changed_sessions": [
+      {
+        "ref": "s2",
+        "name": "codex",
+        "cwd": "/proj/a",
+        "title": "",
+        "rows": 24,
+        "cols": 80
+      }
+    ],
+    "changed_workspaces": [
+      {
+        "cwd": "/proj/a",
+        "session_count": 2
+      }
+    ]
+  }
+}

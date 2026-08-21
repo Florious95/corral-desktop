@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "subscribe",
+  "payload": {
+    "ref": "s1",
+    "rows": 40,
+    "cols": 100
+  }
+}

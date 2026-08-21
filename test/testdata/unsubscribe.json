@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "unsubscribe",
+  "payload": {
+    "ref": "s1"
+  }
+}

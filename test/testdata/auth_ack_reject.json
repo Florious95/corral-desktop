@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "auth_ack",
+  "payload": {
+    "ok": false,
+    "reason": "bad token"
+  }
+}

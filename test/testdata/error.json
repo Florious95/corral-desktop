@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "error",
+  "payload": {
+    "code": "session_not_found",
+    "reason": "session s1 vanished"
+  }
+}

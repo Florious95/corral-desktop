@@ -1,0 +1,18 @@
+REMOTE-AGENT WIRE FIXTURE (binary stream frame)
+Kind:     scrollback
+Ref:      "s1"
+ReqID:    5 (big-endian 00 00 00 05)
+FromLine: -100 (big-endian signed ff ff ff 9c)  -- actual first line of the returned range
+LineCount: 50 (big-endian 00 00 00 32)          -- actual number of lines returned
+Payload:  one history page: "history page one"
+
+The request was from_line=-300, count=100; the server clamped it to what tmux
+had available and reports the ACTUAL range (from_line=-100, line_count=50) in
+the reply header so the client can anchor its scroll viewport.
+
+Hex dump of the fixture bytes:
+  52 41 01 03 02 73 31
+  00 00 00 05             req_id   = 5
+  ff ff ff 9c             from_line = -100
+  00 00 00 32             line_count = 50
+  68 69 73 74 6f 72 79 20 70 61 67 65 20 6f 6e 65   "history page one"

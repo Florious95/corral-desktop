@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "scrollback",
+  "payload": {
+    "req_id": 5,
+    "ref": "s1",
+    "from_line": -300,
+    "count": 100
+  }
+}

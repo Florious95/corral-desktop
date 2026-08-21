@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "input",
+  "payload": {
+    "req_id": 10,
+    "ref": "s1",
+    "keys": ["esc", "ctrl_c", "tab"]
+  }
+}

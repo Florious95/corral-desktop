@@ -1,0 +1,7 @@
+REMOTE-AGENT WIRE FIXTURE (binary stream frame)
+Kind:     delta
+Ref:      "s1"
+Payload:  incremental terminal run: "append"
+
+Hex dump of the fixture bytes:
+  52 41 01 02 02 73 31 61 70 70 65 6e 64

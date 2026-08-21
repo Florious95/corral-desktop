@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "input_ack",
+  "payload": {
+    "req_id": 9,
+    "ok": true
+  }
+}
