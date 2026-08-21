@@ -43,7 +43,7 @@ export default function AgentsList({
   onOpen,
   onContextMenu,
   multiDevice,
-  emptyHint = '在 Space 上右键 → 新建 Agent',
+  emptyHint = '会话由主机发现后会出现在这里',
   emptyTitle = '这个空间还没有 Agent',
 }) {
   const hostRef = useRef(null);
