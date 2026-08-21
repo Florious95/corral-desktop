@@ -184,6 +184,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dp-err {
+  font-size: var(--fs-11);
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dp-box {
   width: 14px;
   height: 14px;
