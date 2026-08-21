@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval' tauri:"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' tauri: "
     }
   },
   "bundle": {
