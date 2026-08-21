@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:radial-gradient(120% 140% at 20% 0%,#ece7de 0%,#d8d2c6 55%,#c3bcae 100%);font-family:-apple-system,'SF Pro Text','PingFang SC','Segoe UI','Microsoft YaHei',sans-serif;color:#3a3835;height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:#8a713d}a:hover{color:#6d5930}
+@keyframes menuIn{from{opacity:0;transform:scale(.96) translateY(-4px)}}
+@keyframes paneIn{from{opacity:0;transform:translateX(28px)}}
+@keyframes rowIn{from{opacity:0;transform:translateY(5px)}}
+::-webkit-scrollbar{width:0;height:0}*{scrollbar-width:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,199,89,.55)}70%{box-shadow:0 0 0 5px rgba(52,199,89,0)}100%{box-shadow:0 0 0 0 rgba(52,199,89,0)}}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box">
+<div style="width:min(1400px,100%);height:100%;background:#fbfaf8;border-radius:{{ winRadius }}px;font-family:{{ uiFont }};overflow:hidden;box-shadow:0 0 0 0.5px rgba(0,0,0,.22),inset 0 0 0 0.5px rgba(255,255,255,.45),0 40px 90px rgba(40,35,25,.28),0 12px 28px rgba(40,35,25,.14),0 2px 6px rgba(0,0,0,.08);display:flex;flex-direction:column;position:relative">
+
+  <!-- title bar -->
+  <div style="height:46px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;background:linear-gradient(180deg,#eeebe6,#e9e6e1);border-bottom:1px solid rgba(0,0,0,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.55)">
+    <sc-if value="{{ isMac }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;gap:8px;padding-left:2px">
+      <span style="width:12px;height:12px;border-radius:50%;background:linear-gradient(180deg,#f0776b,#ea5f52);box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.15)"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:linear-gradient(180deg,#f7c94f,#f2b83b);box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.15)"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:linear-gradient(180deg,#6ed05f,#57c04a);box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.15)"></span>
+    </div>
+    </sc-if>
+    <sc-if value="{{ isWin }}" hint-placeholder-val="{{ false }}">
+    <span style="width:18px;height:18px;border-radius:4px;background:linear-gradient(135deg,#4a4740,#2d2b27);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;flex:none">M</span>
+    </sc-if>
+    <div onClick="{{ toggleSidebar }}" title="折叠/展开侧栏" style="width:28px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#7a766e" style-hover="background:rgba(0,0,0,.06)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="3"></rect><line x1="9" y1="4" x2="9" y2="20"></line></svg>
+    </div>
+    <span style="font-size:12.5px;font-weight:600;color:#6d6a63">Motrix Agent</span>
+    <sc-if value="{{ splitBadge }}" hint-placeholder-val="{{ false }}">
+      <span style="font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:99px;background:#e5efe2;color:#3f7a4c">分裂展示 · {{ paneCount }} 列</span>
+    </sc-if>
+    <div style="margin-left:auto;display:flex;align-items:stretch;align-self:stretch">
+      <div onClick="{{ togglePlatform }}" title="切换平台外观（同一套代码）" style="align-self:center;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#8a867e;padding:4px 10px;border-radius:99px;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.1);margin-right:{{ platBtnMr }}px" style-hover="background:rgba(0,0,0,.05);color:#5d5a54">{{ platLabel }}</div>
+      <sc-if value="{{ isWin }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:stretch;margin-right:-14px">
+        <div style="width:46px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#5d5a54;transition:background .12s" style-hover="background:rgba(0,0,0,.07)"><svg width="10" height="10" viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1"></line></svg></div>
+        <div style="width:46px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#5d5a54;transition:background .12s" style-hover="background:rgba(0,0,0,.07)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1"></rect></svg></div>
+        <div style="width:46px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#5d5a54;transition:background .12s,color .12s" style-hover="background:#c42b1c;color:#fff"><svg width="10" height="10" viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" stroke-width="1"></line><line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" stroke-width="1"></line></svg></div>
+      </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+  <!-- sidebar -->
+  <aside style="width:{{ sidebarW }}px;flex:none;overflow:hidden;background:#ebe8e3;border-right:1px solid rgba(0,0,0,.07);display:flex;flex-direction:column;transition:width .28s cubic-bezier(.2,.8,.2,1)">
+    <div style="width:280px;flex:1;display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:10px;margin:10px 10px 2px;padding:6px 10px;border-radius:7px;font-size:13.5px;cursor:pointer" style-hover="background:rgba(0,0,0,.055)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7a766e" stroke-width="1.8"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>Search</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px 4px">
+        <span onClick="{{ toggleSpaces }}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:#8a867e;cursor:pointer;border-radius:5px;padding:2px 6px;margin-left:-6px" style-hover="background:rgba(0,0,0,.05);color:#5d5a54">Spaces<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="transform:rotate({{ spacesRot }}deg);transition:transform .22s cubic-bezier(.2,.8,.2,1)"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+        <div onClick="{{ addFolder }}" title="新建文件夹" style="width:24px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#8a867e" style-hover="background:rgba(0,0,0,.06);color:#5d5a54"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg></div>
+      </div>
+      <sc-if value="{{ spacesOpen }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:0 10px;display:flex;flex-direction:column;overflow-y:auto;max-height:clamp(96px, 100dvh - 464px, 288px);flex:none">
+        <sc-for list="{{ spaceRows }}" as="sp" hint-placeholder-count="8">
+          <div onClick="{{ sp.select }}" onContextMenu="{{ sp.menu }}" style="display:flex;align-items:center;gap:10px;height:32px;flex:none;box-sizing:border-box;padding:0 10px;border-radius:7px;font-size:13.5px;cursor:pointer;background:{{ sp.bg }};font-weight:{{ sp.weight }};transition:background .15s;animation:rowIn .2s ease-out" style-hover="background:rgba(0,0,0,.07)">{{ sp.iconEl }}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ sp.name }}</span><span style="margin-left:auto;font-size:12px;color:#8a867e;font-weight:400;flex:none">{{ sp.count }}</span></div>
+        </sc-for>
+        <sc-if value="{{ folderEditing }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;animation:rowIn .2s ease-out">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a867e" stroke-width="1.8" style="flex:none"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"></path></svg>
+            <input value="{{ folderName }}" onChange="{{ folderInput }}" onKeyDown="{{ folderKey }}" autoFocus="{{ true }}" placeholder="文件夹名称" style="flex:1;min-width:0;font-size:13px;font-family:inherit;padding:4px 8px;border:1.5px solid #b8a273;border-radius:6px;background:#fff;outline:none;color:#3a3835">
+            <div onClick="{{ folderConfirm }}" title="创建" style="width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#3f7a4c;flex:none" style-hover="background:rgba(0,0,0,.06)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+            <div onClick="{{ folderCancel }}" title="取消" style="width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#8a867e;flex:none" style-hover="background:rgba(0,0,0,.06)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+          </div>
+        </sc-if>
+      </div>
+      </sc-if>
+      <div style="padding:14px 20px 4px;display:flex;align-items:center;min-width:0">
+        <span onClick="{{ toggleAgents }}" style="display:inline-flex;align-items:center;gap:4px;min-width:0;font-size:12px;font-weight:600;color:#8a867e;cursor:pointer;border-radius:5px;padding:2px 6px;margin-left:-6px" style-hover="background:rgba(0,0,0,.05);color:#5d5a54"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ agentsHeader }}</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="flex:none;transform:rotate({{ agentsRot }}deg);transition:transform .22s cubic-bezier(.2,.8,.2,1)"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+      </div>
+      <sc-if value="{{ agentsOpen }}" hint-placeholder-val="{{ true }}">
+      <div ref="{{ agentsWrapRef }}" style="padding:0 10px;flex:1;min-height:108px;overflow:hidden;box-sizing:border-box">
+      <div style="height:{{ agentsVpH }}px;overflow-y:auto">
+        <div style="position:relative;height:{{ agentsBoxH }}px">
+        <sc-for list="{{ agentRows }}" as="ag" hint-placeholder-count="4">
+          <div onClick="{{ ag.open }}" onContextMenu="{{ ag.menu }}" style="position:absolute;left:0;right:0;top:{{ ag.top }}px;height:54px;box-sizing:border-box;border:2px solid transparent;display:flex;flex-direction:column;justify-content:center;padding:0 8px;border-radius:9px;cursor:pointer;background-color:{{ ag.bg }};background-clip:padding-box;opacity:{{ ag.opacity }};transform:scale({{ ag.scale }});transition:background-color .15s,opacity .18s,transform .18s,top .38s cubic-bezier(.2,.8,.2,1);animation:rowIn .22s ease-out" style-hover="background-color:rgba(0,0,0,.07)">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;min-width:0">{{ ag.iconEl }}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ag.title }}</span>{{ ag.favEl }}</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8a867e;margin-top:3px">{{ ag.statusEl }}<span>{{ ag.meta }}</span><span style="margin-left:auto;font-size:10px;font-weight:500;padding:2px 8px;border-radius:99px;background:{{ ag.badgeBg }};color:{{ ag.badgeFg }};flex:none;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.06)">{{ ag.badge }}</span></div>
+          </div>
+        </sc-for>
+        </div>
+        <sc-if value="{{ agentsEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px 10px;font-size:12px;color:#b0aca3;text-align:center">这个空间还没有 Agent<br>在文件夹上右键 → 新建 Agent</div>
+        </sc-if>
+      </div>
+      </div>
+      </sc-if>
+      <div style="flex:{{ spacerFlex }} 1 0px"></div>
+      <div onClick="{{ toggleDevices }}" style="border-top:1px solid rgba(0,0,0,.08);display:flex;align-items:center;gap:8px;padding:11px 16px;font-size:13px;font-weight:600;flex:none;cursor:pointer;transition:background .15s" style-hover="background:rgba(0,0,0,.04)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d5a54" stroke-width="1.8"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ deviceLabel }}</span>
+        <span style="width:7px;height:7px;border-radius:50%;background:#34c759;flex:none"></span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a867e" stroke-width="1.8" style="margin-left:auto"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path></svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- main: split panes -->
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0;background:#fbfaf8">
+    <div style="flex:1;display:flex;min-height:0">
+    <sc-for list="{{ paneRows }}" as="p" hint-placeholder-count="1">
+      <div onContextMenu="{{ p.menu }}" style="flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid rgba(0,0,0,.07);animation:paneIn .28s cubic-bezier(.2,.8,.2,1);position:relative">
+        <div onClick="{{ p.close }}" title="关闭此列" style="position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#b0aca3;z-index:3" style-hover="background:rgba(0,0,0,.06);color:#5d5a54"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:center">
+          <div style="text-align:center">
+            <div style="width:44px;height:44px;border-radius:12px;background:#f0ede8;border:1px solid rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;margin:0 auto 12px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a09c93" stroke-width="1.8"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></div>
+            <div style="font-size:13px;font-weight:600;color:#8a867e">原生 Agent 界面</div>
+            <div style="font-size:11.5px;color:#b0aca3;margin-top:3px">不在设计范围 · 此列渲染该 Agent 的会话视图</div>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+    <sc-if value="{{ panesEmpty }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center">
+        <div style="text-align:center;font-size:13px;color:#b0aca3">从左侧选择一个 Agent<br><span style="font-size:11.5px">右键可分裂展示、收藏或关闭</span></div>
+      </div>
+    </sc-if>
+    </div>
+    <div style="flex:none;border-top:1px solid rgba(0,0,0,.06);background:#f7f5f1;padding:8px 16px;display:flex;align-items:center;gap:18px;overflow-x:auto">
+      <span style="font-size:10.5px;font-weight:600;color:#b0aca3;flex:none">图标 · 运行 / 空闲</span>
+      <sc-for list="{{ iconGallery }}" as="ic" hint-placeholder-count="8">
+        <div style="display:flex;align-items:center;gap:7px;flex:none">
+          {{ ic.runEl }}{{ ic.idleEl }}
+          <span style="font-size:10.5px;color:#8a867e;white-space:nowrap">{{ ic.name }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </main>
+  </div>
+
+  <!-- devices popover -->
+  <sc-if value="{{ devicesOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDevices }}" onContextMenu="{{ closeDevices }}" style="position:fixed;inset:0;z-index:30"></div>
+    <div style="position:absolute;left:10px;bottom:54px;z-index:31;width:300px;background:rgba(252,251,249,.85);backdrop-filter:blur(26px) saturate(1.6);-webkit-backdrop-filter:blur(26px) saturate(1.6);border-radius:12px;box-shadow:0 0 0 0.5px rgba(0,0,0,.16),inset 0 0 0 0.5px rgba(255,255,255,.5),0 16px 44px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.08);padding:6px;animation:menuIn .14s ease-out">
+      <div style="font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#9a968e;padding:8px 12px 6px">Devices</div>
+      <sc-for list="{{ deviceRows }}" as="dv" hint-placeholder-count="3">
+        <div onClick="{{ dv.click }}" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;background-color:{{ dv.bg }};transition:background-color .15s" style-hover="background-color:rgba(0,0,0,.05)">
+          {{ dv.iconEl }}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">{{ dv.name }}{{ dv.dotEl }}</div>
+            <div style="font-size:11px;color:#8a867e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ dv.sub }}</div>
+          </div>
+          {{ dv.checkEl }}
+        </div>
+      </sc-for>
+      <div onClick="{{ addDevice }}" style="border-top:1px solid rgba(0,0,0,.07);margin-top:4px;padding:8px 12px;display:flex;align-items:center;gap:10px;font-size:13px;color:#6d6a63;cursor:pointer;border-radius:0 0 8px 8px" style-hover="background-color:rgba(0,0,0,.05)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Add Device…</div>
+    </div>
+  </sc-if>
+
+  <!-- new agent dialog -->
+  <sc-if value="{{ newAgentOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ cancelNewAgent }}" style="position:fixed;inset:0;z-index:50;background:rgba(40,35,25,.28);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);animation:menuIn .15s ease-out"></div>
+    <div style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:51;width:420px;background:rgba(252,251,249,.92);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);border-radius:14px;box-shadow:0 0 0 0.5px rgba(0,0,0,.18),inset 0 0 0 0.5px rgba(255,255,255,.55),0 24px 70px rgba(0,0,0,.3);padding:20px;animation:menuIn .16s cubic-bezier(.2,.8,.2,1)">
+      <div style="font-size:15px;font-weight:700;margin-bottom:2px">新建 Agent</div>
+      <div style="font-size:12px;color:#8a867e;margin-bottom:14px">在「{{ naSpaceName }}」中创建</div>
+      <input value="{{ naName }}" onChange="{{ naInput }}" autoFocus="{{ true }}" placeholder="任务名称（可留空）" style="width:100%;box-sizing:border-box;font-size:13px;font-family:inherit;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;background:#fff;outline:none;color:#3a3835;margin-bottom:14px">
+      <div style="font-size:11.5px;font-weight:600;color:#8a867e;margin-bottom:8px">选择厂家</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+        <sc-for list="{{ provOptions }}" as="po" hint-placeholder-count="8">
+          <div onClick="{{ po.pick }}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px 8px;border-radius:9px;cursor:pointer;background:{{ po.bg }};box-shadow:{{ po.ring }};transition:background .15s,box-shadow .15s" style-hover="background:rgba(0,0,0,.05)">{{ po.iconEl }}<span style="font-size:10.5px;color:#5d5a54;white-space:nowrap">{{ po.name }}</span></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;background:rgba(0,0,0,.04);margin-bottom:16px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600;color:#a4542e">Bypass permissions</div>
+          <div style="font-size:11px;color:#8a867e;margin-top:1px">允许 Agent 不经确认执行 shell 命令</div>
+        </div>
+        <div onClick="{{ toggleBypass }}" style="width:38px;height:23px;border-radius:99px;background:{{ bypassBg }};position:relative;cursor:pointer;transition:background .2s;flex:none">
+          <span style="position:absolute;top:2px;left:{{ knobX }}px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s cubic-bezier(.2,.8,.2,1)"></span>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <div onClick="{{ cancelNewAgent }}" style="padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#5d5a54;cursor:pointer" style-hover="background:rgba(0,0,0,.06)">取消</div>
+        <div onClick="{{ createAgent }}" style="padding:7px 16px;border-radius:8px;font-size:13px;font-weight:600;color:#fff;background:#3a3835;cursor:pointer" style-hover="background:#201e1d" style-active="background:#000">创建</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- context menu -->
+  <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeMenu }}" onContextMenu="{{ closeMenu }}" style="position:fixed;inset:0;z-index:40"></div>
+    <div style="position:fixed;left:{{ menuX }}px;top:{{ menuY }}px;z-index:41;min-width:176px;background:rgba(250,249,246,.78);backdrop-filter:blur(24px) saturate(1.6);-webkit-backdrop-filter:blur(24px) saturate(1.6);border-radius:11px;box-shadow:0 0 0 0.5px rgba(0,0,0,.16),inset 0 0 0 0.5px rgba(255,255,255,.5),0 16px 44px rgba(0,0,0,.2),0 2px 8px rgba(0,0,0,.08);padding:5px;animation:menuIn .13s ease-out">
+      <sc-for list="{{ menuItems }}" as="mi" hint-placeholder-count="3">
+        <div onClick="{{ mi.onClick }}" style="display:flex;align-items:center;gap:9px;padding:6.5px 10px;border-radius:7px;font-size:13px;cursor:pointer;color:{{ mi.color }};border-top:{{ mi.bt }};margin-top:{{ mi.mt }}px" style-hover="background:rgba(0,0,0,.07)" style-active="background:rgba(0,0,0,.11)">{{ mi.iconEl }}{{ mi.label }}</div>
+      </sc-for>
+    </div>
+  </sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;sidebarWidth&quot;: {&quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 280, &quot;min&quot;: 240, &quot;max&quot;: 340, &quot;step&quot;: 4, &quot;unit&quot;: &quot;px&quot;, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Layout&quot;},
+  &quot;platform&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;macos&quot;, &quot;windows&quot;], &quot;default&quot;: &quot;macos&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Platform&quot;}
+}">
+class Component extends DCLogic {
+  state = {
+    collapsed: false,
+    selected: 'all',
+    menu: null, // {kind:'space'|'agent', id, x, y}
+    panes: ['a1'],
+    closing: {},
+    spaces: [
+      { id: 's1', name: 'gost', device: 'Local' },
+      { id: 's2', name: 'motrix-gpui', device: 'Local' },
+      { id: 's3', name: 'flight.ke', device: 'Mac Studio' },
+      { id: 's4', name: 'opentype', device: 'Mac Studio' },
+      { id: 's5', name: 'kumone', device: 'Mac Studio' },
+      { id: 's6', name: 'treeow', device: 'Mac Studio' },
+    ],
+    agents: [
+      { id: 'a1', title: 'Windows 紅綠燈和關閉按鈕', provider: 'claude-code', space: 's2', running: true, fav: true },
+      { id: 'a2', title: '构建 Swift 原生网易云音乐播放器', provider: 'claude-code', space: 's5', running: true, fav: false },
+      { id: 'a3', title: 'gost 隧道限速排查', provider: 'codex', space: 's1', running: false, fav: true },
+      { id: 'a4', title: '字体子集化 pipeline', provider: 'cursor', space: 's4', running: false, fav: false },
+      { id: 'a5', title: 'flight.ke 抓取重构', provider: 'grok', space: 's3', running: true, fav: false },
+      { id: 'a6', title: 'README 英文润色', provider: 'opencode', space: 's1', running: false, fav: false },
+      { id: 'a7', title: '树形组件虚拟滚动', provider: 'zcode', space: 's6', running: false, fav: false },
+      { id: 'a8', title: 'K2 上下文缓存实验', provider: 'kimi', space: 's5', running: true, fav: false },
+    ],
+  };
+  uid() { return 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  static DEVICES = [
+    { id: 'local', name: 'Local', sub: 'This Mac · herdr.sock', online: true },
+    { id: 'studio', name: 'Mac Studio @ Home', sub: 'vincent@10.10.10.87 · SSH', online: true },
+  ];
+  static BRAND = {
+    'claude-code': { run: 'claude-color', idle: 'claude' },
+    claude: { run: 'claude-color', idle: 'claude' },
+    codex: { run: 'codex', idle: 'codex' },
+    grok: { run: 'grok', idle: 'grok' },
+    opencode: { run: 'opencode', idle: 'opencode' },
+    cursor: { run: 'cursor', idle: 'cursor' },
+    zcode: { run: 'zai', idle: 'zai' },
+    kimi: { run: 'kimi', idle: 'kimi' },
+  };
+  componentDidMount() {
+    this.agentsRO = new ResizeObserver(() => this.fitAgentsVp());
+    const tryObserve = () => {
+      const el = this.agentsWrapRef && this.agentsWrapRef.current;
+      if (el) { this.agentsRO.observe(el); this.fitAgentsVp(); }
+      else requestAnimationFrame(tryObserve);
+    };
+    tryObserve();
+    this.iconCache = {};
+    const slugs = [...new Set(Object.values(Component.BRAND).flatMap(b => [b.run, b.idle]))];
+    slugs.forEach(sl => {
+      const url = 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/' + sl + '.svg';
+      const attempt = n => fetch(url).then(r => { if (!r.ok) throw 0; return r.blob(); })
+        .then(b => { this.iconCache[sl] = URL.createObjectURL(b); this.forceUpdate(); })
+        .catch(() => { if (n < 3) setTimeout(() => attempt(n + 1), 400 * (n + 1)); });
+      attempt(0);
+    });
+  }
+  agentsWrapRef = React.createRef();
+  fitAgentsVp() {
+    const el = this.agentsWrapRef.current;
+    if (!el) return;
+    const h = Math.max(108, Math.floor(el.clientHeight / 54) * 54);
+    if (h !== this.state.agentsVpH) this.setState({ agentsVpH: h });
+  }
+  confirmFolder() {
+    const name = (this.state.editName || '').trim();
+    if (!name) { this.setState({ editName: null }); return; }
+    const id = this.uid();
+    this.setState(s => ({ editName: null, spaces: [...s.spaces, { id, name, device: 'Local' }], selected: id }));
+  }
+
+  icon(provider, size, running) {
+    const h = React.createElement, s = size || 18;
+    const tints = { claude: '#D97757', 'claude-code': '#D97757', grok: '#3a3835', codex: '#6d6a63', opencode: '#7a8a6e', cursor: '#6d6a63', zcode: '#6b83b5', kimi: '#8a713d' };
+    const c = running ? (tints[provider] || '#6d6a63') : '#a8a49b';
+    // Official brand marks (LobeHub AI icon set), pre-fetched into blob URLs in componentDidMount.
+    const sl = Component.BRAND[provider];
+    if (sl) {
+      const key = running ? sl.run : sl.idle;
+      const src = (this.iconCache || {})[key];
+      if (src) return h('img', {
+        src, width: s, height: s, alt: provider,
+        style: { display: 'block', flex: 'none', opacity: running ? 1 : 0.4, transition: 'opacity .3s' },
+      });
+      return h('span', { style: { display: 'inline-flex', flex: 'none', width: s, height: s, borderRadius: '50%', border: '1.5px solid ' + c, color: c, fontSize: s * 0.5, fontWeight: 700, alignItems: 'center', justifyContent: 'center', fontFamily: 'ui-monospace,Menlo,monospace' } }, provider[0].toUpperCase());
+    }
+    const svg = kids => h('svg', { width: s, height: s, viewBox: '0 0 24 24', fill: 'none', style: { flex: 'none', transition: 'all .3s' } }, ...kids);
+    const blobPath = 'M12 2.8c1.7-.8 3.6-.3 4.6 1.1 1.7.2 2.9 1.7 2.7 3.4 1.1 1.2 1.2 3 .2 4.3.5 1.6-.2 3.3-1.7 4-.4 1.6-1.9 2.7-3.6 2.5-1.1 1.2-3 1.4-4.3.5-1.7.3-3.3-.8-3.7-2.4-1.5-.6-2.4-2.2-2-3.8-1.1-1.3-1-3.1.1-4.3-.2-1.7 1-3.2 2.6-3.5C8.1 3.2 9.9 2.5 11.5 3l.5-.2Z';
+    const blob = mark => svg([h('path', { d: blobPath, stroke: c, strokeWidth: 1.5, strokeLinejoin: 'round' }), mark]);
+    const mtext = (t, fs) => h('text', { x: 12, y: 15, textAnchor: 'middle', fontSize: fs || 7.5, fontFamily: 'ui-monospace,Menlo,monospace', fontWeight: 700, fill: c }, t);
+    const robot = () => svg([
+      h('path', { d: 'M8 4v3M16 4v3M3.5 11H5M19 11h1.5', stroke: c, strokeWidth: 1.5, strokeLinecap: 'round' }),
+      h('circle', { cx: 8, cy: 3.4, r: 0.9, fill: c }), h('circle', { cx: 16, cy: 3.4, r: 0.9, fill: c }),
+      h('rect', { x: 5, y: 7, width: 14, height: 9.5, rx: 2, stroke: c, strokeWidth: 1.5 }),
+      h('rect', { x: 8.4, y: 10, width: 2.1, height: 3.2, rx: 0.6, fill: c }),
+      h('rect', { x: 13.5, y: 10, width: 2.1, height: 3.2, rx: 0.6, fill: c }),
+      h('path', { d: 'M8 16.5v3M12 16.5v3M16 16.5v3', stroke: c, strokeWidth: 1.5, strokeLinecap: 'round' }),
+    ]);
+    switch (provider) {
+      case 'claude': return robot();
+      case 'claude-code': return blob(mtext('❯_'));
+      case 'grok': return blob(h('path', { d: 'M9 15.5 15 9M9.2 9.2l2.3 2.3M14.8 14.8l-2.3-2.3', stroke: c, strokeWidth: 1.6, strokeLinecap: 'round' }));
+      case 'codex': return blob(h('circle', { cx: 12, cy: 12, r: 3.6, stroke: c, strokeWidth: 1.5, strokeDasharray: '3.4 1.5' }));
+      case 'opencode': return blob(mtext('$_'));
+      case 'cursor': return blob(h('path', { d: 'M12 8l3.4 2v4L12 16l-3.4-2v-4L12 8Zm0 0v4m3.4-2L12 12m-3.4-2 3.4 2', stroke: c, strokeWidth: 1.2, strokeLinejoin: 'round' }));
+      case 'zcode': return blob(mtext('Z', 8));
+      case 'kimi': return blob(mtext('K', 8));
+      default: return blob(mtext('?', 8));
+    }
+  }
+  statusDot(running, label) {
+    const h = React.createElement;
+    return h('span', { title: running ? '运行中' : '空闲', style: { width: 8, height: 8, borderRadius: 99, flex: 'none', background: running ? '#34c759' : 'transparent', border: running ? 'none' : '1.5px solid #b8b4ab', animation: running ? 'pulse 1.8s ease-out infinite' : 'none' } });
+  }
+  agentIcon(ag, size) {
+    const h = React.createElement;
+    return h('span', { style: { position: 'relative', display: 'inline-flex', flex: 'none' } }, this.icon(ag.provider, size, ag.running));
+  }
+  mkMenuIcon(kind) {
+    const h = React.createElement, p = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, style: { flex: 'none' } };
+    if (kind === 'split') return h('svg', p, h('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }), h('line', { x1: 12, y1: 4, x2: 12, y2: 20 }));
+    if (kind === 'star') return h('svg', p, h('polygon', { points: '12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.5 5.8 21 7 14 2 9.3 9 8.5' }));
+    if (kind === 'starFill') return h('svg', { ...p, fill: 'currentColor', stroke: 'none' }, h('polygon', { points: '12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.5 5.8 21 7 14 2 9.3 9 8.5' }));
+    if (kind === 'x') return h('svg', p, h('line', { x1: 18, y1: 6, x2: 6, y2: 18 }), h('line', { x1: 6, y1: 6, x2: 18, y2: 18 }));
+    if (kind === 'closeL') return h('svg', p, h('line', { x1: 5, y1: 4, x2: 5, y2: 20 }), h('path', { d: 'M19 12H9m0 0 4-4m-4 4 4 4' }));
+    if (kind === 'closeR') return h('svg', p, h('line', { x1: 19, y1: 4, x2: 19, y2: 20 }), h('path', { d: 'M5 12h10m0 0-4-4m4 4-4 4' }));
+    return h('svg', p, h('line', { x1: 12, y1: 5, x2: 12, y2: 19 }), h('line', { x1: 5, y1: 12, x2: 19, y2: 12 }));
+  }
+  openMenu(e, kind, id) {
+    e.preventDefault(); e.stopPropagation();
+    const mw = 180, mh = 130;
+    const x = Math.min(e.clientX, window.innerWidth - mw - 8);
+    const y = Math.min(e.clientY, window.innerHeight - mh - 8);
+    this.setState({ menu: { kind, id, x, y } });
+  }
+  closeAgent(id) {
+    this.setState(s => ({ menu: null, closing: { ...s.closing, [id]: true } }));
+    setTimeout(() => this.setState(s => ({
+      closing: Object.fromEntries(Object.entries(s.closing).filter(([k]) => k !== id)),
+      agents: s.agents.filter(a => a.id !== id),
+      panes: s.panes.filter(p => p !== id),
+    })), 190);
+  }
+  renderVals() {
+    const S = this.state, h = React.createElement;
+    const provCycle = ['claude-code', 'codex', 'grok', 'opencode', 'cursor', 'zcode', 'kimi'];
+    const folderIcon = h('svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: '#8a867e', strokeWidth: 1.8, style: { flex: 'none' } }, h('path', { d: 'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z' }));
+    const gridIcon = h('svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: '#5d5a54', strokeWidth: 1.8, style: { flex: 'none' } }, h('rect', { x: 3, y: 3, width: 7, height: 7, rx: 1.5 }), h('rect', { x: 14, y: 3, width: 7, height: 7, rx: 1.5 }), h('rect', { x: 3, y: 14, width: 7, height: 7, rx: 1.5 }), h('rect', { x: 14, y: 14, width: 7, height: 7, rx: 1.5 }));
+    const starIcon = h('svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: '#f0b429', style: { flex: 'none' } }, h('polygon', { points: '12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.5 5.8 21 7 14 2 9.3 9 8.5' }));
+    const devs = S.devices || Component.DEVICES;
+    const checks = S.deviceChecks || Object.fromEntries(devs.map(d => [d.id, true]));
+    const devNameOf = ag => (S.spaces.find(s => s.id === ag.space) || {}).device || 'Local';
+    const devIdFor = ag => devNameOf(ag) === 'Local' ? 'local' : 'studio';
+    const deviceOk = ag => checks[devIdFor(ag)] !== false;
+    const pool = S.agents.filter(deviceOk);
+    const countFor = id => id === 'all' ? pool.length : id === 'fav' ? pool.filter(a => a.fav).length : pool.filter(a => a.space === id).length;
+    const virt = [
+      { id: 'all', name: 'All Spaces', iconEl: gridIcon },
+      { id: 'fav', name: '收藏', iconEl: starIcon },
+    ];
+    const spaceRows = [...virt, ...S.spaces.map(sp => ({ ...sp, iconEl: folderIcon }))].map(sp => ({
+      ...sp,
+      count: countFor(sp.id),
+      bg: S.selected === sp.id ? 'rgba(0,0,0,.07)' : 'transparent',
+      weight: S.selected === sp.id ? 600 : 400,
+      select: () => this.setState({ selected: sp.id }),
+      menu: (sp.id === 'all' || sp.id === 'fav') ? (e => { e.preventDefault(); }) : (e => this.openMenu(e, 'space', sp.id)),
+    }));
+    const spName = id => (S.spaces.find(s => s.id === id) || {}).name || '—';
+    const devFor = ag => (S.spaces.find(s => s.id === ag.space) || {}).device || 'Local';
+    const visible = pool.filter(a => S.selected === 'all' ? true : S.selected === 'fav' ? a.fav : a.space === S.selected);
+    const sorted = [...visible].sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
+    const agentRows = visible.map(ag => {
+      const dev = devFor(ag);
+      return {
+        ...ag,
+        meta: ({ claude: 'Claude Code', 'claude-code': 'Claude Code', grok: 'Grok', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', zcode: 'Z Code', kimi: 'Kimi Code' }[ag.provider] || ag.provider) + ' · ' + spName(ag.space),
+        badge: dev, badgeBg: dev === 'Local' ? '#e9e6e0' : '#f1e8d8', badgeFg: dev === 'Local' ? '#6d6a63' : '#8a713d',
+        iconEl: this.agentIcon(ag, 18),
+        statusEl: this.statusDot(ag.running),
+        favEl: ag.fav ? h('span', { style: { marginLeft: 'auto', flex: 'none', display: 'inline-flex' } }, h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: '#f0b429' }, h('polygon', { points: '12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.5 5.8 21 7 14 2 9.3 9 8.5' }))) : null,
+        top: sorted.indexOf(ag) * 54,
+        bg: S.panes.includes(ag.id) ? 'rgba(0,0,0,.07)' : 'transparent',
+        opacity: S.closing[ag.id] ? 0 : 1,
+        scale: S.closing[ag.id] ? 0.94 : 1,
+        open: () => this.setState({ panes: [ag.id] }),
+        menu: e => this.openMenu(e, 'agent', ag.id),
+      };
+    });
+    const paneRows = S.panes.map(id => S.agents.find(a => a.id === id)).filter(Boolean).map(ag => ({
+      title: ag.title,
+      iconEl: this.agentIcon(ag, 17),
+      statusEl: this.statusDot(ag.running),
+      statusText: ag.running ? '运行中' : '空闲',
+      close: () => this.setState(s => ({ panes: s.panes.filter(p => p !== ag.id) })),
+      menu: e => this.openMenu(e, 'pane', ag.id),
+    }));
+    let menuItems = [];
+    if (S.menu && S.menu.kind === 'space') {
+      const sid = S.menu.id;
+      menuItems = [{
+        label: '新建 Agent', color: '#3a3835', iconEl: this.mkMenuIcon('plus'),
+        onClick: () => this.setState({ menu: null, newAgent: { space: sid, provider: 'claude-code', bypass: false, name: '' } }),
+      }];
+    } else if (S.menu && S.menu.kind === 'agent') {
+      const ag = S.agents.find(a => a.id === S.menu.id) || {};
+      menuItems = [
+        {
+          label: '分裂展示', color: '#3a3835', iconEl: this.mkMenuIcon('split'),
+          onClick: () => this.setState(s => ({ menu: null, panes: s.panes.includes(ag.id) ? s.panes : [...s.panes, ag.id] })),
+        },
+        {
+          label: ag.fav ? '取消收藏' : '收藏', color: ag.fav ? '#b08a1e' : '#3a3835', iconEl: this.mkMenuIcon(ag.fav ? 'starFill' : 'star'),
+          onClick: () => this.setState(s => ({ menu: null, agents: s.agents.map(a => a.id === ag.id ? { ...a, fav: !a.fav } : a) })),
+        },
+        { label: '关闭', color: '#c42b1c', iconEl: this.mkMenuIcon('x'), onClick: () => this.closeAgent(ag.id), bt: '1px solid rgba(0,0,0,.08)', mt: 4 },
+      ];
+    }
+    else if (S.menu && S.menu.kind === 'pane') {
+      const pid = S.menu.id, idx = S.panes.indexOf(pid);
+      const apply = keep => this.setState(s => ({ menu: null, panes: keep }));
+      const mk = (kind, rot) => { const el = this.mkMenuIcon(kind); return el; };
+      menuItems = [
+        { label: '关闭左侧所有', color: idx > 0 ? '#3a3835' : '#b0aca3', iconEl: this.mkMenuIcon('closeL'), onClick: () => idx > 0 ? apply(S.panes.slice(idx)) : this.setState({ menu: null }) },
+        { label: '关闭右侧所有', color: idx < S.panes.length - 1 ? '#3a3835' : '#b0aca3', iconEl: this.mkMenuIcon('closeR'), onClick: () => idx < S.panes.length - 1 ? apply(S.panes.slice(0, idx + 1)) : this.setState({ menu: null }) },
+        { label: '关闭其他', color: S.panes.length > 1 ? '#3a3835' : '#b0aca3', iconEl: this.mkMenuIcon('x'), onClick: () => S.panes.length > 1 ? apply([pid]) : this.setState({ menu: null }) },
+      ];
+    }
+    menuItems = menuItems.map(mi => ({ bt: 'none', mt: 0, ...mi }));
+    const selName = S.selected === 'all' ? 'Agents' : S.selected === 'fav' ? '收藏的 Agents' : spName(S.selected) + ' 的 Agents';
+    return {
+      sidebarW: S.collapsed ? 0 : (this.props.sidebarWidth ?? 280),
+      toggleSidebar: () => this.setState(s => ({ collapsed: !s.collapsed })),
+      addFolder: () => this.setState({ editName: '' }),
+      folderEditing: S.editName != null,
+      folderName: S.editName || '',
+      folderInput: e => this.setState({ editName: e.target.value }),
+      folderKey: e => {
+        if (e.key === 'Enter') this.confirmFolder();
+        if (e.key === 'Escape') this.setState({ editName: null });
+      },
+      folderConfirm: () => this.confirmFolder(),
+      folderCancel: () => this.setState({ editName: null }),
+      spaceRows, agentRows, paneRows,
+      agentsHeader: selName,
+      spacesOpen: S.spacesOpen !== false,
+      agentsOpen: S.agentsOpen !== false,
+      spacesRot: S.spacesOpen !== false ? 0 : -90,
+      agentsRot: S.agentsOpen !== false ? 0 : -90,
+      toggleSpaces: () => this.setState(s => ({ spacesOpen: s.spacesOpen === false })),
+      toggleAgents: () => this.setState(s => ({ agentsOpen: s.agentsOpen === false })),
+      spacerFlex: S.agentsOpen === false ? 1 : 0,
+      isMac: (this.props.platform ?? S.platform ?? 'macos') !== 'windows',
+      isWin: (this.props.platform ?? S.platform ?? 'macos') === 'windows',
+      winRadius: (this.props.platform ?? S.platform ?? 'macos') === 'windows' ? 8 : 12,
+      uiFont: (this.props.platform ?? S.platform ?? 'macos') === 'windows'
+        ? "'Segoe UI Variable','Segoe UI','Microsoft YaHei',sans-serif"
+        : "-apple-system,'SF Pro Text','PingFang SC','Segoe UI',sans-serif",
+      platLabel: (this.props.platform ?? S.platform ?? 'macos') === 'windows' ? 'Windows · 同一套代码' : 'macOS · 同一套代码',
+      platBtnMr: (this.props.platform ?? S.platform ?? 'macos') === 'windows' ? 10 : 0,
+      togglePlatform: () => this.setState(s => ({ platform: (this.props.platform ?? s.platform ?? 'macos') === 'windows' ? 'macos' : 'windows' })),
+      devicesOpen: !!S.devicesOpen,
+      toggleDevices: () => this.setState(s => ({ devicesOpen: !s.devicesOpen })),
+      closeDevices: e => { if (e && e.preventDefault) e.preventDefault(); this.setState({ devicesOpen: false }); },
+      addDevice: () => this.setState(s => ({
+        devicesOpen: false,
+        devices: [...(s.devices || Component.DEVICES), { id: this.uid(), name: '新设备', sub: '等待配对 · SSH', online: false }],
+      })),
+      deviceRows: (() => {
+        const onlineCount = devs.filter(d => d.online).length;
+        const allOn = devs.every(d => checks[d.id] !== false);
+        const all = { id: 'all', name: 'All Devices', sub: devs.length + ' devices · ' + onlineCount + ' connected', online: null, isAll: true, on: allOn };
+        const mkCheck = on => on
+          ? h('svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: '#3a3835', strokeWidth: 2.2, style: { flex: 'none' } }, h('polyline', { points: '20 6 9 17 4 12' }))
+          : h('span', { style: { width: 14, height: 14, borderRadius: 4, border: '1.5px solid #c4c0b7', flex: 'none', boxSizing: 'border-box' } });
+        return [all, ...devs.map(d => ({ ...d, on: checks[d.id] !== false }))].map(d => ({
+          ...d,
+          bg: 'transparent',
+          iconEl: h('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: '#5d5a54', strokeWidth: 1.8, style: { flex: 'none' } },
+            d.isAll
+              ? [h('polygon', { key: 1, points: '12 2 2 7 12 12 22 7 12 2' }), h('polyline', { key: 2, points: '2 17 12 22 22 17' }), h('polyline', { key: 3, points: '2 12 12 17 22 12' })]
+              : [h('rect', { key: 1, x: 2, y: 4, width: 20, height: 13, rx: 2 }), h('line', { key: 2, x1: 8, y1: 21, x2: 16, y2: 21 }), h('line', { key: 3, x1: 12, y1: 17, x2: 12, y2: 21 })]),
+          dotEl: d.online == null ? null : h('span', { style: { width: 6, height: 6, borderRadius: 99, flex: 'none', background: d.online ? '#34c759' : 'transparent', border: d.online ? 'none' : '1.5px solid #b8b4ab' } }),
+          checkEl: mkCheck(d.on),
+          click: () => {
+            if (d.isAll) {
+              const next = Object.fromEntries(devs.map(x => [x.id, !d.on]));
+              this.setState({ deviceChecks: next });
+            } else {
+              this.setState({ deviceChecks: { ...checks, [d.id]: !(checks[d.id] !== false) } });
+            }
+          },
+        }));
+      })(),
+      deviceLabel: (() => {
+        const on = devs.filter(d => checks[d.id] !== false);
+        if (on.length === devs.length) return 'All Devices';
+        if (on.length === 0) return '未勾选设备';
+        return on.map(d => d.name).join(' · ');
+      })(),
+      newAgentOpen: !!S.newAgent,
+      naSpaceName: S.newAgent ? spName(S.newAgent.space) : '',
+      naName: S.newAgent ? S.newAgent.name : '',
+      naInput: e => this.setState(s => ({ newAgent: { ...s.newAgent, name: e.target.value } })),
+      provOptions: provCycle.map(p => ({
+        name: { 'claude-code': 'Claude Code', codex: 'Codex', grok: 'Grok', opencode: 'OpenCode', cursor: 'Cursor', zcode: 'Z Code', kimi: 'Kimi Code' }[p],
+        iconEl: this.icon(p, 20, true),
+        bg: S.newAgent && S.newAgent.provider === p ? 'rgba(0,0,0,.06)' : 'transparent',
+        ring: S.newAgent && S.newAgent.provider === p ? '0 0 0 1.5px #3a3835' : '0 0 0 0.5px rgba(0,0,0,.08)',
+        pick: () => this.setState(s => ({ newAgent: { ...s.newAgent, provider: p } })),
+      })),
+      bypassBg: S.newAgent && S.newAgent.bypass ? '#d97757' : 'rgba(0,0,0,.15)',
+      knobX: S.newAgent && S.newAgent.bypass ? 17 : 2,
+      toggleBypass: () => this.setState(s => ({ newAgent: { ...s.newAgent, bypass: !s.newAgent.bypass } })),
+      cancelNewAgent: () => this.setState({ newAgent: null }),
+      createAgent: () => {
+        const na = S.newAgent; if (!na) return;
+        this.setState(s => ({
+          newAgent: null, selected: na.space,
+          agents: [...s.agents, { id: this.uid(), title: (na.name || '').trim() || '新任务 · 未命名', provider: na.provider, space: na.space, running: true, fav: false, bypass: na.bypass }],
+        }));
+      },
+      agentsEmpty: agentRows.length === 0,
+      agentsBoxH: agentRows.length * 54,
+      agentsVpH: S.agentsVpH || 108,
+      agentsWrapRef: this.agentsWrapRef,
+      panesEmpty: paneRows.length === 0,
+      splitBadge: paneRows.length > 1,
+      paneCount: paneRows.length,
+      menuOpen: !!S.menu,
+      menuX: S.menu ? S.menu.x : 0,
+      menuY: S.menu ? S.menu.y : 0,
+      menuItems,
+      iconGallery: ['claude-code', 'codex', 'grok', 'opencode', 'cursor', 'zcode', 'kimi'].map(p => ({
+        name: { 'claude-code': 'Claude Code', codex: 'Codex', grok: 'Grok', opencode: 'OpenCode', cursor: 'Cursor', zcode: 'Z Code', kimi: 'Kimi Code' }[p],
+        runEl: this.icon(p, 17, true),
+        idleEl: this.icon(p, 17, false),
+      })),
+      closeMenu: e => { if (e && e.preventDefault) e.preventDefault(); this.setState({ menu: null }); },
+    };
+  }
+}
+</script>
+</body>
+</html>
