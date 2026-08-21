@@ -27,35 +27,13 @@
   padding: 6px 10px;
   border-radius: var(--r-7);
   font-size: var(--fs-135);
-  cursor: text;
-  transition: background var(--d-hover);
-}
-.sidebar-search:hover,
-.sidebar-search.is-active {
-  background: var(--hover-3);
+  cursor: default;
 }
 .sidebar-search-label {
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.sidebar-search-label.is-filled {
-  color: var(--text);
-}
-.sidebar-search-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: inherit;
-  font-size: var(--fs-135);
-  color: var(--text);
-}
-.sidebar-search-input::placeholder {
-  color: var(--text-faint);
 }
 
 /* —— 分组标题 —— */

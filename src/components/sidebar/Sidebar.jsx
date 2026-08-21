@@ -1,5 +1,4 @@
 // 侧栏容器（UI-SPEC §5.1）。宽度折叠动画在外层，内层固定 280px 保证折叠时内容不重排。
-import { useState } from 'react';
 import SpacesList from './SpacesList.jsx';
 import AgentsList from './AgentsList.jsx';
 import { SearchIcon, ChevronDown, LayersIcon, GearIcon } from '../../lib/icons.jsx';
@@ -61,18 +60,6 @@ export default function Sidebar({
   allCount,
   favCount,
 }) {
-  const [searching, setSearching] = useState(false);
-  const [query, setQuery] = useState('');
-
-  const q = query.trim().toLowerCase();
-  const shown = q
-    ? agents.filter(
-        (a) =>
-          (a.title ?? '').toLowerCase().includes(q) ||
-          (a.spaceName ?? '').toLowerCase().includes(q),
-      )
-    : agents;
-
   const spaceName = spaces.find((s) => s.key === selected)?.name;
   const agentsTitle =
     selected === 'fav' ? '收藏的 Agents' : spaceName ? `${spaceName} 的 Agents` : 'Agents';
@@ -80,35 +67,9 @@ export default function Sidebar({
   return (
     <aside className="sidebar" style={{ width: collapsed ? 0 : 280 }}>
       <div className="sidebar-inner">
-        <div
-          className={`sidebar-search${searching ? ' is-active' : ''}`}
-          onClick={() => setSearching(true)}
-          title="按标题或 Space 名过滤 Agents（Esc 清除）"
-        >
+        <div className="sidebar-search">
           <SearchIcon size={15} stroke="var(--icon-titlebar)" />
-          {searching ? (
-            <input
-              className="sidebar-search-input"
-              autoFocus
-              value={query}
-              placeholder="搜索 Agent"
-              spellCheck={false}
-              onChange={(e) => setQuery(e.target.value)}
-              onBlur={() => {
-                if (!query) setSearching(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setQuery('');
-                  setSearching(false);
-                }
-              }}
-            />
-          ) : (
-            <span className={`sidebar-search-label${query ? ' is-filled' : ''}`}>
-              {query || 'Search'}
-            </span>
-          )}
+          <span className="sidebar-search-label">Search</span>
         </div>
 
         <div className="sidebar-group-head sidebar-group-head-spaces">
@@ -135,14 +96,12 @@ export default function Sidebar({
         </div>
         {agentsOpen ? (
           <AgentsList
-            agents={shown}
+            agents={agents}
             openKeys={openKeys}
             closing={closing}
             onOpen={onOpenAgent}
             onContextMenu={onAgentMenu}
             multiDevice={multiDevice}
-            emptyTitle={q ? '没有匹配的 Agent' : undefined}
-            emptyHint={q ? `当前搜索：「${query.trim()}」` : undefined}
           />
         ) : null}
 
