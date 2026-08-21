@@ -28,6 +28,8 @@ export default function InputBar({ onSend, onKey, disabled = false }) {
   const taRef = useRef(null);
   const watchdogRef = useRef(null);
   const errTimerRef = useRef(null);
+  // React state `pending` 要等下一拍才进 disabled；连点在同一拍仍能穿过。
+  const inflightRef = useRef(false);
 
   useEffect(() => () => { clearTimeout(watchdogRef.current); clearTimeout(errTimerRef.current); }, []);
 
@@ -38,10 +40,15 @@ export default function InputBar({ onSend, onKey, disabled = false }) {
   };
 
   const run = async (fn) => {
-    if (disabled || pending) return;
+    if (disabled || inflightRef.current) return;
+    inflightRef.current = true;
     setPending(true);
     clearTimeout(watchdogRef.current);
-    watchdogRef.current = setTimeout(() => { setPending(false); fail('未收到回执'); }, ACK_WATCHDOG_MS);
+    watchdogRef.current = setTimeout(() => {
+      inflightRef.current = false;
+      setPending(false);
+      fail('未收到回执');
+    }, ACK_WATCHDOG_MS);
     try {
       await fn();
       setErr('');
@@ -50,12 +57,13 @@ export default function InputBar({ onSend, onKey, disabled = false }) {
       fail(`发送失败：${(e && e.message) || e || '未知原因'}`);
     } finally {
       clearTimeout(watchdogRef.current);
+      inflightRef.current = false;
       setPending(false);
     }
   };
 
   const send = () => {
-    if (!onSend) return;
+    if (!onSend || disabled || inflightRef.current) return;
     const value = text;          // 空文本 = 协议「仅回车」，允许
     setText('');
     if (taRef.current) taRef.current.style.height = 'auto';
