@@ -324,7 +324,14 @@ export default function App() {
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {
-    dm.addDevice({ name: name || deviceSub(url).split(' · ')[0], url, token });
+    const label = name || deviceSub(url).split(' · ')[0];
+    // 本期只有 Local：再走一遍 Add Device 覆盖已有的那台本机，不必做编辑对话框（C-007 / R-05）。
+    const locals = dm.devices.filter((d) => isLocalUrl(d.url));
+    if (isLocalUrl(url) && locals.length === 1) {
+      dm.updateDevice(locals[0].id, { name: label, url, token });
+    } else {
+      dm.addDevice({ name: label, url, token });
+    }
     dm.connectAll();
     setAddDeviceOpen(false);
     setDevices(dm.devices);
