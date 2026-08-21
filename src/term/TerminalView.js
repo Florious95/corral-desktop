@@ -1,0 +1,153 @@
+/*
+ * AgentMirror 桌面端 —— xterm 底座（CLIENT-CONTRACT §1.3 的重写版）。
+ *
+ * 保留 web 版 TerminalView 的全部语义，只换实现底座：
+ *   - snapshot → reset() + write()（清屏重建；游标锚 ESC[row;colH 在字节尾，必须整段原样喂）
+ *   - delta    → write()（追加）
+ *   - resize   → 120ms debounce 合并后回调（服务端每次真 reflow 都补一帧 snapshot，不合并会闪）
+ *   - 滚到顶   → onHistoryBoundary()，由调用方去拉协议 scrollback
+ *
+ * ⛔ 不引 @xterm/addon-fit：仓库装的是 @xterm/xterm@6.0.0，addon-fit@0.11 面向 xterm5 的私有
+ * _renderService 结构，0.12-beta 又要求 xterm ^6.1.0-beta。fit() 改为直接量 .xterm-screen 的
+ * 实际渲染几何（公开 DOM，自校正），比探针量单字符宽度更准。
+ */
+
+// 直指 ESM 产物（= 包里 module 字段指的那个文件；该包没有 exports 映射，深路径合法）。
+// 走裸 '@xterm/xterm' 的话，打包器拿 .mjs（具名导出）、Node 拿 .js（CJS，具名导入直接
+// SyntaxError），`node --test` 就加载不了本模块 —— 两边指同一个文件才不用写互操作补丁。
+import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
+
+/** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
+const WHEEL_THROTTLE_MS = 400;
+
+export class TerminalView {
+  /**
+   * @param {HTMLElement} container 已有确定尺寸的挂载容器
+   * @param {Object}   [opts]
+   * @param {(rows:number, cols:number) => void} [opts.onResize]         几何变了（已 debounce）
+   * @param {() => void}                         [opts.onHistoryBoundary] 视口滚到顶 / 顶部继续上滚
+   * @param {number}   [opts.scrollback=0]  本地回滚行数。默认 0：历史唯一事实来源是协议
+   *                                        scrollback 帧（UI-SPEC §6.2）
+   * @param {number}   [opts.fontSize=13]
+   * @param {Function} [opts.TerminalCtor]  仅供单测注入 FakeTerminal；生产走 @xterm/xterm
+   */
+  constructor(container, {
+    onResize, onHistoryBoundary, scrollback = 0, fontSize = 13, TerminalCtor = Terminal,
+  } = {}) {
+    this.container = container;
+    this.onResize = onResize || (() => {});
+    this.onHistoryBoundary = onHistoryBoundary || (() => {});
+    this.fontSize = fontSize;
+    this.term = new TerminalCtor({
+      scrollback,
+      fontSize,
+      fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
+      lineHeight: 1.25,
+      cursorBlink: false,
+      convertEol: false,
+      // 镜像是单向的：输入走 InputBar（协议 input.text / input.keys）。不关掉 stdin 的话
+      // 用户在终端里敲的键会静默消失，比敲不动更让人困惑。
+      disableStdin: true,
+      allowProposedApi: true,
+      theme: {
+        background: '#fbfaf8',
+        foreground: '#3a3835',
+        cursor: '#3a3835',
+        selectionBackground: 'rgba(0,0,0,.12)',
+      },
+    });
+    this._lastDims = null;
+    this._lastScrollLine = null;
+    this._resizeTimer = null;
+    this._lastWheelAt = 0;
+    this._disposed = false;
+  }
+
+  /** 挂载进容器并做一次 fit。 */
+  open() {
+    this.term.open(this.container);
+    this._scrollDisposable = this.term.onScroll((line) => {
+      if (line <= 0 && this._lastScrollLine > 0) this.onHistoryBoundary();
+      this._lastScrollLine = line;
+    });
+    // scrollback=0 时视口永远不可滚，onScroll 不会触发；上滚手势是唯一的「要更早历史」信号。
+    this._onWheel = (ev) => {
+      if (ev.deltaY >= 0) return;
+      const buf = this.term.buffer && this.term.buffer.active;
+      if (buf && buf.viewportY > 0) return; // 还能本地往上滚，先滚本地
+      const now = Date.now();
+      if (now - this._lastWheelAt < WHEEL_THROTTLE_MS) return;
+      this._lastWheelAt = now;
+      this.onHistoryBoundary();
+    };
+    this.container.addEventListener('wheel', this._onWheel, { passive: true });
+    this.fit();
+  }
+
+  /** 按容器像素重算 rows/cols；只有真变了才 resize + 上报（上报另有 120ms 合并）。 */
+  fit() {
+    const el = this.container;
+    if (this._disposed || !el || !el.isConnected) return;
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    if (w === 0 || h === 0) return;
+    const cell = this._cell();
+    const cols = Math.max(2, Math.floor(w / cell.w));
+    const rows = Math.max(2, Math.floor(h / cell.h));
+    if (cols !== this.term.cols || rows !== this.term.rows) {
+      this.term.resize(cols, rows);
+      this._report();
+    }
+  }
+
+  /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */
+  writeSnapshot(u8) {
+    this.term.reset();
+    this.term.write(u8);
+  }
+
+  /** 增量：追加到当前屏。 */
+  writeDelta(u8) {
+    this.term.write(u8);
+  }
+
+  clear() { this.term.reset(); }
+
+  focus() { try { this.term.focus(); } catch { /* 已 dispose */ } }
+
+  scrollToBottom() { this.term.scrollToBottom(); }
+
+  dispose() {
+    this._disposed = true;
+    clearTimeout(this._resizeTimer);
+    if (this._onWheel && this.container) this.container.removeEventListener('wheel', this._onWheel);
+    if (this._scrollDisposable) this._scrollDisposable.dispose();
+    try { this.term.dispose(); } catch { /* 已 dispose */ }
+  }
+
+  get rows() { return this.term.rows; }
+  get cols() { return this.term.cols; }
+
+  _report() {
+    const dims = `${this.term.rows}x${this.term.cols}`;
+    if (dims === this._lastDims) return;
+    this._lastDims = dims;
+    clearTimeout(this._resizeTimer);
+    // 服务端对每次真 reflow 都补一帧 snapshot；拖窗口时不合并会闪烁重画。
+    this._resizeTimer = setTimeout(() => {
+      if (!this._disposed) this.onResize(this.term.rows, this.term.cols);
+    }, 120);
+  }
+
+  /** 单元格实际渲染尺寸；首帧渲染前退化成按字号估算。 */
+  _cell() {
+    const screen = this.term.element && this.term.element.querySelector('.xterm-screen');
+    if (screen) {
+      const r = screen.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        return { w: r.width / this.term.cols, h: r.height / this.term.rows };
+      }
+    }
+    return { w: this.fontSize * 0.6, h: Math.round(this.fontSize * 1.25) };
+  }
+}

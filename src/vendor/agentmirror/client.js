@@ -77,6 +77,7 @@ export class Client {
     this.lastSeq = null;
     this.activeSubscriptions = new Map(); // ref -> { rows, cols }
     this.overlaySocket = null;
+    this.level2Workspace = null;           // single-valued: the server tracks one cwd per connection
     this.pendingInputs = new Map();        // reqId -> { timer }
     this.attempt = 0;
     this._reconnectTimer = null;
@@ -196,6 +197,25 @@ export class Client {
     this.overlaySocket = null;
     if (!this.isReady) return true;
     return this.sendControl('overlay_unsubscribe', {});
+  }
+
+  /**
+   * Subscribe the level-2 live stream (title/status/provider) of one workspace.
+   * The server keeps ONE cwd per connection: a second call overwrites the first.
+   * Replayed after READY. Empty cwd is refused.
+   */
+  subscribeLevel2(cwd) {
+    if (typeof cwd !== 'string' || cwd.length === 0) return false;
+    this.level2Workspace = cwd;
+    if (!this.isReady) return true;
+    return this.sendControl('level2_subscribe', { workspace: cwd });
+  }
+
+  /** Stop the level-2 stream so the daemon stops scanning. Idempotent. */
+  unsubscribeLevel2() {
+    this.level2Workspace = null;
+    if (!this.isReady) return true;
+    return this.sendControl('level2_unsubscribe', {});
   }
 
   // ---- internals ----
@@ -329,6 +349,9 @@ export class Client {
     }
     if (this.overlaySocket) {
       this.sendControl('overlay_subscribe', { socket: this.overlaySocket });
+    }
+    if (this.level2Workspace) {
+      this.sendControl('level2_subscribe', { workspace: this.level2Workspace });
     }
   }
 

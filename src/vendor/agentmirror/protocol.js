@@ -29,13 +29,25 @@ export const FRAME_TYPES = Object.freeze([
   'subscribe', 'unsubscribe', 'input', 'input_ack',
   'scrollback', 'resize', 'error',
   'overlay_subscribe', 'overlay_unsubscribe', 'overlay_frame',
+  // Desktop patch (CLIENT-CONTRACT §1.1): types the live daemon pushes but the
+  // web client never learned. Unknown type = whole frame dropped, so these are
+  // mandatory, not optional.
+  'level2_subscribe', 'level2_unsubscribe', 'level2_frame', 'level2_heartbeat',
+  'pane_mode_changed', 'scroll_wheel', 'attach_preview',
 ]);
 
-/** Closed set of AgentState values (§7.1) — server computes, client renders. */
+/**
+ * Closed set of AgentState values (§7.1).
+ * @deprecated 060 uproot — the server-side agent-state pipeline was removed;
+ * listing/list_delta never carry state. Renderers must not depend on this.
+ */
 export const AGENT_STATES = Object.freeze(['working', 'idle', 'blocked', 'done', 'unknown']);
 
-/** Closed set of input.keys named keys (§4.2, R-1 shortcut bar). */
-export const INPUT_KEYS = Object.freeze(['esc', 'ctrl_c', 'tab', 'up', 'down', 'left', 'right']);
+/** Closed set of session.status values carried by level2_frame (protocol.go). */
+export const SESSION_STATUS = Object.freeze(['working', 'idle', 'unknown']);
+
+/** Closed set of input.keys named keys (§4.2, R-1 shortcut bar; Go keys.go is 8-valued). */
+export const INPUT_KEYS = Object.freeze(['esc', 'ctrl_c', 'tab', 'up', 'down', 'left', 'right', 'backspace']);
 
 /** Closed set of error frame codes (§7.2). */
 export const ERROR_CODES = Object.freeze([
@@ -124,7 +136,8 @@ export function validateFrame(type, p) {
     case 'input': {
       if (!Number.isInteger(p.req_id) || p.req_id < 1) return 'input req_id must be >= 1';
       if (typeof p.ref !== 'string' || p.ref.length === 0) return 'input ref must be non-empty';
-      const hasText = typeof p.text === 'string' && p.text.length > 0;
+      const hasText = (typeof p.text === 'string' && p.text.length > 0)
+        || (typeof p.attachment_path === 'string' && p.attachment_path.length > 0);
       const hasKeys = Array.isArray(p.keys) && p.keys.length > 0;
       // text and keys are mutually exclusive (§4.2): both present is a protocol error.
       if (hasText && hasKeys) return 'input carries both text and keys; at most one is allowed';
@@ -160,6 +173,28 @@ export function validateFrame(type, p) {
     case 'overlay_frame':
       if (!Number.isInteger(p.seq) || p.seq < 1) return 'overlay_frame seq must be >= 1';
       return null;
+    // ---- desktop patch (CLIENT-CONTRACT §1.1.5), mirrors Go Validate ----
+    case 'level2_subscribe':
+      if (typeof p.workspace !== 'string' || p.workspace.length === 0) return 'level2_subscribe workspace must be non-empty';
+      return null;
+    case 'level2_unsubscribe':
+      return null;
+    case 'level2_frame':
+    case 'level2_heartbeat':
+      if (typeof p.workspace !== 'string' || p.workspace.length === 0) return `${type} workspace must be non-empty`;
+      if (!Number.isInteger(p.seq) || p.seq < 1) return `${type} seq must be >= 1`;
+      return null;
+    case 'pane_mode_changed':
+      if (typeof p.ref !== 'string' || p.ref.length === 0) return 'pane_mode_changed ref must be non-empty';
+      return null;
+    case 'scroll_wheel':
+      if (typeof p.ref !== 'string' || p.ref.length === 0) return 'scroll_wheel ref must be non-empty';
+      if (!Number.isInteger(p.delta) || p.delta === 0) return 'scroll_wheel delta must be a non-zero integer';
+      return null;
+    case 'attach_preview':
+      if (typeof p.ref !== 'string' || p.ref.length === 0) return 'attach_preview ref must be non-empty';
+      if (typeof p.path !== 'string' || p.path.length === 0) return 'attach_preview path must be non-empty';
+      return null;
     default:
       return `unknown frame type: ${type}`;
   }
@@ -181,8 +216,16 @@ function canonicalPayload(type, p) {
       const o = { req_id: p.req_id, ref: p.ref };
       if (typeof p.text === 'string' && p.text.length > 0) o.text = p.text;
       if (Array.isArray(p.keys) && p.keys.length > 0) o.keys = p.keys;
+      if (typeof p.attachment_path === 'string' && p.attachment_path.length > 0) o.attachment_path = p.attachment_path;
       return o;
     }
+    case 'level2_subscribe': return { workspace: p.workspace };
+    case 'level2_unsubscribe': return {};
+    case 'level2_frame': return { workspace: p.workspace, seq: p.seq, sessions: p.sessions || [] };
+    case 'level2_heartbeat': return { workspace: p.workspace, seq: p.seq };
+    case 'pane_mode_changed': return { ref: p.ref, in_copy_mode: p.in_copy_mode === true };
+    case 'scroll_wheel': return { ref: p.ref, delta: p.delta };
+    case 'attach_preview': return { ref: p.ref, path: p.path };
     case 'scrollback': return { req_id: p.req_id, ref: p.ref, from_line: p.from_line, count: p.count };
     case 'resize': return { ref: p.ref, rows: p.rows, cols: p.cols };
     case 'overlay_subscribe': return { socket: p.socket };
@@ -262,7 +305,7 @@ const KNOWN_FIELDS = Object.freeze({
   list_delta: ['seq', 'added_sessions', 'removed_refs', 'changed_sessions', 'changed_workspaces'],
   subscribe: ['ref', 'rows', 'cols'],
   unsubscribe: ['ref'],
-  input: ['req_id', 'ref', 'text', 'keys'],
+  input: ['req_id', 'ref', 'text', 'keys', 'attachment_path'],
   input_ack: ['req_id', 'ok', 'reason'],
   scrollback: ['req_id', 'ref', 'from_line', 'count'],
   resize: ['ref', 'rows', 'cols'],
@@ -270,6 +313,13 @@ const KNOWN_FIELDS = Object.freeze({
   overlay_subscribe: ['socket'],
   overlay_unsubscribe: [],
   overlay_frame: ['seq', 'text', 'rows', 'cols'],
+  level2_subscribe: ['workspace'],
+  level2_unsubscribe: [],
+  level2_frame: ['workspace', 'seq', 'sessions'],
+  level2_heartbeat: ['workspace', 'seq'],
+  pane_mode_changed: ['ref', 'in_copy_mode'],
+  scroll_wheel: ['ref', 'delta'],
+  attach_preview: ['ref', 'path'],
 });
 
 function pickKnown(type, payload) {
