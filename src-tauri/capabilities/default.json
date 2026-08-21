@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "No native commands are exposed; the client uses browser APIs only.",
+  "description": "Store plugin for pairing tokens; UI prefs stay in localStorage.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "store:default",
+    "core:path:default"
+  ]
 }

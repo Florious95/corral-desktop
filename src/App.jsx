@@ -48,7 +48,7 @@ function isLocalUrl(url) {
   } catch { return false }
 }
 
-export default function App() {
+export default function App({ seedDevices } = {}) {
   /* ——— 协议层：DeviceManager 是 UI 与 Client 之间的唯一边界 ——— */
   const binaryListeners = useRef(new Set());
   const inputWaiters = useRef(new Map()); // `${deviceId}:${reqId}` → resolve（reqId 只在单设备内唯一）
@@ -65,6 +65,7 @@ export default function App() {
 
   if (dmRef.current === null) {
     dmRef.current = new DeviceManager({
+      seedDevices,
       onModelChange: (ws) => setWorkspaces(ws),
       onDeviceChange: (ds) => setDevices(ds),
       onBinary: (evt) => { for (const fn of binaryListeners.current) fn(evt) },
