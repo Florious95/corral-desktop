@@ -103,7 +103,10 @@ export class DeviceManager {
     // No checkedDevices key yet (first run / older data) → everything is checked.
     const explicit = store.hasCheckedDevices(this.storage);
     const checked = new Set(store.loadCheckedDevices(this.storage));
-    this._devices = store.loadDevices(this.storage)
+    const loaded = opts.seedDevices !== undefined
+      ? opts.seedDevices
+      : store.loadDevices(this.storage);
+    this._devices = loaded
       .map((d) => ({ ...d, checked: explicit ? checked.has(d.id) : true }));
 
     this._clients = new Map();   // deviceId -> Client

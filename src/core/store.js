@@ -10,6 +10,13 @@
  * log, a toast, or any UI projection (DeviceManager.devices strips them).
  */
 
+/** Plugin-store filename under $APP_DATA. Desktop shell only; ⛔ not localStorage. */
+export const SECURE_STORE_FILE = 'devices.json';
+
+export function isTauri() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 export const PREFIX = 'agentmirror.desktop.v1.';
 
 export const KEYS = Object.freeze({
@@ -57,17 +64,56 @@ export function favKey(deviceId, cwd, sessionName) {
   return `${deviceId}::${cwd}::${sessionName}`;
 }
 
-/** @returns {{id:string,name:string,url:string,token:string}[]} tokens included — internal use only. */
-export function loadDevices(storage) {
-  const raw = readJson(storage, KEYS.devices);
+function normalizeDevices(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((d) => d && ['id', 'name', 'url', 'token'].every((k) => typeof d[k] === 'string' && d[k].length > 0))
     .map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
 }
 
+/** @returns {{id:string,name:string,url:string,token:string}[]} tokens included — internal use only. */
+export function loadDevices(storage) {
+  // Desktop shell: never read pairing material from localStorage (UI-SPEC §7.4).
+  if (isTauri()) return [];
+  return normalizeDevices(readJson(storage, KEYS.devices));
+}
+
 export function saveDevices(devices, storage) {
+  if (isTauri()) {
+    queueSecureSave(devices);
+    return true;
+  }
   return writeJson(storage, KEYS.devices, devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token })));
+}
+
+let storePromise;
+
+async function pluginStore() {
+  const { load } = await import('@tauri-apps/plugin-store');
+  if (!storePromise) storePromise = load(SECURE_STORE_FILE, { autoSave: true });
+  return storePromise;
+}
+
+/** Desktop hydrate. Tests never call this (no Tauri). */
+export async function loadDevicesSecure() {
+  try {
+    const s = await pluginStore();
+    return normalizeDevices(await s.get('devices'));
+  } catch {
+    return [];
+  }
+}
+
+function queueSecureSave(devices) {
+  const payload = devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
+  pluginStore()
+    .then(async (s) => {
+      await s.set('devices', payload);
+      await s.save();
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('lock_devices_file');
+    })
+    .catch(() => { /* quota / plugin missing: keep in-memory only */ });
 }
 
 /** @returns {string[]} device ids that participate in the aggregated model. */
