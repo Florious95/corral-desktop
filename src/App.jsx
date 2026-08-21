@@ -52,11 +52,16 @@ export default function App() {
   /* ——— 协议层：DeviceManager 是 UI 与 Client 之间的唯一边界 ——— */
   const binaryListeners = useRef(new Set());
   const inputWaiters = useRef(new Map()); // `${deviceId}:${reqId}` → resolve（reqId 只在单设备内唯一）
+  const inputAcks = useRef(new Map());    // ack 早于 waiter 登记时暂存
   const dmRef = useRef(null);
 
   const [devices, setDevices] = useState([]);
   const [workspaces, setWorkspaces] = useState([]);
   const [toastMsg, setToastMsg] = useState(null);
+
+  const toastInputFail = (reason) => {
+    setToastMsg(reason === 'timeout' ? '未收到回执' : `发送失败：${reason || '未知原因'}`);
+  };
 
   if (dmRef.current === null) {
     dmRef.current = new DeviceManager({
@@ -67,6 +72,9 @@ export default function App() {
         const k = `${r.deviceId}:${r.reqId}`;
         const resolve = inputWaiters.current.get(k);
         if (resolve) { inputWaiters.current.delete(k); resolve(r) }
+        else inputAcks.current.set(k, r);
+        // 不等 handleSend 的 await：ack 一到就要让用户看见失败（C-077 / R-54）
+        if (!r.ok) toastInputFail(r.reason);
       },
       // ⛔ message 由 DeviceManager 保证不含 token
       onError: ({ code, message }) => setToastMsg(`${code}：${message}`),
@@ -280,7 +288,12 @@ export default function App() {
 
   /* ——— 输入：text 不带回车，发送 = 两帧（CLIENT-CONTRACT §3.5） ——— */
   const waitAck = useCallback(
-    (sent) => new Promise((resolve) => inputWaiters.current.set(`${sent.deviceId}:${sent.reqId}`, resolve)),
+    (sent) => new Promise((resolve) => {
+      const k = `${sent.deviceId}:${sent.reqId}`;
+      const ready = inputAcks.current.get(k);
+      if (ready) { inputAcks.current.delete(k); resolve(ready); return }
+      inputWaiters.current.set(k, resolve);
+    }),
     [],
   );
 
@@ -293,8 +306,9 @@ export default function App() {
     if (!first) { setToastMsg('未发送'); return }
     const res = await waitAck(first);               // 等 ack，否则帧2 可能提交到旧内容
     if (!res.ok) {
-      setToastMsg(res.reason === 'timeout' ? '未收到回执' : `发送失败：${res.reason || '未知原因'}`);
-      return;
+      const msg = res.reason === 'timeout' ? '未收到回执' : `发送失败：${res.reason || '未知原因'}`;
+      setToastMsg(msg);
+      throw new Error(msg);                         // InputBar 行内也出失败文案
     }
     dm.input(a.key, '');                            // 帧2：裸 Enter 提交
   }, [activeAgent, dm, waitAck]);
