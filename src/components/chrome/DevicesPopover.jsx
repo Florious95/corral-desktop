@@ -12,7 +12,7 @@ function Mark({ state }) {
 /**
  * 左下角设备弹层（UI-SPEC §4.2）。定位基准 = App 根元素（需 position:relative）。
  * @param {Object} props
- * @param {Array<{id:string,name:string,url:string,sub?:string,online:boolean,checked:boolean}>} props.devices
+ * @param {Array<{id:string,name:string,url:string,sub?:string,online:boolean,checked:boolean,lastError?:string|null}>} props.devices
  * @param {(id:string, next:boolean) => void} props.onToggle
  * @param {(next:boolean) => void} props.onToggleAll
  * @param {() => void} props.onAddDevice
@@ -70,6 +70,7 @@ export default function DevicesPopover({ devices, onToggle, onToggleAll, onAddDe
                 <span className={'dp-dot ' + (d.online ? 'dp-dot-on' : 'dp-dot-off')} />
               </div>
               <div className="dp-sub">{d.sub || d.url}</div>
+            {d.lastError ? <div className="dp-err">{d.lastError}</div> : null}
             </div>
             <Mark state={d.checked ? 'all' : 'none'} />
           </button>

@@ -77,7 +77,7 @@ export default function App() {
         if (!r.ok) toastInputFail(r.reason);
       },
       // ⛔ message 由 DeviceManager 保证不含 token
-      onError: ({ code, message }) => setToastMsg(`${code}：${message}`),
+      onError: ({ code, message }) => setToastMsg(code === 'auth' ? message : `${code}：${message}`),
     });
   }
   const dm = dmRef.current;
@@ -214,6 +214,7 @@ export default function App() {
     checked: d.checked,
     sub: deviceSub(d.url),
     online: d.state === 'ready',
+    lastError: d.lastError || null,
   })), [devices]);
 
   const deviceLabel = useMemo(() => {

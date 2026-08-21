@@ -397,7 +397,11 @@ export class DeviceManager {
   _onFrame(deviceId, type, payload) {
     switch (type) {
       case 'auth_ack':
-        if (payload.ok !== true) this._setStatus(deviceId, { lastError: 'token 无效或已过期', authRejected: true });
+        if (payload.ok !== true) {
+          const message = 'token 无效或已过期';
+          this._setStatus(deviceId, { lastError: message, authRejected: true });
+          this.onError({ deviceId, code: 'auth', message });
+        }
         return;
       case 'listing':
       case 'list_delta':
