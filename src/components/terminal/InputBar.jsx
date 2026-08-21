@@ -8,8 +8,8 @@ const KEYS = [
   ['↑', 'up'], ['↓', 'down'], ['←', 'left'], ['→', 'right'],
 ];
 
-/** pending 兜底解锁（ms，UI-SPEC §6.3）。协议层本地超时是 10s，这里只保证 UI 不会卡死。 */
-const ACK_WATCHDOG_MS = 5000;
+/** pending 解锁（ms）。跟契约 input_ack 本地超时 10s，不跟 UI-SPEC 的 5s（U-01）。 */
+const ACK_WATCHDOG_MS = 10_000;
 
 /**
  * 底部输入条：整行文本发送（协议 input.text）+ 快捷键（协议 input.keys）。
@@ -54,7 +54,9 @@ export default function InputBar({ onSend, onKey, disabled = false }) {
       setErr('');
       clearTimeout(errTimerRef.current);
     } catch (e) {
-      fail(`发送失败：${(e && e.message) || e || '未知原因'}`);
+      const raw = String((e && e.message) || e || '未知原因');
+      // 超时文案必须是「未收到回执」，不能加成「发送失败：」（U-01 / C-083）
+      fail(raw.includes('未收到回执') ? raw : `发送失败：${raw}`);
     } finally {
       clearTimeout(watchdogRef.current);
       inflightRef.current = false;
