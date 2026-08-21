@@ -235,7 +235,8 @@ export default function App() {
 
   /* ——— 会话动作 ——— */
   const openAgent = useCallback((key) => {
-    setPaneKeys([key]); // 单击 = 单列打开
+    // 已在列里：只聚焦（U-06）。未打开：单列替换（C-053，左键不是追加）。
+    setPaneKeys((p) => (p.includes(key) ? p : [key]));
     setActiveKey(key);
   }, []);
 
