@@ -1,0 +1,346 @@
+/* 侧栏（UI-SPEC §5）。像素值忠于规格；颜色一律引 tokens.css 变量。 */
+
+/* —— 容器 —— */
+.sidebar {
+  flex: none;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--d-sidebar) var(--ease);
+}
+.sidebar-inner {
+  width: 280px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* —— Search —— */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 10px 2px;
+  padding: 6px 10px;
+  border-radius: var(--r-7);
+  font-size: var(--fs-135);
+  cursor: text;
+  transition: background var(--d-hover);
+}
+.sidebar-search:hover,
+.sidebar-search.is-active {
+  background: var(--hover-3);
+}
+.sidebar-search-label {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-search-label.is-filled {
+  color: var(--text);
+}
+.sidebar-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--fs-135);
+  color: var(--text);
+}
+.sidebar-search-input::placeholder {
+  color: var(--text-faint);
+}
+
+/* —— 分组标题 —— */
+.sidebar-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+.sidebar-group-head-spaces {
+  padding: 12px 20px 4px;
+}
+.sidebar-group-head-agents {
+  padding: 14px 20px 4px;
+}
+.sidebar-group-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: var(--r-5);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--d-hover), color var(--d-hover);
+}
+.sidebar-group-btn:hover {
+  background: var(--hover-2);
+  color: var(--icon-strong);
+}
+.sidebar-chevron {
+  display: inline-flex;
+  flex: none;
+  transition: transform var(--d-chevron) var(--ease);
+}
+.sidebar-group-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* —— 底部 Devices 条 —— */
+.sidebar-devices {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border-strong);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--d-hover);
+}
+.sidebar-devices:hover {
+  background: var(--hover-1);
+}
+.sidebar-devices-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-devices-dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: transparent;
+  border: 1.5px solid var(--dot-hollow);
+}
+.sidebar-devices-dot.is-online {
+  background: var(--green);
+  border: none;
+}
+.sidebar-devices-gear {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+}
+
+/* —— Spaces 列表 —— */
+.spaces-list {
+  padding: 0 10px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex: none;
+  max-height: clamp(96px, 100vh - 464px, 288px);
+}
+.spaces-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  flex: none;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-radius: var(--r-7);
+  font-size: var(--fs-135);
+  font-weight: 400;
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--d-hover);
+  animation: rowIn var(--d-toggle) ease-out;
+}
+.spaces-row.is-selected {
+  background: var(--sel-bg);
+  font-weight: 600;
+}
+.spaces-row:hover {
+  background: var(--hover-5);
+}
+.spaces-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spaces-row-state {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-right: 6px;
+}
+.spaces-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+}
+.spaces-dot.is-working {
+  background: var(--green);
+  animation: pulse 1.8s ease-out infinite;
+}
+.spaces-dot.is-blocked {
+  background: var(--amber);
+  animation: pulseAmber 1.8s ease-out infinite;
+}
+.spaces-row-count {
+  flex: none;
+  font-size: var(--fs-12);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.spaces-badge {
+  flex: none;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-10);
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--ring-hairline);
+  background: var(--badge-remote-bg);
+  color: var(--badge-remote-fg);
+}
+.spaces-badge.is-local {
+  background: var(--badge-local-bg);
+  color: var(--badge-local-fg);
+}
+
+/* —— Agents 列表：54px 绝对定位行 —— */
+.agents-host {
+  padding: 0 10px;
+  flex: 1;
+  min-height: 108px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.agents-viewport {
+  overflow-y: auto;
+}
+.agents-track {
+  position: relative;
+}
+.agents-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 54px;
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8px;
+  border-radius: var(--r-9);
+  cursor: pointer;
+  background-color: transparent;
+  transition: background-color var(--d-hover), opacity var(--d-row), transform var(--d-row),
+    top var(--d-reorder) var(--ease);
+  animation: rowIn var(--d-chevron) ease-out;
+}
+.agents-row.is-open {
+  background-color: var(--sel-bg);
+}
+.agents-row:hover {
+  background-color: var(--hover-5);
+}
+.agents-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.agents-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-row-marks {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+.agents-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 3px;
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+}
+.agents-row-metatext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+}
+.agents-dot.is-working {
+  background: var(--green);
+  animation: pulse 1.8s ease-out infinite;
+}
+.agents-dot.is-blocked {
+  background: var(--amber);
+  animation: pulseAmber 1.8s ease-out infinite;
+}
+.agents-dot.is-done {
+  background: var(--green-deep);
+}
+.agents-dot.is-idle {
+  background: transparent;
+  border: 1.5px solid var(--dot-hollow);
+}
+.agents-dot.is-unknown {
+  background: transparent;
+  border: 1.5px solid var(--ink-060);
+}
+.agents-badge {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-10);
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--ring-hairline);
+  background: var(--badge-remote-bg);
+  color: var(--badge-remote-fg);
+}
+.agents-badge.is-local {
+  background: var(--badge-local-bg);
+  color: var(--badge-local-fg);
+}
+.agents-empty {
+  padding: 18px 10px;
+  font-size: var(--fs-12);
+  color: var(--text-faint);
+  text-align: center;
+}

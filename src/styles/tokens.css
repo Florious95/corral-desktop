@@ -1,0 +1,192 @@
+/* AgentMirror 设计 token —— 唯一事实来源 docs/UI-SPEC.md §1
+   组件里一律引用变量名，禁止裸 hex。 */
+
+:root {
+  /* ——— 1.1 中性色阶（raw ramp，仅供语义 token 引用） ——— */
+  --ink-900: #201e1d;
+  --ink-800: #3a3835;
+  --ink-700: #5d5a54;
+  --ink-600: #6d6a63;
+  --ink-500: #7a766e;
+  --ink-400: #8a867e;
+  --ink-300: #9a968e;
+  --ink-250: #a09c93;
+  --ink-200: #a8a49b;
+  --ink-150: #b0aca3;
+  --ink-100: #b8b4ab;
+  --ink-060: #c4c0b7;
+
+  /* ——— 1.2 表面 / 文字 / 图标 ——— */
+  --bg: #fbfaf8;
+  --sidebar-bg: #ebe8e3;
+  --titlebar-top: #eeebe6;
+  --titlebar-bottom: #e9e6e1;
+  --titlebar-grad: linear-gradient(180deg, var(--titlebar-top), var(--titlebar-bottom));
+  --bar-bg: #f7f5f1;
+  --surface-sunken: #f0ede8;
+  --field-bg: #ffffff;
+
+  --text: var(--ink-800);
+  --text-secondary: var(--ink-600);
+  --text-muted: var(--ink-400);
+  --text-faint: var(--ink-150);
+  --text-hover: var(--ink-700);
+  --label: var(--ink-300);
+
+  --icon: var(--ink-400);
+  --icon-strong: var(--ink-700);
+  --icon-titlebar: var(--ink-500);
+  --icon-placeholder: var(--ink-250);
+  --icon-idle: var(--ink-200);
+  --dot-hollow: var(--ink-100);
+  --checkbox-border: var(--ink-060);
+
+  /* ——— 1.3 强调色 ——— */
+  --green: #34c759;
+  --green-ring: rgba(52, 199, 89, .55);
+  --green-deep: #3f7a4c;
+  --green-badge-bg: #e5efe2;
+  --amber: #f0b429;
+  --amber-ring: rgba(240, 180, 41, .55);
+  --amber-deep: #b08a1e;
+  --danger: #c42b1c;
+  --brand: #d97757;
+  --warn-text: #a4542e;
+  --gold: #8a713d;
+  --gold-hover: #6d5930;
+  --input-focus: #b8a273;
+  --input-focus-ring: rgba(184, 162, 115, .25);
+
+  --badge-local-bg: #e9e6e0;
+  --badge-local-fg: var(--ink-600);
+  --badge-remote-bg: #f1e8d8;
+  --badge-remote-fg: var(--gold);
+
+  /* provider 兜底首字母圆圈的色调（仅 ProviderIcon fallback 用） */
+  --tint-claude: #d97757;
+  --tint-grok: #3a3835;
+  --tint-codex: #6d6a63;
+  --tint-opencode: #7a8a6e;
+  --tint-cursor: #6d6a63;
+  --tint-zai: #6b83b5;
+  --tint-kimi: #8a713d;
+  --tint-default: #6d6a63;
+
+  /* ——— 1.4 叠加层 / 边框 ——— */
+  --hover-1: rgba(0, 0, 0, .04);
+  --hover-2: rgba(0, 0, 0, .05);
+  --hover-3: rgba(0, 0, 0, .055);
+  --hover-4: rgba(0, 0, 0, .06);
+  --hover-5: rgba(0, 0, 0, .07);
+  --active-1: rgba(0, 0, 0, .11);
+  --sel-bg: rgba(0, 0, 0, .07);
+  --fill-subtle: rgba(0, 0, 0, .04);
+  --toggle-off: rgba(0, 0, 0, .15);
+
+  --border-hairline: rgba(0, 0, 0, .06);
+  --border: rgba(0, 0, 0, .07);
+  --border-strong: rgba(0, 0, 0, .08);
+  --border-input: rgba(0, 0, 0, .12);
+  --ring-hairline: inset 0 0 0 0.5px rgba(0, 0, 0, .06);
+  --ring-tile: 0 0 0 0.5px rgba(0, 0, 0, .08);
+  --ring-tile-sel: 0 0 0 1.5px var(--ink-800);
+  --ring-chip: inset 0 0 0 1px rgba(0, 0, 0, .1);
+
+  /* ——— 1.5 玻璃层 / 阴影 ——— */
+  --glass-menu: rgba(250, 249, 246, .78);
+  --glass-popover: rgba(252, 251, 249, .85);
+  --glass-dialog: rgba(252, 251, 249, .92);
+  --blur-menu: blur(24px) saturate(1.6);
+  --blur-popover: blur(26px) saturate(1.6);
+  --blur-dialog: blur(30px) saturate(1.5);
+  --scrim: rgba(40, 35, 25, .28);
+  --scrim-blur: blur(3px);
+
+  --shadow-menu: 0 0 0 0.5px rgba(0, 0, 0, .16), inset 0 0 0 0.5px rgba(255, 255, 255, .5), 0 16px 44px rgba(0, 0, 0, .2), 0 2px 8px rgba(0, 0, 0, .08);
+  --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, .16), inset 0 0 0 0.5px rgba(255, 255, 255, .5), 0 16px 44px rgba(0, 0, 0, .22), 0 2px 8px rgba(0, 0, 0, .08);
+  --shadow-dialog: 0 0 0 0.5px rgba(0, 0, 0, .18), inset 0 0 0 0.5px rgba(255, 255, 255, .55), 0 24px 70px rgba(0, 0, 0, .3);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, .25);
+  --titlebar-inset: inset 0 1px 0 rgba(255, 255, 255, .55);
+
+  /* ——— 1.6 圆角 ——— */
+  --r-4: 4px;
+  --r-5: 5px;
+  --r-6: 6px;
+  --r-7: 7px;
+  --r-8: 8px;
+  --r-9: 9px;
+  --r-10: 10px;
+  --r-11: 11px;
+  --r-12: 12px;
+  --r-14: 14px;
+  --r-pill: 99px;
+
+  /* ——— 1.7 字体与字号 ——— */
+  --font-ui: -apple-system, 'SF Pro Text', 'PingFang SC', 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --fs-10: 10px;
+  --fs-105: 10.5px;
+  --fs-11: 11px;
+  --fs-115: 11.5px;
+  --fs-12: 12px;
+  --fs-125: 12.5px;
+  --fs-13: 13px;
+  --fs-135: 13.5px;
+  --fs-15: 15px;
+
+  /* ——— 1.8 间距 ——— */
+  --sp-1: 2px;
+  --sp-2: 3px;
+  --sp-3: 4px;
+  --sp-4: 6px;
+  --sp-5: 7px;
+  --sp-6: 8px;
+  --sp-7: 10px;
+  --sp-8: 11px;
+  --sp-9: 12px;
+  --sp-10: 14px;
+  --sp-11: 16px;
+  --sp-12: 18px;
+  --sp-13: 20px;
+  --sp-14: 28px;
+
+  /* ——— 1.9 动画 ——— */
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --d-fast: .12s;
+  --d-menu: .13s;
+  --d-pop: .14s;
+  --d-hover: .15s;
+  --d-dialog: .16s;
+  --d-row: .18s;
+  --d-close: 190; /* ms，JS setTimeout：关闭动画后再卸载 */
+  --d-toggle: .2s;
+  --d-chevron: .22s;
+  --d-sidebar: .28s;
+  --d-icon: .3s;
+  --d-reorder: .38s;
+}
+
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(.96) translateY(-4px) }
+}
+
+@keyframes paneIn {
+  from { opacity: 0; transform: translateX(28px) }
+}
+
+@keyframes rowIn {
+  from { opacity: 0; transform: translateY(5px) }
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 var(--green-ring) }
+  70%  { box-shadow: 0 0 0 5px rgba(52, 199, 89, 0) }
+  100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0) }
+}
+
+@keyframes pulseAmber {
+  0%   { box-shadow: 0 0 0 0 var(--amber-ring) }
+  70%  { box-shadow: 0 0 0 5px rgba(240, 180, 41, 0) }
+  100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0) }
+}

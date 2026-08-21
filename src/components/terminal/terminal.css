@@ -1,0 +1,354 @@
+/* 终端区（SplitPanes / TerminalPane / InputBar）。token 名见 UI-SPEC §1。 */
+
+/* ——— SplitPanes（UI-SPEC §6.1） ——— */
+
+.splitpanes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.splitpanes-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  position: relative;
+  animation: paneIn var(--d-sidebar) var(--ease);
+}
+
+/* 侧栏已有 border-right，首列再画一条会并出双线 */
+.splitpanes-col:first-child { border-left: none }
+
+.splitpanes-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-faint);
+  z-index: 3;
+  opacity: 0;
+  transition: opacity var(--d-hover);
+}
+
+.splitpanes-col:hover .splitpanes-close,
+.splitpanes-close:focus-visible { opacity: 1 }
+
+.splitpanes-close:hover {
+  background: var(--hover-4);
+  color: var(--icon-strong);
+}
+
+.splitpanes-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: var(--fs-13);
+  color: var(--text-faint);
+}
+
+.splitpanes-empty-sub { font-size: var(--fs-115) }
+
+/* ——— TerminalPane（UI-SPEC §6.2） ——— */
+
+.terminalpane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminalpane-head {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 40px 0 12px;   /* 右侧 40px 让给列关闭钮 */
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.terminalpane-title {
+  font-size: var(--fs-125);
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminalpane-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  flex: none;
+  box-sizing: border-box;
+}
+
+.terminalpane-dot.is-working { background: var(--green); animation: pulse 1.8s ease-out infinite }
+.terminalpane-dot.is-blocked { background: var(--amber); animation: pulseAmber 1.8s ease-out infinite }
+.terminalpane-dot.is-done    { background: var(--green-deep) }
+.terminalpane-dot.is-idle    { background: transparent; border: 1.5px solid var(--dot-hollow) }
+.terminalpane-dot.is-unknown { background: transparent; border: 1.5px solid var(--ink-060) }
+
+.terminalpane-badge {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--fs-10);
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  box-shadow: var(--ring-hairline);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+.terminalpane-badge.is-local  { background: var(--badge-local-bg); color: var(--badge-local-fg) }
+.terminalpane-badge.is-remote { background: var(--badge-remote-bg); color: var(--badge-remote-fg) }
+
+.terminalpane-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 0;
+  background: var(--bg);
+}
+
+.terminalpane-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;   /* fit 之后 xterm 网格恰好铺满；余数像素不外溢 */
+}
+
+/* xterm 自带的视口底色是 #000（为 macOS 滚动条不透明准备的），亮色主题下要盖掉 */
+.terminalpane-host .xterm .xterm-viewport { background-color: transparent }
+
+.terminalpane-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: var(--bg);
+}
+
+.terminalpane-placeholder-box {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-12);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+}
+
+.terminalpane-placeholder-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.terminalpane-placeholder-sub {
+  font-size: var(--fs-115);
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+
+/* 只读历史面板：协议 scrollback 的落地处，⛔ 绝不与活的 xterm 网格混用 */
+.terminalpane-history {
+  flex: none;
+  max-height: 44%;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--field-bg);
+  overflow: hidden;
+}
+
+.terminalpane-history-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.terminalpane-history-head > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminalpane-history-btn {
+  flex: none;
+  height: 20px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-6);
+  font-family: inherit;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--d-fast);
+}
+
+.terminalpane-history-btn:hover  { background: var(--hover-2) }
+.terminalpane-history-btn:active { background: var(--active-1) }
+
+.terminalpane-history-body {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminalpane-hint {
+  position: absolute;
+  left: 14px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--bar-bg);
+  box-shadow: var(--ring-hairline);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* ——— InputBar（UI-SPEC §6.3） ——— */
+
+.inputbar {
+  flex: none;
+  border-top: 1px solid var(--border-hairline);
+  background: var(--bar-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inputbar-keys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inputbar-chip {
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: var(--ring-chip);
+  transition: background var(--d-fast);
+}
+
+.inputbar-chip:hover:enabled  { background: var(--hover-2) }
+.inputbar-chip:active:enabled { background: var(--active-1) }
+.inputbar-chip:disabled { opacity: .35; cursor: default }
+
+.inputbar-err {
+  margin-left: auto;
+  font-size: var(--fs-11);
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inputbar-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.inputbar-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  max-height: 122px;      /* 1–6 行，line-height 18px */
+  line-height: 18px;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--r-8);
+  background: var(--field-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+}
+
+.inputbar-input:focus {
+  border-color: var(--input-focus);
+  box-shadow: 0 0 0 3px var(--input-focus-ring);
+}
+
+.inputbar-input::placeholder { color: var(--text-faint) }
+.inputbar-input:disabled { opacity: .6 }
+
+.inputbar-send {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-8);
+  background: var(--ink-800);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.inputbar-send:hover:enabled  { background: var(--ink-900) }
+.inputbar-send:active:enabled { background: #000 }
+.inputbar-send:disabled { opacity: .35; cursor: default }

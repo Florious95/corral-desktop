@@ -1,0 +1,94 @@
+/* 全局骨架 —— docs/UI-SPEC.md §1.9 全局补充 + §3 布局 */
+
+::-webkit-scrollbar { width: 0; height: 0 }
+* { scrollbar-width: none }
+
+html, body, #root { height: 100%; margin: 0; overflow: hidden }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, textarea, select { font-family: inherit; color: inherit }
+button { border: 0; background: none; padding: 0 }
+
+/* ——— 布局骨架：标题栏 + （侧栏 | 主区） ——— */
+
+/* position:relative 是 DevicesPopover 的定位基准（UI-SPEC §4.2） */
+.app-root {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* ——— 无设备引导卡片 ——— */
+
+.app-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.app-empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-12);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-placeholder);
+  margin-bottom: var(--sp-9);
+}
+
+.app-empty-title { font-size: var(--fs-13); font-weight: 600; color: var(--text-muted) }
+.app-empty-sub { font-size: var(--fs-115); color: var(--text-faint); margin-top: var(--sp-2) }
+
+.app-empty-btn {
+  margin-top: var(--sp-10);
+  padding: 7px 16px;
+  border-radius: var(--r-8);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: #fff;
+  background: var(--ink-800);
+  cursor: pointer;
+  transition: background var(--d-hover);
+}
+.app-empty-btn:hover { background: var(--ink-900) }
+.app-empty-btn:active { background: #000 }
+
+/* ——— xterm 覆盖：终端底色跟随窗口，滚动条已全局隐藏 ——— */
+.xterm .xterm-viewport { background: transparent !important }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
