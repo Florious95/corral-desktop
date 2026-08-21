@@ -100,7 +100,8 @@ merged。「一事一闭」根本没有成立过。本工程从第一天就按�
   （攒着不提交 = 把已完成的工作暴露在下一次回退里，上游工程实发过整条修复被回退抹掉）。
 - ⛔ **不写 `Co-Authored-By: Claude`**（用户裁定：Contributor 应该是他）。
 - 🔴 **模型铁律**：Workflow 内所有 agent 显式 `model: 'opus'`（Opus 5）。续跑/新开同样遵守。
-  ⛔⛔ 禁用 Deepseek；⛔⛔ 评审席禁用 Fable 5，只能 Opus 5。
+  ⛔⛔ 禁用 Deepseek。
+- **team-agent 席位**：provider `grok`，`model: grok-4.6`（用户 2026-08-22 裁定）。
 
 ## 8. 如果将来建 team-agent 团队
 
