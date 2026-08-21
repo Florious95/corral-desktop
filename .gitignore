@@ -6,3 +6,5 @@ src-tauri/gen/schemas/
 *.log
 .team/runtime/
 .team/logs/
+.worktrees/
+.grok/
