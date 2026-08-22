@@ -105,16 +105,33 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 
 - commit 无需确认，验过就提交，⛔ 不许攒。⛔ 不写 `Co-Authored-By: Claude`。
 - Workflow 内 agent 显式 `model: 'opus'`。⛔⛔ 禁用 Deepseek。
-- **team-agent 席位**：provider `grok`，`model: grok-4.6`（用户 2026-08-22 裁定）。
+- 🔴 **team-agent 席位只许开 cursor 的 grok 4.6**（用户 2026-08-22 裁定，覆盖此前的「provider `grok`」）：
+  角色文件写 `provider: cursor_agent`（⛔ 不是 `cursor`）+ `auth_mode: subscription` +
+  `permission_mode: auto_approve` + `dangerously_skip_permissions: true`。
+  `model:` 会被 shim 剥掉，**实跑模型以 pane 底部显示为准**，起完必须 `capture-pane` 自证。
+  代价（写任务书时必须吃住）：**cursor 席位重启即失忆**，`--resume` 不载历史 ⇒
+  ⛔ 只派**单回合自足**任务，要延续的信息一律落盘到产物文件，不许指望席位记得上一轮。
 
-## 8. 六席位编排
+## 8. 单席位编排（2026-08-22 起，取代原六席位）
 
-`.team/current/`：`integrator`（唯一写产品码）/ `verifier`（零上下文判官）/ `analyst`（需求）/
-`case-designer`（用例，零上下文）/ `web-tester`（执行 + Chrome DevTools MCP）/ `packager`（封装）。
+🔴 **框架硬限制：一个 workspace 只能有一个 cursor 席位。** 加第二个直接被拒：
+`cursor_agent seat already occupies this workspace` ——
+根因是 `<workspace>/.cursor/mcp.json` 是**目录作用域**的，第二席会覆盖 `TEAM_AGENT_ID`（后写者赢）。
+⇒ 与 §7「只许 cursor」叠加的后果：**六席位编排作废**，`.team/current/` 只剩 `integrator`。
+⛔ 不许为绕开它在同一 workspace 硬塞第二席。要多席位只有两条路，都得先立项：
+① 每席一个独立 workspace（各自 `.cursor/`）；② 等上游把 per-seat MCP identity 隔离掉。
 
 - 角色文件必须 `dangerously_skip_permissions: true`，否则席位停在确认提示上，
   症状伪装成「投递失败」。该字段只在启动生效，改文件要 `add-agent --force` 重建。
-- 各自的 ⛔：判官不改实现、执行席不改用例（觉得用例错就报上来）、封装席不重验业务逻辑。
+- 🔴 **cursor 席位必须显式写 `model:`**。不写会 compile 失败；框架的理由是
+  不写就静默 fallback 到 `sonnet-4-thinking`，而 argv 看着还正常。
+  （team-agent skill 文档说 `model` 会被 shim 剥掉、可省 —— **与 CLI 实测矛盾，以 CLI 为准**。）
+- **起完必须 `capture-pane` 自证**：底部要显 `Cursor Agent v<版本>` + 具体模型名。
+  ⛔ `ok: True` 不算起成功。
+- 🔴 **判者独立性没了席位可依托**：同一 workspace 里再也开不出独立判官席。
+  替代做法（选一条，写进任务书）：判官跑在**独立 workspace**；
+  或利用 cursor「重启即失忆」——同一席位 `reset-agent --discard-session` 后就是零上下文判官，
+  但 ⛔ 必须只喂它 PR diff + 判据，不许喂实现过程。**产出方自证仍然不算数。**
 - **leader 不亲写产品码**，上下文留给判断。
 - **投递纪律**：裁定写成文件再 `$(cat ...)` 投——正文里的反引号/尖括号会被 shell 截断
   **但 send 仍返回成功**。席位工作中投会 `send_unverified_exhausted`，**等空闲再投**。
