@@ -89,6 +89,10 @@ export function saveDevices(devices, storage) {
 let storePromise;
 
 async function pluginStore() {
+  // Browser `npm run dev` never sets __TAURI_INTERNALS__; skip before Vite even
+  // follows the specifier (vite.config.js also strips these modules from the
+  // browser graph). Desktop shell still loads the real plugin.
+  if (!isTauri()) throw new Error('plugin-store is desktop-only');
   const { load } = await import('@tauri-apps/plugin-store');
   if (!storePromise) storePromise = load(SECURE_STORE_FILE, { autoSave: true });
   return storePromise;
@@ -96,6 +100,7 @@ async function pluginStore() {
 
 /** Desktop hydrate. Tests never call this (no Tauri). */
 export async function loadDevicesSecure() {
+  if (!isTauri()) return [];
   try {
     const s = await pluginStore();
     return normalizeDevices(await s.get('devices'));
@@ -105,6 +110,7 @@ export async function loadDevicesSecure() {
 }
 
 function queueSecureSave(devices) {
+  if (!isTauri()) return;
   const payload = devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
   pluginStore()
     .then(async (s) => {
