@@ -175,7 +175,19 @@ export default function TerminalPane({
 
     const start = () => {
       if (viewRef.current !== view) return;
-      clientRef.current?.subscribe(target, view.rows, view.cols);
+      // 核心修复：subscribe 用 max(本地列数, 主机列数)，让 daemon 第一次 capture
+      // 就在正确宽度下完成。否则 subscribe(100) → daemon resize 到 100 → capture 100
+      // → 另一 client 拽回 235 → 我方 resize(235) 被 D-27 no-op guard 拦住 → 永远
+      // 拿不到 235 宽的 snapshot。
+      const hostCols = agentColsRef.current || 0;
+      const cols = Math.max(view.cols, hostCols);
+      // 预设 minCols：xterm buffer 在首帧到达前就到位，避免 235 列内容写进
+      // 还没扩开的 100 列 buffer。
+      if (hostCols > view.containerCols) {
+        view.setMinCols(hostCols);
+        host.classList.add('is-wide-host');
+      }
+      clientRef.current?.subscribe(target, view.rows, cols);
     };
     if (view.readyWebgl) view.readyWebgl.then(start);
     else start();
