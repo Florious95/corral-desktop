@@ -108,9 +108,20 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 - 🔴 **team-agent 席位只许开 cursor 的 grok 4.6**（用户 2026-08-22 裁定，覆盖此前的「provider `grok`」）：
   角色文件写 `provider: cursor_agent`（⛔ 不是 `cursor`）+ `auth_mode: subscription` +
   `permission_mode: auto_approve` + `dangerously_skip_permissions: true`。
-  `model:` 会被 shim 剥掉，**实跑模型以 pane 底部显示为准**，起完必须 `capture-pane` 自证。
+  🔴 **`model:` 必填，但它不决定实跑模型**——两条叠加，只知一半就会害人
+  （框架队 2026-08-22 实测确认，本仓库实撞过前半条）：
+  - 省略 ⇒ **compile 直接失败**。CLI 这样做是对的：不写就静默落到内置默认而 argv 看着正常。
+  - 写了 ⇒ **shim 启动时把 `--model` 剥掉**。框架队实测：声明 `sonnet-4-thinking`，
+    pane 显示 `Cursor Grok 4.6`。⇒ **实跑模型以 pane 底部显示为准。**
+
+  ⚠️ **由此：「只许 grok 4.6」这条令没有任何配置能强制。** 它成立只因为 Cursor 客户端的
+  当前默认模型就是 grok 4.6；用户在 Cursor 里换默认，席位会**静默跟着换**，角色文件不变。
+  ⇒ 🔴 **每次起/重建席位都必须 `capture-pane` 核模型名**，⛔ 不许拿角色文件当证据。
+  对不上就停下报用户，⛔ 不许自己改 Cursor 的默认设置。
+
   代价（写任务书时必须吃住）：**cursor 席位重启即失忆**，`--resume` 不载历史 ⇒
   ⛔ 只派**单回合自足**任务，要延续的信息一律落盘到产物文件，不许指望席位记得上一轮。
+  cursor 席位当判者时，判据与证据**必须全部落盘**，⛔ 不能依赖它记得上一轮。
 
 ## 8. 单席位编排（2026-08-22 起，取代原六席位）
 
@@ -128,11 +139,12 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 
 - 角色文件必须 `dangerously_skip_permissions: true`，否则席位停在确认提示上，
   症状伪装成「投递失败」。该字段只在启动生效，改文件要 `add-agent --force` 重建。
-- 🔴 **cursor 席位必须显式写 `model:`**。不写会 compile 失败；框架的理由是
-  不写就静默 fallback 到 `sonnet-4-thinking`，而 argv 看着还正常。
-  （team-agent skill 文档说 `model` 会被 shim 剥掉、可省 —— **与 CLI 实测矛盾，以 CLI 为准**。）
+- `model:` 的两条叠加口径见 §7（必填 + 不决定实跑）。⛔ 不许只记一半。
 - **起完必须 `capture-pane` 自证**：底部要显 `Cursor Agent v<版本>` + 具体模型名。
-  ⛔ `ok: True` 不算起成功。
+  ⛔ `ok: True` 不算起成功，⛔ 角色文件不算模型的证据。
+- ⚠️ **保守假设：cursor 席位共享的目录作用域状态不止 `.cursor/mcp.json` 一处。**
+  框架队 2026-08-22 明说这一条**他们没核过、不猜**，已立案查，查清会告知。
+  在那之前 ⛔ 不许按「隔离了 mcp.json 就能同目录多席」做任何设计。
 - 🔴 **判者独立性的实质是三件，缺一不算独立**（框架队 2026-08-22 纠正我的原文）：
   ① **判者不是产出方** ② **零上下文** ③ **破坏齿由判者选址**
   （判者自己另找一处把实现改坏，看测试红不红；⛔ 不许复用产出方给的那个反面样本）。
