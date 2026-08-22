@@ -46,7 +46,7 @@ test('pill reveal: enter shows; leave waits hideMs; re-enter cancels hide', asyn
 test('runWindowChrome close/min/zoom against a mock API', async () => {
   const log = [];
   const api = {
-    hide: async () => { log.push('hide'); },
+    close: async () => { log.push('close'); },
     minimize: async () => { log.push('min'); },
     isFullscreen: async () => false,
     setFullscreen: async (v) => { log.push(['fs', v]); },
@@ -54,7 +54,7 @@ test('runWindowChrome close/min/zoom against a mock API', async () => {
   await runWindowChrome('close', api);
   await runWindowChrome('min', api);
   await runWindowChrome('zoom', api);
-  assert.deepEqual(log, ['hide', 'min', ['fs', true]]);
+  assert.deepEqual(log, ['close', 'min', ['fs', true]]);
 });
 
 test('Cmd+B is local; Cmd+W and Cmd+Q are not protocol keys (native close/quit)', async () => {
@@ -72,4 +72,11 @@ test('Cmd+B is local; Cmd+W and Cmd+Q are not protocol keys (native close/quit)'
 test('fillsDisplay is a function used for fullscreen detection', async () => {
   const { fillsDisplay } = await import('../src/lib/fullscreen.js');
   assert.equal(typeof fillsDisplay, 'function');
+});
+
+test('Rust does not prevent_close or hide on CloseRequested', async () => {
+  const rust = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
+  assert.equal(rust.includes('prevent_close'), false);
+  assert.equal(rust.includes('CloseRequested'), false);
+  assert.match(rust, /setHidden/);
 });

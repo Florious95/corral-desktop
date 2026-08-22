@@ -47,7 +47,7 @@ export function createPillReveal({ hideMs = PILL_HIDE_MS, onChange } = {}) {
 
 export async function runWindowChrome(kind, api) {
   if (!api) throw new Error('no window api');
-  if (kind === 'close') return api.hide();
+  if (kind === 'close') return api.close();
   if (kind === 'min') return api.minimize();
   if (kind === 'zoom') {
     const fs = await api.isFullscreen();
@@ -60,7 +60,7 @@ export async function desktopWindowApi() {
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
   const w = getCurrentWindow();
   return {
-    hide: () => w.hide(),
+    close: () => w.close(),
     minimize: () => w.minimize(),
     isFullscreen: () => w.isFullscreen(),
     setFullscreen: (v) => w.setFullscreen(v),
