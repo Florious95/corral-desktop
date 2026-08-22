@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseOnData, NativeInputPump, unsupportedKeyEvent } from '../src/term/nativeInput.js';
 import {
   splitPasteText, pickPasteImage, handleClipboardData, wsToHttpOrigin,
-  sanitizeUploadError, chooseUploadTransport, PASTE_TEXT_MAX_UTF8,
+  sanitizeUploadError, chooseUploadTransport, clipboardPasteRoot, PASTE_TEXT_MAX_UTF8,
 } from '../src/term/clipboardPaste.js';
 import { DeviceManager } from '../src/core/devices.js';
 import { scrubLogText, clearUploadLogRing, readUploadLogRing } from '../src/term/uploadLog.js';
@@ -138,6 +138,11 @@ test('chooseUploadTransport: native is not gated on fetchImpl === fetch', () => 
   const poster = async () => {};
   assert.equal(chooseUploadTransport({ fetchImpl: fetch, postUpload: poster }), 'native');
   assert.equal(chooseUploadTransport({}), 'fetch');
+});
+
+test('clipboardPasteRoot: focused column listens on window, not only the pane node', () => {
+  assert.equal(clipboardPasteRoot(true), 'window');
+  assert.equal(clipboardPasteRoot(false), 'pane');
 });
 
 test('DeviceManager.uploadImage native postUpload path; pairing secret not in log', async () => {

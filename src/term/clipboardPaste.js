@@ -90,6 +90,14 @@ export function chooseUploadTransport({ fetchImpl, postUpload, desktop }) {
   return 'fetch';
 }
 
+/**
+ * The focused split column is the paste target. Cmd+V must not require a
+ * hit-test inside xterm — WKWebView otherwise delivers `paste` to body.
+ */
+export function clipboardPasteRoot(focused) {
+  return focused ? 'window' : 'pane';
+}
+
 export function sanitizeUploadError(status, unreachable) {
   if (unreachable) return '上传失败：无法连接';
   if (status === 401) return '上传失败：未授权';

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PASTE_HARNESS_RUNNING</title>
+</head>
+<body>
+<div id="pane" class="terminalpane"></div>
+<pre id="out">running</pre>
+<script type="module">
+import {
+  handleClipboardData, clipboardPasteRoot, pickPasteImage,
+} from '/src/term/clipboardPaste.js';
+
+const out = [];
+function rec(name, pass, extra) {
+  out.push({ name, pass: !!pass, ...extra });
+}
+
+const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const bin = Uint8Array.from(atob(pngB64), (c) => c.charCodeAt(0));
+const file = new File([bin], 'p.png', { type: 'image/png' });
+
+function makeDt() {
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  return dt;
+}
+
+function firePaste(target, dt) {
+  const ev = new Event('paste', { bubbles: true, cancelable: true, composed: true });
+  Object.defineProperty(ev, 'clipboardData', { value: dt, enumerable: true });
+  return target.dispatchEvent(ev);
+}
+
+rec('clipboardPasteRoot_focused_is_window', clipboardPasteRoot(true) === 'window');
+rec('clipboardPasteRoot_blur_is_pane', clipboardPasteRoot(false) === 'pane');
+rec('pickPasteImage', pickPasteImage(makeDt())?.name === 'p.png');
+
+const sent = [];
+const kind = await handleClipboardData(makeDt(), {
+  sendText: (t) => sent.push(['text', t]),
+  sendImage: async (f) => { sent.push(['image', f.type, f.size]); },
+  onError: (m) => sent.push(['err', m]),
+});
+rec('handleClipboardData_image', kind === 'image' && sent[0]?.[0] === 'image', { kind, sent });
+
+const pane = document.getElementById('pane');
+const hits = { window: 0, pane: 0, active: '' };
+
+function onWin(ev) {
+  hits.window += 1;
+  hits.active = document.activeElement && document.activeElement.tagName;
+  ev.preventDefault();
+}
+function onPane(ev) {
+  hits.pane += 1;
+  ev.preventDefault();
+}
+
+// 未聚焦列：只挂 pane —— 合成 paste 打在 window 上应 0 次 pane（根因复现）
+pane.addEventListener('paste', onPane, { capture: true });
+firePaste(window, makeDt());
+rec('unfocused_window_paste_misses_pane_listener', hits.pane === 0 && hits.window === 0, { ...hits });
+
+pane.removeEventListener('paste', onPane, { capture: true });
+hits.pane = 0;
+hits.window = 0;
+
+// 焦点列：挂 window —— 合成 paste 应命中（产品修法）
+window.addEventListener('paste', onWin, { capture: true });
+firePaste(window, makeDt());
+rec('focused_window_listener_gets_synthetic_paste', hits.window === 1, { ...hits });
+
+window.removeEventListener('paste', onWin, { capture: true });
+
+const ok = out.every((x) => x.pass);
+document.getElementById('out').textContent = JSON.stringify({ ok, out, activeElement: hits.active || 'BODY?' });
+document.title = ok ? 'PASTE_HARNESS_PASS' : 'PASTE_HARNESS_FAIL';
+</script>
+</body>
+</html>

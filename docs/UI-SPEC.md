@@ -601,7 +601,7 @@ src/
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
-**粘贴（裁定 2026-08-22）**：终端列捕获 DOM `paste`（capture）。纯文本走 `input.text`（多行整段、不自动补裸 Enter）。图片走桌面壳 **Rust `POST /upload`**（`upload_http` / ureq），成功后再发 `input.attachment_path`。⛔ 不经 WKWebView `fetch`（CORS 预检 OPTIONS→405）。⛔ **不**为上传放宽 `connect-src` loopback HTTP。失败 toast 脱敏；诊断写入 `$APP_DATA/upload.log`（0600）。Ctrl/Cmd-V 放行给 paste，不弹「协议发不了」。
+**粘贴（裁定 2026-08-22）**：终端列捕获 DOM `paste`（capture）。**焦点列**把监听挂在 `window` 上：选中该列（含只点侧栏打开）后 Cmd/Ctrl-V 即处理，⛔ 不要求指针先点进 xterm。纯文本走 `input.text`（多行整段、不自动补裸 Enter）。图片走桌面壳 **Rust `POST /upload`**（`upload_http` / ureq），成功后再发 `input.attachment_path`。⛔ 不经 WKWebView `fetch`（CORS 预检 OPTIONS→405）。⛔ **不**为上传放宽 `connect-src` loopback HTTP。失败 toast 脱敏；诊断写入 `$APP_DATA/upload.log`（0600）。Ctrl/Cmd-V 放行给 paste，不弹「协议发不了」。
 
 ### 6.3 `terminal/InputBar.jsx`
 

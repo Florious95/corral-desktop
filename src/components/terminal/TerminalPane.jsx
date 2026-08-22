@@ -8,7 +8,7 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
-import { handleClipboardData } from '../../term/clipboardPaste.js';
+import { handleClipboardData, clipboardPasteRoot } from '../../term/clipboardPaste.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -61,6 +61,8 @@ export default function TerminalPane({
   onKeyRef.current = onKey;
   onEnterRef.current = onEnter;
   onPasteErrorRef.current = onPasteError;
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
 
   const target = addr || agent.ref;
 
@@ -110,6 +112,7 @@ export default function TerminalPane({
     });
     view.open();
     viewRef.current = view;
+    if (focusedRef.current) view.focus();
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
     });
@@ -200,8 +203,6 @@ export default function TerminalPane({
   }, [focused]);
 
   useEffect(() => {
-    const el = paneRef.current;
-    if (!el) return undefined;
     const onPaste = (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -218,9 +219,16 @@ export default function TerminalPane({
         },
       });
     };
-    el.addEventListener('paste', onPaste, { capture: true });
-    return () => el.removeEventListener('paste', onPaste, { capture: true });
-  }, []);
+    const pane = paneRef.current;
+    const root = clipboardPasteRoot(focused);
+    if (root === 'window') {
+      window.addEventListener('paste', onPaste, { capture: true });
+      return () => window.removeEventListener('paste', onPaste, { capture: true });
+    }
+    if (!pane) return undefined;
+    pane.addEventListener('paste', onPaste, { capture: true });
+    return () => pane.removeEventListener('paste', onPaste, { capture: true });
+  }, [focused]);
 
   return (
     <div className="terminalpane" ref={paneRef}>
