@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PILL_LAYOUT</title>
+  <link rel="stylesheet" href="../../../src/styles/tokens.css" />
+  <link rel="stylesheet" href="../../../src/styles/app.css" />
+  <link rel="stylesheet" href="../../../src/components/chrome/chrome.css" />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .fs-band {
+      position: absolute; left: 0; right: 0; top: 0; height: 62px; z-index: 15;
+      pointer-events: none;
+      background: repeating-linear-gradient(-45deg, #c4b8a8, #c4b8a8 6px, #d8cfc2 6px, #d8cfc2 12px);
+      opacity: 0.55;
+    }
+    .term-fake {
+      flex: 1; min-height: 0; padding: 10px 12px;
+      font: 13px ui-monospace, SF Mono, Menlo, monospace;
+      color: #3a3835; white-space: pre;
+    }
+    .sb-fake { flex: 1; padding: 12px; font: 13px ui-sans-serif, system-ui; color: #3a3835; }
+    .tb-stub { height: 38px; flex: none; background: var(--titlebar-grad); border-bottom: 1px solid var(--border-strong, #ddd); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<pre id="out"></pre>
+<script type="module">
+import { pillHotTop, PILL_HOT, runWindowChrome } from '../../../src/lib/windowChrome.js';
+
+const params = new URLSearchParams(location.search);
+const cell = params.get('cell') || '1';
+const hover = params.get('hover') === '1';
+const collapsed = cell === '3' || cell === '4';
+const fullscreen = cell === '2' || cell === '4';
+const top = pillHotTop(fullscreen);
+const clicks = [];
+const api = {
+  close: async () => clicks.push('close'),
+  minimize: async () => clicks.push('min'),
+  isFullscreen: async () => false,
+  setFullscreen: async () => clicks.push('zoom'),
+};
+
+const root = document.getElementById('root');
+root.style.height = '100%';
+root.innerHTML = `
+  <div class="app-root${collapsed ? ' is-collapsed' : ''}${fullscreen ? ' is-fullscreen' : ''}">
+    ${fullscreen ? '<div class="fs-band" data-band="62"></div>' : ''}
+    <div class="chrome-pill-root${fullscreen ? ' is-fullscreen' : ''}">
+      <div class="chrome-pill-hot" style="top:${top}px;left:${PILL_HOT.left}px;width:${PILL_HOT.width}px;height:${PILL_HOT.height}px"></div>
+      <div class="chrome-pill${hover ? ' is-reveal' : ''}" id="pill" style="top:${fullscreen ? top + 10 : 10}px">
+        <button type="button" class="chrome-lamp r" data-k="close"><span>✕</span></button>
+        <button type="button" class="chrome-lamp y" data-k="min"><span>–</span></button>
+        <button type="button" class="chrome-lamp g" data-k="zoom"><span>⤢</span></button>
+        <div class="chrome-pill-sep" aria-hidden="true"></div>
+        <button type="button" class="chrome-pill-exp" data-k="toggle">x</button>
+      </div>
+    </div>
+    <div class="app-left${collapsed ? ' is-collapsed' : ''}">
+      ${collapsed ? '' : '<div class="tb-stub"></div><div class="sb-fake">Local<br/>agent-one</div>'}
+    </div>
+    <main class="app-main">
+      <div class="term-fake" id="term">$ mock line one — must not sit under chrome\nready.</div>
+    </main>
+  </div>
+`;
+
+const pill = document.getElementById('pill');
+if (hover) {
+  for (const k of ['close', 'min', 'zoom']) {
+    const btn = pill.querySelector(`[data-k="${k}"]`);
+    btn.click();
+    await runWindowChrome(k, api);
+  }
+}
+
+const cs = getComputedStyle(pill);
+const pr = pill.getBoundingClientRect();
+const tr = document.getElementById('term').getBoundingClientRect();
+const leftW = document.querySelector('.app-left').getBoundingClientRect().width;
+const overlap = hover && pr.bottom > tr.top && pr.right > tr.left && pr.left < tr.right;
+const rec = {
+  cell, hover, collapsed, fullscreen, hotTop: top,
+  borderRadius: cs.borderRadius,
+  pill: { w: pill.offsetWidth, h: pill.offsetHeight, opacity: cs.opacity, top: pr.top, left: pr.left },
+  termTop: tr.top, termLeft: tr.left, leftWidth: leftW,
+  clicks,
+  noResidentNarrowCol: collapsed ? leftW < 1 : true,
+  termNotCovered: !hover || pr.height === 0 || cs.opacity === '0' || tr.top >= 0,
+};
+const ok = (
+  (cs.borderRadius === '999px' || parseFloat(cs.borderRadius) >= 999) &&
+  (hover ? parseFloat(cs.opacity) > 0.5 : parseFloat(cs.opacity) < 0.05) &&
+  (collapsed ? leftW < 1 : leftW > 200) &&
+  (!hover || clicks.join(',') === 'close,min,zoom')
+);
+document.getElementById('out').textContent = JSON.stringify({ ok, rec, overlap });
+document.title = ok ? `PILL_LAYOUT_PASS_${cell}_${hover ? 'h' : 'i'}` : `PILL_LAYOUT_FAIL_${cell}`;
+</script>
+</body>
+</html>
