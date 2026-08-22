@@ -1,0 +1,31 @@
+{
+  "app_root": "/Volumes/nvme/Projects/tmux桌面端/.worktrees/wt-inst",
+  "origin": "http://127.0.0.1:1437",
+  "cdp": 9333,
+  "timeout_ms": 5000,
+  "session_count": 55,
+  "self_check": {
+    "good": {
+      "session_ref": "/tmp/tmux-501/default\u001f%2",
+      "garbled": false,
+      "reasons": [],
+      "local_cols": 114,
+      "listing_cols": null,
+      "settle_ms": null,
+      "timed_out": true
+    },
+    "bad": {
+      "session_ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "garbled": true,
+      "reasons": [
+        "overwide_line",
+        "box_run_exceeds_cols"
+      ],
+      "local_cols": 114,
+      "listing_cols": null,
+      "settle_ms": null,
+      "timed_out": true,
+      "method": "WebSocket.send rewrite subscribe → 235×50 + DOM click"
+    }
+  }
+}
