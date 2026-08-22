@@ -182,6 +182,28 @@ test('subscribe: sends subscribe frame and replays on reconnect', async () => {
   assert.deepEqual(decodeControl(replayed[0]).payload, { ref: 's1', rows: 40, cols: 100 });
 });
 
+test('reconnect replays latest negotiated cols, not the first subscribe', async () => {
+  const { client, sockets } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+
+  assert.equal(client.subscribe('s1', 24, 80), true);
+  assert.equal(client.resize('s1', 40, 120), true);
+  ws._close(1006, 'lost');
+  let ws2;
+  for (let i = 0; i < 50 && !ws2; i++) {
+    await new Promise((r) => setTimeout(r, 10));
+    ws2 = sockets[1];
+  }
+  assert.ok(ws2, 'reconnect socket opened');
+  openAndAuth(client, ws2);
+  const replayed = ws2.sent.filter((m) => decodeControl(m).type === 'subscribe');
+  assert.equal(replayed.length, 1);
+  assert.deepEqual(decodeControl(replayed[0]).payload, { ref: 's1', rows: 40, cols: 120 });
+});
+
+
 test('binary frames route to onBinary; scrollback header preserved', () => {
   const { client, sockets, events } = makeClient();
   client.connect();
