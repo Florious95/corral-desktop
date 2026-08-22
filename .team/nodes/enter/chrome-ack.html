@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>enter-ack chrome harness</title>
+</head>
+<body>
+<pre id="out">running</pre>
+<script type="module">
+import {
+  ACK_TIMEOUT, ACK_CLEARED, createInputAckGate, submitPaneEnter,
+} from '/src/term/inputAckGate.js';
+
+const out = [];
+function rec(name, pass, extra) {
+  out.push({ name, pass, ...extra });
+}
+
+const g = createInputAckGate({ timeoutMs: 40 });
+const t0 = Date.now();
+const r = await g.waitAck({ deviceId: 'local', reqId: 1 });
+rec('timeout_bounded', r.reason === ACK_TIMEOUT && Date.now() - t0 < 400, { reason: r.reason, ms: Date.now() - t0 });
+
+const g2 = createInputAckGate({ timeoutMs: 5000 });
+g2.noteText('u', { deviceId: 'local', reqId: 2 });
+const waiting = g2.waitAck({ deviceId: 'local', reqId: 2 });
+g2.flush();
+const fr = await waiting;
+const snap = g2.snapshot();
+rec('reconnect_flush', fr.reason === ACK_CLEARED && snap.waiters === 0 && snap.lastText === 0, snap);
+
+const g3 = createInputAckGate({ timeoutMs: 20 });
+const enters = [];
+await submitPaneEnter({
+  ready: true,
+  pending: { deviceId: 'local', reqId: 3 },
+  waitAck: (s) => g3.waitAck(s),
+  sendBareEnter: () => { enters.push('blocked'); return true; },
+  onToast: () => {},
+});
+const second = await submitPaneEnter({
+  ready: true,
+  pending: undefined,
+  waitAck: (s) => g3.waitAck(s),
+  sendBareEnter: () => { enters.push('sent'); return true; },
+  onToast: () => {},
+});
+rec('enter_after_timeout', second.sent === true && enters.join(',') === 'sent', { enters, sent: second.sent });
+
+const ok = out.every((x) => x.pass);
+document.getElementById('out').textContent = JSON.stringify({ ok, out });
+document.title = ok ? 'ACK_HARNESS_PASS' : 'ACK_HARNESS_FAIL';
+</script>
+</body>
+</html>
