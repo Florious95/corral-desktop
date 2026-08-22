@@ -49,25 +49,30 @@
   align-self: stretch;
 }
 
-/* 折叠态左上角热区：默认看不见按钮；hover/focus 才出现。padding-left 避开交通灯。 */
+/*
+ * 交通灯量度（AgentMirrorTest 折叠 hover 截图，2x→CSS）：
+ *   红 0.5–14  黄 23.5–37  绿 46.5–60（窗口位图左缘）
+ *   配置 {x:14,y:13}、直径 12、间距 8 → 14+12+8+12+8+12 = 66（绿灯右缘）
+ * 折叠钮从 86px 起（66 + 20 间距），热区 DOM 不覆盖 0–86，避免吃掉关闭按钮。
+ */
 .hover-chrome {
   position: absolute;
   top: 0;
-  left: 0;
+  left: 86px;
   z-index: 6;
   height: 38px;
-  padding: 0 8px 0 78px;
+  padding: 0 10px;
   display: flex;
   align-items: center;
   background: transparent;
+  pointer-events: none;
 }
 .hover-chrome-btn {
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--d-hover);
 }
-.hover-chrome:hover .hover-chrome-btn,
-.hover-chrome:focus-within .hover-chrome-btn {
+.hover-chrome.is-hot .hover-chrome-btn {
   opacity: 1;
   pointer-events: auto;
 }
