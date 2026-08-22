@@ -155,9 +155,8 @@ export class TerminalView {
 ```
 
 **必须保留的行为:**
-- 窗口 `fit()` 的 `_report()` 不再驱动协议 `resize`（TerminalPane 不 `client.resize`）。
-- 本地格子 **跟随主机**：`subscribe(listing.rows, listing.cols)` + snapshot `inferHostCols` → `followHostGrid`（不上抛）。
-- 容器只做布局挤压（overflow / 底行可见）。0×0 不算 seed。
+- 首次**正尺寸**视口换算一次 rows/cols 并 `_report()`（120ms 合并窗口只服务这一次上抛）。0×0 不算。
+- 此后 `fit()` 只做布局挤压（overflow / 底行可见），⛔ 不再 `term.resize`、⛔ 不再上抛（裁定 2026-08-23）。
 - `onScroll` 边界:`line <= 0 && this._lastScrollLine > 0` → 触发 `onHistoryBoundary()` → 拉更早历史。
 - 重连 `replaySubscriptions()` 重放 **Map 里最新** 的 rows/cols（`subscribe` 与随后的 `resize` 都会写入）。
 
@@ -387,9 +386,9 @@ fetchOlder(() => this, { onLoading: n => setStatus(`加载 ${n} 行历史…`), 
 
 ### 3.4 resize → 补发 snapshot(可能不补)
 
-`fit()` 的 `onResize` **不再**接到 `dm.resize`（#54 回炉：窗口 seed 不是主机宽度）。订阅用 listing 的主机 rows/cols；snapshot 按行宽把本地格子跟上。窗口拖拽只挤压，不发 `resize` 帧（裁定 2026-08-23）。
+`onResize` 由 `TerminalView` **仅在首次真实视口**触发一次（120ms 合并）→ `dm.resize` / 与 `subscribe` 共用那组协商 cols。此后窗口拖拽 / 分裂列宽 → `ResizeObserver` → `fit()` **不再**发 `resize` 帧（裁定 2026-08-23）。
 
-服务端 `handleResize` 实测（重连 replay 的 subscribe 仍会 `Resize`）:
+服务端 `handleResize` 实测（仍适用于那一次，以及重连 replay 的 subscribe）:
 - 只对**已订阅**的 ref 生效;未订阅 = 静默 no-op,无任何回复。
 - 只有发生**真实 reflow**(几何确实变了)才补发一帧 snapshot;
   几何没变会走 `"ws: resize no-op, skip snapshot"` 分支,**什么都不回**。

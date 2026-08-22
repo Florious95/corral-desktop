@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TerminalView, inferHostCols } from '../src/term/TerminalView.js';
+import { TerminalView } from '../src/term/TerminalView.js';
 import { parseAnsi } from '../src/components/terminal/ansi.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -159,26 +159,6 @@ test('snapshot 清屏重建、delta 追加，字节原样不动', () => {
   view.writeDelta(new Uint8Array([0x42]));
   assert.equal(view.term.resets, 1);
   assert.equal(view.term.writes.length, 2);
-  view.dispose();
-});
-
-test('inferHostCols 取去 ANSI 后最长行', () => {
-  const bar = `${'-'.repeat(220)} tester-t146 --`;
-  assert.equal(inferHostCols(`\x1b[31m${bar}\x1b[0m\nshort`), 235);
-});
-
-test('writeSnapshot 跟随主机行宽且不上抛 onResize', async () => {
-  const { view, calls } = makeView();
-  view.open();
-  await sleep(200);
-  assert.equal(view.term.cols, 100);
-  calls.resize.length = 0;
-  const line = `${'-'.repeat(221)}tester-t146 --`;
-  view.writeSnapshot(new TextEncoder().encode(`${line}\n`));
-  assert.equal(view.term.cols, 235);
-  assert.deepEqual(calls.resize, []);
-  view.writeSnapshot(new TextEncoder().encode('short\n'));
-  assert.equal(view.term.cols, 235, '短快照不得把格子缩小');
   view.dispose();
 });
 
