@@ -46,6 +46,14 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 | 证据夹具缺 `xterm.css` | canvas 掉到 host 下，像产品坏了 | 先排除夹具与产品的差异 |
 | 只判 `loadAddon` 抛没抛错 | load 成功但 canvas 空 | 检查**工作结果**，不只检查错误信号 |
 
+- 🔴🔴 **⛔ 绝不驱动用户的鼠标键盘**（用户 2026-08-22 令：「在测试不要动我的鼠标啊」）。
+  ⛔ `CGEvent` / HID 合成 / `cliclick` / `osascript` + System Events `keystroke`·`click` ——
+  这台机器上用户本人在工作，和测试共用一套输入设备，抢走就是打断他。
+  **粘贴/上传/DOM 事件一律走 Chrome + Chrome DevTools MCP 在后台测**（用户同令：
+  「粘贴这个事情通过 Chrome 是可以在后台测的」）——Chrome 能合成 `ClipboardEvent`、
+  注入 `DataTransfer`，不碰系统输入设备。`.app` 只留给桌面壳特有的东西，
+  且 ⛔ **在 .app 上同样不许合成输入事件**。只能靠驱动真实设备才验得了 ⇒ 判**不可判**上报。
+  ⚠️ 这条**收窄了下面「验证表面 = 交付面」**：交付面仍是 `.app`，但取证手段受本条约束。
 - 🔴 **测试是我们的活，⛔ 不许把验证推给用户**（用户 2026-08-22 令：「你们要测试，你不能让我来测」）。
   席位在 `.app` 上验的做法：构建**独立 bundle id 的测试包**（`com.agentmirror.desktop.test`），
   自己开、自己点、自己截图。⛔ 只在测试构建里改身份，不进 PR。
