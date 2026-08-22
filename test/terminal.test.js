@@ -25,6 +25,8 @@ class FakeTerminal {
     this.writes = [];
     this.resets = 0;
     this.scrollHandlers = [];
+    this.dataHandlers = [];
+    this.keyHandler = null;
     this.buffer = { active: { viewportY: 0 } };
     this.element = {
       querySelector: () => ({
@@ -34,7 +36,10 @@ class FakeTerminal {
   }
   open() {}
   onScroll(cb) { this.scrollHandlers.push(cb); return { dispose: () => {} } }
+  onData(cb) { this.dataHandlers.push(cb); return { dispose: () => {} } }
+  attachCustomKeyEventHandler(fn) { this.keyHandler = fn; return true }
   emitScroll(line) { for (const cb of this.scrollHandlers) cb(line) }
+  emitData(s) { for (const cb of this.dataHandlers) cb(s) }
   resize(cols, rows) { this.cols = cols; this.rows = rows }
   reset() { this.resets += 1 }
   write(data) { this.writes.push(data) }
@@ -139,4 +144,14 @@ test('parseAnsi 不生成标记，尖括号原样留在片段文本里', () => {
   const segs = parseAnsi('<script> & "x"');
   assert.equal(segs.length, 1);
   assert.equal(segs[0].text, '<script> & "x"');   // React 渲染片段自带转义，不需要预转义
+});
+
+test('onData 把按键交给调用方；disableStdin 为 false', () => {
+  const got = [];
+  const { view } = makeView({ onData: (d) => got.push(d) });
+  view.open();
+  assert.equal(view.term.opts.disableStdin, false);
+  view.term.emitData('x');
+  assert.deepEqual(got, ['x']);
+  view.dispose();
 });
