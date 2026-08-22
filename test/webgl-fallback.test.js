@@ -19,15 +19,34 @@ test('attachWebglRenderer: loadAddon 抛错则静默返回 null', async () => {
   assert.equal(r, null);
 });
 
+function termWithCanvas(cssW, cssH, loadAddon) {
+  const canvas = { getBoundingClientRect: () => ({ width: cssW, height: cssH, top: 0, left: 0 }) };
+  return {
+    loadAddon: loadAddon || (() => {}),
+    element: { querySelector: () => canvas },
+  };
+}
+
 test('attachWebglRenderer: 成功时返回 addon 且 loadAddon 被调用一次', async () => {
   const calls = [];
   const addon = { onContextLoss(fn) { this._fn = fn; }, dispose() {} };
   const r = await attachWebglRenderer(
-    { loadAddon(a) { calls.push(a); } },
+    termWithCanvas(640, 400, (a) => { calls.push(a); }),
     async () => ({ WebglAddon: class { constructor() { return addon; } } }),
   );
   assert.equal(r, addon);
   assert.equal(calls.length, 1);
+});
+
+test('attachWebglRenderer: load 成功但 canvas 0×0 则 dispose 并回退 DOM', async () => {
+  let disposed = 0;
+  const addon = { onContextLoss() {}, dispose() { disposed += 1; } };
+  const r = await attachWebglRenderer(
+    termWithCanvas(0, 0, () => {}),
+    async () => ({ WebglAddon: class { constructor() { return addon; } } }),
+  );
+  assert.equal(r, null);
+  assert.equal(disposed, 1);
 });
 
 test('TerminalView.open in node falls back when addon cannot init', async () => {

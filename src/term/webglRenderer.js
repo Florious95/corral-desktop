@@ -21,10 +21,24 @@ export async function attachWebglRenderer(term, importer = defaultImporter) {
       });
     }
     term.loadAddon(addon);
+    if (!webglSurfaceOk(term)) {
+      try { addon.dispose(); } catch { /* stay on DOM */ }
+      return null;
+    }
     return addon;
   } catch {
     return null;
   }
+}
+
+/** loadAddon 没抛但 canvas 0×0 / 不在 DOM，算渲染失败，必须回退。 */
+export function webglSurfaceOk(term) {
+  const el = term && term.element;
+  if (!el) return false;
+  const canvas = el.querySelector('.xterm-screen canvas');
+  if (!canvas) return false;
+  const r = canvas.getBoundingClientRect();
+  return r.width >= 2 && r.height >= 2;
 }
 
 function defaultImporter() {

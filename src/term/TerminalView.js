@@ -103,6 +103,8 @@ export class TerminalView {
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
     this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
       this._webglAddon = addon;
+      // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
+      if (addon) this.fit();
     });
   }
 
