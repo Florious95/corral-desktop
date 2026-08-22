@@ -43,6 +43,8 @@ export default function TerminalPane({
   const clientRef = useRef(client);
   const subRef = useRef(subscribeBinary);
   const onResizeRef = useRef(onResize);
+  const hostDimsRef = useRef({ rows: agent.rows, cols: agent.cols });
+  hostDimsRef.current = { rows: agent.rows, cols: agent.cols };
   clientRef.current = client;
   subRef.current = subscribeBinary;
   onResizeRef.current = onResize;
@@ -143,6 +145,16 @@ export default function TerminalPane({
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
         case BINARY_KIND.SNAPSHOT:
+          // tmux 未跟随我方 resize 的检测：主机实际宽度 > 本地列宽 →
+          // 说明另一个客户端/后台 TUI 未 reshape，缩小字号适配主机宽度。
+          const hostDims = hostDimsRef.current;
+          if (hostDims.cols && hostDims.cols > view.cols) {
+            if (view.adaptToHostWidth(hostDims.cols, hostDims.rows)) {
+              view.writeSnapshot(frame.data);
+              setReady(true);
+              break;
+            }
+          }
           view.writeSnapshot(frame.data);
           setReady(true);
           break;

@@ -23,6 +23,8 @@ import { attachWebglRenderer } from './webglRenderer.js';
 const WHEEL_THROTTLE_MS = 400;
 /** 本地 grid 与上报共用：列宽抖动未落定前 ⛔ 不 term.resize 旧快照。 */
 export const GRID_DEBOUNCE_MS = 120;
+/** 适配主机宽度时的最小字号（px）：低于此值人眼不可读，放弃适配。 */
+export const MIN_ADAPT_FONT_SIZE = 8;
 
 export class TerminalView {
   /**
@@ -77,6 +79,41 @@ export class TerminalView {
     this._lastWheelAt = 0;
     this._disposed = false;
     this._replyHold = '';
+    this._adaptedHostCols = 0;
+    this._adaptedHostRows = 0;
+  }
+
+  /**
+   * 当主机 pane 实际宽度大于本地列宽时（tmux 未跟随我方 resize），
+   * 缩小字号使本地 xterm 格子匹配主机宽度，避免折行撕开。
+   * @returns {boolean} true 表示已适配（字号缩小 + 格子扩到主机宽度）；false 表示无法适配。
+   */
+  adaptToHostWidth(hostCols, hostRows) {
+    if (hostCols <= this.term.cols) return false;
+    const el = this.container;
+    if (!el) return false;
+    const w = el.clientWidth;
+    if (w <= 0) return false;
+    const cellW = w / hostCols;
+    const fontSize = Math.round(cellW / 0.6);
+    if (fontSize < MIN_ADAPT_FONT_SIZE) return false;
+    this.fontSize = fontSize;
+    this.term.options.fontSize = fontSize;
+    this.term.resize(hostCols, hostRows || this.term.rows);
+    this._adaptedHostCols = hostCols;
+    this._adaptedHostRows = hostRows || this.term.rows;
+    this._hasFit = true;
+    return true;
+  }
+
+  /** 清除适配状态，恢复默认字号并从容器像素重新 fit。 */
+  clearAdaptation() {
+    if (this._adaptedHostCols === 0) return;
+    this._adaptedHostCols = 0;
+    this._adaptedHostRows = 0;
+    this.fontSize = 13;
+    this.term.options.fontSize = 13;
+    this.fit({ immediate: true });
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -131,6 +168,32 @@ export class TerminalView {
     const w = el.clientWidth;
     const h = el.clientHeight;
     if (w === 0 || h === 0) return;
+
+    // 处于适配态：容器变化时重新计算字号，保持主机宽度；容器太窄则回退。
+    if (this._adaptedHostCols > 0) {
+      const neededFont = w / (this._adaptedHostCols * 0.6);
+      if (neededFont < MIN_ADAPT_FONT_SIZE) {
+        // 容器太窄，放弃适配，回退到正常 fit。
+        this.clearAdaptation();
+        // clearAdaptation 已做了 immediate fit，直接 return。
+        return;
+      }
+      const newFont = Math.max(MIN_ADAPT_FONT_SIZE, Math.round(neededFont));
+      const cell = { w: newFont * 0.6, h: Math.round(newFont * 1.25) };
+      const cols = this._adaptedHostCols;
+      const rows = Math.max(2, Math.floor(h / cell.h));
+      if (newFont !== this.fontSize) {
+        this.fontSize = newFont;
+        this.term.options.fontSize = newFont;
+      }
+      if (cols !== this.term.cols || rows !== this.term.rows) {
+        this._pendingCols = cols;
+        this._pendingRows = rows;
+        this._commitGrid(cols, rows, { reportDelay: false });
+      }
+      return;
+    }
+
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
