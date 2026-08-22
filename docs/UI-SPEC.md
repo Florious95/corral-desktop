@@ -262,7 +262,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 ## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c`）
 
 - 标题栏高 **38px**。（2026-08-22 用户裁定：顶部去界化，标题条收窄。原 46px 作废。）
-- **悬浮胶囊 chrome**（裁定 2026-08-22，用户确认 `mockup.html`）：系统 traffic lights **隐藏但仍保留 NSWindow 标准按钮**（⛔ 不许 `decorations: false`），自绘运动场形胶囊（`border-radius:999px`）。顺序：红关 / 黄最小化 / 绿切换全屏 / 分隔线 / 展开侧栏。**默认不可见**，鼠标进入左上热区（窗口 `top:0`；全屏 `top:62px` = 主屏菜单 30pt + overlay 32px，落在系统顶栏之下）才浮现；从热区移到胶囊不中断；移开 **160ms** 后隐藏。红钮与 Cmd+W 同路径：`CloseRequested` → `prevent_close` + `hide()`。Cmd+Q 退出。Cmd+B 本地折叠，⛔ 不进 CLI。
+- **悬浮胶囊 chrome**（裁定 2026-08-22，用户确认 `mockup.html`）：系统 traffic lights **隐藏但仍保留 NSWindow 标准按钮**（⛔ 不许 `decorations: false`），自绘运动场形胶囊（`border-radius:999px`）。顺序：红关 / 黄最小化 / 绿切换全屏 / 分隔线 / 展开侧栏。**默认不可见**，鼠标进入左上热区（窗口 `top:0`；全屏 `top:62px` = 主屏菜单 30pt + overlay 32px，落在系统顶栏之下）才浮现；从热区移到胶囊不中断；移开 **160ms** 后隐藏。红钮 = **真关闭**（`window.close()`，进程退出，Dock 不留残留）。⛔ 不许 `prevent_close` + `hide()`。Cmd+W 关窗、Cmd+Q 退出。Cmd+B 本地折叠，⛔ 不进 CLI。
 - `tauri.conf.json` 仍为 Overlay（藏灯在 Rust `setHidden`，不改 decorations）：
   ```json
   { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 13 } }
@@ -271,7 +271,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 - **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开钮只在胶囊里。折叠后终端顶到内容区顶边（系统灯已隐藏，不再 `padding-top:38px`）。
 - **Cmd+B**：本地切换侧栏折叠/展开（任何窗口状态）。⛔ 不发给远端 CLI。
 - 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。
-- 关闭 = hide 窗口（`window.hide()`），Quit 走确认；Rust 侧 `on_window_event(CloseRequested → api.prevent_close(); window.hide())`。
+- 关闭 = 销毁窗口并退出进程（红钮 / Cmd+W 走 `close()`）。⛔ 不许 hide 后 Dock 残留。Quit = Cmd+Q。
 
 ---
 
@@ -600,6 +600,8 @@ src/
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
+**终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与 InputBar `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
+
 **粘贴（裁定 2026-08-22）**：#33 终端列 DOM paste（文本 `input.text` / 图片 `POST /upload` + `input.attachment_path`）及为其放开的 loopback `connect-src` **整条回退**。Ctrl-V 不再放行给 paste 处理器。能力由后续格重做，本规格不留半截。
 
 ### 6.3 `terminal/InputBar.jsx`
@@ -813,4 +815,5 @@ PROVIDER_LABEL  // §8.2 最后一列
 11. 新增 `prefers-reduced-motion` 降级（脉冲/过渡关闭）与输入框可见 focus ring —— 无障碍基础不省。
 12. token 不写 localStorage，落 Rust 侧 store 文件（安全红线，见协议 §9）。
 13. **2026-08-22**：回退 #33 粘贴 v2（含文字粘贴）及其 CSP loopback HTTP 口子；用户已知并接受文字粘贴一并退掉。
-14. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、Cmd+B/W/Q 兜底。
+14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
+15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。

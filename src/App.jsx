@@ -15,6 +15,7 @@ import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
 import { watchFullscreen } from './lib/fullscreen.js';
 import { isLocalSidebarToggle } from './term/nativeInput.js';
+import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from './term/inputAckGate.js';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
@@ -53,8 +54,9 @@ function isLocalUrl(url) {
 export default function App({ seedDevices } = {}) {
   /* ——— 协议层：DeviceManager 是 UI 与 Client 之间的唯一边界 ——— */
   const binaryListeners = useRef(new Set());
-  const inputWaiters = useRef(new Map()); // `${deviceId}:${reqId}` → resolve（reqId 只在单设备内唯一）
-  const inputAcks = useRef(new Map());    // ack 早于 waiter 登记时暂存
+  const ackGate = useRef(null);
+  if (ackGate.current === null) ackGate.current = createInputAckGate();
+  const prevDevState = useRef(new Map());
   const dmRef = useRef(null);
 
   const [devices, setDevices] = useState([]);
@@ -69,15 +71,19 @@ export default function App({ seedDevices } = {}) {
     dmRef.current = new DeviceManager({
       seedDevices,
       onModelChange: (ws) => setWorkspaces(ws),
-      onDeviceChange: (ds) => setDevices(ds),
+      onDeviceChange: (ds) => {
+        for (const d of ds) {
+          const prev = prevDevState.current.get(d.id);
+          prevDevState.current.set(d.id, d.state);
+          if (prev && prev !== d.state) ackGate.current.flush();
+        }
+        setDevices(ds);
+      },
       onBinary: (evt) => { for (const fn of binaryListeners.current) fn(evt) },
       onInputResult: (r) => {
-        const k = `${r.deviceId}:${r.reqId}`;
-        const resolve = inputWaiters.current.get(k);
-        if (resolve) { inputWaiters.current.delete(k); resolve(r) }
-        else inputAcks.current.set(k, r);
-        // ack 一到就要让用户看见失败（C-077 / R-54）
-        if (!r.ok) toastInputFail(r.reason);
+        ackGate.current.onInputResult(r);
+        // ack 一到就要让用户看见失败（C-077 / R-54）；超时/清场文案由 submitPaneEnter 发
+        if (!r.ok && r.reason !== ACK_TIMEOUT && r.reason !== ACK_CLEARED) toastInputFail(r.reason);
       },
       // ⛔ message 由 DeviceManager 保证不含 token
       onError: ({ code, message }) => setToastMsg(code === 'auth' ? message : `${code}：${message}`),
@@ -301,17 +307,6 @@ export default function App({ seedDevices } = {}) {
   }, [dm]);
 
   /* ——— 原生输入：xterm onData → 该列 uid，不经底部 InputBar ——— */
-  const waitAck = useCallback(
-    (sent) => new Promise((resolve) => {
-      const k = `${sent.deviceId}:${sent.reqId}`;
-      const ready = inputAcks.current.get(k);
-      if (ready) { inputAcks.current.delete(k); resolve(ready); return }
-      inputWaiters.current.set(k, resolve);
-    }),
-    [],
-  );
-  const lastTextByUid = useRef(new Map());
-
   const uidReady = useCallback((uid) => {
     const i = String(uid).indexOf('::');
     const deviceId = i === -1 ? uid : uid.slice(0, i);
@@ -322,25 +317,24 @@ export default function App({ seedDevices } = {}) {
     if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
     const sent = dm.input(uid, text);
     if (!sent) { setToastMsg('未发送'); return }
-    lastTextByUid.current.set(uid, sent);
+    ackGate.current.noteText(uid, sent);
   }, [dm, uidReady]);
 
   const handlePaneKey = useCallback((uid, key) => {
     if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
-    lastTextByUid.current.delete(uid);
+    ackGate.current.takePending(uid);
     if (!dm.keys(uid, key)) setToastMsg('未发送');
   }, [dm, uidReady]);
 
   const handlePaneEnter = useCallback(async (uid) => {
-    if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
-    const pending = lastTextByUid.current.get(uid);
-    lastTextByUid.current.delete(uid);
-    if (pending) {
-      const res = await waitAck(pending);
-      if (!res.ok) return; // toast 已由 onInputResult 发出；⛔ 不把失败 enter 提交到旧缓冲
-    }
-    if (!dm.input(uid, '')) setToastMsg('未发送');
-  }, [dm, waitAck, uidReady]);
+    await submitPaneEnter({
+      ready: uidReady(uid),
+      pending: ackGate.current.takePending(uid),
+      waitAck: (sent) => ackGate.current.waitAck(sent),
+      sendBareEnter: () => dm.input(uid, ''),
+      onToast: setToastMsg,
+    });
+  }, [dm, uidReady]);
 
   const renderPane = useCallback((agent) => (
     <TerminalPane
