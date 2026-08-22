@@ -24,42 +24,6 @@ const WHEEL_THROTTLE_MS = 400;
 /** 本地 grid 与上报共用：列宽抖动未落定前 ⛔ 不 term.resize 旧快照。 */
 export const GRID_DEBOUNCE_MS = 120;
 
-/**
- * 从 snapshot 字节推断内容宽度。
- * 扫描 CSI CUP (ESC[row;colH) 和 CSI CHA (ESC[colG) 序列，取最大列号。
- * tmux capture-pane -e 每行以 CUP 开头，内容延伸到 cols 列，所以最大 CUP col + 行内容宽 = 网格宽。
- * 简化启发式：最大 CUP col 就是网格宽（因为 capture-pane 把行末补空格到满宽）。
- * 返回 0 表示无法推断。
- */
-export function inferSnapshotWidth(u8) {
-  if (!u8 || u8.length < 4) return 0;
-  let maxCol = 0;
-  let i = 0;
-  const len = u8.length;
-  while (i < len - 1) {
-    if (u8[i] === 0x1b && u8[i + 1] === 0x5b) { // ESC [ (CSI)
-      // 扫描参数（0x30-0x3F 范围）直到终止字节
-      let j = i + 2;
-      while (j < len && u8[j] >= 0x30 && u8[j] <= 0x3f) j++;
-      if (j < len) {
-        const final = u8[j];
-        if (final === 0x48 || final === 0x47) { // 'H' (CUP) or 'G' (CHA)
-          const params = new TextDecoder('utf-8', { fatal: false }).decode(u8.subarray(i + 2, j));
-          const parts = params.split(';');
-          const col = final === 0x48 ? (parts[1] ? parseInt(parts[1], 10) : 1) : (parts[0] ? parseInt(parts[0], 10) : 1);
-          if (col > maxCol) maxCol = col;
-        }
-        i = j + 1;
-      } else {
-        i++;
-      }
-    } else {
-      i++;
-    }
-  }
-  return maxCol;
-}
-
 export class TerminalView {
   /**
    * @param {HTMLElement} container 已有确定尺寸的挂载容器
@@ -113,9 +77,6 @@ export class TerminalView {
     this._lastWheelAt = 0;
     this._disposed = false;
     this._replyHold = '';
-    this._minCols = 0;        // 宽主机模式：xterm 最小列数（≥ 容器列数）
-    this._containerCols = 0;  // 容器像素算出的列数（不含 minCols）
-    this._suppressNextReport = false; // markReported 设位，吞掉紧跟 subscribe 的重复 fit 上报
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -163,9 +124,6 @@ export class TerminalView {
    * 按容器像素重算 rows/cols。首帧立刻落到格子上；之后 120ms 内的抖动只记目标，
    * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
    * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
-   *
-   * 宽主机模式：cols 取 Math.max(容器列数, _minCols)，确保 xterm buffer 不比
-   * 主机快照窄（否则 235 列内容写进 100 列 buffer 永久折行）。
    */
   fit({ immediate = false } = {}) {
     const el = this.container;
@@ -174,10 +132,8 @@ export class TerminalView {
     const h = el.clientHeight;
     if (w === 0 || h === 0) return;
     const cell = this._cell();
-    const containerCols = Math.max(2, Math.floor(w / cell.w));
+    const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
-    const cols = Math.max(containerCols, this._minCols);
-    this._containerCols = containerCols;
     this._pendingCols = cols;
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {
@@ -197,48 +153,6 @@ export class TerminalView {
       if (this._disposed) return;
       this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
     }, GRID_DEBOUNCE_MS);
-  }
-
-  /**
-   * 设置 xterm 最小列数（宽主机模式）。
-   * 扩 buffer 是纯本地显示策略：只改 xterm 渲染宽度，不上报给 daemon。
-   */
-  setMinCols(n) {
-    const next = Math.max(0, n | 0);
-    if (next === this._minCols) return;
-    this._minCols = next;
-    // 直接 term.resize，不走 _commitGrid（避免触发 _report → resize 帧）
-    const cols = Math.max(this._containerCols, this._minCols);
-    if (cols !== this.term.cols) {
-      this.term.resize(cols, this.term.rows);
-    }
-  }
-
-  /**
-   * 清除最小列数约束。⚠️ 只有收到匹配宽度的 snapshot 后才应调用，
-   * 否则旧画面按新宽度折行会钉死。由调用方保证时序。
-   */
-  clearMinCols() {
-    if (this._minCols === 0) return;
-    this._minCols = 0;
-    const cols = this._containerCols;
-    if (cols !== this.term.cols) {
-      this.term.resize(cols, this.term.rows);
-    }
-  }
-
-  /** 容器像素算出的列数（不含 minCols 加成）。 */
-  get containerCols() { return this._containerCols; }
-
-  /**
-   * 标记「已上报」：吞掉紧跟 subscribe 的重复 fit 产生的 resize。
-   * subscribe 已经带了正确尺寸给 daemon，open()/WebGL fit 不应再发一帧。
-   */
-  markReported() {
-    this._lastDims = `${this.term.rows}x${this.term.cols}`;
-    this._suppressNextReport = true;
-    clearTimeout(this._resizeTimer);
-    this._resizeTimer = null;
   }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
@@ -288,22 +202,13 @@ export class TerminalView {
   get cols() { return this.term.cols; }
 
   _report() {
-    // markReported 后的第一次调用：吞掉（subscribe 已经带了正确尺寸）
-    if (this._suppressNextReport) {
-      this._suppressNextReport = false;
-      this._lastDims = `${this.term.rows}x${this.term.cols}`;
-      return;
-    }
-    // 上报用容器列数（窗口像素列数），不用 effective cols（含 minCols）。
-    // 扩 buffer 是本地显示策略，不应告知 daemon。
-    const reportCols = this._containerCols || this.term.cols;
-    const dims = `${this.term.rows}x${reportCols}`;
+    const dims = `${this.term.rows}x${this.term.cols}`;
     if (dims === this._lastDims) return;
     this._lastDims = dims;
     clearTimeout(this._resizeTimer);
     // 服务端对每次真 reflow 都补一帧 snapshot；拖窗口时不合并会闪烁重画。
     this._resizeTimer = setTimeout(() => {
-      if (!this._disposed) this.onResize(this.term.rows, reportCols);
+      if (!this._disposed) this.onResize(this.term.rows, this.term.cols);
     }, 120);
   }
 

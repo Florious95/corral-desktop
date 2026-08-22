@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import './terminal.css';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
-import { TerminalView, inferSnapshotWidth } from '../../term/TerminalView.js';
+import { TerminalView } from '../../term/TerminalView.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
@@ -56,8 +56,6 @@ export default function TerminalPane({
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onEnterRef.current = onEnter;
-  const agentColsRef = useRef(agent.cols);
-  agentColsRef.current = agent.cols;
 
   const target = addr || agent.ref;
 
@@ -144,24 +142,10 @@ export default function TerminalPane({
       // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
-        case BINARY_KIND.SNAPSHOT: {
-          // 写入前推断快照宽度，先扩 buffer 再写。listing 只做兗底。
-          const inferred = inferSnapshotWidth(frame.data);
-          const hostCols = Math.max(inferred, agentColsRef.current || 0);
-          if (hostCols > view.containerCols) {
-            view.setMinCols(hostCols);
-            host.classList.add('is-wide-host');
-            host.scrollLeft = 0;
-          } else {
-            // 快照比容器窄：清除 minCols（此时有匹配的快照，缩是安全的）
-            view.clearMinCols();
-            host.classList.remove('is-wide-host');
-          }
+        case BINARY_KIND.SNAPSHOT:
           view.writeSnapshot(frame.data);
-          host.scrollLeft = 0;
           setReady(true);
           break;
-        }
         case BINARY_KIND.DELTA:
           view.writeDelta(frame.data);
           break;
@@ -179,11 +163,7 @@ export default function TerminalPane({
 
     const start = () => {
       if (viewRef.current !== view) return;
-      // 订阅用本地窗口列数。主机更宽的情况由 snapshot 推断宽度后本地扩 buffer 处理。
       clientRef.current?.subscribe(target, view.rows, view.cols);
-      // 吞掉 open()/WebGL fit 排队的重复 resize：subscribe 已经带了正确尺寸，
-      // 紧跟的 fit 不应再发一帧 resize（否则 Claude Code 会多一次 SIGWINCH 重排）。
-      view.markReported();
     };
     if (view.readyWebgl) view.readyWebgl.then(start);
     else start();
@@ -206,21 +186,6 @@ export default function TerminalPane({
     };
     // client / subscribeBinary 走 ref，身份变化不重挂；要换连接实例请由 App 用 React key 强制重挂。
   }, [agent.key, agent.ref, target, loadHistory]);
-
-  // 宽主机模式动态跟踪：agent.cols 变大时立即扩 buffer。
-  // ⚠️ 不在本地 shrink：没有匹配快照时一缩，旧画面会按新宽度折行钉死。
-  // 缩由 SNAPSHOT handler 负责（收到匹配宽度的快照时才 clearMinCols）。
-  useEffect(() => {
-    const v = viewRef.current;
-    const host = hostRef.current;
-    if (!v || !host) return;
-    const hostCols = agent.cols || 0;
-    if (hostCols > v.containerCols && hostCols > (v._minCols || 0)) {
-      v.setMinCols(hostCols);
-      host.classList.add('is-wide-host');
-      host.scrollLeft = 0;
-    }
-  }, [agent.cols]);
 
   useEffect(() => {
     const v = viewRef.current;
