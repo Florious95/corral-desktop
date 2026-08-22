@@ -21,39 +21,6 @@
 /* 侧栏已有 border-right，首列再画一条会并出双线 */
 .splitpanes-col:first-child { border-left: none }
 
-.splitpanes-col.is-focused {
-  box-shadow: inset 0 0 0 2px var(--input-focus);
-  z-index: 1;
-}
-
-.splitpanes-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  border-radius: var(--r-6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--text-faint);
-  z-index: 3;
-  opacity: 0;
-  transition: opacity var(--d-hover);
-}
-
-.splitpanes-col:hover .splitpanes-close,
-.splitpanes-close:focus-visible { opacity: 1 }
-
-.splitpanes-close:hover {
-  background: var(--hover-4);
-  color: var(--icon-strong);
-}
-
 .splitpanes-empty {
   flex: 1;
   display: flex;
@@ -74,64 +41,6 @@
   display: flex;
   flex-direction: column;
 }
-
-.terminalpane.is-focused .terminalpane-head {
-  background: var(--hover-2);
-}
-
-.terminalpane.is-keyflash .terminalpane-head {
-  background: var(--amber, #e6c07b);
-}
-
-.terminalpane-head {
-  height: 34px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 40px 0 12px;   /* 右侧 40px 让给列关闭钮 */
-  border-bottom: 1px solid var(--border-hairline);
-}
-
-.terminalpane-title {
-  font-size: var(--fs-125);
-  font-weight: 600;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.terminalpane-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--r-pill);
-  flex: none;
-  box-sizing: border-box;
-}
-
-.terminalpane-dot.is-working { background: var(--green); animation: pulse 1.8s ease-out infinite }
-.terminalpane-dot.is-blocked { background: var(--amber); animation: pulseAmber 1.8s ease-out infinite }
-.terminalpane-dot.is-done    { background: var(--green-deep) }
-.terminalpane-dot.is-idle    { background: transparent; border: 1.5px solid var(--dot-hollow) }
-.terminalpane-dot.is-unknown { background: transparent; border: 1.5px solid var(--ink-060) }
-
-.terminalpane-badge {
-  margin-left: auto;
-  flex: none;
-  font-size: var(--fs-10);
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: var(--r-pill);
-  box-shadow: var(--ring-hairline);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 40%;
-}
-
-.terminalpane-badge.is-local  { background: var(--badge-local-bg); color: var(--badge-local-fg) }
-.terminalpane-badge.is-remote { background: var(--badge-remote-bg); color: var(--badge-remote-fg) }
 
 .terminalpane-body {
   flex: 1;

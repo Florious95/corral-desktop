@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import './terminal.css';
-import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
 import { TerminalView } from '../../term/TerminalView.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
@@ -12,8 +11,6 @@ import { parseAnsi } from './ansi.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
-
-const STATE_TITLE = { working: '运行中', blocked: '等待确认', done: '已完成', idle: '空闲', unknown: '状态未知' };
 
 /**
  * 一个分裂列的终端视图：订阅 → snapshot 清屏重建 → delta 追加；
@@ -30,15 +27,14 @@ const STATE_TITLE = { working: '运行中', blocked: '等待确认', done: '已�
  * @param {string} [props.addr]         寻址键，默认 `agent.ref`（DeviceManager 走 uid 时传 agent.key）
  * @param {(handler:(frame:Object)=>void) => (() => void)} [props.subscribeBinary]
  *                                      可选：外部帧流订阅；不传则用 `client.onBinary`
- * @param {boolean} [props.focused]     是否为键盘焦点列
- * @param {boolean} [props.multiDevice] 勾选设备 > 1 时才渲染设备徽章
+ * @param {boolean} [props.focused]     是否为键盘焦点列（映射到 xterm focus/blur）
  * @param {(rows:number, cols:number) => void} [props.onResize]
  * @param {(text:string) => void} [props.onText]
  * @param {(key:string) => void} [props.onKey]
  * @param {() => void} [props.onEnter]
  */
 export default function TerminalPane({
-  agent, client, addr, subscribeBinary, focused = false, multiDevice = false, onResize,
+  agent, client, addr, subscribeBinary, focused = false, onResize,
   onText, onKey, onEnter,
 }) {
   const hostRef = useRef(null);
@@ -54,7 +50,6 @@ export default function TerminalPane({
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState(null);   // { fromLine, lineCount, text }
   const [hint, setHint] = useState('');
-  const [keyFlash, setKeyFlash] = useState(false);
   const onTextRef = useRef(onText);
   const onKeyRef = useRef(onKey);
   const onEnterRef = useRef(onEnter);
@@ -89,9 +84,8 @@ export default function TerminalPane({
     let flashTimer = null;
     const showUnsupported = (label) => {
       setHint(`协议发不了：${label}`);
-      setKeyFlash(true);
       clearTimeout(flashTimer);
-      flashTimer = setTimeout(() => setKeyFlash(false), 700);
+      flashTimer = setTimeout(() => setHint(''), 2500);
     };
     const pump = new NativeInputPump({
       sendText: (text) => onTextRef.current?.(text),
@@ -188,23 +182,15 @@ export default function TerminalPane({
     // client / subscribeBinary 走 ref，身份变化不重挂；要换连接实例请由 App 用 React key 强制重挂。
   }, [agent.key, agent.ref, target, loadHistory]);
 
-  useEffect(() => { if (focused) viewRef.current?.focus(); }, [focused]);
-
-  const state = agent.state || 'unknown';
+  useEffect(() => {
+    const v = viewRef.current;
+    if (!v) return;
+    if (focused) v.focus();
+    else v.blur();
+  }, [focused]);
 
   return (
-    <div className={`terminalpane${focused ? ' is-focused' : ''}${keyFlash ? ' is-keyflash' : ''}`}>
-      <div className="terminalpane-head">
-        <ProviderIcon provider={agent.provider} size={17} active={state === 'working' || state === 'blocked'} />
-        <span className="terminalpane-title">{agent.title}</span>
-        <span className={`terminalpane-dot is-${state}`} title={STATE_TITLE[state] || STATE_TITLE.unknown} />
-        {multiDevice && (
-          <span className={`terminalpane-badge is-${agent.deviceLocal ? 'local' : 'remote'}`}>
-            {agent.deviceName}
-          </span>
-        )}
-      </div>
-
+    <div className="terminalpane">
       <div className="terminalpane-body">
         {history && (
           <div className="terminalpane-history">
