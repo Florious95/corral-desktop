@@ -97,6 +97,31 @@ test('几何没变不上报', async () => {
   view.dispose();
 });
 
+test('host 像素不变时 fit 不因 cell 探针晃动上报', async () => {
+  const { view, calls } = makeView();
+  view.open();
+  await sleep(200);
+  calls.resize.length = 0;
+  view.term.element.querySelector = () => ({
+    getBoundingClientRect: () => ({ width: 900, height: 500 }),
+  });
+  view.fit();
+  await sleep(200);
+  assert.deepEqual(calls.resize, []);
+  view.dispose();
+});
+
+test('reassertResize 在 DOM 不变时仍上报当前几何', async () => {
+  const { view, calls } = makeView();
+  view.open();
+  await sleep(200);
+  calls.resize.length = 0;
+  view.reassertResize();
+  await sleep(200);
+  assert.deepEqual(calls.resize, [[25, 100]]);
+  view.dispose();
+});
+
 test('滚到顶触发拉历史；停在顶部不重复触发', () => {
   const { view, calls } = makeView();
   view.open();

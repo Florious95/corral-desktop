@@ -66,6 +66,8 @@ export class TerminalView {
       },
     });
     this._lastDims = null;
+    this._lastHostW = -1;
+    this._lastHostH = -1;
     this._lastScrollLine = null;
     this._resizeTimer = null;
     this._lastWheelAt = 0;
@@ -105,24 +107,38 @@ export class TerminalView {
     this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
       this._webglAddon = addon;
       // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
-      if (addon) this.fit();
+      if (addon) this.fit({ force: true });
     });
   }
 
-  /** 按容器像素重算 rows/cols；只有真变了才 resize + 上报（上报另有 120ms 合并）。 */
-  fit() {
+  /**
+   * 按容器像素重算 rows/cols。host 宽高没变就返回 —— 禁止用写屏后 cell 探针抖动
+   * 去打 resize 帧（daemon 每次 resize 都会 set-option window-size latest，
+   * 会夹在别人的 paste-buffer 与 Enter 之间）。
+   */
+  fit({ force = false } = {}) {
     const el = this.container;
     if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
     const h = el.clientHeight;
     if (w === 0 || h === 0) return;
+    if (!force && w === this._lastHostW && h === this._lastHostH) return;
+    this._lastHostW = w;
+    this._lastHostH = h;
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
-    if (cols !== this.term.cols || rows !== this.term.rows) {
-      this.term.resize(cols, rows);
+    if (force || cols !== this.term.cols || rows !== this.term.rows) {
+      if (cols !== this.term.cols || rows !== this.term.rows) this.term.resize(cols, rows);
       this._report();
     }
+  }
+
+  /** 容器没变也再发一帧当前 rows/cols（小客户端离开后 DOM 不变）。 */
+  reassertResize() {
+    if (this._disposed) return;
+    this._lastDims = null;
+    this._report();
   }
 
   /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */

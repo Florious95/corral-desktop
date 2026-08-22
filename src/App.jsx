@@ -341,7 +341,6 @@ export default function App({ seedDevices } = {}) {
       agent={agent}
       client={clientFor(agent)}
       focused={activeAgent ? agent.key === activeAgent.key : false}
-      onResize={(rows, cols) => dm.resize(agent.key, rows, cols)}
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
       onEnter={() => handlePaneEnter(agent.key)}

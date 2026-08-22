@@ -8,6 +8,7 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
+import { createResizeAnnouncer, inferCapturedCols } from '../../term/resizeAnnounce.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -93,11 +94,17 @@ export default function TerminalPane({
       sendEnter: () => onEnterRef.current?.(),
       onUnsupported: showUnsupported,
     });
+    const announcer = createResizeAnnouncer({
+      send: (rows, cols) => {
+        // 单一入口：shim.resize → dm.resize。⛔ 不要再让 App onResize 发第二帧。
+        clientRef.current?.resize(target, rows, cols);
+        onResizeRef.current?.(rows, cols);
+      },
+    });
     const view = new TerminalView(host, {
       onResize: (rows, cols) => {
         // 发完即忘：服务端只在真 reflow 时补一帧 snapshot，几何没变什么都不回。
-        clientRef.current?.resize(target, rows, cols);
-        onResizeRef.current?.(rows, cols);
+        announcer.fromFit(rows, cols);
       },
       onHistoryBoundary: () => loadHistory(),
       onData: (data) => pump.onData(data),
@@ -145,6 +152,11 @@ export default function TerminalPane({
         case BINARY_KIND.SNAPSHOT:
           view.writeSnapshot(frame.data);
           setReady(true);
+          {
+            const text = new TextDecoder('utf-8').decode(frame.data);
+            const captured = inferCapturedCols(text);
+            if (captured != null && view.cols > captured + 1) announcer.reassert();
+          }
           break;
         case BINARY_KIND.DELTA:
           view.writeDelta(frame.data);
@@ -164,6 +176,7 @@ export default function TerminalPane({
     const start = () => {
       if (viewRef.current !== view) return;
       clientRef.current?.subscribe(target, view.rows, view.cols);
+      announcer.note(view.rows, view.cols);
     };
     if (view.readyWebgl) view.readyWebgl.then(start);
     else start();
@@ -171,10 +184,20 @@ export default function TerminalPane({
     const ro = new ResizeObserver(() => view.fit());
     ro.observe(host);
 
+    const onFocus = () => announcer.reassert();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') announcer.reassert();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+
     return () => {
       ro.disconnect();
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
+      announcer.dispose();
       clearTimeout(g.timer);
       clearTimeout(flashTimer);
       pump.dispose();

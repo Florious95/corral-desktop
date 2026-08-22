@@ -597,7 +597,9 @@ src/
 - **终端区**：`flex:1; min-height:0; padding:8px 10px 0; background:var(--bg)`。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`、
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  尺寸变化 → FitAddon.fit() → `client.resize(ref, rows, cols)`（debounce 120ms）。
+  尺寸变化 → 仅当**容器像素**变了才 fit → `client.resize(ref, rows, cols)`（debounce 120ms）。写屏/cell 探针晃动 ⛔ 不得打 resize 帧。
+  **多客户端恢复（裁定 2026-08-22）**：`window-size latest` 下小客户端活动会把会话缩掉；我方 DOM 不变所以原先永不重发。窗口 `focus` / `visibilitychange=visible`、以及 snapshot 推断捕获列宽明显小于本列网格时，**去抖后重发同一 rows/cols**（不是轮询）。过渡态点点边缘允许存在。字号不变、左上对齐。手机仅息屏仍挂着、并未断开 ⇒ 上游/daemon 管，桌面端不伪造 detach。
+  入口只有 `TerminalPane` → `client.resize` → `dm.resize`，⛔ 不要 App 再发一帧。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
@@ -817,3 +819,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 12. token 不写 localStorage，落 Rust 侧 store 文件（安全红线，见协议 §9）。
 13. **2026-08-22**：回退 #33 粘贴 v2（含文字粘贴）及其 CSP loopback HTTP 口子；用户已知并接受文字粘贴一并退掉。
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
+15. **2026-08-22**：多客户端 `window-size latest`：DOM 不变也要能重发 `resize`；禁止写屏抖动打 resize 帧。
