@@ -1,25 +1,31 @@
 #!/usr/bin/env node
 /**
- * Real Client.subscribe against an isolated agentmirrord.
+ * Real Client.subscribe + product TerminalView.fit (jittered cell probe).
  * Token from env AGENTMIRROR_TOKEN only; never printed.
+ *
+ * r20: r19 probe never called fit(), so reverting the host-pixel lock was a
+ * no-op. This file drives fit() like ResizeObserver. Pre-fix arm temporarily
+ * strips the lock in TerminalView.js, then git-restores it.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync, readFileSync, mkdirSync, appendFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
 import { Client } from '../../../src/vendor/agentmirror/client.js';
 import { BINARY_KIND } from '../../../src/vendor/agentmirror/binary.js';
-import { createResizeAnnouncer, inferCapturedCols } from '../../../src/term/resizeAnnounce.js';
+import { createResizeAnnouncer } from '../../../src/term/resizeAnnounce.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const worktree = join(here, '../../..');
+const viewFile = join(worktree, 'src/term/TerminalView.js');
 const N = 20;
-const PORT = process.env.AM_PROBE_PORT || '19911';
+const PORT = process.env.AM_PROBE_PORT || '19912';
+const BETWEEN_PASTE_ENTER_MS = 140;
 const uid = process.getuid();
 const sockDir = `/private/tmp/tmux-${uid}`;
 const sock = join(sockDir, 'amrsz');
 const gotLog = join(here, 'got.log');
-const py = join(here, 'tui-reader.py');
 const stateDir = join(here, 'dstate');
 const daemonBin = '/Volumes/nvme/Projects/远程Agent安卓/server/agentmirrord';
 const token = process.env.AGENTMIRROR_TOKEN;
@@ -30,6 +36,8 @@ if (!token) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sanitize = (s) => String(s).split(token).join('<token>');
+const LOCK_LINES = `    if (!force && w === this._lastHostW && h === this._lastHostH) return;\n    this._lastHostW = w;\n    this._lastHostH = h;\n`;
+const originalViewSrc = readFileSync(viewFile, 'utf8');
 
 const tmux = (...args) => {
   const env = { ...process.env };
@@ -37,6 +45,22 @@ const tmux = (...args) => {
   const r = spawnSync('tmux', args, { encoding: 'utf8', env });
   return { rc: r.status ?? 1, out: r.stdout || '', err: r.stderr || '' };
 };
+
+function restoreView() {
+  writeFileSync(viewFile, originalViewSrc);
+}
+
+function stripPixelLock() {
+  if (!originalViewSrc.includes(LOCK_LINES)) {
+    throw new Error('host-pixel lock snippet not found in TerminalView.js');
+  }
+  writeFileSync(viewFile, originalViewSrc.replace(LOCK_LINES, '    // r20 pre-fix: host-pixel lock stripped\n'));
+}
+
+async function loadTerminalView(bust) {
+  const href = `${pathToFileURL(viewFile).href}?bust=${bust}`;
+  return import(href);
+}
 
 function score() {
   const text = readFileSync(gotLog, 'utf8');
@@ -50,7 +74,7 @@ function score() {
   return { ok, missing, failRate: (N - ok) / N, log: text, capture: cap.out };
 }
 
-function injectAll() {
+async function injectAll(onBetweenPasteAndEnter) {
   for (let i = 1; i <= N; i++) {
     const marker = `AM-PROBE-${i}`;
     const load = spawnSync('tmux', ['load-buffer', '-'], {
@@ -61,11 +85,13 @@ function injectAll() {
     if ((load.status ?? 1) !== 0) throw new Error(`load-buffer ${load.stderr}`);
     const p = tmux('paste-buffer', '-d', '-t', 'amrsz');
     if (p.rc !== 0) throw new Error(`paste-buffer ${p.err}`);
+    if (onBetweenPasteAndEnter) await onBetweenPasteAndEnter();
+    else await sleep(BETWEEN_PASTE_ENTER_MS);
     const e = tmux('send-keys', '-t', 'amrsz', 'Enter');
     if (e.rc !== 0) throw new Error(`Enter ${e.err}`);
-    spawnSync('sleep', ['0.08']);
+    await sleep(80);
   }
-  spawnSync('sleep', ['0.3']);
+  await sleep(300);
   return score();
 }
 
@@ -95,9 +121,7 @@ function stopTmux() {
 function startDaemon() {
   mkdirSync(stateDir, { recursive: true });
   mkdirSync(join(stateDir, 'up'), { recursive: true });
-  const outPath = join(here, 'daemon.stdout');
   const errPath = join(here, 'daemon.stderr');
-  writeFileSync(outPath, '');
   writeFileSync(errPath, '');
   const child = spawn(daemonBin, [
     '-listen', `127.0.0.1:${PORT}`,
@@ -117,13 +141,10 @@ function startDaemon() {
     })(),
     stdio: ['ignore', 'ignore', 'pipe'],
   });
-  let errBuf = '';
   child.stderr.on('data', (b) => {
-    const s = sanitize(String(b));
-    errBuf += s;
-    appendFileSync(errPath, s);
+    appendFileSync(errPath, sanitize(String(b)));
   });
-  return { child, errPath, getErr: () => errBuf };
+  return { child, errPath };
 }
 
 function findAmrsz(client) {
@@ -135,7 +156,46 @@ function findAmrsz(client) {
   return null;
 }
 
-async function withSubscribe(rows, cols) {
+function makeJitterHost() {
+  let ticks = 0;
+  class FakeTerminal {
+    constructor() {
+      this.cols = 80;
+      this.rows = 24;
+      this.element = {
+        querySelector: () => ({
+          getBoundingClientRect: () => {
+            ticks += 1;
+            const j = ticks % 2 === 0 ? 0 : 16;
+            return { width: this.cols * 8 + j, height: this.rows * 16 };
+          },
+        }),
+      };
+      this.buffer = { active: { viewportY: 0 } };
+    }
+    open() {}
+    onScroll() { return { dispose() {} }; }
+    onData() { return { dispose() {} }; }
+    attachCustomKeyEventHandler() { return true; }
+    resize(cols, rows) { this.cols = cols; this.rows = rows; }
+    reset() {}
+    write() {}
+    focus() {}
+    blur() {}
+    scrollToBottom() {}
+    dispose() {}
+  }
+  const container = {
+    isConnected: true,
+    clientWidth: 800,
+    clientHeight: 400,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  return { FakeTerminal, container, ticks: () => ticks };
+}
+
+async function withSubscribe(TerminalView, rows, cols) {
   writeFileSync(gotLog, '');
   let resizeCount = 0;
   let snapshots = 0;
@@ -149,12 +209,11 @@ async function withSubscribe(rows, cols) {
     },
     onFrame: (type, payload) => {
       if (type !== 'listing' && type !== 'auth_ack') return;
-      const n = (payload.workspaces || []).reduce((a, w) => a + (w.sessions || []).length, 0);
       const names = [];
       for (const w of payload.workspaces || []) {
         for (const s of w.sessions || []) names.push(s.name);
       }
-      appendFileSync(join(here, 'client-trace.txt'), `${type} sessions=${n} hasAmrsz=${names.includes('amrsz')} nnames=${names.length}\n`);
+      appendFileSync(join(here, 'client-trace.txt'), `${type} hasAmrsz=${names.includes('amrsz')} nnames=${names.length}\n`);
     },
     onConnectionIssue: (msg) => {
       appendFileSync(join(here, 'client-trace.txt'), `issue ${sanitize(msg)}\n`);
@@ -178,50 +237,68 @@ async function withSubscribe(rows, cols) {
     },
   });
   const refHolder = { ref: null };
+  const jitter = makeJitterHost();
+  const view = new TerminalView(jitter.container, {
+    TerminalCtor: jitter.FakeTerminal,
+    onResize: (r, c) => announcer.fromFit(r, c),
+  });
+  view.open();
+  await sleep(180);
+
   client.onBinary = (frame) => {
-    if (frame.kind !== BINARY_KIND.SNAPSHOT) return;
-    snapshots += 1;
-    const text = new TextDecoder().decode(frame.data);
-    const captured = inferCapturedCols(text);
-    if (captured != null && cols > captured + 1) announcer.reassert();
+    if (frame.kind === BINARY_KIND.SNAPSHOT) snapshots += 1;
   };
   client.connect();
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000) {
-    await sleep(150);
-    if (!client.isReady) continue;
-    client.list();
-    await sleep(200);
-    const sess = findAmrsz(client);
-    if (sess) {
-      refHolder.ref = sess.ref;
-      announcer.note(rows, cols);
-      client.subscribe(sess.ref, rows, cols);
-      await sleep(600);
-      const result = injectAll();
-      client.disconnect();
-      announcer.dispose();
-      return {
-        ...result,
-        resizeCount,
-        snapshots,
-        listedRows: sess.rows,
-        listedCols: sess.cols,
-        sessionName: sess.name,
-      };
+  try {
+    while (Date.now() - t0 < 8000) {
+      await sleep(150);
+      if (!client.isReady) continue;
+      client.list();
+      await sleep(200);
+      const sess = findAmrsz(client);
+      if (sess) {
+        refHolder.ref = sess.ref;
+        announcer.note(rows, cols);
+        client.subscribe(sess.ref, rows, cols);
+        await sleep(600);
+        resizeCount = 0;
+        const result = await injectAll(async () => {
+          for (let k = 0; k < 6; k += 1) view.fit();
+          await sleep(BETWEEN_PASTE_ENTER_MS);
+        });
+        return {
+          ...result,
+          resizeCount,
+          snapshots,
+          listedRows: sess.rows,
+          listedCols: sess.cols,
+          sessionName: sess.name,
+          fitTicks: jitter.ticks(),
+        };
+      }
     }
+    throw new Error('listing never contained amrsz (ready=' + client.isReady + ' sessions=' + client.sessionsByRef.size + ')');
+  } finally {
+    client.disconnect();
+    announcer.dispose();
+    view.dispose();
   }
-  client.disconnect();
-  announcer.dispose();
-  throw new Error('listing never contained amrsz (ready=' + client.isReady + ' sessions=' + client.sessionsByRef.size + ')');
 }
 
-const report = { n: N, port: PORT, notes: 'token via env AGENTMIRROR_TOKEN (generated). Session amrsz on default tmux server (daemon binary ignores private sockets); kill-session amrsz only, never kill-server.' };
+const report = {
+  n: N,
+  port: PORT,
+  betweenPasteEnterMs: BETWEEN_PASTE_ENTER_MS,
+  notes: 'token via env AGENTMIRROR_TOKEN (generated). Session amrsz on default tmux server; kill-session amrsz only. r20 drives TerminalView.fit with cell-probe jitter between paste and Enter. Pre-fix arm strips host-pixel lock then restores the file.',
+  taskDefinitionChange: 'BRIEF said run the same probe after reverting the lock. r19 probe never called fit(), so that would stay resizeCount=0 by construction. This round wires fit()+jitter (same WS subscribe + paste-buffer+Enter). Explicit, not silent.',
+};
 
+let daemon;
 try {
   startTmux();
-  spawnSync('sleep', ['0.35']);
-  const daemon = startDaemon();
+  await sleep(350);
+  daemon = startDaemon();
   for (let i = 0; i < 40; i++) {
     await sleep(150);
     if (daemon.child.exitCode != null) {
@@ -233,7 +310,7 @@ try {
   }
 
   writeFileSync(gotLog, '');
-  const control = injectAll();
+  const control = await injectAll(null);
   report.control = {
     name: 'no_ws_subscribe',
     submitted: control.ok,
@@ -242,31 +319,54 @@ try {
   };
   writeFileSync(join(here, 'ws-control.capture.txt'), control.capture);
 
-  const subscribed = await withSubscribe(24, 100);
-  report.subscribed = {
-    name: 'Client.subscribe_plus_announcer',
-    submitted: subscribed.ok,
-    failRate: subscribed.failRate,
-    missing: subscribed.missing,
-    resizeCount: subscribed.resizeCount,
-    snapshots: subscribed.snapshots,
-    listedRows: subscribed.listedRows,
-    listedCols: subscribed.listedCols,
-    sessionName: subscribed.sessionName,
+  restoreView();
+  const { TerminalView: ViewPost } = await loadTerminalView('post');
+  const post = await withSubscribe(ViewPost, 24, 100);
+  report.postFix = {
+    name: 'subscribe_fit_pixel_lock_on',
+    submitted: post.ok,
+    failRate: post.failRate,
+    missing: post.missing,
+    resizeCount: post.resizeCount,
+    snapshots: post.snapshots,
+    listedRows: post.listedRows,
+    listedCols: post.listedCols,
+    sessionName: post.sessionName,
+    fitTicks: post.fitTicks,
   };
-  writeFileSync(join(here, 'ws-subscribed.capture.txt'), subscribed.capture);
+  writeFileSync(join(here, 'ws-subscribed.capture.txt'), post.capture);
 
-  try { process.kill(daemon.child.pid); } catch { /* gone */ }
-  stopTmux();
+  stripPixelLock();
+  const { TerminalView: ViewPre } = await loadTerminalView('pre');
+  const pre = await withSubscribe(ViewPre, 24, 100);
+  report.preFix = {
+    name: 'subscribe_fit_pixel_lock_off',
+    submitted: pre.ok,
+    failRate: pre.failRate,
+    missing: pre.missing,
+    resizeCount: pre.resizeCount,
+    snapshots: pre.snapshots,
+    listedRows: pre.listedRows,
+    listedCols: pre.listedCols,
+    sessionName: pre.sessionName,
+    fitTicks: pre.fitTicks,
+  };
+  writeFileSync(join(here, 'ws-pre-fix.capture.txt'), pre.capture);
 } catch (e) {
   report.error = sanitize(e.message || String(e));
+} finally {
+  restoreView();
+  if (daemon && daemon.child && daemon.child.pid) {
+    try { process.kill(daemon.child.pid); } catch { /* gone */ }
+  }
   try { stopTmux(); } catch { /* */ }
 }
 
 writeFileSync(join(here, 'ws-subscribe-probe.json'), JSON.stringify(report, null, 2));
 console.log(JSON.stringify({
   control: report.control,
-  subscribed: report.subscribed,
+  postFix: report.postFix,
+  preFix: report.preFix,
   error: report.error || null,
 }));
 process.exit(report.error ? 1 : 0);

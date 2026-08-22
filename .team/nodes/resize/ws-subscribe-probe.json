@@ -1,15 +1,17 @@
 {
   "n": 20,
-  "port": "19911",
-  "notes": "token via env AGENTMIRROR_TOKEN (generated). Session amrsz on default tmux server (daemon binary ignores private sockets); kill-session amrsz only, never kill-server.",
+  "port": "19912",
+  "betweenPasteEnterMs": 140,
+  "notes": "token via env AGENTMIRROR_TOKEN (generated). Session amrsz on default tmux server; kill-session amrsz only. r20 drives TerminalView.fit with cell-probe jitter between paste and Enter. Pre-fix arm strips host-pixel lock then restores the file.",
+  "taskDefinitionChange": "BRIEF said run the same probe after reverting the lock. r19 probe never called fit(), so that would stay resizeCount=0 by construction. This round wires fit()+jitter (same WS subscribe + paste-buffer+Enter). Explicit, not silent.",
   "control": {
     "name": "no_ws_subscribe",
     "submitted": 20,
     "failRate": 0,
     "missing": []
   },
-  "subscribed": {
-    "name": "Client.subscribe_plus_announcer",
+  "postFix": {
+    "name": "subscribe_fit_pixel_lock_on",
     "submitted": 20,
     "failRate": 0,
     "missing": [],
@@ -17,6 +19,19 @@
     "snapshots": 0,
     "listedRows": 24,
     "listedCols": 80,
-    "sessionName": "amrsz"
+    "sessionName": "amrsz",
+    "fitTicks": 1
+  },
+  "preFix": {
+    "name": "subscribe_fit_pixel_lock_off",
+    "submitted": 20,
+    "failRate": 0,
+    "missing": [],
+    "resizeCount": 20,
+    "snapshots": 0,
+    "listedRows": 24,
+    "listedCols": 80,
+    "sessionName": "amrsz",
+    "fitTicks": 121
   }
 }
