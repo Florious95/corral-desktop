@@ -4,10 +4,9 @@
  * 保留 web 版 TerminalView 的全部语义，只换实现底座：
  *   - snapshot → reset() + write()（清屏重建；游标锚 ESC[row;colH 在字节尾，必须整段原样喂）
  *   - delta    → write()（追加）
- *   - resize   → 窗口 fit 只 seed 一次且不上抛协议（#54）；本地格子另由 listing / snapshot
- *                 行宽 followHostGrid（#54 回炉：不锁死窗口 seed）。窗口变化只挤压
- *                 （overflow 留白/横滑、底行可见），⛔ 不把窗口 cols 当主机宽度发 resize
- *                 （裁定 2026-08-23）
+ *   - resize   → 仅首次真实视口（正宽高）换算一次 rows/cols 并上抛；此后只做布局挤压
+ *                 （overflow 留白/横滑、底行可见），⛔ 不再 term.resize、⛔ 不再上抛
+ *                 （裁定 2026-08-23，对齐安卓 raw/019：消灭 resize 帧本体）
  *   - 滚到顶   → onHistoryBoundary()，由调用方去拉协议 scrollback
  *
  * ⛔ 不引 @xterm/addon-fit：仓库装的是 @xterm/xterm@6.0.0，addon-fit@0.11 面向 xterm5 的私有
@@ -24,21 +23,8 @@ import { attachWebglRenderer } from './webglRenderer.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
-/** 首次上抛 onResize 的合并窗口（窗口 fit 用；跟随主机格子不走这条）。 */
+/** 首次上抛 onResize 的合并窗口（仅那一次；此后 fit 不再上抛）。 */
 export const GRID_DEBOUNCE_MS = 120;
-/** 从 snapshot ANSI 反推主机行宽（去 CSI 后最长一行的格子数）。 */
-export function inferHostCols(ansiText) {
-  const text = String(ansiText)
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\r/g, '');
-  let max = 0;
-  for (const line of text.split('\n')) {
-    const n = [...line].length;
-    if (n > max) max = n;
-  }
-  return max;
-}
 
 export class TerminalView {
   /**
@@ -189,26 +175,8 @@ export class TerminalView {
     }
   }
 
-  /** 按主机格子改本地 xterm，⛔ 不上抛协议 resize。 */
-  followHostGrid(cols, rows) {
-    const c = Math.max(2, Number(cols) || 0);
-    const r = Math.max(2, Number(rows) || 0);
-    if (c === this.term.cols && r === this.term.rows) {
-      this._viewportSeeded = true;
-      return;
-    }
-    this.term.resize(c, r);
-    this._viewportSeeded = true;
-    this._lastDims = `${r}x${c}`;
-    const el = this.container;
-    if (el && el.clientWidth > 0 && el.clientHeight > 0) this._squeeze(el.clientWidth, el.clientHeight);
-  }
-
-  /** 全屏快照：先按行宽落到主机格子，再清屏重建。 */
+  /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
-    const text = new TextDecoder('utf-8').decode(u8);
-    const hostCols = inferHostCols(text);
-    if (hostCols > this.term.cols) this.followHostGrid(hostCols, this.term.rows);
     this.term.reset();
     this.term.write(u8);
   }

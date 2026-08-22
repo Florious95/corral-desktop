@@ -52,8 +52,6 @@
  *  @property {string}     title      = session.name 原样
  *  @property {string|null} provider  inferProvider(session.name) 结果，认不出为 null
  *  @property {AgentState} state
- *  @property {number}     [rows]     listing 里的主机 pane 行数
- *  @property {number}     [cols]     listing 里的主机 pane 列数
  *  @property {boolean}    fav        本地收藏
  */
 ```
@@ -598,7 +596,7 @@ src/
 - **终端区**：`flex:1; min-height:0; padding:8px 10px 0; background:var(--bg)`。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`、
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  尺寸变化 → `fit()` 不再发协议 `resize`。`subscribe` 用 listing 的主机 rows/cols；snapshot 按行宽 `followHostGrid`（本地格子跟随主机，容器 overflow，⛔ 折行）。窗口变窄不锁死错误 seed（#54 回炉，裁定 2026-08-23）。
+  尺寸变化 → `fit()`：**仅首次正宽高视口**换算 rows/cols 并上抛一次（裁定 2026-08-23，对齐安卓 raw/019）。0×0 不算。此后 ⛔ 不改格子、⛔ 不发 `resize`；`overflow:auto` 横滑/留白，底行可见。⛔ 不许把更宽主机行折进窄画布。PR #51 / #53 的「少发」被本裁定「不发」取代。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
@@ -822,4 +820,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
 15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。
 16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。
-17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）。**同日 #54**：窗口只 seed 一次。**回炉**：#54 锁死窗口 seed 会把 235 字行折进 ~100 列画布；改为本地格子跟随主机（listing / snapshot 行宽），窗口 fit 仍不发协议 resize。
+17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）；未落定不 reflow 旧快照。**同日再裁定**：一辈子只在首次真实视口 resize 一次（对齐安卓）；#51/#53 的「少发」被「不发」取代。
