@@ -4,9 +4,7 @@
  * 保留 web 版 TerminalView 的全部语义，只换实现底座：
  *   - snapshot → reset() + write()（清屏重建；游标锚 ESC[row;colH 在字节尾，必须整段原样喂）
  *   - delta    → write()（追加）
- *   - resize   → 仅首次真实视口（正宽高）换算一次 rows/cols 并上抛；此后只做布局挤压
- *                 （overflow 留白/横滑、底行可见），⛔ 不再 term.resize、⛔ 不再上抛
- *                 （裁定 2026-08-23，对齐安卓 raw/019：消灭 resize 帧本体）
+ *   - resize   → 120ms debounce 合并后回调（服务端每次真 reflow 都补一帧 snapshot，不合并会闪）
  *   - 滚到顶   → onHistoryBoundary()，由调用方去拉协议 scrollback
  *
  * ⛔ 不引 @xterm/addon-fit：仓库装的是 @xterm/xterm@6.0.0，addon-fit@0.11 面向 xterm5 的私有
@@ -23,7 +21,7 @@ import { attachWebglRenderer } from './webglRenderer.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
-/** 首次上抛 onResize 的合并窗口（仅那一次；此后 fit 不再上抛）。 */
+/** 本地 grid 与上报共用：列宽抖动未落定前 ⛔ 不 term.resize 旧快照。 */
 export const GRID_DEBOUNCE_MS = 120;
 
 export class TerminalView {
@@ -72,8 +70,10 @@ export class TerminalView {
     this._lastDims = null;
     this._lastScrollLine = null;
     this._resizeTimer = null;
-    this._viewportSeeded = false;
-    this._layout = null;
+    this._gridTimer = null;
+    this._hasFit = false;
+    this._pendingCols = null;
+    this._pendingRows = null;
     this._lastWheelAt = 0;
     this._disposed = false;
     this._replyHold = '';
@@ -121,26 +121,38 @@ export class TerminalView {
   }
 
   /**
-   * 首次正尺寸视口：换算 rows/cols、term.resize、上抛一次。
-   * 0×0 预布局不算。此后只更新像素基准 / 可见行 / overflow，不再改格子、不上抛。
-   * `immediate` 只影响「尚未 seed」时是否跳过 120ms 上报合并；seed 之后一律挤压。
+   * 按容器像素重算 rows/cols。首帧立刻落到格子上；之后 120ms 内的抖动只记目标，
+   * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
+   * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
    */
   fit({ immediate = false } = {}) {
     const el = this.container;
     if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
     const h = el.clientHeight;
-    if (w <= 0 || h <= 0) return;
-    if (this._viewportSeeded) {
-      this._squeeze(w, h);
-      return;
-    }
+    if (w === 0 || h === 0) return;
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
-    this._viewportSeeded = true;
-    this._commitGrid(cols, rows, { reportDelay: !immediate });
-    this._squeeze(w, h);
+    this._pendingCols = cols;
+    this._pendingRows = rows;
+    if (!this._hasFit || immediate) {
+      this._hasFit = true;
+      this._commitGrid(cols, rows, { reportDelay: true });
+      return;
+    }
+    if (cols === this.term.cols && rows === this.term.rows) {
+      clearTimeout(this._gridTimer);
+      this._gridTimer = null;
+      return;
+    }
+    clearTimeout(this._gridTimer);
+    clearTimeout(this._resizeTimer);
+    this._gridTimer = setTimeout(() => {
+      this._gridTimer = null;
+      if (this._disposed) return;
+      this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
+    }, GRID_DEBOUNCE_MS);
   }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
@@ -151,27 +163,6 @@ export class TerminalView {
         this._lastDims = `${rows}x${cols}`;
         this.onResize(rows, cols);
       }
-    }
-  }
-
-  /** 布局挤压：格子锁死；容器 overflow 横滑/留白；滚到底行。 */
-  _squeeze(w, h) {
-    const cell = this._cell();
-    const visibleRows = Math.max(1, Math.floor(h / cell.h));
-    this._layout = {
-      hostW: w,
-      hostH: h,
-      gridCols: this.term.cols,
-      gridRows: this.term.rows,
-      visibleRows,
-      overflowX: w < cell.w * this.term.cols,
-      overflowY: h < cell.h * this.term.rows,
-    };
-    if (this.container && this.container.style) {
-      this.container.style.overflow = 'auto';
-      const sh = Number(this.container.scrollHeight) || 0;
-      const ch = Number(this.container.clientHeight) || 0;
-      this.container.scrollTop = Math.max(0, sh - ch);
     }
   }
 
@@ -198,6 +189,7 @@ export class TerminalView {
     this._disposed = true;
     this._replyHold = '';
     clearTimeout(this._resizeTimer);
+    clearTimeout(this._gridTimer);
     try { this._webglAddon?.dispose(); } catch { /* already gone */ }
     this._webglAddon = null;
     if (this._onWheel && this.container) this.container.removeEventListener('wheel', this._onWheel);

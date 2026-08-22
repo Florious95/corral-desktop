@@ -596,7 +596,7 @@ src/
 - **终端区**：`flex:1; min-height:0; padding:8px 10px 0; background:var(--bg)`。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`、
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  尺寸变化 → `fit()`：**仅首次正宽高视口**换算 rows/cols 并上抛一次（裁定 2026-08-23，对齐安卓 raw/019）。0×0 不算。此后 ⛔ 不改格子、⛔ 不发 `resize`；`overflow:auto` 横滑/留白，底行可见。⛔ 不许把更宽主机行折进窄画布。PR #51 / #53 的「少发」被本裁定「不发」取代。
+  尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize` 并 `client.resize`（裁定 2026-08-23）。首帧立刻落到格子。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow：回到原几何时 daemon `resize` 是 no-op、不补快照，错乱会钉死。真正变宽/变窄仍走 `resize` 等补快照。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
@@ -820,4 +820,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
 15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。
 16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。
-17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）；未落定不 reflow 旧快照。**同日再裁定**：一辈子只在首次真实视口 resize 一次（对齐安卓）；#51/#53 的「少发」被「不发」取代。
+17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）；未落定不 reflow 旧快照。
