@@ -6,9 +6,8 @@ import './chrome.css';
  * @param {Object}     props
  * @param {boolean}    props.sidebarCollapsed
  * @param {() => void} props.onToggleSidebar
- * @param {number}     [props.paneCount]   当前分裂列数，>1 时显示徽章
  */
-export default function TitleBar({ sidebarCollapsed, onToggleSidebar, paneCount = 0 }) {
+export default function TitleBar({ sidebarCollapsed, onToggleSidebar }) {
   return (
     <div className="tb" data-tauri-drag-region>
       <button
@@ -21,8 +20,6 @@ export default function TitleBar({ sidebarCollapsed, onToggleSidebar, paneCount 
       >
         <SidebarIcon size={16} strokeWidth={1.8} />
       </button>
-      <span className="tb-brand">AgentMirror</span>
-      {paneCount > 1 && <span className="tb-badge">分裂展示 · {paneCount} 列</span>}
       <div className="tb-drag" data-tauri-drag-region />
     </div>
   );
