@@ -21,6 +21,8 @@ import { attachWebglRenderer } from './webglRenderer.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
+/** 本地 grid 与上报共用：列宽抖动未落定前 ⛔ 不 term.resize 旧快照。 */
+export const GRID_DEBOUNCE_MS = 120;
 
 export class TerminalView {
   /**
@@ -68,6 +70,10 @@ export class TerminalView {
     this._lastDims = null;
     this._lastScrollLine = null;
     this._resizeTimer = null;
+    this._gridTimer = null;
+    this._hasFit = false;
+    this._pendingCols = null;
+    this._pendingRows = null;
     this._lastWheelAt = 0;
     this._disposed = false;
     this._replyHold = '';
@@ -110,12 +116,16 @@ export class TerminalView {
     this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
       this._webglAddon = addon;
       // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
-      if (addon) this.fit();
+      if (addon) this.fit({ immediate: true });
     });
   }
 
-  /** 按容器像素重算 rows/cols；只有真变了才 resize + 上报（上报另有 120ms 合并）。 */
-  fit() {
+  /**
+   * 按容器像素重算 rows/cols。首帧立刻落到格子上；之后 120ms 内的抖动只记目标，
+   * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
+   * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
+   */
+  fit({ immediate = false } = {}) {
     const el = this.container;
     if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
@@ -124,9 +134,35 @@ export class TerminalView {
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
+    this._pendingCols = cols;
+    this._pendingRows = rows;
+    if (!this._hasFit || immediate) {
+      this._hasFit = true;
+      this._commitGrid(cols, rows, { reportDelay: true });
+      return;
+    }
+    if (cols === this.term.cols && rows === this.term.rows) {
+      clearTimeout(this._gridTimer);
+      this._gridTimer = null;
+      return;
+    }
+    clearTimeout(this._gridTimer);
+    clearTimeout(this._resizeTimer);
+    this._gridTimer = setTimeout(() => {
+      this._gridTimer = null;
+      if (this._disposed) return;
+      this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
+    }, GRID_DEBOUNCE_MS);
+  }
+
+  _commitGrid(cols, rows, { reportDelay = true } = {}) {
     if (cols !== this.term.cols || rows !== this.term.rows) {
       this.term.resize(cols, rows);
-      this._report();
+      if (reportDelay) this._report();
+      else {
+        this._lastDims = `${rows}x${cols}`;
+        this.onResize(rows, cols);
+      }
     }
   }
 
@@ -153,6 +189,7 @@ export class TerminalView {
     this._disposed = true;
     this._replyHold = '';
     clearTimeout(this._resizeTimer);
+    clearTimeout(this._gridTimer);
     try { this._webglAddon?.dispose(); } catch { /* already gone */ }
     this._webglAddon = null;
     if (this._onWheel && this.container) this.container.removeEventListener('wheel', this._onWheel);
