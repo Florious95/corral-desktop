@@ -4,6 +4,7 @@ import './terminal.css';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
 import { TerminalView } from '../../term/TerminalView.js';
+import { NativeInputPump } from '../../term/nativeInput.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
@@ -31,9 +32,13 @@ const STATE_TITLE = { working: '运行中', blocked: '等待确认', done: '已�
  * @param {boolean} [props.focused]     是否为键盘焦点列
  * @param {boolean} [props.multiDevice] 勾选设备 > 1 时才渲染设备徽章
  * @param {(rows:number, cols:number) => void} [props.onResize]
+ * @param {(text:string) => void} [props.onText]
+ * @param {(key:string) => void} [props.onKey]
+ * @param {() => void} [props.onEnter]
  */
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, multiDevice = false, onResize,
+  onText, onKey, onEnter,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -48,6 +53,13 @@ export default function TerminalPane({
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState(null);   // { fromLine, lineCount, text }
   const [hint, setHint] = useState('');
+  const [keyFlash, setKeyFlash] = useState(false);
+  const onTextRef = useRef(onText);
+  const onKeyRef = useRef(onKey);
+  const onEnterRef = useRef(onEnter);
+  onTextRef.current = onText;
+  onKeyRef.current = onKey;
+  onEnterRef.current = onEnter;
 
   const target = addr || agent.ref;
 
@@ -73,6 +85,19 @@ export default function TerminalPane({
     const host = hostRef.current;
     if (!host) return undefined;
 
+    let flashTimer = null;
+    const showUnsupported = (label) => {
+      setHint(`协议发不了：${label}`);
+      setKeyFlash(true);
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => setKeyFlash(false), 700);
+    };
+    const pump = new NativeInputPump({
+      sendText: (text) => onTextRef.current?.(text),
+      sendKey: (key) => onKeyRef.current?.(key),
+      sendEnter: () => onEnterRef.current?.(),
+      onUnsupported: showUnsupported,
+    });
     const view = new TerminalView(host, {
       onResize: (rows, cols) => {
         // 发完即忘：服务端只在真 reflow 时补一帧 snapshot，几何没变什么都不回。
@@ -80,6 +105,8 @@ export default function TerminalPane({
         onResizeRef.current?.(rows, cols);
       },
       onHistoryBoundary: () => loadHistory(),
+      onData: (data) => pump.onData(data),
+      onUnsupportedKey: showUnsupported,
     });
     view.open();
     viewRef.current = view;
@@ -137,6 +164,8 @@ export default function TerminalPane({
     return () => {
       ro.disconnect();
       clearTimeout(g.timer);
+      clearTimeout(flashTimer);
+      pump.dispose();
       if (typeof off === 'function') off();
       view.dispose();
       viewRef.current = null;
@@ -151,7 +180,7 @@ export default function TerminalPane({
   const state = agent.state || 'unknown';
 
   return (
-    <div className="terminalpane">
+    <div className={`terminalpane${focused ? ' is-focused' : ''}${keyFlash ? ' is-keyflash' : ''}`}>
       <div className="terminalpane-head">
         <ProviderIcon provider={agent.provider} size={17} active={state === 'working' || state === 'blocked'} />
         <span className="terminalpane-title">{agent.title}</span>

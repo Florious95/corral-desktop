@@ -9,8 +9,10 @@ import './terminal.css';
  * @param {(key:string) => void} props.onClosePane
  * @param {(e:MouseEvent, key:string) => void} props.onPaneMenu
  * @param {(agent:Object) => JSX.Element} props.renderPane 由 App 注入，通常返回 <TerminalPane/>
+ * @param {string} [props.focusedKey]
+ * @param {(key:string) => void} [props.onFocusPane]
  */
-export default function SplitPanes({ panes = [], onClosePane, onPaneMenu, renderPane }) {
+export default function SplitPanes({ panes = [], onClosePane, onPaneMenu, renderPane, focusedKey, onFocusPane }) {
   if (panes.length === 0) {
     return (
       <div className="splitpanes-empty">
@@ -27,7 +29,8 @@ export default function SplitPanes({ panes = [], onClosePane, onPaneMenu, render
       {panes.map((agent) => (
         <div
           key={agent.key}
-          className="splitpanes-col"
+          className={`splitpanes-col${focusedKey === agent.key ? ' is-focused' : ''}`}
+          onMouseDown={() => onFocusPane && onFocusPane(agent.key)}
           onContextMenu={(e) => onPaneMenu && onPaneMenu(e, agent.key)}
         >
           <button

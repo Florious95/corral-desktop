@@ -15,7 +15,6 @@ import Toast from './components/chrome/Toast.jsx';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
-import InputBar from './components/terminal/InputBar.jsx';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
 const CLOSE_MS = 190;
@@ -74,7 +73,7 @@ export default function App({ seedDevices } = {}) {
         const resolve = inputWaiters.current.get(k);
         if (resolve) { inputWaiters.current.delete(k); resolve(r) }
         else inputAcks.current.set(k, r);
-        // 不等 handleSend 的 await：ack 一到就要让用户看见失败（C-077 / R-54）
+        // ack 一到就要让用户看见失败（C-077 / R-54）
         if (!r.ok) toastInputFail(r.reason);
       },
       // ⛔ message 由 DeviceManager 保证不含 token
@@ -279,17 +278,7 @@ export default function App({ seedDevices } = {}) {
     return shim;
   }, [dm]);
 
-  const renderPane = useCallback((agent) => (
-    <TerminalPane
-      agent={agent}
-      client={clientFor(agent)}
-      focused={activeAgent ? agent.key === activeAgent.key : false}
-      multiDevice={multiDevice}
-      onResize={(rows, cols) => dm.resize(agent.key, rows, cols)}
-    />
-  ), [clientFor, activeAgent, multiDevice, dm]);
-
-  /* ——— 输入：text 不带回车，发送 = 两帧（CLIENT-CONTRACT §3.5） ——— */
+  /* ——— 原生输入：xterm onData → 该列 uid，不经底部 InputBar ——— */
   const waitAck = useCallback(
     (sent) => new Promise((resolve) => {
       const k = `${sent.deviceId}:${sent.reqId}`;
@@ -299,29 +288,50 @@ export default function App({ seedDevices } = {}) {
     }),
     [],
   );
+  const lastTextByUid = useRef(new Map());
 
-  const handleSend = useCallback(async (text) => {
-    const a = activeAgent;
-    if (!a) return;
-    if (!dm.isReady(a.deviceId)) { setToastMsg('未连接，未发送'); return }
-    if (text === '') { dm.input(a.key, ''); return } // 裸 Enter = 直接提交 CLI 输入框
-    const first = dm.input(a.key, text);            // 帧1：打字进输入框
-    if (!first) { setToastMsg('未发送'); return }
-    const res = await waitAck(first);               // 等 ack，否则帧2 可能提交到旧内容
-    if (!res.ok) {
-      const msg = res.reason === 'timeout' ? '未收到回执' : `发送失败：${res.reason || '未知原因'}`;
-      setToastMsg(msg);
-      throw new Error(msg);                         // InputBar 行内也出失败文案
+  const uidReady = useCallback((uid) => {
+    const i = String(uid).indexOf('::');
+    const deviceId = i === -1 ? uid : uid.slice(0, i);
+    return dm.isReady(deviceId);
+  }, [dm]);
+
+  const handlePaneText = useCallback((uid, text) => {
+    if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
+    const sent = dm.input(uid, text);
+    if (!sent) { setToastMsg('未发送'); return }
+    lastTextByUid.current.set(uid, sent);
+  }, [dm, uidReady]);
+
+  const handlePaneKey = useCallback((uid, key) => {
+    if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
+    lastTextByUid.current.delete(uid);
+    if (!dm.keys(uid, key)) setToastMsg('未发送');
+  }, [dm, uidReady]);
+
+  const handlePaneEnter = useCallback(async (uid) => {
+    if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
+    const pending = lastTextByUid.current.get(uid);
+    lastTextByUid.current.delete(uid);
+    if (pending) {
+      const res = await waitAck(pending);
+      if (!res.ok) return; // toast 已由 onInputResult 发出；⛔ 不把失败 enter 提交到旧缓冲
     }
-    dm.input(a.key, '');                            // 帧2：裸 Enter 提交
-  }, [activeAgent, dm, waitAck]);
+    if (!dm.input(uid, '')) setToastMsg('未发送');
+  }, [dm, waitAck, uidReady]);
 
-  const handleKey = useCallback(async (key) => {
-    const a = activeAgent;
-    if (!a) return;
-    if (!dm.isReady(a.deviceId)) { setToastMsg('未连接，未发送'); return }
-    dm.keys(a.key, key);
-  }, [activeAgent, dm]);
+  const renderPane = useCallback((agent) => (
+    <TerminalPane
+      agent={agent}
+      client={clientFor(agent)}
+      focused={activeAgent ? agent.key === activeAgent.key : false}
+      multiDevice={multiDevice}
+      onResize={(rows, cols) => dm.resize(agent.key, rows, cols)}
+      onText={(text) => handlePaneText(agent.key, text)}
+      onKey={(key) => handlePaneKey(agent.key, key)}
+      onEnter={() => handlePaneEnter(agent.key)}
+    />
+  ), [clientFor, activeAgent, multiDevice, dm, handlePaneText, handlePaneKey, handlePaneEnter]);
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {
@@ -491,14 +501,11 @@ export default function App({ seedDevices } = {}) {
             <>
               <SplitPanes
                 panes={panes}
+                focusedKey={activeAgent ? activeAgent.key : null}
+                onFocusPane={setActiveKey}
                 onClosePane={closeAgent}
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
-              />
-              <InputBar
-                onSend={handleSend}
-                onKey={handleKey}
-                disabled={!activeAgent || !dm.isReady(activeAgent.deviceId)}
               />
             </>
           )}
