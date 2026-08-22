@@ -14,7 +14,8 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
 
 /**
  * 一个分裂列的终端视图：订阅 → snapshot 清屏重建 → delta 追加；
- * 容器尺寸变化 → fit（仅首次正视口上报 resize；此后挤压不发帧，CLIENT-CONTRACT §3.4）；
+ * 容器尺寸变化 → fit 只挤压窗口；subscribe 用 listing 主机 rows/cols，snapshot 可把格子放大到行宽
+ * （CLIENT-CONTRACT §3.4，#54 回炉）；
  * 上滚到顶 → 协议 scrollback 分页拉取，渲染进独立只读面板（⛔ 绝不写进活的 xterm 网格，§3.3）。
  *
  * @param {Object} props
@@ -95,8 +96,6 @@ export default function TerminalPane({
     });
     const view = new TerminalView(host, {
       onResize: (rows, cols) => {
-        // 发完即忘：服务端只在真 reflow 时补一帧 snapshot，几何没变什么都不回。
-        clientRef.current?.resize(target, rows, cols);
         onResizeRef.current?.(rows, cols);
       },
       onHistoryBoundary: () => loadHistory(),
@@ -163,7 +162,10 @@ export default function TerminalPane({
 
     const start = () => {
       if (viewRef.current !== view) return;
-      clientRef.current?.subscribe(target, view.rows, view.cols);
+      const rows = Number(agent.rows) > 0 ? Number(agent.rows) : view.rows;
+      const cols = Number(agent.cols) > 0 ? Number(agent.cols) : view.cols;
+      view.followHostGrid(cols, rows);
+      clientRef.current?.subscribe(target, rows, cols);
     };
     if (view.readyWebgl) view.readyWebgl.then(start);
     else start();
@@ -185,7 +187,7 @@ export default function TerminalPane({
       clientRef.current?.unsubscribe(target);
     };
     // client / subscribeBinary 走 ref，身份变化不重挂；要换连接实例请由 App 用 React key 强制重挂。
-  }, [agent.key, agent.ref, target, loadHistory]);
+    }, [agent.key, agent.ref, agent.rows, agent.cols, target, loadHistory]);
 
   useEffect(() => {
     const v = viewRef.current;
