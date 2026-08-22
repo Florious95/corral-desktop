@@ -180,6 +180,8 @@ export default function App({ seedDevices } = {}) {
           deviceLocal: !!localById.get(w.deviceId),
           spaceKey: w.spaceKey,
           spaceName: w.label,
+          rows: s.rows,
+          cols: s.cols,
           title,
           provider: inferProvider(title),
           state: s.status || 'unknown',
@@ -341,7 +343,6 @@ export default function App({ seedDevices } = {}) {
       agent={agent}
       client={clientFor(agent)}
       focused={activeAgent ? agent.key === activeAgent.key : false}
-      onResize={(rows, cols) => dm.resize(agent.key, rows, cols)}
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
       onEnter={() => handlePaneEnter(agent.key)}
