@@ -176,6 +176,12 @@ export function parseOnData(s) {
       i += 2;
       continue;
     }
+    if (c === '\x16') {
+      flush();
+      events.push({ type: 'mouse-silent', seq: c });
+      i += 1;
+      continue;
+    }
     if (code < 32) {
       flush();
       events.push({ type: 'unsupported', label: ctrlLabel(code), seq: c });
@@ -200,9 +206,10 @@ export function isLocalSidebarToggle(ev) {
 export function unsupportedKeyEvent(ev) {
   if (!ev || ev.type !== 'keydown') return null;
   if (ev.isComposing) return null;
-  if (ev.metaKey) return null; // 系统快捷键留给浏览器
   const k = ev.key;
   if (isLocalSidebarToggle(ev)) return null;
+  if ((ev.ctrlKey || ev.metaKey) && (k === 'v' || k === 'V')) return null;
+  if (ev.metaKey) return null; // 其它系统快捷键留给浏览器
   if (k === 'Enter' || k === 'Backspace' || k === 'Tab' || k === 'Escape') return null;
   if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') return null;
   if (ev.ctrlKey && (k === 'c' || k === 'C')) return null;

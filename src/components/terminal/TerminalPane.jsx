@@ -8,6 +8,7 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
+import { handleClipboardData, clipboardPasteRoot } from '../../term/clipboardPaste.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -32,11 +33,13 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
  * @param {(text:string) => void} [props.onText]
  * @param {(key:string) => void} [props.onKey]
  * @param {() => void} [props.onEnter]
+ * @param {(msg:string) => void} [props.onPasteError]
  */
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
-  onText, onKey, onEnter,
+  onText, onKey, onEnter, onPasteError,
 }) {
+  const paneRef = useRef(null);
   const hostRef = useRef(null);
   const viewRef = useRef(null);
   const gRef = useRef(null);
@@ -53,9 +56,13 @@ export default function TerminalPane({
   const onTextRef = useRef(onText);
   const onKeyRef = useRef(onKey);
   const onEnterRef = useRef(onEnter);
+  const onPasteErrorRef = useRef(onPasteError);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onEnterRef.current = onEnter;
+  onPasteErrorRef.current = onPasteError;
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
 
   const target = addr || agent.ref;
 
@@ -105,6 +112,7 @@ export default function TerminalPane({
     });
     view.open();
     viewRef.current = view;
+    if (focusedRef.current) view.focus();
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
     });
@@ -194,8 +202,36 @@ export default function TerminalPane({
     else v.blur();
   }, [focused]);
 
+  useEffect(() => {
+    const onPaste = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handleClipboardData(ev.clipboardData, {
+        sendText: (t) => onTextRef.current?.(t),
+        sendImage: (f) => {
+          const up = clientRef.current?.uploadImage;
+          if (!up) return Promise.reject(new Error('未发送'));
+          return up(f);
+        },
+        onError: (msg) => {
+          setHint(msg);
+          onPasteErrorRef.current?.(msg);
+        },
+      });
+    };
+    const pane = paneRef.current;
+    const root = clipboardPasteRoot(focused);
+    if (root === 'window') {
+      window.addEventListener('paste', onPaste, { capture: true });
+      return () => window.removeEventListener('paste', onPaste, { capture: true });
+    }
+    if (!pane) return undefined;
+    pane.addEventListener('paste', onPaste, { capture: true });
+    return () => pane.removeEventListener('paste', onPaste, { capture: true });
+  }, [focused]);
+
   return (
-    <div className="terminalpane">
+    <div className="terminalpane" ref={paneRef}>
       <div className="terminalpane-body">
         {history && (
           <div className="terminalpane-history">

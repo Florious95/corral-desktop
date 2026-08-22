@@ -15,6 +15,8 @@
 import { Client, ClientState } from '../vendor/agentmirror/client.js';
 import { inferProvider } from './providers.js';
 import * as store from './store.js';
+import { wsToHttpOrigin, sanitizeUploadError, chooseUploadTransport } from '../term/clipboardPaste.js';
+import { buildUploadRecord, persistUploadRecord } from '../term/uploadLog.js';
 
 const MODEL_DEBOUNCE_MS = 100;
 
@@ -114,6 +116,7 @@ export class DeviceManager {
     this._level2 = new Map();    // deviceId -> { cwd, seq, sessions: Map<ref, {...}>, lastSeen }
     this._connected = false;
     this._modelTimer = null;
+    this._uploadN = 0;
   }
 
   // ---- devices ----
@@ -321,6 +324,114 @@ export class DeviceManager {
   scrollWheel(uid, delta) {
     const t = this._route(uid);
     return t ? t.client.scrollWheel(t.ref, delta) : false;
+  }
+
+  /** @returns {{deviceId:string,reqId:number}|null} */
+  inputAttachment(uid, path) {
+    const t = this._route(uid);
+    const reqId = t ? t.client.inputAttachment(t.ref, path) : null;
+    return reqId === null ? null : { deviceId: t.deviceId, reqId };
+  }
+
+  /**
+   * POST image then input.attachment_path.
+   * Third arg: fetch function (tests) or `{ fetchImpl, postUpload }`.
+   * Desktop default is native `postUpload` / invoke — not `fetchImpl === fetch`.
+   */
+  async uploadImage(uid, file, extra) {
+    if (!file || typeof file.type !== 'string' || !file.type.startsWith('image/')) {
+      throw new Error('不是图片');
+    }
+    const t = this._route(uid);
+    if (!t) throw new Error('未发送');
+    const d = this._devices.find((x) => x.id === t.deviceId);
+    if (!d) throw new Error('未发送');
+    const url = `${wsToHttpOrigin(t.client.url)}/upload`;
+    const n = ++this._uploadN;
+    const note = async (fields) => persistUploadRecord(buildUploadRecord({ n, url, ...fields }));
+    const opts = typeof extra === 'function' ? { fetchImpl: extra } : (extra || {});
+    const mode = chooseUploadTransport({
+      fetchImpl: opts.fetchImpl,
+      postUpload: opts.postUpload,
+      desktop: store.isTauri(),
+    });
+
+    const toastUnreach = sanitizeUploadError(0, true);
+    let res;
+    try {
+      if (mode === 'native') {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const poster = typeof opts.postUpload === 'function'
+          ? opts.postUpload
+          : async (args) => {
+            const { invoke } = await import('@tauri-apps/api/core');
+            return invoke('upload_http', {
+              url: args.url,
+              authorization: args.authorization,
+              filename: args.filename,
+              mime: args.mime,
+              data: Array.from(args.data),
+            });
+          };
+        const r = await poster({
+          url,
+          authorization: `Bearer ${d.token}`,
+          filename: file.name || 'paste.png',
+          mime: file.type,
+          data: buf,
+        });
+        await note({
+          status: r.status,
+          unreachable: r.unreachable === true,
+          ok: r.ok === true,
+          name: r.err_name || '',
+          message: r.err_message || '',
+        });
+        if (r.unreachable) throw new Error(toastUnreach);
+        res = {
+          ok: r.ok === true,
+          status: r.status,
+          json: async () => JSON.parse(r.body || '{}'),
+        };
+      } else {
+        const body = new FormData();
+        body.append('file', file, file.name || 'paste.png');
+        const fetchImpl = opts.fetchImpl || fetch;
+        res = await fetchImpl(url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${d.token}` },
+          body,
+        });
+        await note({
+          status: res.status,
+          unreachable: false,
+          ok: res.ok === true,
+          name: '',
+          message: '',
+        });
+      }
+    } catch (e) {
+      const already = e && e.message === toastUnreach;
+      if (!already) {
+        await note({
+          status: 0,
+          unreachable: true,
+          ok: false,
+          name: e && e.name,
+          message: e && e.message,
+        });
+      }
+      if (e && (e.message === toastUnreach || e.message === sanitizeUploadError(401, false))) throw e;
+      throw new Error(toastUnreach);
+    }
+    if (!res.ok) throw new Error(sanitizeUploadError(res.status, false));
+    let json;
+    try { json = await res.json(); } catch { throw new Error('上传失败'); }
+    const path = json && typeof json.path === 'string' ? json.path : '';
+    if (!path) throw new Error('上传失败');
+    const sent = this.inputAttachment(uid, path);
+    if (!sent) throw new Error('未发送');
+    return sent;
   }
 
   // ---- level2 (titles / status / provider) ----
