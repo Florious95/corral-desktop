@@ -17,6 +17,11 @@ test('collapsed chrome: no 131px column; hover reveals toggle', async () => {
   assert.match(css, /top:\s*32px/);
 });
 
+test('fillsDisplay is a function used for fullscreen detection', async () => {
+  const { fillsDisplay } = await import('../src/lib/fullscreen.js');
+  assert.equal(typeof fillsDisplay, 'function');
+});
+
 test('Cmd+B is a local sidebar toggle and is not an unsupported protocol key', async () => {
   const { isLocalSidebarToggle, unsupportedKeyEvent } = await import('../src/term/nativeInput.js');
   const cmdB = { type: 'keydown', key: 'b', metaKey: true, ctrlKey: false, altKey: false };
