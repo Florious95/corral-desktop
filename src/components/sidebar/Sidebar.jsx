@@ -105,7 +105,7 @@ export default function Sidebar({
           />
         ) : null}
 
-        <div style={{ flex: agentsOpen ? '0 1 0px' : '1 1 0px' }} />
+        <div className="sidebar-footer-spacer" />
 
         <div className="sidebar-devices" onClick={onToggleDevices}>
           <LayersIcon size={15} stroke="var(--icon-strong)" />

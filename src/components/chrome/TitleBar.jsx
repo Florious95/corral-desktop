@@ -10,6 +10,7 @@ import './chrome.css';
 export default function TitleBar({ sidebarCollapsed, onToggleSidebar }) {
   return (
     <div className="tb" data-tauri-drag-region>
+      <div className="tb-drag" data-tauri-drag-region />
       <button
         type="button"
         className="chr-btn-reset tb-toggle"
@@ -20,7 +21,6 @@ export default function TitleBar({ sidebarCollapsed, onToggleSidebar }) {
       >
         <SidebarIcon size={16} strokeWidth={1.8} />
       </button>
-      <div className="tb-drag" data-tauri-drag-region />
     </div>
   );
 }

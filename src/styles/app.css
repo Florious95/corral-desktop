@@ -16,36 +16,21 @@ body {
 button, input, textarea, select { font-family: inherit; color: inherit }
 button { border: 0; background: none; padding: 0 }
 
-/* ——— 布局骨架：左列（矮标题条 + 侧栏） | 右列终端顶到窗口顶 ——— */
+/* ——— 布局骨架：通栏标题条 + （侧栏 | 主区）。主区不再自带列头条（#24）。 ——— */
 
 /* position:relative 是 DevicesPopover 的定位基准（UI-SPEC §4.2） */
 .app-root {
   position: relative;
   height: 100%;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   overflow: hidden;
 }
 
-.app-left {
-  flex: none;
-  width: 280px;
-  min-width: 0;
+.app-body {
+  flex: 1;
   display: flex;
-  flex-direction: column;
   min-height: 0;
-  transition: width var(--d-sidebar) var(--ease);
-}
-.app-left.is-collapsed {
-  width: 0;
-  overflow: visible;
-}
-.app-left.is-collapsed .tb {
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 5;
-  width: 131px; /* 93px 交通灯预留 + 28px 折叠钮 + 10px padding */
 }
 
 .app-main {

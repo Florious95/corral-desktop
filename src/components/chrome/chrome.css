@@ -26,7 +26,6 @@
   gap: 12px;
   padding: 0 10px 0 93px;
   background: var(--titlebar-grad);
-  /* 分隔线只在左侧条下沿，不横切终端 */
   border-bottom: 1px solid var(--border-strong);
   box-shadow: var(--titlebar-inset);
 }

@@ -3,6 +3,8 @@
 /* —— 容器 —— */
 .sidebar {
   flex: none;
+  align-self: stretch;
+  min-height: 0;
   overflow: hidden;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
@@ -79,6 +81,11 @@
 }
 
 /* —— 底部 Devices 条 —— */
+.sidebar-footer-spacer {
+  flex: 1 1 0px;
+  min-height: 0;
+}
+
 .sidebar-devices {
   flex: none;
   display: flex;

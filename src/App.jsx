@@ -461,11 +461,11 @@ export default function App({ seedDevices } = {}) {
 
   return (
     <div className="app-root">
-      <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
-        <TitleBar
-          sidebarCollapsed={collapsed}
-          onToggleSidebar={() => setCollapsed((v) => !v)}
-        />
+      <TitleBar
+        sidebarCollapsed={collapsed}
+        onToggleSidebar={() => setCollapsed((v) => !v)}
+      />
+      <div className="app-body">
         <Sidebar
           collapsed={collapsed}
           spacesOpen={spacesOpen}
@@ -491,7 +491,6 @@ export default function App({ seedDevices } = {}) {
           onToggleDevices={() => setDevicesOpen((v) => !v)}
           multiDevice={multiDevice}
         />
-      </div>
 
         <main className="app-main">
           {noDevices ? (
@@ -514,6 +513,7 @@ export default function App({ seedDevices } = {}) {
             </>
           )}
         </main>
+      </div>
 
       {devicesOpen && (
         <DevicesPopover
