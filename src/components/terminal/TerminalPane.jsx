@@ -114,8 +114,13 @@ export default function TerminalPane({
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
     });
-    const onWheel = (ev) => wheel.onWheel(ev);
-    host.addEventListener('wheel', onWheel, { passive: true });
+    const onWheel = (ev) => {
+      // 捕获阶段先于 xterm 的 SGR 鼠标编码。preventDefault 才能拦住编码，passive 不行。
+      ev.preventDefault();
+      ev.stopPropagation();
+      wheel.onWheel(ev);
+    };
+    host.addEventListener('wheel', onWheel, { capture: true, passive: false });
 
     // fetchOlder/acceptScrollback 直接读写这个对象上的 pendingScrollback / nextScrollbackLine。
     const g = {
@@ -169,7 +174,7 @@ export default function TerminalPane({
 
     return () => {
       ro.disconnect();
-      host.removeEventListener('wheel', onWheel);
+      host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
       clearTimeout(g.timer);
       clearTimeout(flashTimer);
