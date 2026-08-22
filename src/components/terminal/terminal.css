@@ -58,17 +58,6 @@
   overflow: hidden;   /* fit 之后 xterm 网格恰好铺满；余数像素不外溢 */
 }
 
-/* 宽主机模式：主机 pane 比本地列宽时，xterm buffer 扩到主机宽度，容器横向滚动 */
-.terminalpane-host.is-wide-host {
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-.terminalpane-host.is-wide-host .xterm,
-.terminalpane-host.is-wide-host .xterm-screen {
-  margin: 0 !important;
-  transform: none !important;
-}
-
 /* xterm 自带的视口底色是 #000（为 macOS 滚动条不透明准备的），亮色主题下要盖掉 */
 .terminalpane-host .xterm .xterm-viewport { background-color: transparent }
 
