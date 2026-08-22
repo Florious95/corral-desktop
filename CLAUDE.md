@@ -108,15 +108,17 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 - 🔴 **team-agent 席位只许开 cursor 的 grok 4.6**（用户 2026-08-22 裁定，覆盖此前的「provider `grok`」）：
   角色文件写 `provider: cursor_agent`（⛔ 不是 `cursor`）+ `auth_mode: subscription` +
   `permission_mode: auto_approve` + `dangerously_skip_permissions: true`。
-  🔴 **`model:` 必填，但它不决定实跑模型**——两条叠加，只知一半就会害人
-  （框架队 2026-08-22 实测确认，本仓库实撞过前半条）：
+  🔴 **`model:` 必填，且本机实测生效。**
   - 省略 ⇒ **compile 直接失败**。CLI 这样做是对的：不写就静默落到内置默认而 argv 看着正常。
-  - 写了 ⇒ **shim 启动时把 `--model` 剥掉**。框架队实测：声明 `sonnet-4-thinking`，
-    pane 显示 `Cursor Grok 4.6`。⇒ **实跑模型以 pane 底部显示为准。**
+  - 写了 ⇒ **本仓库 2026-08-22 对照实验证明声明生效**：同机同版本**并发**两席，
+    `integrator` 声明 `cursor-grok-4.6-high` → pane 显 `Cursor Grok 4.6 High`；
+    `verifier` 声明 `cursor-grok-4.6-medium` → pane 显 `Cursor Grok 4.6 Medium`。
+    两个声明不同 ⇒ 两个实跑不同。**该推断不依赖「Cursor 默认值是多少」**：
+    默认若 High 则 judge 那格证明生效，默认若 Medium 则 integrator 那格证明生效。
 
-  ⚠️ **由此：「只许 grok 4.6」这条令没有任何配置能强制。** 它成立只因为 Cursor 客户端的
-  当前默认模型就是 grok 4.6；用户在 Cursor 里换默认，席位会**静默跟着换**，角色文件不变。
-  ⇒ 🔴 **每次起/重建席位都必须 `capture-pane` 核模型名**，⛔ 不许拿角色文件当证据。
+  ⚠️ 框架队 2026-08-22 报的是相反结论（「shim 剥 `--model`」，声明 `sonnet-4-thinking`
+  而 pane 显 `Cursor Grok 4.6`）。**本机实测与之矛盾，已回报**。⇒ 在他们复核前，
+  ⛔ 不许只凭角色文件宣称模型：🔴 **每次起/重建席位仍必须 `capture-pane` 核模型名**。
   对不上就停下报用户，⛔ 不许自己改 Cursor 的默认设置。
 
   代价（写任务书时必须吃住）：**cursor 席位重启即失忆**，`--resume` 不载历史 ⇒
@@ -128,8 +130,7 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 🔴 **框架硬限制：一个 workspace 只能有一个 cursor 席位。** 加第二个直接被拒：
 `cursor_agent seat already occupies this workspace` ——
 根因是 `<workspace>/.cursor/mcp.json` 是**目录作用域**的，第二席会覆盖 `TEAM_AGENT_ID`（后写者赢）。
-⇒ 与 §7「只许 cursor」叠加的后果：**六席位编排作废**，`.team/current/` 只剩 `integrator`。
-⛔ 不许为绕开它在同一 workspace 硬塞第二席。
+⇒ 与 §7「只许 cursor」叠加的后果：**六席位编排作废**。⛔ 不许为绕开它在同一 workspace 硬塞第二席。
 
 🔴 **多席位 = 多 workspace，一目录一席。这是正解，不是降级凑合。**
 （框架队 2026-08-22 回信：grok 的 `<cwd>/.grok/config.toml` **同样是目录作用域**，
@@ -137,9 +138,21 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 他们自己撞出来才写进纪律。cursor 这条至少 fail-closed 并给了 action。
 他们四个席位就是四个 workspace 目录。）⇒ 要开第二席就开第二个 workspace，⛔ 不要等上游隔离。
 
+**当前两个 workspace（2026-08-22 起）**：
+
+| workspace | 目录 | 席位 | 干什么 |
+|---|---|---|---|
+| `corral-desktop` | `/Volumes/nvme/Projects/tmux桌面端`（主树，`main`） | `integrator` | **唯一写产品码** |
+| `corral-judge` | `/Volumes/nvme/Projects/tmux桌面端-judge`（worktree，分支 `judge/workspace`） | `verifier` | 零上下文判官，⛔ 不写产品码 |
+
+判官 workspace 是同一个 git 仓库的独立 worktree，有自己的 `.cursor/`，所以能各起一席。
+⚠️ `quick-start` 判官队会报 `leader_receiver_unbound`（我的 leader pane 已被 `corral-desktop` 占）——
+**席位照常起，照常收派单**；结果走 `team-agent collect --workspace <judge 目录>` 取，
+⛔ 不要为了消这个警告去 `claim-leader`，那会把我从产出方队上解绑。
+
 - 角色文件必须 `dangerously_skip_permissions: true`，否则席位停在确认提示上，
   症状伪装成「投递失败」。该字段只在启动生效，改文件要 `add-agent --force` 重建。
-- `model:` 的两条叠加口径见 §7（必填 + 不决定实跑）。⛔ 不许只记一半。
+- `model:` 见 §7（必填；本机对照实验证明**生效**，但与框架队结论矛盾 ⇒ 仍以 pane 为准）。
 - **起完必须 `capture-pane` 自证**：底部要显 `Cursor Agent v<版本>` + 具体模型名。
   ⛔ `ok: True` 不算起成功，⛔ 角色文件不算模型的证据。
 - ⚠️ **保守假设：cursor 席位共享的目录作用域状态不止 `.cursor/mcp.json` 一处。**
