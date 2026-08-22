@@ -4,7 +4,7 @@
  * Token from env AGENTMIRROR_TOKEN only; never printed.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync, readFileSync, mkdirSync, appendFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, appendFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
