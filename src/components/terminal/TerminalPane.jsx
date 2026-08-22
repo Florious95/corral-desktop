@@ -5,6 +5,7 @@ import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
 import { TerminalView } from '../../term/TerminalView.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
+import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
@@ -110,6 +111,11 @@ export default function TerminalPane({
     });
     view.open();
     viewRef.current = view;
+    const wheel = new WheelAccumulator((delta) => {
+      clientRef.current?.scrollWheel?.(target, delta);
+    });
+    const onWheel = (ev) => wheel.onWheel(ev);
+    host.addEventListener('wheel', onWheel, { passive: true });
 
     // fetchOlder/acceptScrollback 直接读写这个对象上的 pendingScrollback / nextScrollbackLine。
     const g = {
@@ -163,6 +169,8 @@ export default function TerminalPane({
 
     return () => {
       ro.disconnect();
+      host.removeEventListener('wheel', onWheel);
+      wheel.dispose();
       clearTimeout(g.timer);
       clearTimeout(flashTimer);
       pump.dispose();

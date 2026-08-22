@@ -205,6 +205,18 @@ test('binary frames route to onBinary; scrollback header preserved', () => {
   assert.equal(b.lineCount, 50);
 });
 
+test('scrollWheel: sends scroll_wheel with ref and delta, no ack wait', () => {
+  const { client, sockets } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+  assert.equal(client.scrollWheel('s1', -3), true);
+  const frame = decodeControl(ws.sent[ws.sent.length - 1]);
+  assert.equal(frame.type, 'scroll_wheel');
+  assert.equal(frame.payload.ref, 's1');
+  assert.equal(frame.payload.delta, -3);
+});
+
 test('input: sends frame, resolves on input_ack', () => {
   const { client, sockets, events } = makeClient();
   client.connect();
