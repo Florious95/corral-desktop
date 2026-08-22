@@ -167,21 +167,6 @@ export class Client {
     return reqId;
   }
 
-  /** Submit an uploaded image path. No text field (empty text would be bare Enter). */
-  inputAttachment(ref, path) {
-    const reqId = this.nextReqId++;
-    let frame;
-    try {
-      frame = encodeControl('input', { req_id: reqId, ref, attachment_path: path });
-    } catch (e) {
-      this.onLocalError(e.code, e.message);
-      return null;
-    }
-    if (!this.sendRaw(frame)) return null;
-    this.registerPending(reqId);
-    return reqId;
-  }
-
   /** Mouse wheel. No ack; the server replies with error on failure. */
   scrollWheel(ref, delta) {
     return this.sendControl('scroll_wheel', { ref, delta });
