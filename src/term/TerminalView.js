@@ -17,6 +17,7 @@
 // SyntaxError），`node --test` 就加载不了本模块 —— 两边指同一个文件才不用写互操作补丁。
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 import { unsupportedKeyEvent } from './nativeInput.js';
+import { attachWebglRenderer } from './webglRenderer.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -49,6 +50,7 @@ export class TerminalView {
       fontSize,
       fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
       lineHeight: 1.25,
+      customGlyphs: true,
       cursorBlink: true,
       cursorStyle: 'block',
       cursorInactiveStyle: 'outline',
@@ -98,6 +100,9 @@ export class TerminalView {
     };
     this.container.addEventListener('wheel', this._onWheel, { passive: true });
     this.fit();
+    this._webglPromise = attachWebglRenderer(this.term).then((addon) => {
+      this._webglAddon = addon;
+    });
   }
 
   /** 按容器像素重算 rows/cols；只有真变了才 resize + 上报（上报另有 120ms 合并）。 */
@@ -138,6 +143,8 @@ export class TerminalView {
   dispose() {
     this._disposed = true;
     clearTimeout(this._resizeTimer);
+    try { this._webglAddon?.dispose(); } catch { /* already gone */ }
+    this._webglAddon = null;
     if (this._onWheel && this.container) this.container.removeEventListener('wheel', this._onWheel);
     if (this._dataDisposable) this._dataDisposable.dispose();
     if (this._scrollDisposable) this._scrollDisposable.dispose();
