@@ -10,6 +10,75 @@ export const CLICK_HINT_MS = 3000;
 
 const ARROW = { A: 'up', B: 'down', C: 'right', D: 'left' };
 
+export const REPLY_HOLD_MAX = 8192;
+
+function findStringTerm(buf, from) {
+  for (let j = from; j < buf.length; j += 1) {
+    if (buf.charCodeAt(j) === 0x07) return j + 1;
+    if (buf[j] === '\x1b' && buf[j + 1] === '\\') return j + 2;
+  }
+  return -1;
+}
+
+function readCsi(buf, i) {
+  let j = i + 2;
+  if (j >= buf.length) return { incomplete: true };
+  while (j < buf.length) {
+    const cc = buf.charCodeAt(j);
+    if (cc >= 0x30 && cc <= 0x3f) { j += 1; continue; }
+    break;
+  }
+  while (j < buf.length) {
+    const cc = buf.charCodeAt(j);
+    if (cc >= 0x20 && cc <= 0x2f) { j += 1; continue; }
+    break;
+  }
+  if (j >= buf.length) return { incomplete: true };
+  const fin = buf.charCodeAt(j);
+  if (fin < 0x40 || fin > 0x7e) return { incomplete: true };
+  return { seq: buf.slice(i, j + 1), next: j + 1, fin: buf[j] };
+}
+
+/**
+ * Drop xterm automatic replies so they never become input.text / keys.
+ * Keep user keys: CSI … A/B/C/D (arrows) vs CPR `…R`, DA `…c`, DSR `…n`.
+ * Incomplete OSC/DCS/CSI at the tail goes to `hold` (caller concatenates).
+ */
+export function consumeTerminalReplies(chunk, hold = '') {
+  const buf = hold + (typeof chunk === 'string' ? chunk : '');
+  let kept = '';
+  let i = 0;
+  while (i < buf.length) {
+    if (buf[i] !== '\x1b') {
+      kept += buf[i];
+      i += 1;
+      continue;
+    }
+    if (i + 1 >= buf.length) return { kept, hold: buf.slice(i) };
+    const n = buf[i + 1];
+    if (n === ']' || n === 'P') {
+      const end = findStringTerm(buf, i + 2);
+      if (end < 0) return { kept, hold: buf.slice(i) };
+      i = end;
+      continue;
+    }
+    if (n === '[') {
+      const csi = readCsi(buf, i);
+      if (csi.incomplete) return { kept, hold: buf.slice(i) };
+      if (csi.fin === 'c' || csi.fin === 'n' || csi.fin === 'R') {
+        i = csi.next;
+        continue;
+      }
+      kept += csi.seq;
+      i = csi.next;
+      continue;
+    }
+    kept += buf[i];
+    i += 1;
+  }
+  return { kept, hold: '' };
+}
+
 function ctrlLabel(code) {
   if (code === 4) return 'Ctrl-D';
   if (code === 1) return 'Ctrl-A';
@@ -233,10 +302,14 @@ export class NativeInputPump {
     this._buf = '';
     this._timer = null;
     this._lastClickHint = 0;
+    this._replyHold = '';
   }
 
   onData(s) {
-    for (const e of parseOnData(s)) {
+    const stripped = consumeTerminalReplies(s, this._replyHold);
+    this._replyHold = stripped.hold.length > REPLY_HOLD_MAX ? '' : stripped.hold;
+    if (stripped.kept.length === 0) return;
+    for (const e of parseOnData(stripped.kept)) {
       if (e.type === 'text') {
         this._buf += e.value;
         if (this._buf.length >= TEXT_FLUSH_CHARS) this.flush();
@@ -266,6 +339,7 @@ export class NativeInputPump {
   }
 
   dispose() {
+    this._replyHold = '';
     this.flush();
   }
 

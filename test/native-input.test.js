@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOnData, NativeInputPump, unsupportedKeyEvent, TEXT_FLUSH_MS, CLICK_HINT_MS, classifyMouseBtn } from '../src/term/nativeInput.js';
+import { parseOnData, NativeInputPump, unsupportedKeyEvent, TEXT_FLUSH_MS, CLICK_HINT_MS, classifyMouseBtn, consumeTerminalReplies } from '../src/term/nativeInput.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -142,3 +142,69 @@ test('unsupportedKeyEvent lets mapped keys through', () => {
   assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'F5' }), 'F5');
   assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'Home' }), 'Home');
 });
+
+const OSC11 = '\x1b]11;rgb:fbfb/fafa/f8f8\x07';
+
+test('bad state: raw parseOnData treats OSC 11 reply as text (and may emit esc)', () => {
+  const ev = parseOnData(OSC11);
+  const text = ev.filter((e) => e.type === 'text').map((e) => e.value).join('');
+  assert.equal(text.includes('11;rgb:fbfb/fafa/f8f8'), true);
+  const splitEsc = parseOnData('\x1b');
+  assert.deepEqual(splitEsc, [{ type: 'key', value: 'esc' }]);
+});
+
+function recordPump() {
+  const rec = { text: [], keys: [], enter: 0, unsupported: [] };
+  const pump = new NativeInputPump({
+    sendText: (t) => rec.text.push(t),
+    sendKey: (k) => rec.keys.push(k),
+    sendEnter: () => { rec.enter += 1; },
+    onUnsupported: (l) => rec.unsupported.push(l),
+  });
+  return { rec, pump };
+}
+
+test('good state: NativeInputPump drops OSC 11 reply — zero uplink', () => {
+  const { rec, pump } = recordPump();
+  pump.onData(OSC11);
+  pump.flush();
+  assert.deepEqual(rec, { text: [], keys: [], enter: 0, unsupported: [] });
+  pump.dispose();
+});
+
+test('good state: split OSC 11 then remainder still zero uplink', () => {
+  const { rec, pump } = recordPump();
+  pump.onData('\x1b]11;rgb:fbfb');
+  pump.onData('/fafa/f8f8\x07');
+  pump.flush();
+  assert.deepEqual(rec.text, []);
+  assert.deepEqual(rec.keys, []);
+  pump.dispose();
+});
+
+test('consumeTerminalReplies strips DA / CPR / DSR / DCS; keeps arrows and SGR mouse', () => {
+  const a = consumeTerminalReplies('\x1b[?1;2c\x1b[24;80R\x1b[0n\x1bP1$r\x1b\\hello\x1b[A');
+  assert.equal(a.kept, 'hello\x1b[A');
+  assert.equal(a.hold, '');
+  const m = consumeTerminalReplies('\x1b[<0;10;10M');
+  assert.equal(m.kept, '\x1b[<0;10;10M');
+  const right = consumeTerminalReplies('\x1b[C');
+  assert.equal(right.kept, '\x1b[C');
+});
+
+test('pump still uplinks type / arrows / Ctrl-C / enter', () => {
+  const { rec, pump } = recordPump();
+  pump.onData('hi');
+  pump.flush();
+  pump.onData('\x1b[A');
+  pump.onData('\x1b[B');
+  pump.onData('\x1b[C');
+  pump.onData('\x1b[D');
+  pump.onData('\x03');
+  pump.onData('\r');
+  assert.deepEqual(rec.text, ['hi']);
+  assert.deepEqual(rec.keys, ['up', 'down', 'right', 'left', 'ctrl_c']);
+  assert.equal(rec.enter, 1);
+  pump.dispose();
+});
+
