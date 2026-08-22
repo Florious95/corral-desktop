@@ -142,10 +142,21 @@ export default function TerminalPane({
       // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
-        case BINARY_KIND.SNAPSHOT:
+        case BINARY_KIND.SNAPSHOT: {
+          // 宽主机模式：主机 pane 比本地容器宽时，扩 xterm buffer 到主机宽度，
+          // 容器用 overflow-x: auto 横向滚动，避免 235 列内容写进 100 列 buffer 永久折行。
+          const hostCols = agent.cols || 0;
+          if (hostCols > view.containerCols) {
+            view.setMinCols(hostCols);
+            host.classList.add('is-wide-host');
+          } else {
+            view.clearMinCols();
+            host.classList.remove('is-wide-host');
+          }
           view.writeSnapshot(frame.data);
           setReady(true);
           break;
+        }
         case BINARY_KIND.DELTA:
           view.writeDelta(frame.data);
           break;
