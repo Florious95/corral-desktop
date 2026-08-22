@@ -156,6 +156,7 @@ export class TerminalView {
 
 **必须保留的两条行为(照抄 web 版,有单测护着):**
 - `_report()` 用 **120ms debounce** 合并 resize —— 服务端每次真 reflow 都回一帧 snapshot,不合并会闪烁重画。
+- 首帧之后的 `fit()` 把**本地** `term.resize` 也推迟到同一 120ms：列宽来回抖时若回到原几何，daemon `resize` 会 no-op 不补快照；先本地 reflow 旧内容就会钉死错乱（裁定 2026-08-23）。
 - `onScroll` 边界:`line <= 0 && this._lastScrollLine > 0` → 触发 `onHistoryBoundary()` → 拉更早历史。
 
 新增依赖:`@xterm/xterm@6`(已裁定)+ `@xterm/addon-fit`。不再需要 `postinstall.cjs` 拷 UMD。
