@@ -195,11 +195,19 @@ export function parseOnData(s) {
   return events;
 }
 
+/** 本地 chrome：Cmd+B 折叠/展开侧栏。⛔ 不进远端 CLI。 */
+export function isLocalSidebarToggle(ev) {
+  if (!ev || ev.type !== 'keydown' || ev.isComposing) return false;
+  if (ev.altKey || ev.ctrlKey) return false;
+  return !!(ev.metaKey && (ev.key === 'b' || ev.key === 'B'));
+}
+
 /** KeyboardEvent 里协议表达不了、且不该交给 xterm 再编一串我们仍发不出去的序列。 */
 export function unsupportedKeyEvent(ev) {
   if (!ev || ev.type !== 'keydown') return null;
   if (ev.isComposing) return null;
   const k = ev.key;
+  if (isLocalSidebarToggle(ev)) return null;
   if ((ev.ctrlKey || ev.metaKey) && (k === 'v' || k === 'V')) return null;
   if (ev.metaKey) return null; // 其它系统快捷键留给浏览器
   if (k === 'Enter' || k === 'Backspace' || k === 'Tab' || k === 'Escape') return null;

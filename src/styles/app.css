@@ -36,11 +36,20 @@ button { border: 0; background: none; padding: 0 }
   flex-direction: column;
   transition: width var(--d-sidebar) var(--ease);
 }
-/* 折叠后仍留 131px 列：93px 交通灯预留 + 28px 折叠钮 + 10px padding。
-   不用 width:0 + absolute overlay —— 终端会铺到 x=0，钻到灯/钮底下。 */
 .app-left.is-collapsed {
-  width: 131px;
+  width: 0;
   overflow: hidden;
+}
+
+/* 窗口模式 + 折叠：顶部 38px 让开交通灯，不是常驻窄列。全屏无灯，真正占满。 */
+.app-root.is-collapsed:not(.is-fullscreen) .app-main {
+  padding-top: 38px;
+}
+
+/* 全屏系统顶栏：菜单 30px 在 webview 外，内容窗上沿还有 32px overlay。
+   热区/钮下移 32px，落到能收到 mousemove 的区域。窗口模式 top:0 不动。 */
+.app-root.is-fullscreen .hover-chrome {
+  top: 32px;
 }
 
 .app-main {

@@ -269,7 +269,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
   （12px 按钮在 38px 条里垂直居中：`(38-12)/2 = 13`。）
 - 标题栏左侧**预留 93px**：`padding-left:93px`，折叠钮排在**该条最右端**。
 - **标题条只占左侧栏宽度**（2026-08-22 用户裁定：不通栏；右侧终端从窗口内容区顶边开始，上方无条、无线）。拖拽区只在这条上：根加 `data-tauri-drag-region`，可点击子元素不要带该属性。⛔ 不要把 drag-region 铺到终端上。
-- **侧栏折叠**（2026-08-22 用户裁定：全屏折叠不得压住终端）：`.app-left` 仍宽 **131px**（93+28+10），不是 0。终端从 x=131 顶到顶。交通灯与折叠钮始终可点、不压第一行文字。
+- **侧栏折叠**（2026-08-22 用户裁定：hover 才出折叠钮，不要常驻窄列；钮不得压住交通灯）：`.app-left` 宽 **0**。折叠钮默认不可见。窗口模式：鼠标进入左上角（clientX≤140、clientY≤48）才显示，钮 DOM `left:86px`（灯集群右缘 66px+20）。全屏：系统顶栏实测菜单 30px（webview 外）+ overlay 32px；热区与钮 `top:32px`，热区 clientY≤80。⛔ 不隐藏交通灯。
+- **Cmd+B**：本地切换侧栏折叠/展开（任何窗口状态）。⛔ 不发给远端 CLI。
 - 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。
 - 关闭 = hide 窗口（`window.hide()`），Quit 走确认；Rust 侧 `on_window_event(CloseRequested → api.prevent_close(); window.hide())`。
 
