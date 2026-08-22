@@ -262,17 +262,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 ## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c`）
 
 - 标题栏高 **38px**。（2026-08-22 用户裁定：顶部去界化，标题条收窄。原 46px 作废。）
-- **原生 traffic lights**，不画假圆点。`tauri.conf.json`：
+- **悬浮胶囊 chrome**（裁定 2026-08-22，用户确认 `mockup.html`）：系统 traffic lights **隐藏但仍保留 NSWindow 标准按钮**（⛔ 不许 `decorations: false`），自绘运动场形胶囊（`border-radius:999px`）。顺序：红关 / 黄最小化 / 绿切换全屏 / 分隔线 / 展开侧栏。**默认不可见**，鼠标进入左上热区（窗口 `top:0`；全屏 `top:62px` = 主屏菜单 30pt + overlay 32px，落在系统顶栏之下）才浮现；从热区移到胶囊不中断；移开 **160ms** 后隐藏。红钮 = **真关闭**（`window.close()`，进程退出，Dock 不留残留）。⛔ 不许 `prevent_close` + `hide()`。Cmd+W 关窗、Cmd+Q 退出。Cmd+B 本地折叠，⛔ 不进 CLI。
+- `tauri.conf.json` 仍为 Overlay（藏灯在 Rust `setHidden`，不改 decorations）：
   ```json
   { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 13 } }
   ```
-  （12px 按钮在 38px 条里垂直居中：`(38-12)/2 = 13`。）
-- 标题栏左侧**预留 93px**：`padding-left:93px`，折叠钮排在**该条最右端**。
-- **标题条只占左侧栏宽度**（2026-08-22 用户裁定：不通栏；右侧终端从窗口内容区顶边开始，上方无条、无线）。拖拽区只在这条上：根加 `data-tauri-drag-region`，可点击子元素不要带该属性。⛔ 不要把 drag-region 铺到终端上。
-- **侧栏折叠**（2026-08-22 用户裁定：hover 才出折叠钮，不要常驻窄列；钮不得压住交通灯）：`.app-left` 宽 **0**。折叠钮默认不可见。窗口模式：鼠标进入左上角（clientX≤140、clientY≤48）才显示，钮 DOM `left:86px`（灯集群右缘 66px+20）。全屏：系统顶栏实测菜单 30px（webview 外）+ overlay 32px；热区与钮 `top:32px`，热区 clientY≤80。⛔ 不隐藏交通灯。
+- **标题条只占左侧栏宽度**（2026-08-22 用户裁定：不通栏；右侧终端从窗口内容区顶边开始，上方无条、无线）。拖拽区只在这条上。⛔ 不要把 drag-region 铺到终端上。标题条不再为系统灯留 93px。
+- **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开钮只在胶囊里。折叠后终端顶到内容区顶边（系统灯已隐藏，不再 `padding-top:38px`）。
 - **Cmd+B**：本地切换侧栏折叠/展开（任何窗口状态）。⛔ 不发给远端 CLI。
 - 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。
-- 关闭 = hide 窗口（`window.hide()`），Quit 走确认；Rust 侧 `on_window_event(CloseRequested → api.prevent_close(); window.hide())`。
+- 关闭 = 销毁窗口并退出进程（红钮 / Cmd+W 走 `close()`）。⛔ 不许 hide 后 Dock 残留。Quit = Cmd+Q。
 
 ---
 
@@ -325,7 +324,7 @@ src/
 
 | 部件 | 规格 |
 |---|---|
-| 根 | `height:38px; flex:none; display:flex; align-items:center; gap:12px; padding:0 10px 0 93px; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset)`，带 `data-tauri-drag-region`。只排在侧栏列顶，不延伸到主区。 |
+| 根 | `height:38px; flex:none; display:flex; align-items:center; gap:12px; padding:0 10px; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset)`，带 `data-tauri-drag-region`。只排在侧栏列顶，不延伸到主区。折叠/窗口钮改在悬浮胶囊。 |
 | 侧栏开关 | 排在**左侧条最右端**。`28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
 | 品牌名 | **不渲染**（2026-08-22 用户裁定：不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
@@ -804,7 +803,7 @@ PROVIDER_LABEL  // §8.2 最后一列
 ## 11. 与设计稿的偏差决策（汇总，供评审）
 
 1. 品牌名 `Motrix Agent` → **AgentMirror**（产品已定名）。
-2. 假 traffic lights → **原生按钮 + 93px 左留白**（Desktop Mockups `#1c`）。
+2. 假 traffic lights → 2026-08-22 再裁定：隐藏系统灯、hover 运动场胶囊（四钮），保留 Cmd+W/Q。
 3. 状态从布尔 `running` 扩到**协议五值**；新增 `blocked` 琥珀脉冲、`done` 绿色对勾、`unknown` 浅灰空心点。
 4. Space 行**新增**设备徽章与聚合状态点（仅多设备 / 非 idle 时渲染），设计稿的 Space 行没有这两样。
 5. **补出 pane 列头**：设计稿算出了 `title/iconEl/statusEl` 却没渲染；分裂多列必须能分辨归属。
@@ -817,3 +816,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 12. token 不写 localStorage，落 Rust 侧 store 文件（安全红线，见协议 §9）。
 13. **2026-08-22**：回退 #33 粘贴 v2（含文字粘贴）及其 CSP loopback HTTP 口子；用户已知并接受文字粘贴一并退掉。
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
+15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。

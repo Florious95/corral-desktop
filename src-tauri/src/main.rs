@@ -4,6 +4,9 @@ use std::os::unix::fs::PermissionsExt;
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
+
 /// Filename under $APP_DATA. Keep in sync with src/core/store.js.
 const DEVICES_FILE: &str = "devices.json";
 
@@ -38,11 +41,33 @@ fn lock_devices_file(app: tauri::AppHandle) -> Result<(), String> {
     chmod600(&devices_path(&app)?)
 }
 
+/// Hide AppKit traffic lights; keep the standard buttons in the window so
+/// Cmd+W / the Close menu still work. Do not set decorations=false.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+fn hide_native_traffic_lights(win: &tauri::WebviewWindow) {
+    let Ok(ptr) = win.ns_window() else { return };
+    let ns_window = ptr as *mut objc::runtime::Object;
+    unsafe {
+        // NSWindowCloseButton=0, Miniaturize=1, Zoom=2
+        for id in [0_usize, 1, 2] {
+            let btn: *mut objc::runtime::Object = msg_send![ns_window, standardWindowButton: id];
+            if !btn.is_null() {
+                let _: () = msg_send![btn, setHidden: true];
+            }
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             let _ = ensure_devices_store(app.handle());
+            if let Some(w) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                hide_native_traffic_lights(&w);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![lock_devices_file])

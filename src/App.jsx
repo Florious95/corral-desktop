@@ -7,7 +7,7 @@ import {
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
-import HoverToggle from './components/chrome/HoverToggle.jsx';
+import ChromePill from './components/chrome/ChromePill.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
@@ -476,19 +476,14 @@ export default function App({ seedDevices } = {}) {
 
   return (
     <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
-      {collapsed ? (
-        <HoverToggle
-          pressed
-          fullscreen={nativeFullscreen}
-          onToggle={() => setCollapsed(false)}
-        />
-      ) : null}
+      <ChromePill
+        fullscreen={nativeFullscreen}
+        sidebarCollapsed={collapsed}
+        onToggleSidebar={() => setCollapsed((v) => !v)}
+      />
       <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
         {collapsed ? null : (
-          <TitleBar
-            sidebarCollapsed={collapsed}
-            onToggleSidebar={() => setCollapsed((v) => !v)}
-          />
+          <TitleBar />
         )}
         <Sidebar
           collapsed={collapsed}

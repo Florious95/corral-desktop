@@ -1,0 +1,226 @@
+[
+  {
+    "ok": true,
+    "rec": {
+      "cell": "1",
+      "hover": false,
+      "collapsed": false,
+      "fullscreen": false,
+      "hotTop": 0,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "0",
+        "top": 6.434999465942383,
+        "left": 13.680000305175781
+      },
+      "termTop": 0,
+      "termLeft": 280,
+      "leftWidth": 280,
+      "clicks": [],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": false,
+    "file": "shots/g1-idle.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "1",
+      "hover": true,
+      "collapsed": false,
+      "fullscreen": false,
+      "hotTop": 0,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "1",
+        "top": 10,
+        "left": 12
+      },
+      "termTop": 0,
+      "termLeft": 280,
+      "leftWidth": 280,
+      "clicks": [
+        "close",
+        "min",
+        "zoom"
+      ],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": false,
+    "file": "shots/g1-hover.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "2",
+      "hover": false,
+      "collapsed": false,
+      "fullscreen": true,
+      "hotTop": 62,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "0",
+        "top": 68.43499755859375,
+        "left": 13.680000305175781
+      },
+      "termTop": 0,
+      "termLeft": 280,
+      "leftWidth": 280,
+      "clicks": [],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": false,
+    "file": "shots/g2-idle.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "2",
+      "hover": true,
+      "collapsed": false,
+      "fullscreen": true,
+      "hotTop": 62,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "1",
+        "top": 72,
+        "left": 12
+      },
+      "termTop": 0,
+      "termLeft": 280,
+      "leftWidth": 280,
+      "clicks": [
+        "close",
+        "min",
+        "zoom"
+      ],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": false,
+    "file": "shots/g2-hover.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "3",
+      "hover": false,
+      "collapsed": true,
+      "fullscreen": false,
+      "hotTop": 0,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "0",
+        "top": 6.434999465942383,
+        "left": 13.680000305175781
+      },
+      "termTop": 0,
+      "termLeft": 0,
+      "leftWidth": 0,
+      "clicks": [],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": false,
+    "file": "shots/g3-idle.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "3",
+      "hover": true,
+      "collapsed": true,
+      "fullscreen": false,
+      "hotTop": 0,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "1",
+        "top": 10,
+        "left": 12
+      },
+      "termTop": 0,
+      "termLeft": 0,
+      "leftWidth": 0,
+      "clicks": [
+        "close",
+        "min",
+        "zoom"
+      ],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": true,
+    "file": "shots/g3-hover.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "4",
+      "hover": false,
+      "collapsed": true,
+      "fullscreen": true,
+      "hotTop": 62,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "0",
+        "top": 68.43499755859375,
+        "left": 13.680000305175781
+      },
+      "termTop": 0,
+      "termLeft": 0,
+      "leftWidth": 0,
+      "clicks": [],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": false,
+    "file": "shots/g4-idle.png"
+  },
+  {
+    "ok": true,
+    "rec": {
+      "cell": "4",
+      "hover": true,
+      "collapsed": true,
+      "fullscreen": true,
+      "hotTop": 62,
+      "borderRadius": "999px",
+      "pill": {
+        "w": 112,
+        "h": 29,
+        "opacity": "1",
+        "top": 72,
+        "left": 12
+      },
+      "termTop": 0,
+      "termLeft": 0,
+      "leftWidth": 0,
+      "clicks": [
+        "close",
+        "min",
+        "zoom"
+      ],
+      "noResidentNarrowCol": true,
+      "termNotCovered": true
+    },
+    "overlap": true,
+    "file": "shots/g4-hover.png"
+  }
+]
