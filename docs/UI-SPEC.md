@@ -602,6 +602,8 @@ src/
 
 **终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与 InputBar `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
 
+**xterm 应答不上行（裁定 2026-08-23）**：我方是被动镜像，⛔ 不许替远端终端回答 OSC/CSI 查询。xterm 自动生成的 OSC（含 4/10/11/12）、DA（`CSI … c`）、CPR（`CSI … R`）、DSR（`CSI … n`）、DCS 在 `NativeInputPump` / `TerminalView.onData` **丢掉，不发 `input.text` / `input.keys`**。方向键是 `CSI A/B/C/D`（终字节大写），与 CPR 的 `R`、DA 的 `c` 分开。远端拿不到颜色应答会回落到默认主题，可接受。⛔ 修前 OSC 11 应答会变成输入行垃圾并可能打出 `esc`。
+
 **粘贴（裁定 2026-08-22）**：#33 终端列 DOM paste（文本 `input.text` / 图片 `POST /upload` + `input.attachment_path`）及为其放开的 loopback `connect-src` **整条回退**。Ctrl-V 不再放行给 paste 处理器。能力由后续格重做，本规格不留半截。
 
 ### 6.3 `terminal/InputBar.jsx`
@@ -817,3 +819,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 13. **2026-08-22**：回退 #33 粘贴 v2（含文字粘贴）及其 CSP loopback HTTP 口子；用户已知并接受文字粘贴一并退掉。
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
 15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。
+16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。

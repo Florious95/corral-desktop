@@ -422,6 +422,8 @@ send(text):
 你的 pending 会挂到 10s 超时)。vendor 的 `client.keys(ref, key)` 一次只发一个键,够用。
 keys **不追加 Enter** —— 「按一下那个键」。
 
+**xterm 应答不上行（裁定 2026-08-23）**：`term.onData` 会混进仿真器对 OSC 11/10/12/4、DA、CPR、DSR、DCS 的自动应答。那些字节不是用户按键。共享入口 `consumeTerminalReplies`（`NativeInputPump.onData` 与 `TerminalView` 的 `term.onData`）丢掉后再交给 `parseOnData`。方向键 `ESC [ A/B/C/D` 保留；CPR 是 `ESC [ … R`。应答不上行后远端查询超时、回落默认主题，与「不支持该查询的终端」一致，可接受。⛔ 不得把应答当 `input.text` 或把前导 ESC 当 `keys:esc`。
+
 **input_ack 必达 + 超时**:
 - 每个 `input()`/`keys()` 注册一个 **10s** 本地定时器(`inputTimeoutMs`)。
 - 超时 → `onInputResult(reqId, false, 'timeout')`,pending 清除。**这不代表服务端没执行**,只代表不可判定;
