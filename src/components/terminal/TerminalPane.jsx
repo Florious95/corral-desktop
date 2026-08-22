@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import './terminal.css';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
-import { TerminalView } from '../../term/TerminalView.js';
+import { TerminalView, inferSnapshotWidth } from '../../term/TerminalView.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
@@ -145,16 +145,20 @@ export default function TerminalPane({
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
         case BINARY_KIND.SNAPSHOT: {
-          // 宽主机模式：用 ref 读最新值（避免 stale closure）。
-          const hostCols = agentColsRef.current || 0;
+          // 写入前推断快照宽度，先扩 buffer 再写。listing 只做兗底。
+          const inferred = inferSnapshotWidth(frame.data);
+          const hostCols = Math.max(inferred, agentColsRef.current || 0);
           if (hostCols > view.containerCols) {
             view.setMinCols(hostCols);
             host.classList.add('is-wide-host');
+            host.scrollLeft = 0;
           } else {
+            // 快照比容器窄：清除 minCols（此时有匹配的快照，缩是安全的）
             view.clearMinCols();
             host.classList.remove('is-wide-host');
           }
           view.writeSnapshot(frame.data);
+          host.scrollLeft = 0;
           setReady(true);
           break;
         }
@@ -175,19 +179,11 @@ export default function TerminalPane({
 
     const start = () => {
       if (viewRef.current !== view) return;
-      // 核心修复：subscribe 用 max(本地列数, 主机列数)，让 daemon 第一次 capture
-      // 就在正确宽度下完成。否则 subscribe(100) → daemon resize 到 100 → capture 100
-      // → 另一 client 拽回 235 → 我方 resize(235) 被 D-27 no-op guard 拦住 → 永远
-      // 拿不到 235 宽的 snapshot。
-      const hostCols = agentColsRef.current || 0;
-      const cols = Math.max(view.cols, hostCols);
-      // 预设 minCols：xterm buffer 在首帧到达前就到位，避免 235 列内容写进
-      // 还没扩开的 100 列 buffer。
-      if (hostCols > view.containerCols) {
-        view.setMinCols(hostCols);
-        host.classList.add('is-wide-host');
-      }
-      clientRef.current?.subscribe(target, view.rows, cols);
+      // 订阅用本地窗口列数。主机更宽的情况由 snapshot 推断宽度后本地扩 buffer 处理。
+      clientRef.current?.subscribe(target, view.rows, view.cols);
+      // 吞掉 open()/WebGL fit 排队的重复 resize：subscribe 已经带了正确尺寸，
+      // 紧跟的 fit 不应再发一帧 resize（否则 Claude Code 会多一次 SIGWINCH 重排）。
+      view.markReported();
     };
     if (view.readyWebgl) view.readyWebgl.then(start);
     else start();
@@ -211,19 +207,18 @@ export default function TerminalPane({
     // client / subscribeBinary 走 ref，身份变化不重挂；要换连接实例请由 App 用 React key 强制重挂。
   }, [agent.key, agent.ref, target, loadHistory]);
 
-  // 宽主机模式动态跟踪：agent.cols 变化时（listing 更新 / 另一 client 附着或脱离）
-  // 立即调整 xterm buffer 宽度，不等下一个 SNAPSHOT。
+  // 宽主机模式动态跟踪：agent.cols 变大时立即扩 buffer。
+  // ⚠️ 不在本地 shrink：没有匹配快照时一缩，旧画面会按新宽度折行钉死。
+  // 缩由 SNAPSHOT handler 负责（收到匹配宽度的快照时才 clearMinCols）。
   useEffect(() => {
     const v = viewRef.current;
     const host = hostRef.current;
     if (!v || !host) return;
     const hostCols = agent.cols || 0;
-    if (hostCols > v.containerCols) {
+    if (hostCols > v.containerCols && hostCols > (v._minCols || 0)) {
       v.setMinCols(hostCols);
       host.classList.add('is-wide-host');
-    } else {
-      v.clearMinCols();
-      host.classList.remove('is-wide-host');
+      host.scrollLeft = 0;
     }
   }, [agent.cols]);
 

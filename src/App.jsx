@@ -184,6 +184,8 @@ export default function App({ seedDevices } = {}) {
           provider: inferProvider(title),
           state: s.status || 'unknown',
           fav: favSet.has(`${w.spaceKey}::${title}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
+          rows: s.rows,
+          cols: s.cols,
         });
       }
     }

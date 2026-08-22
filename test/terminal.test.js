@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TerminalView } from '../src/term/TerminalView.js';
+import { TerminalView, inferSnapshotWidth } from '../src/term/TerminalView.js';
 import { parseAnsi } from '../src/components/terminal/ansi.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -241,5 +241,79 @@ test('minCols 不影响 onResize 上报的 cols', async () => {
   await sleep(200);
   assert.equal(calls.resize.length, 1, '容器变宽超过 minCols 应上报新几何');
   assert.deepEqual(calls.resize[0], [25, 300]);
+  view.dispose();
+});
+
+// ——— inferSnapshotWidth ———
+
+test('inferSnapshotWidth: CUP 序列取最大列', () => {
+  // ESC[1;1H ESC[2;1H ESC[1;235H
+  const bytes = new Uint8Array([
+    0x1b, 0x5b, 0x31, 0x3b, 0x31, 0x48, // ESC[1;1H
+    0x41,                                 // 'A'
+    0x1b, 0x5b, 0x32, 0x3b, 0x31, 0x48, // ESC[2;1H
+    0x42,                                 // 'B'
+    0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x33, 0x35, 0x48, // ESC[1;235H
+  ]);
+  assert.equal(inferSnapshotWidth(bytes), 235);
+});
+
+test('inferSnapshotWidth: CHA 序列也算', () => {
+  // ESC[100G (CHA to col 100)
+  const bytes = new Uint8Array([
+    0x1b, 0x5b, 0x31, 0x30, 0x30, 0x47, // ESC[100G
+  ]);
+  assert.equal(inferSnapshotWidth(bytes), 100);
+});
+
+test('inferSnapshotWidth: 无 CSI 序列返回 0', () => {
+  const bytes = new Uint8Array([0x41, 0x42, 0x43]); // plain text
+  assert.equal(inferSnapshotWidth(bytes), 0);
+});
+
+test('inferSnapshotWidth: 空/null 安全', () => {
+  assert.equal(inferSnapshotWidth(null), 0);
+  assert.equal(inferSnapshotWidth(new Uint8Array([])), 0);
+});
+
+// ——— markReported ———
+
+test('markReported 吞掉紧跟 subscribe 的重复 fit 上报', async () => {
+  const { view, container, calls } = makeView();
+  view.open();
+  await sleep(200);
+  calls.resize.length = 0;
+
+  // 模拟 subscribe 后调 markReported
+  view.markReported();
+
+  // WebGL fit 触发（容器没变）：不应上报
+  container.clientWidth = 800; // 同尺寸
+  view.fit({ immediate: true });
+  await sleep(200);
+  assert.deepEqual(calls.resize, [], 'markReported 后第一次 fit 不上报');
+
+  // 真正容器变化：应上报
+  container.clientWidth = 640; // 80 cols
+  view.fit();
+  await sleep(200);
+  assert.equal(calls.resize.length, 1, '后续变化正常上报');
+  view.dispose();
+});
+
+// ——— 宽快照后再来窄快照才允许缩 ———
+
+test('setMinCols 扩后 clearMinCols 缩（模拟宽快照→窄快照时序）', () => {
+  const { view, container } = makeView();
+  view.open(); // 100 cols
+  assert.equal(view.term.cols, 100);
+
+  // 宽快照到达：扩到 235
+  view.setMinCols(235);
+  assert.equal(view.term.cols, 235, '扩到快照宽度');
+
+  // 窄快照到达（主机缩回 100）：clearMinCols 安全缩回
+  view.clearMinCols();
+  assert.equal(view.term.cols, 100, '匹配快照到达后安全缩回');
   view.dispose();
 });

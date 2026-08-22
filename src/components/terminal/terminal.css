@@ -63,6 +63,11 @@
   overflow-x: auto;
   overflow-y: hidden;
 }
+.terminalpane-host.is-wide-host .xterm,
+.terminalpane-host.is-wide-host .xterm-screen {
+  margin: 0 !important;
+  transform: none !important;
+}
 
 /* xterm 自带的视口底色是 #000（为 macOS 滚动条不透明准备的），亮色主题下要盖掉 */
 .terminalpane-host .xterm .xterm-viewport { background-color: transparent }
