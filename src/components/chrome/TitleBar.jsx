@@ -2,7 +2,7 @@ import { SidebarIcon } from '../../lib/icons.jsx';
 import './chrome.css';
 
 /**
- * 窗口标题栏（UI-SPEC §4.1）。整条可拖动，可点击子元素不带 data-tauri-drag-region。
+ * 窗口标题栏（UI-SPEC §4.1）。只占左侧栏宽度；拖拽区不覆盖终端。
  * @param {Object}     props
  * @param {boolean}    props.sidebarCollapsed
  * @param {() => void} props.onToggleSidebar

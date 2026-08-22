@@ -2,8 +2,7 @@
 
 /* —— 容器 —— */
 .sidebar {
-  flex: none;
-  align-self: stretch;
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   background: var(--sidebar-bg);
@@ -81,11 +80,6 @@
 }
 
 /* —— 底部 Devices 条 —— */
-.sidebar-footer-spacer {
-  flex: 1 1 0px;
-  min-height: 0;
-}
-
 .sidebar-devices {
   flex: none;
   display: flex;
@@ -210,7 +204,7 @@
 .agents-host {
   padding: 0 10px;
   flex: 1;
-  min-height: 108px;
+  min-height: 0;
   overflow: hidden;
   box-sizing: border-box;
 }

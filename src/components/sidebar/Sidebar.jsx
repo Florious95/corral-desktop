@@ -103,9 +103,9 @@ export default function Sidebar({
             onContextMenu={onAgentMenu}
             multiDevice={multiDevice}
           />
-        ) : null}
-
-        <div className="sidebar-footer-spacer" />
+        ) : (
+          <div className="agents-host" />
+        )}
 
         <div className="sidebar-devices" onClick={onToggleDevices}>
           <LayersIcon size={15} stroke="var(--icon-strong)" />
