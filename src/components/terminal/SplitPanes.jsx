@@ -1,4 +1,3 @@
-import { XIcon } from '../../lib/icons.jsx';
 import './terminal.css';
 
 /**
@@ -6,13 +5,11 @@ import './terminal.css';
  *
  * @param {Object} props
  * @param {Array}  props.panes                            按左→右顺序的 Agent[]
- * @param {(key:string) => void} props.onClosePane
  * @param {(e:MouseEvent, key:string) => void} props.onPaneMenu
  * @param {(agent:Object) => JSX.Element} props.renderPane 由 App 注入，通常返回 <TerminalPane/>
- * @param {string} [props.focusedKey]
  * @param {(key:string) => void} [props.onFocusPane]
  */
-export default function SplitPanes({ panes = [], onClosePane, onPaneMenu, renderPane, focusedKey, onFocusPane }) {
+export default function SplitPanes({ panes = [], onPaneMenu, renderPane, onFocusPane }) {
   if (panes.length === 0) {
     return (
       <div className="splitpanes-empty">
@@ -29,19 +26,10 @@ export default function SplitPanes({ panes = [], onClosePane, onPaneMenu, render
       {panes.map((agent) => (
         <div
           key={agent.key}
-          className={`splitpanes-col${focusedKey === agent.key ? ' is-focused' : ''}`}
+          className="splitpanes-col"
           onMouseDown={() => onFocusPane && onFocusPane(agent.key)}
           onContextMenu={(e) => onPaneMenu && onPaneMenu(e, agent.key)}
         >
-          <button
-            type="button"
-            className="splitpanes-close"
-            title="关闭此列"
-            aria-label="关闭此列"
-            onClick={(e) => { e.stopPropagation(); onClosePane && onClosePane(agent.key); }}
-          >
-            <XIcon size={12} strokeWidth={2} />
-          </button>
           {renderPane ? renderPane(agent) : null}
         </div>
       ))}

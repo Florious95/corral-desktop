@@ -19,7 +19,7 @@ import TerminalPane from './components/terminal/TerminalPane.jsx';
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
 const CLOSE_MS = 190;
 /** 右键菜单夹取尺寸（UI-SPEC §4.5） */
-const MENU_W = 180, MENU_H = 130;
+const MENU_W = 180, MENU_H = 168;
 
 /* ——— localStorage（前缀 am.，UI-SPEC §7.4）。设备与 token 归 DeviceManager 管，这里不碰。 ———
    ponytail: 只读写 UI 本地态，坏数据一律回落缺省值，不做迁移。 */
@@ -326,13 +326,12 @@ export default function App({ seedDevices } = {}) {
       agent={agent}
       client={clientFor(agent)}
       focused={activeAgent ? agent.key === activeAgent.key : false}
-      multiDevice={multiDevice}
       onResize={(rows, cols) => dm.resize(agent.key, rows, cols)}
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
       onEnter={() => handlePaneEnter(agent.key)}
     />
-  ), [clientFor, activeAgent, multiDevice, dm, handlePaneText, handlePaneKey, handlePaneEnter]);
+  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneEnter]);
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {
@@ -425,6 +424,13 @@ export default function App({ seedDevices } = {}) {
     const idx = paneKeys.indexOf(menu.id);
     return [
       {
+        key: 'close-this',
+        label: '关闭',
+        icon: icon(XIcon, { strokeWidth: 2 }),
+        color: 'var(--danger)',
+        onClick: () => { closeMenu(); closeAgent(menu.id) },
+      },
+      {
         key: 'close-left',
         label: '关闭左侧所有',
         icon: icon(CloseLeftIcon),
@@ -502,9 +508,7 @@ export default function App({ seedDevices } = {}) {
             <>
               <SplitPanes
                 panes={panes}
-                focusedKey={activeAgent ? activeAgent.key : null}
                 onFocusPane={setActiveKey}
-                onClosePane={closeAgent}
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
               />

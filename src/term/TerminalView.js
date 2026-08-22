@@ -49,7 +49,9 @@ export class TerminalView {
       fontSize,
       fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
       lineHeight: 1.25,
-      cursorBlink: false,
+      cursorBlink: true,
+      cursorStyle: 'block',
+      cursorInactiveStyle: 'outline',
       convertEol: false,
       // 输入走 onData → 协议。远程 delta 负责回显，xterm 不本地 echo。
       disableStdin: false,
@@ -128,6 +130,8 @@ export class TerminalView {
   clear() { this.term.reset(); }
 
   focus() { try { this.term.focus(); } catch { /* 已 dispose */ } }
+
+  blur() { try { this.term.blur(); } catch { /* 已 dispose */ } }
 
   scrollToBottom() { this.term.scrollToBottom(); }
 

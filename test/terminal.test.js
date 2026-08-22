@@ -43,7 +43,9 @@ class FakeTerminal {
   resize(cols, rows) { this.cols = cols; this.rows = rows }
   reset() { this.resets += 1 }
   write(data) { this.writes.push(data) }
-  focus() {}
+  focused = false;
+  focus() { this.focused = true }
+  blur() { this.focused = false }
   scrollToBottom() {}
   dispose() {}
 }
@@ -144,6 +146,19 @@ test('parseAnsi 不生成标记，尖括号原样留在片段文本里', () => {
   const segs = parseAnsi('<script> & "x"');
   assert.equal(segs.length, 1);
   assert.equal(segs[0].text, '<script> & "x"');   // React 渲染片段自带转义，不需要预转义
+});
+
+test('焦点列实心闪烁、失焦列空心：cursorBlink + outline inactive + focus/blur', () => {
+  const { view } = makeView();
+  view.open();
+  assert.equal(view.term.opts.cursorBlink, true);
+  assert.equal(view.term.opts.cursorStyle, 'block');
+  assert.equal(view.term.opts.cursorInactiveStyle, 'outline');
+  view.focus();
+  assert.equal(view.term.focused, true);
+  view.blur();
+  assert.equal(view.term.focused, false);
+  view.dispose();
 });
 
 test('onData 把按键交给调用方；disableStdin 为 false', () => {
