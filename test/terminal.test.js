@@ -148,9 +148,17 @@ test('parseAnsi 不生成标记，尖括号原样留在片段文本里', () => {
   assert.equal(segs[0].text, '<script> & "x"');   // React 渲染片段自带转义，不需要预转义
 });
 
+test('lineHeight 是 1：方块字符行盒贴合', () => {
+  const { view } = makeView();
+  view.open();
+  assert.equal(view.term.opts.lineHeight, 1);
+  view.dispose();
+});
+
 test('焦点列实心闪烁、失焦列空心：cursorBlink + outline inactive + focus/blur', () => {
   const { view } = makeView();
   view.open();
+  assert.equal(view.term.opts.lineHeight, 1);
   assert.equal(view.term.opts.cursorBlink, true);
   assert.equal(view.term.opts.cursorStyle, 'block');
   assert.equal(view.term.opts.cursorInactiveStyle, 'outline');
