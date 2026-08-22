@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "captured_at": "2026-08-22T23:08:40.394Z",
+  "host": "local daemon via tauri devices.json (token not stored here)",
+  "subscribe_geom": "listing.rows x listing.cols (reshape no-op when already matching)",
+  "wide": {
+    "file": "test/testdata/garble/wide-host.snapshot.bin",
+    "pane": "%1",
+    "listing_cols": 235,
+    "listing_rows": 50,
+    "bytes": 22303,
+    "stripped_max_line": 235
+  },
+  "matched": {
+    "file": "test/testdata/garble/matched-host.snapshot.bin",
+    "pane": "%2",
+    "listing_cols": 80,
+    "listing_rows": 24,
+    "bytes": 1694,
+    "stripped_max_line": 79
+  }
+}
