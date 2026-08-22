@@ -77,6 +77,8 @@ export class TerminalView {
     this._lastWheelAt = 0;
     this._disposed = false;
     this._replyHold = '';
+    this._minCols = 0;        // 宽主机模式：xterm 最小列数（≥ 容器列数）
+    this._containerCols = 0;  // 容器像素算出的列数（不含 minCols）
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -124,6 +126,9 @@ export class TerminalView {
    * 按容器像素重算 rows/cols。首帧立刻落到格子上；之后 120ms 内的抖动只记目标，
    * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
    * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
+   *
+   * 宽主机模式：cols 取 Math.max(容器列数, _minCols)，确保 xterm buffer 不比
+   * 主机快照窄（否则 235 列内容写进 100 列 buffer 永久折行）。
    */
   fit({ immediate = false } = {}) {
     const el = this.container;
@@ -132,8 +137,10 @@ export class TerminalView {
     const h = el.clientHeight;
     if (w === 0 || h === 0) return;
     const cell = this._cell();
-    const cols = Math.max(2, Math.floor(w / cell.w));
+    const containerCols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
+    const cols = Math.max(containerCols, this._minCols);
+    this._containerCols = containerCols;
     this._pendingCols = cols;
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {
@@ -154,6 +161,25 @@ export class TerminalView {
       this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
     }, GRID_DEBOUNCE_MS);
   }
+
+  /**
+   * 设置 xterm 最小列数（宽主机模式）。
+   * 当主机 pane 宽度 > 本地容器列数时，调用方设置此值让 xterm buffer 扩到主机宽度，
+   * 容器用 overflow-x: auto 呈现横向滚动。
+   */
+  setMinCols(n) {
+    this._minCols = Math.max(0, n | 0);
+    this.fit({ immediate: true });
+  }
+
+  /** 清除最小列数约束，xterm 回到容器像素决定的列数。 */
+  clearMinCols() {
+    this._minCols = 0;
+    this.fit({ immediate: true });
+  }
+
+  /** 容器像素算出的列数（不含 minCols 加成）。 */
+  get containerCols() { return this._containerCols; }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
     if (cols !== this.term.cols || rows !== this.term.rows) {

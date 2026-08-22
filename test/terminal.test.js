@@ -170,3 +170,76 @@ test('onData 把按键交给调用方；disableStdin 为 false', () => {
   assert.deepEqual(got, ['x']);
   view.dispose();
 });
+
+// ——— 宽主机模式（minCols） ———
+
+test('setMinCols 让 fit() 不缩到容器列数以下', () => {
+  const { view, container } = makeView();
+  view.open();  // 800px / 8px = 100 cols
+  assert.equal(view.term.cols, 100);
+  assert.equal(view.containerCols, 100);
+
+  // 主机 235 列：设 minCols
+  view.setMinCols(235);
+  assert.equal(view.term.cols, 235, 'xterm 扩到主机宽度');
+  assert.equal(view.containerCols, 100, 'containerCols 仍反映容器像素');
+
+  // 容器缩窄：minCols 继续兜底
+  container.clientWidth = 480;  // 60 cols
+  view.fit({ immediate: true });
+  assert.equal(view.term.cols, 235, '容器缩到 60 列时 minCols=235 仍生效');
+  assert.equal(view.containerCols, 60);
+  view.dispose();
+});
+
+test('clearMinCols 回到容器像素列数', () => {
+  const { view, container } = makeView();
+  view.open();  // 100 cols
+  view.setMinCols(235);
+  assert.equal(view.term.cols, 235);
+
+  view.clearMinCols();
+  assert.equal(view.term.cols, 100, '清除后回到容器列数');
+  assert.equal(view._minCols, 0);
+  view.dispose();
+});
+
+test('容器变宽超过 minCols 时自然接管', () => {
+  const { view, container } = makeView();
+  view.open();  // 100 cols
+  view.setMinCols(150);
+  assert.equal(view.term.cols, 150);
+
+  // 容器变宽到 200 cols：超过 minCols，自然接管
+  container.clientWidth = 1600;  // 1600/8 = 200 cols
+  view.fit({ immediate: true });
+  assert.equal(view.term.cols, 200, '容器变宽后 effective = max(200, 150) = 200');
+  assert.equal(view.containerCols, 200);
+  view.dispose();
+});
+
+test('minCols 不影响 onResize 上报的 cols', async () => {
+  const { view, container, calls } = makeView();
+  view.open();  // 100 cols, 25 rows
+  await sleep(200);
+  calls.resize.length = 0;
+
+  view.setMinCols(235);
+  assert.equal(view.term.cols, 235);
+  await sleep(200);            // 让 setMinCols 的 report 落定
+  calls.resize.length = 0;     // 清掉 setMinCols 触发的上报
+
+  // 容器缩窄：effective 仍 235（minCols 兜底），不应重复上报
+  container.clientWidth = 560;  // 70 cols
+  view.fit();
+  await sleep(200);
+  assert.deepEqual(calls.resize, [], 'effective cols 未变不上报');
+
+  // 容器变宽超过 minCols：effective = 300，应上报新几何
+  container.clientWidth = 2400;  // 300 cols
+  view.fit();
+  await sleep(200);
+  assert.equal(calls.resize.length, 1, '容器变宽超过 minCols 应上报新几何');
+  assert.deepEqual(calls.resize[0], [25, 300]);
+  view.dispose();
+});
