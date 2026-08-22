@@ -1,0 +1,1 @@
+{"control":{"name":"no_ws_subscribe","submitted":20,"failRate":0,"missing":[]},"subscribed":{"name":"Client.subscribe_plus_announcer","submitted":20,"failRate":0,"missing":[],"resizeCount":0,"snapshots":0,"listedRows":24,"listedCols":80,"sessionName":"amrsz"},"error":null}

@@ -1,64 +1,47 @@
-# RESIZE-FIX.md · t.resize-fix r18
+# RESIZE-FIX.md · t.resize-fix r19
 
 **worktree** `/Volumes/nvme/Projects/tmux桌面端/.worktrees/wt-resize`  
-**分支** `feat/resize-reannounce`  
-未 kill/open 用户 AgentMirror；未 HID。
+**分支** `feat/resize-reannounce` · PR #51  
+未 kill/open 用户 AgentMirror；未 HID；未读 `.env` 原文。
 
-## 第一件事：attach 决定权
+## r19 补的那一档：真 WS `subscribe`
 
-只读核过 `/Volumes/nvme/Projects/远程Agent安卓/server/internal/`：
+凭据：进程内 `set -a; AGENTMIRROR_TOKEN=$(openssl rand -hex 16); set +a`（一次性，**不是**用户 `.env`）。只注入子进程。产物只写「已用 env 注入，未打印」。
 
-| 层 | 事实 |
-|---|---|
-| 桌面端 | 只发 WS `subscribe` / `resize`。**没有** `tmux attach` / `new-session -t`。 |
-| daemon `handleSubscribe` | `br.Resize`（`set-option window-size latest` + `resize-window`）再 `pipe-pane`。 |
-| 框架队首选 grouped `new-session -t` | **落在 daemon**，客户端改不了。 |
+Daemon：`/Volumes/nvme/Projects/远程Agent安卓/server/agentmirrord`（只执行不写上游）  
+`-listen 127.0.0.1:19911` `-state-dir` 在本格目录（已删，不入库）`-qr-listen` 关。stdout 丢弃（避免 QR 落盘）。
 
-⚠ **账本 write_paths 不含** `.team/nodes/_night/BACKLOG-UPSTREAM.md`，本席 **没写那份文件**（否则越权）。请 leader 把下面两条抄进 BACKLOG：
+客户端：本仓库 `src/vendor/agentmirror/client.js`（`ws` 包），`subscribe` + 产品同款 `createResizeAnnouncer`（snapshot 窄则 reassert）。
 
-1. **根治**：订阅时 `tmux new-session -t <目标>` 分组会话，各客户端独立尺寸。  
-2. **息屏仍挂着**：对方没断开时 tmux 仍跟 latest/小客户端；桌面端 ⛔ 不许伪造 detach。
+TUI：`grok-tui.c` 编成 comm=`grok`（daemon `filterModel` **只列出白名单进程**；python 进不了 listing）。会话名 `amrsz`，结束只 `kill-session -t amrsz`，**从未** `kill-server`。
 
-本格做的是客户端**缓解**：DOM 不变也要能重发 `resize`；并堵住写屏抖动打出的多余 `resize` 帧（daemon 每帧都会 `window-size latest` + `resize-window`，夹在 paste 与 Enter 之间）。**不是根治。**
+卡过的路（显式）：
 
-## 调用方（动手前 grep）
+1. 私有 `TMUX_TMPDIR`：本机 **8-21 的 agentmirrord 二进制不扫** 那棵树 → listing 无 amrsz。  
+2. 默认目录里另开 socket 文件 `amrsz`：listing 仍只有原 43 个白名单 pane。  
+3. python TUI：被 `filterModel` 丢掉。  
+4. Node `ws` 的 Buffer 文本帧：已在探针里把 `{` 开头 Buffer 转成 string，否则 `ready` 但解析失败。
 
-- `dm.resize` ← `App` shim `client.resize` ← `TerminalPane` announcer（**已去掉 App 第二帧 `onResize`**）
-- `TerminalView._report` / `fit` / `reassertResize`
-- `DeviceManager.resize` → `Client.resize`
+## 注入 n=20（paste-buffer -d + Enter）
 
-## 改了什么
+| 态 | submitted | failRate |
+|---|---|---|
+| 对照：无 WS subscribe | **20/20** | **0** |
+| **真 Client.subscribe 着** | **20/20** | **0** |
+| r18 手工 paste↔Enter 夹 `resize-window` | 17/20 | 0.15 |
 
-1. `fit`：host **像素没变直接返回**（WebGL 首次仍 `fit({force:true})`）。  
-2. `createResizeAnnouncer`：focus / `visibility=visible` / snapshot 捕获列宽明显小于本列网格 → 去抖 250ms 重发同一 rows/cols。⛔ 无定时轮询。  
-3. UI-SPEC §6.2 + §11.15（2026-08-22）。
+`resizeCount`（announcer 在注入窗口额外 `resize` 帧）= **0**。`listedRows/Cols` = 24×80。
 
-## 注入判据（自建 tmux socket `.team/nodes/resize/ts`）
+⇒ 与 r18 一致、且现在有真 subscribe：**不是「subscribe/attach 就会坏」，是「resize 撞进注入窗口才会坏」。** 本 PR 的 fit 像素锁让注入窗口里不再打 resize，subscribe 档与对照同档。
 
-TUI：`tui-reader.py`（cbreak；**SIGWINCH 清空输入行**，模拟会重绘输入行的 TUI）。注入：`load-buffer` + `paste-buffer -d` + `send-keys Enter`。n=20。量具：进程写 `got.log`（不靠 24 行 capture 窗口）。
+## 仍不是根治
 
-| 态 | submitted / 20 | failRate | 缺 |
-|---|---|---|---|
-| **对照** 无 attach、无中途 resize | **20** | **0** | [] |
-| 同 session 再挂一个 40×12 attach | 20 | 0 | [] （python TUI ≠ team-agent；此路未复现） |
-| **坏** paste 与 Enter 之间 `resize-window`（= daemon 处理 resize 帧） | **17** | **0.15** | 8, 17, 19 |
-
-对照绿、坏态红（本轮 15%；上一轮同脚本 10%）。修好后「不要在注入窗口打 resize」对应对照档 **failRate 0**。
-
-**我方 WS `subscribe` 真客户端**：需要自建 daemon + 一次性 token。本机有上游目录里的 `agentmirrord` 二进制，但 **pairing token 在 .env，红线不读**。⇒ **subscribe 本体不可判(2)**。未把 tmux 机制实验写成「桌面 subscribe 已解决」。
-
-## 交付面 a/b/c
-
-| # | 读数 |
-|---|---|
-| a 修前语义 | 缩到小尺寸后 **DOM 不变则窗口停在小的**：`afterPhone=40x12`，`stillSmall=40x12` |
-| b 重发后 | `afterReassert=80x24`（回到桌面 `desktop=80x24`） |
-| c 过渡态图 | `geom-small.capture.txt` 是缩窗后的 pane 文本，**不是** tmux 给大客户端填的 `·` 边（那是 attach 端绘制）。真 · 边 **不可判(2)**（禁止抢用户屏截图）。 |
+grouped `new-session -t` 在 daemon。write_paths 仍不含 `_night/BACKLOG-UPSTREAM.md`。息屏仍挂着的小客户端同前。
 
 ## 棘轮
 
-`npm test` **101 pass / 0 fail**（基线 94；新增 resize-announce + TerminalView 像素锁/reassert）。
+产品码相对 r18 无新改。`npm test` 仍 **101/0**（本轮未重跑；r18 TAP 仍在）。
 
 ---
 
-verdict: pass（客户端缓解 + 机制坏/好夹住）；grouped attach 与真 WS subscribe **unjudgeable / 待 BACKLOG**
+verdict: pass（真 WS subscribe 20/20 = 对照）；机制坏态仍是 r18 resize-between

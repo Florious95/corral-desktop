@@ -1,0 +1,22 @@
+{
+  "n": 20,
+  "port": "19911",
+  "notes": "token via env AGENTMIRROR_TOKEN (generated). Session amrsz on default tmux server (daemon binary ignores private sockets); kill-session amrsz only, never kill-server.",
+  "control": {
+    "name": "no_ws_subscribe",
+    "submitted": 20,
+    "failRate": 0,
+    "missing": []
+  },
+  "subscribed": {
+    "name": "Client.subscribe_plus_announcer",
+    "submitted": 20,
+    "failRate": 0,
+    "missing": [],
+    "resizeCount": 0,
+    "snapshots": 0,
+    "listedRows": 24,
+    "listedCols": 80,
+    "sessionName": "amrsz"
+  }
+}
