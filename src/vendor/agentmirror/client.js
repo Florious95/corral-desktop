@@ -167,6 +167,11 @@ export class Client {
     return reqId;
   }
 
+  /** Mouse wheel. No ack; the server replies with error on failure. */
+  scrollWheel(ref, delta) {
+    return this.sendControl('scroll_wheel', { ref, delta });
+  }
+
   /** Fetch one history page; reply arrives as a binary scrollback frame. */
   scrollback(ref, fromLine, count) {
     if (!this.isReady) return null;

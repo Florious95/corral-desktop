@@ -265,6 +265,7 @@ export default function App({ seedDevices } = {}) {
         subscribe: (_ref, rows, cols) => dm.subscribe(uid, rows, cols),
         unsubscribe: () => dm.unsubscribe(uid),
         resize: (_ref, rows, cols) => dm.resize(uid, rows, cols),
+        scrollWheel: (_ref, delta) => dm.scrollWheel(uid, delta),
         scrollback: (_ref, fromLine, count) => dm.scrollback(uid, fromLine, count)?.reqId ?? null,
         /** 只投递本列的二进制帧；返回退订函数 */
         onBinary: (fn) => {

@@ -317,6 +317,12 @@ export class DeviceManager {
     return t ? t.client.resize(t.ref, rows, cols) : false;
   }
 
+  /** @returns {boolean} no ack; failure is an error frame. */
+  scrollWheel(uid, delta) {
+    const t = this._route(uid);
+    return t ? t.client.scrollWheel(t.ref, delta) : false;
+  }
+
   // ---- level2 (titles / status / provider) ----
 
   /**
