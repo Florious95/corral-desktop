@@ -15,7 +15,6 @@
 import { Client, ClientState } from '../vendor/agentmirror/client.js';
 import { inferProvider } from './providers.js';
 import * as store from './store.js';
-import { wsToHttpOrigin, sanitizeUploadError } from '../term/clipboardPaste.js';
 
 const MODEL_DEBOUNCE_MS = 100;
 
@@ -322,50 +321,6 @@ export class DeviceManager {
   scrollWheel(uid, delta) {
     const t = this._route(uid);
     return t ? t.client.scrollWheel(t.ref, delta) : false;
-  }
-
-  /** @returns {{deviceId:string,reqId:number}|null} */
-  inputAttachment(uid, path) {
-    const t = this._route(uid);
-    const reqId = t ? t.client.inputAttachment(t.ref, path) : null;
-    return reqId === null ? null : { deviceId: t.deviceId, reqId };
-  }
-
-  /**
-   * POST /upload then input.attachment_path. Token only in the Authorization
-   * header — never in thrown messages.
-   * @param {Blob} file
-   * @param {typeof fetch} [fetchImpl]
-   */
-  async uploadImage(uid, file, fetchImpl = fetch) {
-    if (!file || typeof file.type !== 'string' || !file.type.startsWith('image/')) {
-      throw new Error('不是图片');
-    }
-    const t = this._route(uid);
-    if (!t) throw new Error('未发送');
-    const d = this._devices.find((x) => x.id === t.deviceId);
-    if (!d) throw new Error('未发送');
-    const url = `${wsToHttpOrigin(t.client.url)}/upload`;
-    const body = new FormData();
-    body.append('file', file, file.name || 'paste.png');
-    let res;
-    try {
-      res = await fetchImpl(url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${d.token}` },
-        body,
-      });
-    } catch {
-      throw new Error(sanitizeUploadError(0, true));
-    }
-    if (!res.ok) throw new Error(sanitizeUploadError(res.status, false));
-    let json;
-    try { json = await res.json(); } catch { throw new Error('上传失败'); }
-    const path = json && typeof json.path === 'string' ? json.path : '';
-    if (!path) throw new Error('上传失败');
-    const sent = this.inputAttachment(uid, path);
-    if (!sent) throw new Error('未发送');
-    return sent;
   }
 
   // ---- level2 (titles / status / provider) ----

@@ -287,7 +287,6 @@ export default function App({ seedDevices } = {}) {
         unsubscribe: () => dm.unsubscribe(uid),
         resize: (_ref, rows, cols) => dm.resize(uid, rows, cols),
         scrollWheel: (_ref, delta) => dm.scrollWheel(uid, delta),
-        uploadImage: (file) => dm.uploadImage(uid, file),
         scrollback: (_ref, fromLine, count) => dm.scrollback(uid, fromLine, count)?.reqId ?? null,
         /** 只投递本列的二进制帧；返回退订函数 */
         onBinary: (fn) => {
@@ -352,7 +351,6 @@ export default function App({ seedDevices } = {}) {
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
       onEnter={() => handlePaneEnter(agent.key)}
-      onPasteError={(msg) => setToastMsg(msg)}
     />
   ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneEnter]);
 

@@ -601,6 +601,8 @@ src/
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
+**粘贴（裁定 2026-08-22）**：#33 终端列 DOM paste（文本 `input.text` / 图片 `POST /upload` + `input.attachment_path`）及为其放开的 loopback `connect-src` **整条回退**。Ctrl-V 不再放行给 paste 处理器。能力由后续格重做，本规格不留半截。
+
 ### 6.3 `terminal/InputBar.jsx`
 
 ```js
@@ -793,6 +795,7 @@ PROVIDER_LABEL  // §8.2 最后一列
 | 外层 1400px 卡片圆角 + 四层投影 + body 径向渐变 | **删除** | 画布演示，真实窗口交给 macOS |
 | 「新建 Agent」真正创建远程会话 | 按钮只弹 toast | 协议 v1 无此能力 |
 | 「关闭 Agent」杀掉远端 tmux 会话 | 只关本地列 | 协议 v1 无 kill |
+| 终端列 Cmd/Ctrl-V 粘贴文本或图片上传 | **不做**（#33 已回退，2026-08-22） | 上传路径 CORS 失败；理由被推翻的改动整条退 |
 
 ---
 
@@ -810,3 +813,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 10. `max-height:clamp(96px, 100dvh - 464px, 288px)` 的 `100dvh` → `100vh`（桌面端窗口无动态视口）。
 11. 新增 `prefers-reduced-motion` 降级（脉冲/过渡关闭）与输入框可见 focus ring —— 无障碍基础不省。
 12. token 不写 localStorage，落 Rust 侧 store 文件（安全红线，见协议 §9）。
+13. **2026-08-22**：回退 #33 粘贴 v2（含文字粘贴）及其 CSP loopback HTTP 口子；用户已知并接受文字粘贴一并退掉。
