@@ -161,7 +161,12 @@ export default function TerminalPane({
     const attach = subRef.current || (c && typeof c.onBinary === 'function' ? (fn) => c.onBinary(fn) : null);
     const off = attach ? attach(handleBinary) : null;
 
-    clientRef.current?.subscribe(target, view.rows, view.cols);
+    const start = () => {
+      if (viewRef.current !== view) return;
+      clientRef.current?.subscribe(target, view.rows, view.cols);
+    };
+    if (view.readyWebgl) view.readyWebgl.then(start);
+    else start();
 
     const ro = new ResizeObserver(() => view.fit());
     ro.observe(host);

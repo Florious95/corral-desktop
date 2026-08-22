@@ -58,6 +58,6 @@ test('TerminalView.open in node falls back when addon cannot init', async () => 
   assert.equal(view.term.opts.lineHeight, 1.25);
   view.writeSnapshot(new Uint8Array([65]));
   assert.equal(view.term.writes.length, 1);
-  await view._webglPromise;
+  await view.readyWebgl;
   view.dispose();
 });

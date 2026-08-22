@@ -100,7 +100,8 @@ export class TerminalView {
     };
     this.container.addEventListener('wheel', this._onWheel, { passive: true });
     this.fit();
-    this._webglPromise = attachWebglRenderer(this.term).then((addon) => {
+    // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
+    this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
       this._webglAddon = addon;
     });
   }
