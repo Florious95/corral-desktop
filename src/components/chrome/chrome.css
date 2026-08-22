@@ -24,8 +24,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 14px 0 93px;
+  padding: 0 10px 0 93px;
   background: var(--titlebar-grad);
+  /* 分隔线只在左侧条下沿，不横切终端 */
   border-bottom: 1px solid var(--border-strong);
   box-shadow: var(--titlebar-inset);
 }
@@ -41,19 +42,6 @@
 }
 .tb-toggle:hover {
   background-color: var(--hover-4);
-}
-.tb-brand {
-  font-size: var(--fs-125);
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-.tb-badge {
-  font-size: var(--fs-105);
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--r-pill);
-  background: var(--green-badge-bg);
-  color: var(--green-deep);
 }
 .tb-drag {
   margin-left: auto;
