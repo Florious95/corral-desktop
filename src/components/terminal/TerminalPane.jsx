@@ -56,6 +56,8 @@ export default function TerminalPane({
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onEnterRef.current = onEnter;
+  const agentColsRef = useRef(agent.cols);
+  agentColsRef.current = agent.cols;
 
   const target = addr || agent.ref;
 
@@ -143,9 +145,8 @@ export default function TerminalPane({
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
         case BINARY_KIND.SNAPSHOT: {
-          // 宽主机模式：主机 pane 比本地容器宽时，扩 xterm buffer 到主机宽度，
-          // 容器用 overflow-x: auto 横向滚动，避免 235 列内容写进 100 列 buffer 永久折行。
-          const hostCols = agent.cols || 0;
+          // 宽主机模式：用 ref 读最新值（避免 stale closure）。
+          const hostCols = agentColsRef.current || 0;
           if (hostCols > view.containerCols) {
             view.setMinCols(hostCols);
             host.classList.add('is-wide-host');
@@ -197,6 +198,22 @@ export default function TerminalPane({
     };
     // client / subscribeBinary 走 ref，身份变化不重挂；要换连接实例请由 App 用 React key 强制重挂。
   }, [agent.key, agent.ref, target, loadHistory]);
+
+  // 宽主机模式动态跟踪：agent.cols 变化时（listing 更新 / 另一 client 附着或脱离）
+  // 立即调整 xterm buffer 宽度，不等下一个 SNAPSHOT。
+  useEffect(() => {
+    const v = viewRef.current;
+    const host = hostRef.current;
+    if (!v || !host) return;
+    const hostCols = agent.cols || 0;
+    if (hostCols > v.containerCols) {
+      v.setMinCols(hostCols);
+      host.classList.add('is-wide-host');
+    } else {
+      v.clearMinCols();
+      host.classList.remove('is-wide-host');
+    }
+  }, [agent.cols]);
 
   useEffect(() => {
     const v = viewRef.current;
