@@ -48,8 +48,7 @@ export class TerminalView {
       scrollback,
       fontSize,
       fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
-      // 方块/盒绘字符要行盒贴合；1.25 会在行间留缝。DOM renderer 不支持 customGlyphs。
-      lineHeight: 1,
+      lineHeight: 1.25,
       cursorBlink: true,
       cursorStyle: 'block',
       cursorInactiveStyle: 'outline',
@@ -168,6 +167,6 @@ export class TerminalView {
         return { w: r.width / this.term.cols, h: r.height / this.term.rows };
       }
     }
-    return { w: this.fontSize * 0.6, h: this.fontSize };
+    return { w: this.fontSize * 0.6, h: Math.round(this.fontSize * 1.25) };
   }
 }
