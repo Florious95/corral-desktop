@@ -24,24 +24,11 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 10px 0 93px;
+  padding: 0 10px;
   background: var(--titlebar-grad);
   /* 分隔线只在左侧条下沿，不横切终端 */
   border-bottom: 1px solid var(--border-strong);
   box-shadow: var(--titlebar-inset);
-}
-.tb-toggle {
-  width: 28px;
-  height: 26px;
-  border-radius: var(--r-6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--icon-titlebar);
-  transition: background-color var(--d-hover);
-}
-.tb-toggle:hover {
-  background-color: var(--hover-4);
 }
 .tb-drag {
   margin-left: auto;
@@ -49,32 +36,79 @@
   align-self: stretch;
 }
 
-/*
- * 交通灯量度（AgentMirrorTest 折叠 hover 截图，2x→CSS）：
- *   红 0.5–14  黄 23.5–37  绿 46.5–60（窗口位图左缘）
- *   配置 {x:14,y:13}、直径 12、间距 8 → 14+12+8+12+8+12 = 66（绿灯右缘）
- * 折叠钮从 86px 起（66 + 20 间距），热区 DOM 不覆盖 0–86，避免吃掉关闭按钮。
- */
-.hover-chrome {
+/* ---------- hover stadium chrome (mockup 2026-08-22) ---------- */
+.chrome-pill-root {
   position: absolute;
-  top: 0;
-  left: 86px;
-  z-index: 6;
-  height: 38px;
-  padding: 0 10px;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+.chrome-pill-hot {
+  position: absolute;
+  pointer-events: auto;
+}
+.chrome-pill {
+  position: absolute;
+  left: 12px;
+  z-index: 21;
   display: flex;
   align-items: center;
-  background: transparent;
-  pointer-events: none;
-}
-.hover-chrome-btn {
+  gap: 9px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(28, 30, 35, 0.82);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
   opacity: 0;
+  transform: translateY(-4px) scale(0.97);
   pointer-events: none;
-  transition: opacity var(--d-hover);
+  transition: opacity 0.14s ease, transform 0.14s ease;
 }
-.hover-chrome.is-hot .hover-chrome-btn {
+.chrome-pill.is-reveal {
   opacity: 1;
+  transform: none;
   pointer-events: auto;
+}
+.chrome-lamp {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  position: relative;
+  flex: none;
+  cursor: pointer;
+}
+.chrome-lamp span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  font-weight: 700;
+  line-height: 1;
+}
+.chrome-pill.is-reveal:hover .chrome-lamp span {
+  opacity: 1;
+}
+.chrome-lamp.r { background: #ff5f57; }
+.chrome-lamp.y { background: #febc2e; }
+.chrome-lamp.g { background: #28c840; }
+.chrome-pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  flex: none;
+}
+.chrome-pill-exp {
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  color: #dfe3e8;
+  cursor: pointer;
 }
 
 /* ---------- §4.5 ContextMenu ---------- */

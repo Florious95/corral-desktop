@@ -1,0 +1,556 @@
+TAP version 13
+# Subtest: decode: snapshot.bin fixture
+ok 1 - decode: snapshot.bin fixture
+  ---
+  duration_ms: 3.636209
+  type: 'test'
+  ...
+# Subtest: decode: delta.bin fixture
+ok 2 - decode: delta.bin fixture
+  ---
+  duration_ms: 0.69
+  type: 'test'
+  ...
+# Subtest: decode: scrollback.bin fixture carries converged range header
+ok 3 - decode: scrollback.bin fixture carries converged range header
+  ---
+  duration_ms: 0.61
+  type: 'test'
+  ...
+# Subtest: encode: snapshot round-trips byte-identically to the fixture
+ok 4 - encode: snapshot round-trips byte-identically to the fixture
+  ---
+  duration_ms: 0.6925
+  type: 'test'
+  ...
+# Subtest: encode: scrollback round-trips byte-identically to the fixture
+ok 5 - encode: scrollback round-trips byte-identically to the fixture
+  ---
+  duration_ms: 0.740291
+  type: 'test'
+  ...
+# Subtest: decode: bad magic is rejected
+ok 6 - decode: bad magic is rejected
+  ---
+  duration_ms: 0.266708
+  type: 'test'
+  ...
+# Subtest: decode: truncated frame is rejected
+ok 7 - decode: truncated frame is rejected
+  ---
+  duration_ms: 0.152958
+  type: 'test'
+  ...
+# Subtest: decode: unknown kind is rejected
+ok 8 - decode: unknown kind is rejected
+  ---
+  duration_ms: 0.0705
+  type: 'test'
+  ...
+# Subtest: decode: empty ref is rejected
+ok 9 - decode: empty ref is rejected
+  ---
+  duration_ms: 0.342083
+  type: 'test'
+  ...
+# Subtest: encode: empty ref is rejected on encode side too
+ok 10 - encode: empty ref is rejected on encode side too
+  ---
+  duration_ms: 1.275458
+  type: 'test'
+  ...
+# Subtest: encode: non-ASCII ref is encoded as UTF-8 and decodes back
+ok 11 - encode: non-ASCII ref is encoded as UTF-8 and decodes back
+  ---
+  duration_ms: 0.17475
+  type: 'test'
+  ...
+# Subtest: lifecycle: connect → auth → ready → auto list
+ok 12 - lifecycle: connect → auth → ready → auto list
+  ---
+  duration_ms: 2.230125
+  type: 'test'
+  ...
+# Subtest: list_delta: continuous seq applies incrementally
+ok 13 - list_delta: continuous seq applies incrementally
+  ---
+  duration_ms: 0.323667
+  type: 'test'
+  ...
+# Subtest: list_delta: discontinuous seq forces an automatic re-list
+ok 14 - list_delta: discontinuous seq forces an automatic re-list
+  ---
+  duration_ms: 0.186958
+  type: 'test'
+  ...
+# Subtest: subscribe: sends subscribe frame and replays on reconnect
+ok 15 - subscribe: sends subscribe frame and replays on reconnect
+  ---
+  duration_ms: 22.647917
+  type: 'test'
+  ...
+# Subtest: binary frames route to onBinary; scrollback header preserved
+ok 16 - binary frames route to onBinary; scrollback header preserved
+  ---
+  duration_ms: 0.347542
+  type: 'test'
+  ...
+# Subtest: scrollWheel: sends scroll_wheel with ref and delta, no ack wait
+ok 17 - scrollWheel: sends scroll_wheel with ref and delta, no ack wait
+  ---
+  duration_ms: 0.37475
+  type: 'test'
+  ...
+# Subtest: input: sends frame, resolves on input_ack
+ok 18 - input: sends frame, resolves on input_ack
+  ---
+  duration_ms: 0.293
+  type: 'test'
+  ...
+# Subtest: input: timeout is a decidable failure (no silent loss)
+ok 19 - input: timeout is a decidable failure (no silent loss)
+  ---
+  duration_ms: 701.073791
+  type: 'test'
+  ...
+# Subtest: keys: named-key input sends keys array without text
+ok 20 - keys: named-key input sends keys array without text
+  ---
+  duration_ms: 1.570958
+  type: 'test'
+  ...
+# Subtest: keys: repeated special keys remain in flight independently
+ok 21 - keys: repeated special keys remain in flight independently
+  ---
+  duration_ms: 0.677083
+  type: 'test'
+  ...
+# Subtest: close reason is exposed for visible connection feedback
+ok 22 - close reason is exposed for visible connection feedback
+  ---
+  duration_ms: 0.277125
+  type: 'test'
+  ...
+# Subtest: auth rejection is permanent (no reconnect loop)
+ok 23 - auth rejection is permanent (no reconnect loop)
+  ---
+  duration_ms: 0.1275
+  type: 'test'
+  ...
+# Subtest: disconnect is permanent and drops the socket
+ok 24 - disconnect is permanent and drops the socket
+  ---
+  duration_ms: 0.131583
+  type: 'test'
+  ...
+# Subtest: auth → listing → aggregated model carries uid/spaceKey/device name
+ok 25 - auth → listing → aggregated model carries uid/spaceKey/device name
+  ---
+  duration_ms: 56.0905
+  type: 'test'
+  ...
+# Subtest: two devices union, colliding basenames disambiguate, uncheck filters without disconnecting
+ok 26 - two devices union, colliding basenames disambiguate, uncheck filters without disconnecting
+  ---
+  duration_ms: 15.416833
+  type: 'test'
+  ...
+# Subtest: list_delta applies; a seq gap triggers exactly one automatic re-list
+ok 27 - list_delta applies; a seq gap triggers exactly one automatic re-list
+  ---
+  duration_ms: 135.879333
+  type: 'test'
+  ...
+# Subtest: level2 fills title/status/provider and drives the client-side aggregate
+ok 28 - level2 fills title/status/provider and drives the client-side aggregate
+  ---
+  duration_ms: 23.807875
+  type: 'test'
+  ...
+# Subtest: subscribe routes binary frames with deviceId; input acks; resize no-op stays silent
+ok 29 - subscribe routes binary frames with deviceId; input acks; resize no-op stays silent
+  ---
+  duration_ms: 176.851042
+  type: 'test'
+  ...
+# Subtest: socket drop → re-auth, subscription and level2 replay
+ok 30 - socket drop → re-auth, subscription and level2 replay
+  ---
+  duration_ms: 55.3425
+  type: 'test'
+  ...
+# Subtest: bad token stops permanently with a token-free error message
+ok 31 - bad token stops permanently with a token-free error message
+  ---
+  duration_ms: 162.262667
+  type: 'test'
+  ...
+# Subtest: storage: devices persist, corrupt data falls back, removeDevice forgets favourites and panes
+ok 32 - storage: devices persist, corrupt data falls back, removeDevice forgets favourites and panes
+  ---
+  duration_ms: 13.296458
+  type: 'test'
+  ...
+# Subtest: inferProvider: case-insensitive substring table
+ok 33 - inferProvider: case-insensitive substring table
+  ---
+  duration_ms: 0.840333
+  type: 'test'
+  ...
+# Subtest: inferProvider: opencode is not misread as codex
+ok 34 - inferProvider: opencode is not misread as codex
+  ---
+  duration_ms: 0.218167
+  type: 'test'
+  ...
+# Subtest: every inferred key has a label and an icon slug pair
+ok 35 - every inferred key has a label and an icon slug pair
+  ---
+  duration_ms: 2.185625
+  type: 'test'
+  ...
+# Subtest: providerLabel falls back to the raw session name
+ok 36 - providerLabel falls back to the raw session name
+  ---
+  duration_ms: 0.079208
+  type: 'test'
+  ...
+# Subtest: collapsed chrome: no 131px column; no traffic-light gutter
+ok 37 - collapsed chrome: no 131px column; no traffic-light gutter
+  ---
+  duration_ms: 8.130792
+  type: 'test'
+  ...
+# Subtest: fullscreen hot zone sits below 62px system chrome inset
+ok 38 - fullscreen hot zone sits below 62px system chrome inset
+  ---
+  duration_ms: 0.133541
+  type: 'test'
+  ...
+# Subtest: pill reveal: enter shows; leave waits hideMs; re-enter cancels hide
+ok 39 - pill reveal: enter shows; leave waits hideMs; re-enter cancels hide
+  ---
+  duration_ms: 121.826791
+  type: 'test'
+  ...
+# Subtest: runWindowChrome close/min/zoom against a mock API
+ok 40 - runWindowChrome close/min/zoom against a mock API
+  ---
+  duration_ms: 0.609959
+  type: 'test'
+  ...
+# Subtest: Cmd+B is local; Cmd+W and Cmd+Q are not protocol keys (native close/quit)
+ok 41 - Cmd+B is local; Cmd+W and Cmd+Q are not protocol keys (native close/quit)
+  ---
+  duration_ms: 1.07725
+  type: 'test'
+  ...
+# Subtest: fillsDisplay is a function used for fullscreen detection
+ok 42 - fillsDisplay is a function used for fullscreen detection
+  ---
+  duration_ms: 0.74875
+  type: 'test'
+  ...
+# Subtest: parseOnData: printable run stays one text event
+ok 43 - parseOnData: printable run stays one text event
+  ---
+  duration_ms: 2.89475
+  type: 'test'
+  ...
+# Subtest: parseOnData: CR / LF / CRLF are bare enter
+ok 44 - parseOnData: CR / LF / CRLF are bare enter
+  ---
+  duration_ms: 0.307209
+  type: 'test'
+  ...
+# Subtest: parseOnData: type then enter does not glue
+ok 45 - parseOnData: type then enter does not glue
+  ---
+  duration_ms: 0.113875
+  type: 'test'
+  ...
+# Subtest: parseOnData: closed-set keys
+ok 46 - parseOnData: closed-set keys
+  ---
+  duration_ms: 0.1095
+  type: 'test'
+  ...
+# Subtest: parseOnData: unsupported is labeled, not remapped
+ok 47 - parseOnData: unsupported is labeled, not remapped
+  ---
+  duration_ms: 0.220209
+  type: 'test'
+  ...
+# Subtest: NativeInputPump merges burst text into one sendText
+ok 48 - NativeInputPump merges burst text into one sendText
+  ---
+  duration_ms: 53.483292
+  type: 'test'
+  ...
+# Subtest: NativeInputPump flushes text before enter / keys
+ok 49 - NativeInputPump flushes text before enter / keys
+  ---
+  duration_ms: 0.331417
+  type: 'test'
+  ...
+# Subtest: parseOnData: SGR motion 35 is silent, not CSI unsupported
+ok 50 - parseOnData: SGR motion 35 is silent, not CSI unsupported
+  ---
+  duration_ms: 0.116917
+  type: 'test'
+  ...
+# Subtest: parseOnData: SGR wheel 64/65 silent; click 0 is mouse-click
+ok 51 - parseOnData: SGR wheel 64/65 silent; click 0 is mouse-click
+  ---
+  duration_ms: 0.540334
+  type: 'test'
+  ...
+# Subtest: parseOnData: X10 mouse three-byte report is not printable text
+ok 52 - parseOnData: X10 mouse three-byte report is not printable text
+  ---
+  duration_ms: 0.578291
+  type: 'test'
+  ...
+# Subtest: classifyMouseBtn: 32+ is motion, 64/65 wheel, 0-2 click
+ok 53 - classifyMouseBtn: 32+ is motion, 64/65 wheel, 0-2 click
+  ---
+  duration_ms: 0.305083
+  type: 'test'
+  ...
+# Subtest: NativeInputPump: motion does not hint; click hints at most once per window
+ok 54 - NativeInputPump: motion does not hint; click hints at most once per window
+  ---
+  duration_ms: 0.326875
+  type: 'test'
+  ...
+# Subtest: NativeInputPump: Ctrl-D still hints (user key, not mouse noise)
+ok 55 - NativeInputPump: Ctrl-D still hints (user key, not mouse noise)
+  ---
+  duration_ms: 0.075333
+  type: 'test'
+  ...
+# Subtest: unsupportedKeyEvent lets mapped keys through
+ok 56 - unsupportedKeyEvent lets mapped keys through
+  ---
+  duration_ms: 0.246458
+  type: 'test'
+  ...
+# Subtest: encode: auth matches golden fixture (field order frozen)
+ok 57 - encode: auth matches golden fixture (field order frozen)
+  ---
+  duration_ms: 1.746041
+  type: 'test'
+  ...
+# Subtest: encode: auth rejects empty token
+ok 58 - encode: auth rejects empty token
+  ---
+  duration_ms: 0.281125
+  type: 'test'
+  ...
+# Subtest: encode: input text variant matches golden field order
+ok 59 - encode: input text variant matches golden field order
+  ---
+  duration_ms: 0.081042
+  type: 'test'
+  ...
+# Subtest: encode: input keys variant matches golden field order
+ok 60 - encode: input keys variant matches golden field order
+  ---
+  duration_ms: 0.135167
+  type: 'test'
+  ...
+# Subtest: encode: input with both text and keys is rejected (mutually exclusive)
+ok 61 - encode: input with both text and keys is rejected (mutually exclusive)
+  ---
+  duration_ms: 0.08475
+  type: 'test'
+  ...
+# Subtest: encode: input with unknown key is rejected (closed set)
+ok 62 - encode: input with unknown key is rejected (closed set)
+  ---
+  duration_ms: 0.064209
+  type: 'test'
+  ...
+# Subtest: encode: bare-enter input (empty text) omits the text field
+ok 63 - encode: bare-enter input (empty text) omits the text field
+  ---
+  duration_ms: 0.105083
+  type: 'test'
+  ...
+# Subtest: decode: every golden control-frame fixture round-trips through validate
+ok 64 - decode: every golden control-frame fixture round-trips through validate
+  ---
+  duration_ms: 14.428084
+  type: 'test'
+  ...
+# Subtest: decode: missing version is an error
+ok 65 - decode: missing version is an error
+  ---
+  duration_ms: 0.630708
+  type: 'test'
+  ...
+# Subtest: decode: wrong version is unsupported_version
+ok 66 - decode: wrong version is unsupported_version
+  ---
+  duration_ms: 0.573875
+  type: 'test'
+  ...
+# Subtest: decode: unknown type is unsupported_type
+ok 67 - decode: unknown type is unsupported_type
+  ---
+  duration_ms: 0.184208
+  type: 'test'
+  ...
+# Subtest: decode: unknown fields inside payload are ignored (forward compat)
+ok 68 - decode: unknown fields inside payload are ignored (forward compat)
+  ---
+  duration_ms: 0.062708
+  type: 'test'
+  ...
+# Subtest: decode: listing missing required seq is invalid_field
+ok 69 - decode: listing missing required seq is invalid_field
+  ---
+  duration_ms: 0.065125
+  type: 'test'
+  ...
+# Subtest: decode: input_ack ok:false without reason is invalid (one-field-one-meaning)
+ok 70 - decode: input_ack ok:false without reason is invalid (one-field-one-meaning)
+  ---
+  duration_ms: 0.057542
+  type: 'test'
+  ...
+# Subtest: enumerations are the documented closed sets
+ok 71 - enumerations are the documented closed sets
+  ---
+  duration_ms: 0.051
+  type: 'test'
+  ...
+# Subtest: history requests paginate backward from the previous returned range
+ok 72 - history requests paginate backward from the previous returned range
+  ---
+  duration_ms: 1.427416
+  type: 'test'
+  ...
+# Subtest: resize 上报合并成一次：连续 fit 只回调最终几何
+ok 73 - resize 上报合并成一次：连续 fit 只回调最终几何
+  ---
+  duration_ms: 204.171708
+  type: 'test'
+  ...
+# Subtest: 几何没变不上报
+ok 74 - 几何没变不上报
+  ---
+  duration_ms: 403.10825
+  type: 'test'
+  ...
+# Subtest: 滚到顶触发拉历史；停在顶部不重复触发
+ok 75 - 滚到顶触发拉历史；停在顶部不重复触发
+  ---
+  duration_ms: 0.261916
+  type: 'test'
+  ...
+# Subtest: 顶部上滚滚轮触发拉历史（scrollback=0 时 onScroll 永不触发）
+ok 76 - 顶部上滚滚轮触发拉历史（scrollback=0 时 onScroll 永不触发）
+  ---
+  duration_ms: 0.305667
+  type: 'test'
+  ...
+# Subtest: snapshot 清屏重建、delta 追加，字节原样不动
+ok 77 - snapshot 清屏重建、delta 追加，字节原样不动
+  ---
+  duration_ms: 0.161875
+  type: 'test'
+  ...
+# Subtest: parseAnsi 只解 SGR，其余 ESC 吞掉
+ok 78 - parseAnsi 只解 SGR，其余 ESC 吞掉
+  ---
+  duration_ms: 0.200667
+  type: 'test'
+  ...
+# Subtest: parseAnsi 不生成标记，尖括号原样留在片段文本里
+ok 79 - parseAnsi 不生成标记，尖括号原样留在片段文本里
+  ---
+  duration_ms: 0.058959
+  type: 'test'
+  ...
+# Subtest: 焦点列实心闪烁、失焦列空心：cursorBlink + outline inactive + focus/blur
+ok 80 - 焦点列实心闪烁、失焦列空心：cursorBlink + outline inactive + focus/blur
+  ---
+  duration_ms: 0.159125
+  type: 'test'
+  ...
+# Subtest: onData 把按键交给调用方；disableStdin 为 false
+ok 81 - onData 把按键交给调用方；disableStdin 为 false
+  ---
+  duration_ms: 0.412209
+  type: 'test'
+  ...
+# Subtest: attachWebglRenderer: importer 抛错则静默返回 null，不调用 loadAddon
+ok 82 - attachWebglRenderer: importer 抛错则静默返回 null，不调用 loadAddon
+  ---
+  duration_ms: 0.816875
+  type: 'test'
+  ...
+# Subtest: attachWebglRenderer: loadAddon 抛错则静默返回 null
+ok 83 - attachWebglRenderer: loadAddon 抛错则静默返回 null
+  ---
+  duration_ms: 0.091916
+  type: 'test'
+  ...
+# Subtest: attachWebglRenderer: 成功时返回 addon 且 loadAddon 被调用一次
+ok 84 - attachWebglRenderer: 成功时返回 addon 且 loadAddon 被调用一次
+  ---
+  duration_ms: 0.23825
+  type: 'test'
+  ...
+# Subtest: attachWebglRenderer: load 成功但 canvas 0×0 则 dispose 并回退 DOM
+ok 85 - attachWebglRenderer: load 成功但 canvas 0×0 则 dispose 并回退 DOM
+  ---
+  duration_ms: 0.127917
+  type: 'test'
+  ...
+# Subtest: TerminalView.open in node falls back when addon cannot init
+ok 86 - TerminalView.open in node falls back when addon cannot init
+  ---
+  duration_ms: 0.714625
+  type: 'test'
+  ...
+# Subtest: linesFromWheel: pixel mode folds by LINE_PX
+ok 87 - linesFromWheel: pixel mode folds by LINE_PX
+  ---
+  duration_ms: 0.782458
+  type: 'test'
+  ...
+# Subtest: linesFromWheel: line and page modes
+ok 88 - linesFromWheel: line and page modes
+  ---
+  duration_ms: 0.072833
+  type: 'test'
+  ...
+# Subtest: WheelAccumulator merges ticks and only sends non-zero integers
+ok 89 - WheelAccumulator merges ticks and only sends non-zero integers
+  ---
+  duration_ms: 42.9135
+  type: 'test'
+  ...
+# Subtest: WheelAccumulator preserves sign (down = positive)
+ok 90 - WheelAccumulator preserves sign (down = positive)
+  ---
+  duration_ms: 41.568958
+  type: 'test'
+  ...
+# Subtest: mock daemon: input on one uid does not leak scroll_wheel onto the other
+ok 91 - mock daemon: input on one uid does not leak scroll_wheel onto the other
+  ---
+  duration_ms: 219.278958
+  type: 'test'
+  ...
+1..91
+# tests 91
+# suites 0
+# pass 91
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 879.645792

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PILL_HARNESS_RUNNING</title>
+  <link rel="stylesheet" href="/src/components/chrome/chrome.css" />
+</head>
+<body>
+<div class="chrome-pill is-reveal" id="pill">
+  <button type="button" class="chrome-lamp r"><span>✕</span></button>
+  <button type="button" class="chrome-lamp y"><span>–</span></button>
+  <button type="button" class="chrome-lamp g"><span>⤢</span></button>
+  <div class="chrome-pill-sep"></div>
+  <button type="button" class="chrome-pill-exp">x</button>
+</div>
+<pre id="out">running</pre>
+<script type="module">
+import { pillHotTop, createPillReveal, runWindowChrome, PILL_HIDE_MS } from '/src/lib/windowChrome.js';
+const pill = document.getElementById('pill');
+const cs = getComputedStyle(pill);
+const recs = [];
+recs.push({ name: 'radius_999', pass: cs.borderRadius === '999px' || parseFloat(cs.borderRadius) >= 999, borderRadius: cs.borderRadius, w: pill.offsetWidth, h: pill.offsetHeight });
+recs.push({ name: 'hot_fs', pass: pillHotTop(true) === 62 && pillHotTop(false) === 0 });
+const log = [];
+const r = createPillReveal({ hideMs: 30, onChange: (v) => log.push(v) });
+r.enter();
+r.leave();
+await new Promise((x) => setTimeout(x, 10));
+const mid = r.revealed;
+await new Promise((x) => setTimeout(x, 40));
+recs.push({ name: 'hide_delay', pass: mid === true && r.revealed === false && PILL_HIDE_MS === 160, mid, after: r.revealed });
+const api = { hide: async () => log.push('hide'), minimize: async () => {}, isFullscreen: async () => false, setFullscreen: async () => {} };
+await runWindowChrome('close', api);
+recs.push({ name: 'close_is_hide', pass: log.includes('hide') });
+const ok = recs.every((x) => x.pass);
+document.getElementById('out').textContent = JSON.stringify({ ok, recs, box: { w: pill.offsetWidth, h: pill.offsetHeight, r: cs.borderRadius } });
+document.title = ok ? 'PILL_HARNESS_PASS' : 'PILL_HARNESS_FAIL';
+</script>
+</body>
+</html>
