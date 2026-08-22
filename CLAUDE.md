@@ -116,10 +116,19 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
     两个声明不同 ⇒ 两个实跑不同。**该推断不依赖「Cursor 默认值是多少」**：
     默认若 High 则 judge 那格证明生效，默认若 Medium 则 integrator 那格证明生效。
 
-  ⚠️ 框架队 2026-08-22 报的是相反结论（「shim 剥 `--model`」，声明 `sonnet-4-thinking`
-  而 pane 显 `Cursor Grok 4.6`）。**本机实测与之矛盾，已回报**。⇒ 在他们复核前，
-  ⛔ 不许只凭角色文件宣称模型：🔴 **每次起/重建席位仍必须 `capture-pane` 核模型名**。
-  对不上就停下报用户，⛔ 不许自己改 Cursor 的默认设置。
+  ✅ 框架队 2026-08-22 已复核并确认：`--model` 确实进 argv（`adapters/cursor_agent.rs`
+  有测试 `cursor_role_explicit_model_reaches_argv`），他们原先「shim 剥掉」的说法作废。
+  **同家族内，角色文件的 `model:` 能强制** ⇒ 用户的合规令是可以由配置保证的。
+
+  ⚠️ 但他们同时给了两条限定，都是陷阱：
+  - 🔴 **模型名必须取自该 provider 的 catalog**（查法：`cursor-agent models`）。
+    跨家族或不存在的 id 会**静默兜底、零告警**，而且**兜底落点不稳定** ——
+    他们同一个 `sonnet-4-thinking` 两次分别落到 `Cursor Grok 4.6 Extra High` 与 `Composer 2.5`。
+    ⛔ 不许把兜底想成「落到本机默认」，它不是一个稳定值。（该缺陷已立案，短期无排期，⛔ 不要等。）
+  - 🔴 **`capture-pane` 看到的是铬名，不等于实跑模型**。「pane 显示是不是实跑模型」
+    框架队**答不了**（argv 只证明声明进了 CLI；无请求日志）。
+  ⇒ **自证照做**（每次起/重建席位 `capture-pane`），但它只证明声明与铬名一致，
+  ⛔ 不许把它当作实跑模型的证据。对不上就停下报用户，⛔ 不许自己改 Cursor 的默认设置。
 
   代价（写任务书时必须吃住）：**cursor 席位重启即失忆**，`--resume` 不载历史 ⇒
   ⛔ 只派**单回合自足**任务，要延续的信息一律落盘到产物文件，不许指望席位记得上一轮。
