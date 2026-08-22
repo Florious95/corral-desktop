@@ -182,9 +182,6 @@ export class Client {
 
   /** Report client terminal dims (applies to a subscribed session). */
   resize(ref, rows, cols) {
-    if (this.activeSubscriptions.has(ref)) {
-      this.activeSubscriptions.set(ref, { rows, cols });
-    }
     if (!this.isReady) return false;
     return this.sendControl('resize', { ref, rows, cols });
   }

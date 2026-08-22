@@ -56,9 +56,6 @@ function makeView(overrides = {}) {
     isConnected: true,
     clientWidth: 800,
     clientHeight: 400,
-    scrollHeight: 400,
-    scrollTop: 0,
-    style: {},
     addEventListener: (type, fn) => { if (type === 'wheel') wheelHandlers.push(fn) },
     removeEventListener: () => {},
   };
@@ -72,44 +69,20 @@ function makeView(overrides = {}) {
   return { view, container, calls, wheel: (deltaY) => wheelHandlers.forEach((fn) => fn({ deltaY })) };
 }
 
-test('首次真实视口上抛一次；此后改列宽不再 resize、不折行', async () => {
+test('resize 上报合并成一次：连续 fit 只回调最终几何', async () => {
   const { view, container, calls } = makeView();
   view.open();                                  // 800/8=100 列, 400/16=25 行
   assert.deepEqual(view.term.cols, 100);
   assert.deepEqual(view.term.rows, 25);
-  await sleep(200);
-  assert.deepEqual(calls.resize, [[25, 100]], '仅首次上抛');
 
-  for (let i = 0; i < 30; i += 1) {
-    container.clientWidth = i % 2 === 0 ? 640 : 800;
-    container.clientHeight = i % 2 === 0 ? 320 : 400;
-    view.fit();
-  }
-  container.clientWidth = 640;
-  container.clientHeight = 320;
+  container.clientWidth = 640;                  // 80 列
   view.fit();
-  await sleep(200);
-  assert.equal(calls.resize.length, 1);
-  assert.equal(view.term.cols, 100, '格子锁死，窄容器也不折成 80 列');
-  assert.equal(view.term.rows, 25);
-  assert.equal(container.style.overflow, 'auto');
-  assert.equal(view._layout.overflowX, true);
-  view.dispose();
-});
+  container.clientHeight = 320;                 // 20 行
+  view.fit();
+  assert.equal(calls.resize.length, 0, '120ms 之内不应上报');
 
-test('0×0 预布局不算那一次；正尺寸之后才 seed', async () => {
-  const { view, container, calls } = makeView();
-  container.clientWidth = 0;
-  container.clientHeight = 0;
-  view.open();
-  assert.equal(view._viewportSeeded, false);
-  assert.equal(calls.resize.length, 0);
-  container.clientWidth = 800;
-  container.clientHeight = 400;
-  view.fit();
   await sleep(200);
-  assert.equal(view._viewportSeeded, true);
-  assert.deepEqual(calls.resize, [[25, 100]]);
+  assert.deepEqual(calls.resize, [[20, 80]], '合并后只上报一次最终 rows/cols');
   view.dispose();
 });
 

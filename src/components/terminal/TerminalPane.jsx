@@ -14,7 +14,7 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
 
 /**
  * 一个分裂列的终端视图：订阅 → snapshot 清屏重建 → delta 追加；
- * 容器尺寸变化 → fit（仅首次正视口上报 resize；此后挤压不发帧，CLIENT-CONTRACT §3.4）；
+ * 容器尺寸变化 → fit → resize 帧（发完即忘，⛔ 不进「等 snapshot」阻塞态，CLIENT-CONTRACT §3.4）；
  * 上滚到顶 → 协议 scrollback 分页拉取，渲染进独立只读面板（⛔ 绝不写进活的 xterm 网格，§3.3）。
  *
  * @param {Object} props

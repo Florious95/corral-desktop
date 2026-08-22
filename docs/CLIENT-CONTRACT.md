@@ -154,11 +154,10 @@ export class TerminalView {
 }
 ```
 
-**必须保留的行为:**
-- 首次**正尺寸**视口换算一次 rows/cols 并 `_report()`（120ms 合并窗口只服务这一次上抛）。0×0 不算。
-- 此后 `fit()` 只做布局挤压（overflow / 底行可见），⛔ 不再 `term.resize`、⛔ 不再上抛（裁定 2026-08-23）。
+**必须保留的两条行为(照抄 web 版,有单测护着):**
+- `_report()` 用 **120ms debounce** 合并 resize —— 服务端每次真 reflow 都回一帧 snapshot,不合并会闪烁重画。
+- 首帧之后的 `fit()` 把**本地** `term.resize` 也推迟到同一 120ms：列宽来回抖时若回到原几何，daemon `resize` 会 no-op 不补快照；先本地 reflow 旧内容就会钉死错乱（裁定 2026-08-23）。
 - `onScroll` 边界:`line <= 0 && this._lastScrollLine > 0` → 触发 `onHistoryBoundary()` → 拉更早历史。
-- 重连 `replaySubscriptions()` 重放 **Map 里最新** 的 rows/cols（`subscribe` 与随后的 `resize` 都会写入）。
 
 新增依赖:`@xterm/xterm@6`(已裁定)+ `@xterm/addon-fit`。不再需要 `postinstall.cjs` 拷 UMD。
 
@@ -386,15 +385,17 @@ fetchOlder(() => this, { onLoading: n => setStatus(`加载 ${n} 行历史…`), 
 
 ### 3.4 resize → 补发 snapshot(可能不补)
 
-`onResize` 由 `TerminalView` **仅在首次真实视口**触发一次（120ms 合并）→ `dm.resize` / 与 `subscribe` 共用那组协商 cols。此后窗口拖拽 / 分裂列宽 → `ResizeObserver` → `fit()` **不再**发 `resize` 帧（裁定 2026-08-23）。
+`onResize` 由 `TerminalView` 的 120ms debounce 触发 → `dm.resize(uid, rows, cols)` → `resize` 帧。
 
-服务端 `handleResize` 实测（仍适用于那一次，以及重连 replay 的 subscribe）:
+服务端 `handleResize` 实测:
 - 只对**已订阅**的 ref 生效;未订阅 = 静默 no-op,无任何回复。
 - 只有发生**真实 reflow**(几何确实变了)才补发一帧 snapshot;
   几何没变会走 `"ws: resize no-op, skip snapshot"` 分支,**什么都不回**。
 - 没有独立的 resize ack —— 补发的 snapshot 就是事实回执。
 
 ⛔ 因此 UI **不得**进入「等 snapshot」的阻塞态,也不得对 resize 设超时报错。发完即忘。
+
+窗口拖拽 / 分裂列宽变化 → `ResizeObserver` → `term.fit()` → 变了才走上面这条链。
 
 ### 3.5 input:两帧提交,不是一帧
 
