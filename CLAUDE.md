@@ -118,8 +118,13 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
 `cursor_agent seat already occupies this workspace` ——
 根因是 `<workspace>/.cursor/mcp.json` 是**目录作用域**的，第二席会覆盖 `TEAM_AGENT_ID`（后写者赢）。
 ⇒ 与 §7「只许 cursor」叠加的后果：**六席位编排作废**，`.team/current/` 只剩 `integrator`。
-⛔ 不许为绕开它在同一 workspace 硬塞第二席。要多席位只有两条路，都得先立项：
-① 每席一个独立 workspace（各自 `.cursor/`）；② 等上游把 per-seat MCP identity 隔离掉。
+⛔ 不许为绕开它在同一 workspace 硬塞第二席。
+
+🔴 **多席位 = 多 workspace，一目录一席。这是正解，不是降级凑合。**
+（框架队 2026-08-22 回信：grok 的 `<cwd>/.grok/config.toml` **同样是目录作用域**，
+同一 workspace 起第二个 grok 席会**回溯性污染先起的那个**，而且**当年 `add-agent` 根本不拦**——
+他们自己撞出来才写进纪律。cursor 这条至少 fail-closed 并给了 action。
+他们四个席位就是四个 workspace 目录。）⇒ 要开第二席就开第二个 workspace，⛔ 不要等上游隔离。
 
 - 角色文件必须 `dangerously_skip_permissions: true`，否则席位停在确认提示上，
   症状伪装成「投递失败」。该字段只在启动生效，改文件要 `add-agent --force` 重建。
@@ -128,10 +133,13 @@ Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket�
   （team-agent skill 文档说 `model` 会被 shim 剥掉、可省 —— **与 CLI 实测矛盾，以 CLI 为准**。）
 - **起完必须 `capture-pane` 自证**：底部要显 `Cursor Agent v<版本>` + 具体模型名。
   ⛔ `ok: True` 不算起成功。
-- 🔴 **判者独立性没了席位可依托**：同一 workspace 里再也开不出独立判官席。
-  替代做法（选一条，写进任务书）：判官跑在**独立 workspace**；
-  或利用 cursor「重启即失忆」——同一席位 `reset-agent --discard-session` 后就是零上下文判官，
-  但 ⛔ 必须只喂它 PR diff + 判据，不许喂实现过程。**产出方自证仍然不算数。**
+- 🔴 **判者独立性的实质是三件，缺一不算独立**（框架队 2026-08-22 纠正我的原文）：
+  ① **判者不是产出方** ② **零上下文** ③ **破坏齿由判者选址**
+  （判者自己另找一处把实现改坏，看测试红不红；⛔ 不许复用产出方给的那个反面样本）。
+  ⇒ **判官优先开在第二个 workspace**。
+  ⛔ **不许拿 `reset-agent --discard-session` 冒充独立判官**：它只买到②，
+  同一个席位清了上下文**仍然是同一双手**，①不成立。
+  实在拿不到第二个 workspace，至少让判者**自己另写反面样本**，并在产物里标明①未满足。
 - **leader 不亲写产品码**，上下文留给判断。
 - **投递纪律**：裁定写成文件再 `$(cat ...)` 投——正文里的反引号/尖括号会被 shell 截断
   **但 send 仍返回成功**。席位工作中投会 `send_unverified_exhausted`，**等空闲再投**。
