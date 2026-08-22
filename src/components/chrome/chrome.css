@@ -49,6 +49,29 @@
   align-self: stretch;
 }
 
+/* 折叠态左上角热区：默认看不见按钮；hover/focus 才出现。padding-left 避开交通灯。 */
+.hover-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
+  height: 38px;
+  padding: 0 8px 0 78px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+}
+.hover-chrome-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--d-hover);
+}
+.hover-chrome:hover .hover-chrome-btn,
+.hover-chrome:focus-within .hover-chrome-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* ---------- §4.5 ContextMenu ---------- */
 .cm-overlay {
   position: fixed;

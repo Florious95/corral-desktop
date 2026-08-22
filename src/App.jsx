@@ -7,11 +7,13 @@ import {
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
+import HoverToggle from './components/chrome/HoverToggle.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
+import { watchFullscreen } from './lib/fullscreen.js';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
@@ -88,6 +90,7 @@ export default function App({ seedDevices } = {}) {
   const [activeKey, setActiveKey] = useState(() => LS.read('am.activePane', null));
   const [selected, setSelected] = useState(() => LS.read('am.selected', 'all'));
   const [collapsed, setCollapsed] = useState(() => LS.read('am.collapsed', false));
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [spacesOpen, setSpacesOpen] = useState(() => LS.read('am.spacesOpen', true));
   const [agentsOpen, setAgentsOpen] = useState(() => LS.read('am.agentsOpen', true));
 
@@ -108,6 +111,12 @@ export default function App({ seedDevices } = {}) {
     setDevices(dm.devices);
     setWorkspaces(dm.workspaces);
   }, [dm]);
+
+  useEffect(() => {
+    let off;
+    watchFullscreen(setNativeFullscreen).then((u) => { off = u; });
+    return () => { if (typeof off === 'function') off(); };
+  }, []);
 
   useEffect(() => { LS.write('am.fav', favs) }, [favs]);
   useEffect(() => { LS.write('am.panes', paneKeys) }, [paneKeys]);
@@ -462,12 +471,17 @@ export default function App({ seedDevices } = {}) {
   const noDevices = devices.length === 0;
 
   return (
-    <div className="app-root">
+    <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
+      {collapsed ? (
+        <HoverToggle pressed onToggle={() => setCollapsed(false)} />
+      ) : null}
       <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
-        <TitleBar
-          sidebarCollapsed={collapsed}
-          onToggleSidebar={() => setCollapsed((v) => !v)}
-        />
+        {collapsed ? null : (
+          <TitleBar
+            sidebarCollapsed={collapsed}
+            onToggleSidebar={() => setCollapsed((v) => !v)}
+          />
+        )}
         <Sidebar
           collapsed={collapsed}
           spacesOpen={spacesOpen}
