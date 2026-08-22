@@ -55,7 +55,7 @@
 .terminalpane-host {
   flex: 1;
   min-height: 0;
-  overflow: hidden;   /* fit 之后 xterm 网格恰好铺满；余数像素不外溢 */
+  overflow: auto; /* 格子锁死后变窄：横滑/留白，⛔ 不折行（裁定 2026-08-23） */
 }
 
 /* xterm 自带的视口底色是 #000（为 macOS 滚动条不透明准备的），亮色主题下要盖掉 */
