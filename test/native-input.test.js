@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOnData, NativeInputPump, unsupportedKeyEvent, TEXT_FLUSH_MS } from '../src/term/nativeInput.js';
+import { parseOnData, NativeInputPump, unsupportedKeyEvent, TEXT_FLUSH_MS, CLICK_HINT_MS, classifyMouseBtn } from '../src/term/nativeInput.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,6 +73,64 @@ test('NativeInputPump flushes text before enter / keys', () => {
   assert.deepEqual(sent, [['text', 'ok'], ['enter']]);
   pump.onData('\x1b[A');
   assert.deepEqual(sent[2], ['key', 'up']);
+  pump.dispose();
+});
+
+test('parseOnData: SGR motion 35 is silent, not CSI unsupported', () => {
+  const ev = parseOnData('\x1b[<35;30;34M');
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].type, 'mouse-silent');
+});
+
+test('parseOnData: SGR wheel 64/65 silent; click 0 is mouse-click', () => {
+  assert.equal(parseOnData('\x1b[<64;1;1M')[0].type, 'mouse-silent');
+  assert.equal(parseOnData('\x1b[<65;1;1m')[0].type, 'mouse-silent');
+  const click = parseOnData('\x1b[<0;10;10M');
+  assert.equal(click[0].type, 'mouse-click');
+  assert.equal(click[0].label, '鼠标点击');
+});
+
+test('parseOnData: X10 mouse three-byte report is not printable text', () => {
+  const motion = String.fromCharCode(32 + 35, 32 + 8, 32 + 8);
+  const ev = parseOnData('\x1b[M' + motion);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].type, 'mouse-silent');
+  const click = parseOnData('\x1b[M' + String.fromCharCode(32, 32 + 1, 32 + 1));
+  assert.equal(click[0].type, 'mouse-click');
+});
+
+test('classifyMouseBtn: 32+ is motion, 64/65 wheel, 0-2 click', () => {
+  assert.equal(classifyMouseBtn(35), 'silent');
+  assert.equal(classifyMouseBtn(64), 'silent');
+  assert.equal(classifyMouseBtn(65), 'silent');
+  assert.equal(classifyMouseBtn(0), 'click');
+  assert.equal(classifyMouseBtn(2), 'click');
+});
+
+test('NativeInputPump: motion does not hint; click hints at most once per window', () => {
+  const hints = [];
+  const pump = new NativeInputPump({
+    sendText: () => {}, sendKey: () => {}, sendEnter: () => {},
+    onUnsupported: (l) => hints.push(l),
+  });
+  pump.onData('\x1b[<35;30;34M');
+  pump.onData('\x1b[<35;31;34M');
+  pump.onData('\x1b[<64;1;1M');
+  assert.deepEqual(hints, []);
+  pump.onData('\x1b[<0;2;2M');
+  pump.onData('\x1b[<0;3;3M');
+  assert.deepEqual(hints, ['鼠标点击']);
+  pump.dispose();
+});
+
+test('NativeInputPump: Ctrl-D still hints (user key, not mouse noise)', () => {
+  const hints = [];
+  const pump = new NativeInputPump({
+    sendText: () => {}, sendKey: () => {}, sendEnter: () => {},
+    onUnsupported: (l) => hints.push(l),
+  });
+  pump.onData('\x04');
+  assert.deepEqual(hints, ['Ctrl-D']);
   pump.dispose();
 });
 

@@ -5,6 +5,8 @@
 
 export const TEXT_FLUSH_MS = 32;
 export const TEXT_FLUSH_CHARS = 64;
+/** 真点击提示：同一泵每这么多毫秒最多一次。移动/滚轮上报不提示。 */
+export const CLICK_HINT_MS = 3000;
 
 const ARROW = { A: 'up', B: 'down', C: 'right', D: 'left' };
 
@@ -44,6 +46,22 @@ function mapCsi(seq) {
   if (seq === '\x1b[C') return 'right';
   if (seq === '\x1b[D') return 'left';
   return null;
+}
+
+/**
+ * SGR 1006 鼠标：btn 64/65 = 滚轮，≥32 = 移动（含 35），0/1/2 = 真点击。
+ * @returns {'silent'|'click'|null}
+ */
+export function classifyMouseBtn(btn) {
+  if (!Number.isFinite(btn)) return 'silent';
+  if (btn === 64 || btn === 65 || btn === 66 || btn === 67) return 'silent';
+  if (btn >= 32) return 'silent';
+  return 'click';
+}
+
+function mouseEvent(kind, seq) {
+  if (kind === 'click') return { type: 'mouse-click', label: '鼠标点击', seq };
+  return { type: 'mouse-silent', seq };
 }
 
 /**
@@ -90,7 +108,33 @@ export function parseOnData(s) {
     }
     if (c === '\x1b') {
       flush();
+      // X10 鼠标：ESC [ M + 3 字节（btn/x/y 各 +32）
+      if (s[i + 1] === '[' && s[i + 2] === 'M') {
+        if (i + 5 >= s.length) {
+          events.push(mouseEvent('silent', s.slice(i)));
+          break;
+        }
+        const btn = s.charCodeAt(i + 3) - 32;
+        events.push(mouseEvent(classifyMouseBtn(btn), s.slice(i, i + 6)));
+        i += 6;
+        continue;
+      }
       if (s[i + 1] === '[') {
+        // SGR 1006：ESC [ < btn ; x ; y M|m —— 必须在通用 CSI 之前吃掉，否则变成「协议发不了」
+        if (s[i + 2] === '<') {
+          let j = i + 3;
+          while (j < s.length && s[j] !== 'M' && s[j] !== 'm') j += 1;
+          if (j >= s.length) {
+            events.push(mouseEvent('silent', s.slice(i)));
+            break;
+          }
+          const seq = s.slice(i, j + 1);
+          const m = /^(\d+)/.exec(s.slice(i + 3));
+          const btn = m ? Number(m[1]) : NaN;
+          events.push(mouseEvent(classifyMouseBtn(btn), seq));
+          i = j + 1;
+          continue;
+        }
         let j = i + 2;
         while (j < s.length) {
           const cc = s.charCodeAt(j);
@@ -180,6 +224,7 @@ export class NativeInputPump {
     this.onUnsupported = onUnsupported;
     this._buf = '';
     this._timer = null;
+    this._lastClickHint = 0;
   }
 
   onData(s) {
@@ -193,7 +238,13 @@ export class NativeInputPump {
       this.flush();
       if (e.type === 'enter') this.sendEnter();
       else if (e.type === 'key') this.sendKey(e.value);
-      else this.onUnsupported(e.label);
+      else if (e.type === 'mouse-silent') continue;
+      else if (e.type === 'mouse-click') {
+        const now = Date.now();
+        if (now - this._lastClickHint < CLICK_HINT_MS) continue;
+        this._lastClickHint = now;
+        this.onUnsupported(e.label);
+      } else this.onUnsupported(e.label);
     }
   }
 
