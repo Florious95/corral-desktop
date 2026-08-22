@@ -5,6 +5,7 @@ import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
 import { TerminalView } from '../../term/TerminalView.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
+import { handleClipboardData } from '../../term/clipboardPaste.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
@@ -32,11 +33,13 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
  * @param {(text:string) => void} [props.onText]
  * @param {(key:string) => void} [props.onKey]
  * @param {() => void} [props.onEnter]
+ * @param {(msg:string) => void} [props.onPasteError]
  */
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
-  onText, onKey, onEnter,
+  onText, onKey, onEnter, onPasteError,
 }) {
+  const paneRef = useRef(null);
   const hostRef = useRef(null);
   const viewRef = useRef(null);
   const gRef = useRef(null);
@@ -53,9 +56,11 @@ export default function TerminalPane({
   const onTextRef = useRef(onText);
   const onKeyRef = useRef(onKey);
   const onEnterRef = useRef(onEnter);
+  const onPasteErrorRef = useRef(onPasteError);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onEnterRef.current = onEnter;
+  onPasteErrorRef.current = onPasteError;
 
   const target = addr || agent.ref;
 
@@ -194,8 +199,31 @@ export default function TerminalPane({
     else v.blur();
   }, [focused]);
 
+  useEffect(() => {
+    const el = paneRef.current;
+    if (!el) return undefined;
+    const onPaste = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handleClipboardData(ev.clipboardData, {
+        sendText: (t) => onTextRef.current?.(t),
+        sendImage: (f) => {
+          const up = clientRef.current?.uploadImage;
+          if (!up) return Promise.reject(new Error('未发送'));
+          return up(f);
+        },
+        onError: (msg) => {
+          setHint(msg);
+          onPasteErrorRef.current?.(msg);
+        },
+      });
+    };
+    el.addEventListener('paste', onPaste, { capture: true });
+    return () => el.removeEventListener('paste', onPaste, { capture: true });
+  }, []);
+
   return (
-    <div className="terminalpane">
+    <div className="terminalpane" ref={paneRef}>
       <div className="terminalpane-body">
         {history && (
           <div className="terminalpane-history">
