@@ -16,7 +16,7 @@ body {
 button, input, textarea, select { font-family: inherit; color: inherit }
 button { border: 0; background: none; padding: 0 }
 
-/* ——— 布局骨架：左列（矮标题条 + 侧栏） | 右列终端顶到窗口顶 ——— */
+/* ——— 左列：38px chrome + 侧栏撑满；右列终端从窗口内容区顶边开始（2026-08-22 用户裁定） ——— */
 
 /* position:relative 是 DevicesPopover 的定位基准（UI-SPEC §4.2） */
 .app-root {
@@ -30,10 +30,10 @@ button { border: 0; background: none; padding: 0 }
 .app-left {
   flex: none;
   width: 280px;
-  min-width: 0;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   transition: width var(--d-sidebar) var(--ease);
 }
 .app-left.is-collapsed {
@@ -45,7 +45,7 @@ button { border: 0; background: none; padding: 0 }
   left: 0;
   top: 0;
   z-index: 5;
-  width: 131px; /* 93px 交通灯预留 + 28px 折叠钮 + 10px padding */
+  width: 131px;
 }
 
 .app-main {

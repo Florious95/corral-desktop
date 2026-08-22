@@ -267,8 +267,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
   { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 13 } }
   ```
   （12px 按钮在 38px 条里垂直居中：`(38-12)/2 = 13`。）
-- 标题栏左侧**预留 93px**：`padding-left:93px`，其余控件从 93px 开始排。
-- **整条可拖动**：根 `<div>` 加 `data-tauri-drag-region`；所有可点击子元素**不要**带这个属性（Tauri 按事件 target 判定）。双击缩放由 Tauri 处理。
+- 标题栏左侧**预留 93px**：`padding-left:93px`，折叠钮排在**该条最右端**。
+- **标题条只占左侧栏宽度**（2026-08-22 用户裁定：不通栏；右侧终端从窗口内容区顶边开始，上方无条、无线）。拖拽区只在这条上：根加 `data-tauri-drag-region`，可点击子元素不要带该属性。⛔ 不要把 drag-region 铺到终端上。
+- 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。
 - 关闭 = hide 窗口（`window.hide()`），Quit 走确认；Rust 侧 `on_window_event(CloseRequested → api.prevent_close(); window.hide())`。
 
 ---
@@ -323,7 +324,7 @@ src/
 | 部件 | 规格 |
 |---|---|
 | 根 | `height:38px; flex:none; display:flex; align-items:center; gap:12px; padding:0 10px 0 93px; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset)`，带 `data-tauri-drag-region`。只排在侧栏列顶，不延伸到主区。 |
-| 侧栏开关 | `28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
+| 侧栏开关 | 排在**左侧条最右端**。`28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
 | 品牌名 | **不渲染**（2026-08-22 用户裁定：不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 左侧条剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。**不要**把 drag-region 铺到终端上（否则无法选文本）。 |

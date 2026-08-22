@@ -2,7 +2,8 @@
 
 /* —— 容器 —— */
 .sidebar {
-  flex: none;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
@@ -203,7 +204,7 @@
 .agents-host {
   padding: 0 10px;
   flex: 1;
-  min-height: 108px;
+  min-height: 0;
   overflow: hidden;
   box-sizing: border-box;
 }
