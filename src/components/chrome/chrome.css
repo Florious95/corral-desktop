@@ -19,7 +19,7 @@
 
 /* ---------- §4.1 TitleBar ---------- */
 .tb {
-  height: 46px;
+  height: 38px;
   flex: none;
   display: flex;
   align-items: center;

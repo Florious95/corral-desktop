@@ -261,12 +261,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 
 ## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c`）
 
-- 标题栏高 **46px**（设计稿 `#1c` 的 40px 是示意图，实现取主原型的 46px）。
+- 标题栏高 **38px**。（2026-08-22 用户裁定：顶部去界化，标题条收窄。原 46px 作废。）
 - **原生 traffic lights**，不画假圆点。`tauri.conf.json`：
   ```json
-  { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 17 } }
+  { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 13 } }
   ```
-  （12px 按钮在 46px 条里垂直居中：`(46-12)/2 = 17`。）
+  （12px 按钮在 38px 条里垂直居中：`(38-12)/2 = 13`。）
 - 标题栏左侧**预留 93px**：`padding-left:93px`，其余控件从 93px 开始排。
 - **整条可拖动**：根 `<div>` 加 `data-tauri-drag-region`；所有可点击子元素**不要**带这个属性（Tauri 按事件 target 判定）。双击缩放由 Tauri 处理。
 - 关闭 = hide 窗口（`window.hide()`），Quit 走确认；Rust 侧 `on_window_event(CloseRequested → api.prevent_close(); window.hide())`。
@@ -316,18 +316,17 @@ src/
 /**
  * @param {boolean} sidebarCollapsed
  * @param {() => void} onToggleSidebar
- * @param {number} paneCount        当前分裂列数
  */
 ```
-内部状态：无（纯展示）。
+内部状态：无（纯展示）。标题条只占左侧栏宽度，不横切终端。（2026-08-22 用户裁定：顶部去界化，标题条收窄。）
 
 | 部件 | 规格 |
 |---|---|
-| 根 | `height:46px; flex:none; display:flex; align-items:center; gap:12px; padding:0 14px 0 93px; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset)`，带 `data-tauri-drag-region` |
+| 根 | `height:38px; flex:none; display:flex; align-items:center; gap:12px; padding:0 10px 0 93px; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset)`，带 `data-tauri-drag-region`。只排在侧栏列顶，不延伸到主区。 |
 | 侧栏开关 | `28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
-| 品牌名 | `<span>AgentMirror</span>`，`font-size:var(--fs-125); font-weight:600; color:var(--text-secondary)` |
-| 分裂徽章 | 仅 `paneCount > 1` 渲染：文本 `分裂展示 · {paneCount} 列`；`font-size:var(--fs-105); font-weight:600; padding:2px 8px; border-radius:var(--r-pill); background:var(--green-badge-bg); color:var(--green-deep)` |
-| 右侧 | `<div style="margin-left:auto;flex:1" data-tauri-drag-region/>` 纯拖动区（**无**平台切换按钮、**无** Windows caption 键） |
+| 品牌名 | **不渲染**（2026-08-22 用户裁定：不要展示产品名）。 |
+| 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
+| 拖动区 | 左侧条剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。**不要**把 drag-region 铺到终端上（否则无法选文本）。 |
 
 ### 4.2 `chrome/DevicesPopover.jsx`
 
