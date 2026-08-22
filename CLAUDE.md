@@ -1,131 +1,118 @@
 # tmux桌面端（AgentMirror macOS 桌面客户端）——工程流程约定
 
-用 Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6 做的 macOS 桌面客户端，
-通过 WebSocket（协议 v1）镜像主机 tmux 里的 Agent CLI 会话。技术栈已裁定，⛔ 不要重开选型。
+Tauri v2 + Vite + React 19（JSX，无 TS）+ @xterm/xterm 6，通过 WebSocket（协议 v1）
+镜像主机 tmux 里的 Agent CLI。技术栈已裁定，⛔ 不要重开选型。
 
-本文件只写**关键流程**。写代码的品味准则在 `/Users/alauda/.claude/CLAUDE.md`（全局），本文件不重复。
+只写关键流程。写代码的品味准则在 `/Users/alauda/.claude/CLAUDE.md`（全局），不重复。
 
 ---
 
-## 1. 真相源与目录地图
+## 1. 真相源
 
 | 问什么 | 看哪 |
 |---|---|
-| 协议怎么发怎么收 | `docs/CLIENT-CONTRACT.md`（**§0 权威顺序警告必读**） |
-| UI 长什么样 | `docs/UI-SPEC.md`（UI 唯一事实来源，读它就不用再翻设计稿） |
-| 设计稿原件（仅存疑时回看） | `design-handoff/cross-platform-desktop-ui-mockups/project/Agent App Prototype.dc.html` |
-| 当前进度与在途任务 | `HANDOFF-leader-<日期>.md`（最新那份） |
+| 协议 | `docs/CLIENT-CONTRACT.md`（**§0 权威顺序必读**） |
+| UI | `docs/UI-SPEC.md`（唯一事实来源） |
+| 进度与在途 | `HANDOFF-leader-<日期>.md`（最新那份） |
+| 上游挂起项 | `.team/nodes/_night/BACKLOG-UPSTREAM.md` |
+| 设计稿原件（存疑时） | `design-handoff/.../Agent App Prototype.dc.html` |
 
-- 🔴 **实现 > 文档**：协议有分歧时以上游 `server/internal/` 的 Go 源码为准。
-  `docs/protocol.md` 有三处已被服务端推翻（见 CLIENT-CONTRACT §0）。
-  web 端 `client.js` 里读 `s.state` / `w.aggregate_state` 的分支是**死代码**，⛔ 不许照抄。
-- 🔴 **上游只读**：`/Volumes/nvme/Projects/远程Agent安卓/`（服务端 + web 客户端 + 协议文档）
-  **只能读，禁止任何写入**。需要上游改动 ⇒ 记下来告诉用户，⛔ 不许直接动手。
+- 🔴 **实现 > 文档**：协议有分歧以上游 `server/internal/` 的 Go 源码为准。
+  web 端 `client.js` 里读 `s.state` / `w.aggregate_state` 的分支是死代码，⛔ 不许照抄。
+- 🔴 **上游只读**：`/Volumes/nvme/Projects/远程Agent安卓/` 与 GitHub `Florious95/corral-core`
+  **只能读**。需要上游改动 ⇒ 记进 BACKLOG 告诉用户，⛔ 不许动手。
+- **遇疑难先搜上游**：`corral-core` 的 `requirement-base/entries/` 常有同一问题的根因与判据。
+  实例：`083-真机视觉收口六条.md` 解过框线断点/logo 黑缝，连「交点闭合」判据都是现成的。
+- **规格与实现同步改**：改实现要在同一个 PR 里改 UI-SPEC，注明裁定日期。
+  ⛔ 不许留中间态——判官按旧规格判，会判出真红但假缺陷。
 
-## 2. 当前验收标准（用户 2026-08-22 收窄，未变更前一直有效）
+## 2. 验收标准（用户 2026-08-22 收窄）
 
 > 把当前主机所有目录在左边摆出来，每个目录下的 Agent 摆出来，右边可以分列展示。
-> 主机只有 Local。本地基于 WS 链接 + Token 联通。做到这一点就是验收标准。
+> 主机只有 Local。本地基于 WS 链接 + Token 联通。
 
-**明确排除在本期外**（用户明令「之后要做，不是现在」）：新建文件夹、新建 Agent、
-联通远端、加远端节点。多设备 UI 壳可以作为超集存在，但**验收只看 Local 单设备**。
-⛔ 不许把排除项当成「顺手做了更好」而偷偷做进来——那是加需求，不是做需求。
+**本期封存**：新建文件夹、新建 Agent、联通远端、加远端节点。多设备 UI 壳可作超集存在。
+⛔ 做多了和做少了一样是不满足。
 
-## 3. PR 开发流程（🔴 本工程最容易违反的一条）
+## 3. 量具与证据（🔴 今天栽最多的地方）
 
-**铁律：一事一 PR 一闭环。远端 PR 列表就是流程存在的证明。**
+**先怀疑量具，再怀疑被测物。「没报错」不等于「工作正常」。**
 
-姊妹工程「远程Agent安卓」2026-08-21/22 被用户点名两次同一件事：本地把活干完了、
-分支也封了，**远端几乎没有 PR**；后来补开的 PR 又因为 land 之后才推，成批显示 closed 而不是
-merged。「一事一闭」根本没有成立过。本工程从第一天就按对的来：
+| 坏量具 | 实撞症状 | 正确做法 |
+|---|---|---|
+| `cmd \| tail` 取 `$?` | 构建失败读成 rc=0 | ⛔ 退出码不许经管道 |
+| grep 源码标识符判包版本 | 恒假阴性（资源在包里压缩存） | 比对 `dist/assets/*` 文件名 |
+| tmux pane 里起 GUI 截图 | 全白（AX windowCount=0） | 同命令先截一个已知有内容的窗口 |
+| 证据夹具缺 `xterm.css` | canvas 掉到 host 下，像产品坏了 | 先排除夹具与产品的差异 |
+| 只判 `loadAddon` 抛没抛错 | load 成功但 canvas 空 | 检查**工作结果**，不只检查错误信号 |
 
-1. **远端仓还没建** —— `git remote -v` 现在是空的。第一次要推之前，先建远端仓并
-   `git remote add origin <url>`，然后把现有 main 推上去。这是开工前置，⛔ 不许拖到最后。
-2. **每完成一件事**（一个功能 / 一个缺陷 / 一次重构步骤）：
-   建分支 → 提交 → **推分支 → `gh pr create`（CLI，⛔ 不用网页）**。
-   评审/验证是在 PR 上做的，⛔ 不许「本地验完了再补 PR」。
-3. **验过之后**：并进 main → **立刻推 main**，让该 PR 显示 **merged**。
-   land 之后才推 = PR 变成 closed，等于流程没发生过。
-4. `gh pr merge <n> --merge` 走 CLI；⛔ 网页点 merge。
-5. 一个 PR 只装一件事。⛔ 不许把多个缺陷、多个功能揉进一个 PR——回滚时分不清，
-   也追不出「哪一次改动引入了倒退」。
+- **两头夹住**：坏态必须红、好态必须绿。⛔ 只给「修好之后」证明不了任何事。
+- **验证表面 = 交付面**：桌面壳的能力**必须在 `.app` 上验**，`npm run dev` 绿不算数，
+  探针 app 绿也不算数。实撞两次：「dev 绿而 build 白」「Web 绿而桌面不绿」。
+- **状态组合穷举**（布局类）：空/有内容 × 展开/折叠 × 普通/全屏 × 单列/多列。
+  实撞：空态掩盖底栏回归，展开态掩盖折叠遮挡。
+- **判据四态**：通过(0) / 不通过(1) / **不可判(2)** / 不适用。编译不过 ≠ 测试红。
+- **自报不算数**：要么亲跑写退出码，要么判官复核，要么标「待核」。
+- **判者不能是产出方**。
+- **图是一手，转述是二手**：用户截图落 `.team/nodes/integrate/refs/`，让席位自己看；
+  文字与图冲突以图为准。参考图若是别人家产品，**只取形态不取内容**。
 
-## 4. 全自动编排（怎么把活派出去）
+## 4. 改代码
 
-本工程目前**没有 team-agent 团队**（`.team/` 下只有 logs/runtime）。两条路，按活的形状选：
+- **一次一条改动**，验过不倒退才做下一条。⛔ 不许攒一批一起上。
+- **一个 PR 只装一件事**；建分支 → 提交 → 推 → `gh pr create` → 验 → merge → **立刻推 main**。
+  land 之后才推 = PR 显示 closed，等于流程没发生。
+- **修 bug 修根因**：改之前 grep 你要动的函数的所有调用方。
+- 🔴 **回炉 / 不许污染**（用户 2026-08-22 令）：修完实测没生效 ⇒ **整条回退**，
+  连它为自己开的口子（CSP、依赖、测试）一起退。⛔ 不许留半截说「反正比原来好一点」——
+  **理由被推翻的改动就是噪音**，下一个人看到它不敢动，也说不清它为什么在。
+  实撞：#15 幻影 CSP、#25 粘贴（桌面不生效）、#26 行高（方向错）。
+- **棘轮**：`npm test` 只增不减。⛔ 不许删测试/弱化断言凑绿。
+  因回退能力而下降属合法，要写明退了哪几条。
+- ⛔ 不许用「让症状不可见」的修法（例：藏交通灯来消除遮挡）。
+- ⛔ **不在主工作树 `git checkout`**——主树跑着活团队，切分支会删掉它的运行时状态。
+  一律独立 worktree。冲突手工解，⛔ 不许自动策略。
 
-- **Workflow（多 agent 并行/流水）** —— 适合一次性的宽面工作：铺开调研、分头实现、
-  多路对抗验证。`model: 'opus'` **必须显式写**（用户两次强调，见 §7）。
-- **账本编排 ledger.v2 + `ledger-run --drive`** —— 适合**要跑一整夜、要可恢复、要留证据链**的工作。
-  账本用 **ledgerdsl**（`/Users/alauda/.claude/skills/ledger-orchestration/reference/ledgerdsl-0.1.0/`）
-  写 Python 源码再编译成 JSON，⛔ 不手写 JSON。四道门：构造+emit → jsonschema → `--preflight`。
-  - ⚠️ 门③ 缺省 schema 路径在本工程不存在，必须显式
-    `--schema /Volumes/nvme/Projects/无等编排/账本标准/ledger.v2.schema.json`（安装件自带的那份是旧的，不认 `transitions`）。
-  - 驱动器**必须用受管后台任务起**（`nohup &` 起的会在几分钟后被 TERM），
-    起完手写 pid 文件 `.team/nodes/_driver/<名>.pid`，并按 cwd 核对归属
-    （同机多工程的驱动器进程名都叫 `ledger-run`，⛔ 认错了就会杀别人的活）。
-  - **编排要全自动就得连收口一起自动**：判据绿 → 封版 → 推分支 → 开 PR → 并线 → 推 main，
-    这一串写成 **Python 脚本**跑，⛔ 不要靠人半夜盯着手动接力。
-    脚本必须做到：非交互（`GIT_TERMINAL_PROMPT=0`、gh 预先登录好）、幂等（重跑不重复开 PR）、
-    **遇冲突就停下并记录，⛔ 不许自动解冲突**（解冲突是判断，不是自动化）。
+## 5. 安全红线
 
-**编排跑起来之后：** 编排中断/卡住而没人叫停 ⇒ 写一页现象+日志+复现给对应维护方，**投完就继续跑，不停工**。
-⛔ 不许绕过缺陷自己去改别人的框架，也⛔ 不许人肉编排顶替全自动编排。
+- ⛔ 读凭据文件原文（`.env` / token / authkey / plist）。取值只用 `set -a; . <file>; set +a`
+  注入子进程，不打印、不落日志、不入截图。
+- ⛔ 无过滤 `ps aux`。进程只取 `ps -o pid,ppid,etime,stat,comm`。
+- 🔴 **CSP 无因果放宽一律打回**。实撞三次全是多余的：`'unsafe-eval'`、`script-src tauri:`、
+  `connect-src http:/https:` 通配。要放开先证明因果（拿违规原文），**并把裁定写成测试**。
+- 配对 token 只在 `auth` 帧与上传 header 上行，⛔ 不进日志/toast/错误文案/截图。
+- 产物**零 CDN 外链**；桌面壳 token 走 `tauri-plugin-store`(0600)，⛔ 不回 localStorage。
+- **按 pid 杀，⛔ 不按模式杀**（`pkill -f` 误伤过 grok 席位）。端口被占**换一个，⛔ 不 kill 占用者**。
+- ⛔ 写 `/tmp` 或工程外路径（隔离 tmux socket 例外，须短路径 + `list-sessions` 自检）。
 
-## 5. 判据与证据纪律
+## 6. 装机（用户常驻授权：并完直接换）
 
-- **自报不算数**。agent 说「测试绿了」，你要么亲跑一遍写下退出码，要么在文档里标「**待核**」。
-  ⛔ 不许把自报直接写成「已完成」。
-- **判据四态**：通过(0) / 不通过(1) / **不可判(2)** / 不适用。
-  ⛔ 不可判和不适用不许折进通过或失败。**编译不过 ≠ 测试红**，一律判不可判。
-- **判者独立**：验收的人不能是产出的人；尽量异源（换个 provider）。
-- **棘轮**：先把当前存量红记下来当基线（本工程当前 `npm test` 58/58 绿，`npm run build`
-  有 2 个已定位的 import 断点）。**存量不清，增量不许新增。**
-  ⛔ 不许通过删测试、弱化断言、改判据来凑绿。
-- **诊断日志记操作数，不只记判决**。「未触发」这种记录分不清是「压根没被调用」还是
-  「守卫拦下了」还是「守卫算错了」——凡有阈值/比较的地方，把参与比较的两边原始值都记下来。
+⛔ 不用问用户。顺序固定：
 
-## 6. 改代码的三条硬纪律
+1. 构建：`CARGO_TARGET_DIR=<独立目录> CI=true npm run tauri build -- --ci --no-sign --bundles app`
+2. 核版本：`dist/assets/*` 的文件名在 `.app` 里能不能找到。
+3. **拷临时位 → 原子替换**。🔴 ⛔ 绝不先 `rm -rf` 目标再拷（实撞：源没了，用户一份可用包都不剩）。
+4. kill 旧 → `open` 新 → 核 `lsof -nP -iTCP:9900` 有 ESTABLISHED → 核 `devices.json` 在且 0600。
 
-- **一次一条改动**：做完一条，验过不倒退，才做下一条。⛔ 不许攒一批一起上——
-  上游工程实证过：五个修复一起发，出了回归就分不清是哪一个引起的。
-- **眼见为实**：UI/交互类改动，改之前先复现（截图留证），改之后同样步骤再走一遍看到修复。
-  **单测绿 ≠ 问题修了**。
-- **回炉**：修完实测没生效 ⇒ **把相关改动完整回退**，在回退的 diff 上反推根因、做根因探针，
-  再重做。⛔ 不许在有问题的代码上继续叠改（用户 2026-08-22 点名批评过一次）。
+主树 `node_modules` 易落后（席位各自 `npm ci`）。`Rolldown failed to resolve import` 多半是它，先 `npm install`。
 
 ## 7. 提交与模型
 
-- **commit 无需用户确认，每个关键点都必须提交**；一次修复一个提交；**验过才提交**；⛔ 不许攒
-  （攒着不提交 = 把已完成的工作暴露在下一次回退里，上游工程实发过整条修复被回退抹掉）。
-- ⛔ **不写 `Co-Authored-By: Claude`**（用户裁定：Contributor 应该是他）。
-- 🔴 **模型铁律**：Workflow 内所有 agent 显式 `model: 'opus'`（Opus 5）。续跑/新开同样遵守。
-  ⛔⛔ 禁用 Deepseek。
+- commit 无需确认，验过就提交，⛔ 不许攒。⛔ 不写 `Co-Authored-By: Claude`。
+- Workflow 内 agent 显式 `model: 'opus'`。⛔⛔ 禁用 Deepseek。
 - **team-agent 席位**：provider `grok`，`model: grok-4.6`（用户 2026-08-22 裁定）。
 
-## 8. 如果将来建 team-agent 团队
+## 8. 六席位编排
 
-- 新建席位角色文件必须写 `dangerously_skip_permissions: true`，否则席位会**停在 provider 的
-  第一个确认提示上等人按键**，而编排层给出的症状只是「投递失败」，读起来像网络问题。
-  该字段与 `model` 一样**只在启动时生效**——改文件不够，必须 `remove-agent --force` + `add-agent` 重建，
-  并读 pane 自证底部显示的模型名。
-- **leader 不亲力亲为**：探索性的活（找锚点、摸代码、查现状、试环境、读大文件）派给席位，
-  不清楚就**追问**。leader 的上下文留给判断，不留给素材。
-- **席位不许主动给 leader 发消息**：唯一出口是 `report_result` + 落盘产物；
-  只有**编排调整**（本格没法继续、需要改账本/裁定归属）才允许发消息。
-- 给席位发消息只走 `team-agent send`，⛔ 禁 tmux `send-keys`。
-  `ok: True` **不是送达**——投前先 `team-agent status` 验活（每行都是「错误」= 死队）。
-- 席位卡住时**读它的屏**（`tmux -S <team 私有 socket> capture-pane -p -t <pane>`），
-  这是没人在屏幕前时唯一能认出「卡在提示上」的手段。
+`.team/current/`：`integrator`（唯一写产品码）/ `verifier`（零上下文判官）/ `analyst`（需求）/
+`case-designer`（用例，零上下文）/ `web-tester`（执行 + Chrome DevTools MCP）/ `packager`（封装）。
 
-## 9. 安全红线
-
-- ⛔ 任何形式读凭据文件原文（`.env` / profile / token / authkey / plist）。
-  取值只用 `set -a; . <file>; set +a` 注入子进程，不打印、不落日志、不入截图。
-- ⛔ 无过滤 `ps aux`（会把 API key 打上屏）；进程只取 `ps -o pid,ppid,etime,stat,comm`。
-- **查任何配置前先想凭据**：一个 `grep -i` 打在偏好文件上就可能把 key 打上屏（上游实发过）。
-- **凭据万一泄露 ≠ 停工**：只做三件——一行上报（⛔ 不复述泄露的值）、就地收紧做法、继续干活。
-  ⛔ 不要因此停工等新 key，也不要把删本地产物当成风险处置。
-- ⛔ 起隔离 tmux 必须自检「我在自己的 socket 上」：`tmux` 建 socket 失败时**不报错，静默回退到
-  用户真实 tmux**——`tmux -S <sock> list-sessions` 自检不过立刻停手。
-- ⛔ 不写 `/tmp` 或工程外路径（隔离 tmux 的 socket 目录因长度上限例外，必须短路径且预建）。
+- 角色文件必须 `dangerously_skip_permissions: true`，否则席位停在确认提示上，
+  症状伪装成「投递失败」。该字段只在启动生效，改文件要 `add-agent --force` 重建。
+- 各自的 ⛔：判官不改实现、执行席不改用例（觉得用例错就报上来）、封装席不重验业务逻辑。
+- **leader 不亲写产品码**，上下文留给判断。
+- **投递纪律**：裁定写成文件再 `$(cat ...)` 投——正文里的反引号/尖括号会被 shell 截断
+  **但 send 仍返回成功**。席位工作中投会 `send_unverified_exhausted`，**等空闲再投**。
+  投递不确定时**靠产物反查，⛔ 不重投**（重投可能重复执行）。
+- `ok: True` 不是送达。席位卡住读它的屏：`tmux -S <team socket> capture-pane -p -t <pane>`。
+- ⛔ 不许 kill/open 用户正在用的 AgentMirror 进程；换包由 leader 做。
