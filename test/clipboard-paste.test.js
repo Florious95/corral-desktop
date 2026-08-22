@@ -56,7 +56,26 @@ test('handleClipboardData: text is sent whole including newlines, no extra enter
 
 test('wsToHttpOrigin maps daemon WS to HTTP upload origin', () => {
   assert.equal(wsToHttpOrigin('ws://127.0.0.1:9900/ws'), 'http://127.0.0.1:9900');
-  assert.equal(wsToHttpOrigin('wss://host.example:443/ws'), 'https://host.example');
+  assert.equal(wsToHttpOrigin('ws://localhost:19900/ws'), 'http://localhost:19900');
+  assert.equal(wsToHttpOrigin('wss://127.0.0.1:443/ws'), 'https://127.0.0.1');
+});
+
+test('CSP connect-src allows loopback HTTP only, not http:/https: schemes', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const conf = JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url)));
+  const csp = conf.app.security.csp;
+  const connect = /connect-src ([^;]+)/.exec(csp)[1];
+  for (const need of [
+    'http://127.0.0.1:*', 'http://localhost:*',
+    'https://127.0.0.1:*', 'https://localhost:*',
+  ]) {
+    assert.ok(connect.includes(need), `missing ${need}`);
+  }
+  assert.equal(/\bhttps?:($|\s)/.test(connect), false, 'must not allow any-origin http:/https:');
+  assert.match(csp, /script-src 'self'$/);
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /style-src 'self' 'unsafe-inline'/);
+  assert.match(csp, /img-src 'self' data:/);
 });
 
 test('sanitizeUploadError never includes credentials', () => {
