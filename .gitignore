@@ -8,3 +8,6 @@ src-tauri/gen/schemas/
 .team/logs/
 .worktrees/
 .grok/
+
+# 巡检夹具的 Chrome 用户目录：localStorage 里有配对 token，⛔ 绝不入库
+.team/nodes/garble/chrome-profile/
