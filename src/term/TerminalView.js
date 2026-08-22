@@ -16,7 +16,7 @@
 // 走裸 '@xterm/xterm' 的话，打包器拿 .mjs（具名导出）、Node 拿 .js（CJS，具名导入直接
 // SyntaxError），`node --test` 就加载不了本模块 —— 两边指同一个文件才不用写互操作补丁。
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
-import { unsupportedKeyEvent } from './nativeInput.js';
+import { isLocalSidebarToggle, unsupportedKeyEvent } from './nativeInput.js';
 import { attachWebglRenderer } from './webglRenderer.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
@@ -78,6 +78,7 @@ export class TerminalView {
     this._dataDisposable = this.term.onData((data) => this.onData(data));
     if (typeof this.term.attachCustomKeyEventHandler === 'function') {
       this.term.attachCustomKeyEventHandler((ev) => {
+        if (isLocalSidebarToggle(ev)) return false;
         const label = unsupportedKeyEvent(ev);
         if (!label) return true;
         this.onUnsupportedKey(label);

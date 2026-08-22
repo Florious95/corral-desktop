@@ -46,6 +46,12 @@ button { border: 0; background: none; padding: 0 }
   padding-top: 38px;
 }
 
+/* 全屏系统顶栏：菜单 30px 在 webview 外，内容窗上沿还有 32px overlay。
+   热区/钮下移 32px，落到能收到 mousemove 的区域。窗口模式 top:0 不动。 */
+.app-root.is-fullscreen .hover-chrome {
+  top: 32px;
+}
+
 .app-main {
   flex: 1;
   min-width: 0;

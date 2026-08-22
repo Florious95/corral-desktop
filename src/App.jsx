@@ -14,6 +14,7 @@ import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
 import { watchFullscreen } from './lib/fullscreen.js';
+import { isLocalSidebarToggle } from './term/nativeInput.js';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
@@ -116,6 +117,17 @@ export default function App({ seedDevices } = {}) {
     let off;
     watchFullscreen(setNativeFullscreen).then((u) => { off = u; });
     return () => { if (typeof off === 'function') off(); };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!isLocalSidebarToggle(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setCollapsed((v) => !v);
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, []);
 
   useEffect(() => { LS.write('am.fav', favs) }, [favs]);
@@ -473,7 +485,11 @@ export default function App({ seedDevices } = {}) {
   return (
     <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
       {collapsed ? (
-        <HoverToggle pressed onToggle={() => setCollapsed(false)} />
+        <HoverToggle
+          pressed
+          fullscreen={nativeFullscreen}
+          onToggle={() => setCollapsed(false)}
+        />
       ) : null}
       <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
         {collapsed ? null : (
