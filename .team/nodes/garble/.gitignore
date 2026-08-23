@@ -15,3 +15,6 @@ cwd-inv/
 npm-test.out
 daemon.log
 repro2-daemon.log
+am-state-cause/
+cwd-cause/
+cause-raw/
