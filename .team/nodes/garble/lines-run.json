@@ -1,0 +1,3373 @@
+{
+  "iso": {
+    "ok": true,
+    "fixture": "113 ASCII x + U+4E2D in 114-col own pane (not user)",
+    "e": {
+      "raw_nl": 8,
+      "n_lines_dotall": 9,
+      "n_lines_nodotall": 9,
+      "overwide_dotall": 0,
+      "overwide_nodotall": 0,
+      "max_w_dotall": 114,
+      "max_w_nodotall": 114,
+      "n_eq_115_dotall": 0,
+      "strip_ate_lines": false,
+      "strip_dotall_vs_g": false
+    },
+    "p": {
+      "raw_nl": 8,
+      "n_lines_dotall": 9,
+      "n_lines_nodotall": 9,
+      "overwide_dotall": 0,
+      "overwide_nodotall": 0,
+      "max_w_dotall": 114,
+      "max_w_nodotall": 114,
+      "n_eq_115_dotall": 0,
+      "strip_ate_lines": false,
+      "strip_dotall_vs_g": false
+    },
+    "j": {
+      "raw_nl": 6,
+      "n_lines_dotall": 7,
+      "n_lines_nodotall": 7,
+      "overwide_dotall": 2,
+      "overwide_nodotall": 2,
+      "max_w_dotall": 140,
+      "max_w_nodotall": 140,
+      "n_eq_115_dotall": 0,
+      "strip_ate_lines": false,
+      "strip_dotall_vs_g": false
+    },
+    "classify": {
+      "glued": 0,
+      "real115": 0,
+      "unmatched": 0,
+      "glue_how": {
+        "concat": 0,
+        "prefix_suffix": 0
+      }
+    }
+  },
+  "live": {
+    "ok": true,
+    "sessions": 55,
+    "tot": {
+      "n": 55,
+      "snap_overwide": 16,
+      "e_overwide": 4,
+      "p_overwide": 4,
+      "j_overwide": 16,
+      "glued": 0,
+      "real115": 4,
+      "unmatched": 0,
+      "glue_how": {
+        "concat": 0,
+        "prefix_suffix": 0
+      },
+      "strip_dotall_joins": 0,
+      "e_fewer_nl_than_p": 0
+    },
+    "per": [
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2083
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 16,
+          "n_lines_dotall": 17,
+          "n_lines_nodotall": 17,
+          "overwide_dotall": 6,
+          "overwide_nodotall": 6,
+          "max_w_dotall": 977,
+          "max_w_nodotall": 977,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4224
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 7
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3233
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3973
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3242
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3242
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 7
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8721
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8464
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10849
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10048
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10201
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10098
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10667
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 37,
+          "n_lines_dotall": 38,
+          "n_lines_nodotall": 38,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2449
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4105
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 2,
+          "overwide_nodotall": 2,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 2,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3050
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3944
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3938
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 2,
+          "overwide_nodotall": 2,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 2,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4901
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4180
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4282
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 2,
+          "overwide_nodotall": 2,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 2,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3599
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 3,
+          "overwide_nodotall": 3,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 3,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3817
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4235
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 76,
+          "max_w_nodotall": 76,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 78,
+          "max_w_nodotall": 78,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 109,
+          "max_w_nodotall": 109,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 104,
+          "max_w_nodotall": 104,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 1993
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 6
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 55,
+          "max_w_nodotall": 55,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2677
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8416
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8625
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 11524
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8139
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 1645
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 112,
+          "max_w_nodotall": 112,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 112,
+          "max_w_nodotall": 112,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 112,
+          "max_w_nodotall": 112,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 37,
+          "n_lines_dotall": 38,
+          "n_lines_nodotall": 38,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 112,
+          "max_w_nodotall": 112,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4210
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 2,
+          "overwide_nodotall": 2,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 2,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 1973
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 3,
+          "overwide_nodotall": 3,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 3,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 3,
+          "overwide_nodotall": 3,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 3,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 3,
+          "overwide_nodotall": 3,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 3,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 3,
+          "overwide_nodotall": 3,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 3,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 3,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 3799
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 1,
+          "overwide_nodotall": 1,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 1,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 1,
+          "overwide_nodotall": 1,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 1,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 1,
+          "overwide_nodotall": 1,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 1,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 1,
+          "overwide_nodotall": 1,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 1,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 1,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4083
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2893
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2447
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10859
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 1531
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 1,
+          "overwide_nodotall": 1,
+          "max_w_dotall": 115,
+          "max_w_nodotall": 115,
+          "n_eq_115_dotall": 1,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2327
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8391
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 32,
+          "n_lines_dotall": 33,
+          "n_lines_nodotall": 33,
+          "overwide_dotall": 6,
+          "overwide_nodotall": 6,
+          "max_w_dotall": 229,
+          "max_w_nodotall": 229,
+          "n_eq_115_dotall": 1,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 6
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 113,
+          "max_w_nodotall": 113,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 4736
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10424
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 10664
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 7
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 7
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 0,
+          "n_lines_dotall": 1,
+          "n_lines_nodotall": 1,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 0,
+          "max_w_nodotall": 0,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 7
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 13011
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 8821
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 38,
+          "n_lines_dotall": 39,
+          "n_lines_nodotall": 39,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 5467
+      },
+      {
+        "e": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "p": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "j": {
+          "raw_nl": 39,
+          "n_lines_dotall": 40,
+          "n_lines_nodotall": 40,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "snap": {
+          "raw_nl": 35,
+          "n_lines_dotall": 36,
+          "n_lines_nodotall": 36,
+          "overwide_dotall": 0,
+          "overwide_nodotall": 0,
+          "max_w_dotall": 114,
+          "max_w_nodotall": 114,
+          "n_eq_115_dotall": 0,
+          "strip_ate_lines": false,
+          "strip_dotall_vs_g": false
+        },
+        "classify": {
+          "glued": 0,
+          "real115": 0,
+          "unmatched": 0,
+          "glue_how": {
+            "concat": 0,
+            "prefix_suffix": 0
+          }
+        },
+        "snap_bytes": 2996
+      }
+    ]
+  }
+}
