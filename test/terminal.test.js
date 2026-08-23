@@ -122,6 +122,21 @@ test('顶部上滚滚轮触发拉历史（scrollback=0 时 onScroll 永不触发
   view.dispose();
 });
 
+test('C: after snapshot, settled shrink resets before resize (no wrap of old cells)', async () => {
+  const { view, container } = makeView();
+  view.open();
+  await sleep(200);
+  view.writeSnapshot(new Uint8Array([0x41]));
+  const resetsAfterPaint = view.term.resets;
+  container.clientWidth = 400;
+  view.fit();
+  await sleep(200);
+  assert.ok(view.term.resets > resetsAfterPaint, 'old snapshot cleared before narrower grid');
+  assert.equal(view.term.cols, 50);
+  assert.equal(view._hasPainted, false);
+  view.dispose();
+});
+
 test('snapshot 清屏重建、delta 追加，字节原样不动', () => {
   const { view } = makeView();
   view.open();

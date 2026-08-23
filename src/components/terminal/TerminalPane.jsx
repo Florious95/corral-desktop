@@ -3,6 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import './terminal.css';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
 import { TerminalView } from '../../term/TerminalView.js';
+import { SameWidthController } from '../../term/sameWidth.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
@@ -13,8 +14,9 @@ import { parseAnsi } from './ansi.js';
 const SCROLLBACK_TIMEOUT_MS = 10000;
 
 /**
- * 一个分裂列的终端视图：订阅 → snapshot 清屏重建 → delta 追加；
- * 容器尺寸变化 → fit → resize 帧（发完即忘，⛔ 不进「等 snapshot」阻塞态，CLIENT-CONTRACT §3.4）；
+ * 一个分裂列的终端视图：网格落定后 subscribe → 同宽 snapshot 清屏重建 → delta 追加；
+ * 容器尺寸变化 → fit 落定 → 重发 subscribe（resize 在几何未变时 no-op 不补快照）；
+ * 捕获宽度 ≠ 网格宽度的帧 ⛔ 不画进 xterm（裁定 2026-08-23 同宽不变量）。
  * 上滚到顶 → 协议 scrollback 分页拉取，渲染进独立只读面板（⛔ 绝不写进活的 xterm 网格，§3.3）。
  *
  * @param {Object} props
@@ -93,10 +95,15 @@ export default function TerminalPane({
       sendEnter: () => onEnterRef.current?.(),
       onUnsupported: showUnsupported,
     });
+    const gate = new SameWidthController();
+    const sendIfNeeded = (act) => {
+      if (!act || act.type !== 'subscribe') return;
+      clientRef.current?.subscribe(target, act.rows, act.cols);
+      gate.noteSent(act.rows, act.cols);
+    };
     const view = new TerminalView(host, {
       onResize: (rows, cols) => {
-        // 发完即忘：服务端只在真 reflow 时补一帧 snapshot，几何没变什么都不回。
-        clientRef.current?.resize(target, rows, cols);
+        sendIfNeeded(gate.settle(rows, cols));
         onResizeRef.current?.(rows, cols);
       },
       onHistoryBoundary: () => loadHistory(),
@@ -143,10 +150,12 @@ export default function TerminalPane({
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
         case BINARY_KIND.SNAPSHOT:
+          if (!gate.acceptSnapshot()) return;
           view.writeSnapshot(frame.data);
           setReady(true);
           break;
         case BINARY_KIND.DELTA:
+          if (!gate.acceptDelta()) return;
           view.writeDelta(frame.data);
           break;
         case BINARY_KIND.SCROLLBACK:
@@ -161,12 +170,7 @@ export default function TerminalPane({
     const attach = subRef.current || (c && typeof c.onBinary === 'function' ? (fn) => c.onBinary(fn) : null);
     const off = attach ? attach(handleBinary) : null;
 
-    const start = () => {
-      if (viewRef.current !== view) return;
-      clientRef.current?.subscribe(target, view.rows, view.cols);
-    };
-    if (view.readyWebgl) view.readyWebgl.then(start);
-    else start();
+    // A: 首订走 onResize（fit/webgl 落定后的 debounce），点开瞬间的过渡宽度不下订。
 
     const ro = new ResizeObserver(() => view.fit());
     ro.observe(host);
