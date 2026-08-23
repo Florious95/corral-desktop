@@ -18,6 +18,7 @@
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 import { isLocalSidebarToggle, unsupportedKeyEvent, consumeTerminalReplies, REPLY_HOLD_MAX } from './nativeInput.js';
 import { attachWebglRenderer } from './webglRenderer.js';
+import { push as diag } from './amDiag.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -40,8 +41,10 @@ export class TerminalView {
   constructor(container, {
     onResize, onHistoryBoundary, onData, onUnsupportedKey,
     scrollback = 0, fontSize = 13, TerminalCtor = Terminal,
+    diagRef = null,
   } = {}) {
     this.container = container;
+    this.diagRef = diagRef;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
@@ -128,10 +131,25 @@ export class TerminalView {
    */
   fit({ immediate = false } = {}) {
     const el = this.container;
-    if (this._disposed || !el || !el.isConnected) return;
+    const ref = this.diagRef;
+    if (this._disposed || !el || !el.isConnected) {
+      diag({
+        type: 'fit', ref, early_exit: 'not_connected',
+        container_w: el ? el.clientWidth : 0, container_h: el ? el.clientHeight : 0,
+        debounce_armed: !!this._gridTimer, has_fit: this._hasFit,
+      });
+      return;
+    }
     const w = el.clientWidth;
     const h = el.clientHeight;
-    if (w === 0 || h === 0) return;
+    if (w === 0 || h === 0) {
+      diag({
+        type: 'fit', ref, early_exit: 'zero_px',
+        container_w: w, container_h: h,
+        debounce_armed: !!this._gridTimer, has_fit: this._hasFit,
+      });
+      return;
+    }
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
@@ -139,12 +157,25 @@ export class TerminalView {
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {
       this._hasFit = true;
+      diag({
+        type: 'fit', ref, early_exit: null, path: immediate ? 'immediate' : 'first',
+        container_w: w, container_h: h, cols, rows,
+        term_cols: this.term.cols, term_rows: this.term.rows,
+        will_resize: cols !== this.term.cols || rows !== this.term.rows,
+        debounce_armed: !!this._gridTimer,
+      });
       this._commitGrid(cols, rows, { reportDelay: true });
       return;
     }
     if (cols === this.term.cols && rows === this.term.rows) {
       clearTimeout(this._gridTimer);
       this._gridTimer = null;
+      diag({
+        type: 'fit', ref, early_exit: 'grid_unchanged',
+        container_w: w, container_h: h, cols, rows,
+        term_cols: this.term.cols, term_rows: this.term.rows,
+        will_resize: false, debounce_armed: false,
+      });
       return;
     }
     clearTimeout(this._gridTimer);
@@ -154,16 +185,28 @@ export class TerminalView {
       if (this._disposed) return;
       this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
     }, GRID_DEBOUNCE_MS);
+    diag({
+      type: 'fit', ref, early_exit: null, path: 'debounce',
+      container_w: w, container_h: h, cols, rows,
+      term_cols: this.term.cols, term_rows: this.term.rows,
+      will_resize: false, debounce_armed: true,
+    });
   }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
     if (cols !== this.term.cols || rows !== this.term.rows) {
+      const from_cols = this.term.cols;
+      const from_rows = this.term.rows;
       // C: 有旧快照时先 reset 再 resize，避免把捕获宽度 A 的格子 wrap 进宽度 B。
       if (this._hasPainted) {
         this.term.reset();
         this._hasPainted = false;
       }
       this.term.resize(cols, rows);
+      diag({
+        type: 'term_resize', ref: this.diagRef,
+        from_cols, from_rows, to_cols: cols, to_rows: rows,
+      });
       if (reportDelay) this._report();
       else {
         this._lastDims = `${rows}x${cols}`;
@@ -180,14 +223,25 @@ export class TerminalView {
 
   /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
+    const t_reset = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     this.term.reset();
+    const t_write = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     this.term.write(u8);
     this._hasPainted = true;
+    diag({
+      type: 'write_snapshot', ref: this.diagRef,
+      t_reset, t_write, term_cols: this.term.cols, term_rows: this.term.rows,
+      bytes: u8 && u8.length != null ? u8.length : 0,
+    });
   }
 
   /** 增量：追加到当前屏。 */
   writeDelta(u8) {
     this.term.write(u8);
+    diag({
+      type: 'write_delta', ref: this.diagRef,
+      term_cols: this.term.cols, bytes: u8 && u8.length != null ? u8.length : 0,
+    });
   }
 
   clear() { this.term.reset(); }
@@ -216,7 +270,13 @@ export class TerminalView {
 
   _report() {
     const dims = `${this.term.rows}x${this.term.cols}`;
-    if (dims === this._lastDims) return;
+    if (dims === this._lastDims) {
+      diag({
+        type: 'resize_up', ref: this.diagRef, sent: false, reason: 'geom_unchanged',
+        rows: this.term.rows, cols: this.term.cols,
+      });
+      return;
+    }
     this._lastDims = dims;
     clearTimeout(this._resizeTimer);
     // 服务端对每次真 reflow 都补一帧 snapshot；拖窗口时不合并会闪烁重画。

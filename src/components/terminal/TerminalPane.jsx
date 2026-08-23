@@ -9,6 +9,7 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
+import { push as diag, beginActivate, liveHostGeomOf } from '../../term/amDiag.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -96,12 +97,14 @@ export default function TerminalPane({
       onUnsupported: showUnsupported,
     });
     const gate = new SameWidthController();
+    beginActivate(target);
     const sendIfNeeded = (act) => {
       if (!act || act.type !== 'subscribe') return;
       clientRef.current?.subscribe(target, act.rows, act.cols);
       gate.noteSent(act.rows, act.cols);
     };
     const view = new TerminalView(host, {
+      diagRef: target,
       onResize: (rows, cols) => {
         sendIfNeeded(gate.settle(rows, cols));
         onResizeRef.current?.(rows, cols);
@@ -149,15 +152,39 @@ export default function TerminalPane({
       // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
-        case BINARY_KIND.SNAPSHOT:
-          if (!gate.acceptSnapshot()) return;
+        case BINARY_KIND.SNAPSHOT: {
+          const accepted = gate.acceptSnapshot();
+          const live = liveHostGeomOf(agent.ref) || liveHostGeomOf(target);
+          diag({
+            type: 'snapshot_gate',
+            ref: target,
+            accepted,
+            grid_cols: view.cols,
+            grid_rows: view.rows,
+            sent_cols: gate.sent ? gate.sent.cols : null,
+            sent_rows: gate.sent ? gate.sent.rows : null,
+            bytes: frame.data && frame.data.length != null ? frame.data.length : 0,
+            host_cols_live: live ? live.cols : null,
+            host_rows_live: live ? live.rows : null,
+          });
+          if (!accepted) return;
           view.writeSnapshot(frame.data);
           setReady(true);
           break;
-        case BINARY_KIND.DELTA:
-          if (!gate.acceptDelta()) return;
+        }
+        case BINARY_KIND.DELTA: {
+          const ok = gate.acceptDelta();
+          diag({
+            type: 'delta_gate',
+            ref: target,
+            accepted: ok,
+            grid_cols: view.cols,
+            bytes: frame.data && frame.data.length != null ? frame.data.length : 0,
+          });
+          if (!ok) return;
           view.writeDelta(frame.data);
           break;
+        }
         case BINARY_KIND.SCROLLBACK:
           acceptScrollback(g, frame);
           break;

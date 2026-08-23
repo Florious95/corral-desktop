@@ -19,6 +19,10 @@
 
 import { encodeControl, decodeControl } from './protocol.js';
 import { decodeBinary } from './binary.js';
+import {
+  push as diag, recordHostGeom, forgetHostGeom, hostGeomOf,
+  markSubscribed, recordLiveHostGeom, stampHostAtSnap, byteStats,
+} from '../../term/amDiag.js';
 
 export const ClientState = Object.freeze({
   STOPPED: 'stopped',
@@ -121,16 +125,43 @@ export class Client {
 
   /** Subscribe to a session mirror; bookkept for replay across reconnects. */
   subscribe(ref, rows, cols) {
-    this.activeSubscriptions.set(ref, { rows, cols });
-    if (!this.isReady) return true; // bookkept; replayed on READY
-    return this.sendControl('subscribe', { ref, rows, cols });
+    const host = hostGeomOf(ref);
+    const forceHost = typeof globalThis !== 'undefined' && globalThis.__amSubscribeAtHost === true;
+    let sendRows = rows;
+    let sendCols = cols;
+    if (forceHost && host && host.rows >= 1 && host.cols >= 1) {
+      sendRows = host.rows;
+      sendCols = host.cols;
+    }
+    this.activeSubscriptions.set(ref, { rows: sendRows, cols: sendCols });
+    const hostFields = {
+      host_rows: host ? host.rows : null,
+      host_cols: host ? host.cols : null,
+      listing_seq: host ? host.listing_seq : null,
+      req_rows: rows,
+      req_cols: cols,
+      force_host: forceHost === true,
+    };
+    if (!this.isReady) {
+      diag({ type: 'subscribe', ref, rows: sendRows, cols: sendCols, sent: false, reason: 'not_ready_bookkept', ...hostFields });
+      return true; // bookkept; replayed on READY
+    }
+    const sent = this.sendControl('subscribe', { ref, rows: sendRows, cols: sendCols });
+    if (sent) markSubscribed(ref);
+    diag({ type: 'subscribe', ref, rows: sendRows, cols: sendCols, sent, reason: sent ? null : 'send_failed', ...hostFields });
+    return sent;
   }
 
   /** Stop mirroring (idempotent); removed from replay bookkeeping. */
   unsubscribe(ref) {
     this.activeSubscriptions.delete(ref);
-    if (!this.isReady) return true;
-    return this.sendControl('unsubscribe', { ref });
+    if (!this.isReady) {
+      diag({ type: 'unsubscribe', ref, sent: false, reason: 'not_ready' });
+      return true;
+    }
+    const sent = this.sendControl('unsubscribe', { ref });
+    diag({ type: 'unsubscribe', ref, sent, reason: sent ? null : 'send_failed' });
+    return sent;
   }
 
   /**
@@ -182,8 +213,13 @@ export class Client {
 
   /** Report client terminal dims (applies to a subscribed session). */
   resize(ref, rows, cols) {
-    if (!this.isReady) return false;
-    return this.sendControl('resize', { ref, rows, cols });
+    if (!this.isReady) {
+      diag({ type: 'resize_up', ref, rows, cols, sent: false, reason: 'not_ready' });
+      return false;
+    }
+    const sent = this.sendControl('resize', { ref, rows, cols });
+    diag({ type: 'resize_up', ref, rows, cols, sent, reason: sent ? null : 'send_failed' });
+    return sent;
   }
 
   /**
@@ -226,9 +262,11 @@ export class Client {
   // ---- internals ----
 
   setState(s) {
+    const prev = this.state;
     if (this.state !== s) {
       this.state = s;
       this.onStateChange(s);
+      diag({ type: 'conn_state', from: prev, to: s, ref: null });
     }
   }
 
@@ -281,6 +319,14 @@ export class Client {
         this.onLocalError(e.code, e.message);
         return;
       }
+      const kindName = frame.kind === 1 ? 'snapshot' : frame.kind === 2 ? 'delta' : 'scrollback';
+      const live = kindName === 'snapshot' ? stampHostAtSnap(frame.ref) : {};
+      const stats = byteStats(frame.data);
+      diag({
+        type: kindName, ref: frame.ref, kind: frame.kind,
+        ...stats,
+        ...live,
+      });
       this.onBinary(frame);
     }
   }
@@ -308,6 +354,15 @@ export class Client {
         this.lastSeq = payload.seq;
         this.buildFromListing(payload);
         this.onFrame(type, payload);
+        const panes = [];
+        for (const w of payload.workspaces || []) {
+          for (const s of w.sessions || []) {
+            panes.push({ ref: s.ref, rows: s.rows, cols: s.cols });
+          }
+        }
+        diag({ type: 'listing', ref: null, listing_seq: payload.seq, pane_count: panes.length, panes });
+        recordHostGeom(panes, payload.seq);
+        recordLiveHostGeom(panes, payload.seq);
         return;
       }
       case 'list_delta': {
@@ -321,6 +376,17 @@ export class Client {
         this.lastSeq = payload.seq;
         this.applyDelta(payload);
         this.onFrame(type, payload);
+        const panes = [];
+        for (const s of [...(payload.added_sessions || []), ...(payload.changed_sessions || [])]) {
+          panes.push({ ref: s.ref, rows: s.rows, cols: s.cols });
+        }
+        diag({
+          type: 'list_delta', ref: null, listing_seq: payload.seq,
+          panes, removed: (payload.removed_refs || []).length,
+        });
+        recordHostGeom(panes, payload.seq);
+        recordLiveHostGeom(panes, payload.seq);
+        forgetHostGeom(payload.removed_refs);
         return;
       }
       case 'input_ack': {
@@ -345,12 +411,23 @@ export class Client {
     this.ws = null;
     this.clearPending('connection lost');
     if (this.state === ClientState.STOPPED) return; // explicit disconnect already ran
+    diag({ type: 'reconnect', ref: null, reason: 'connection_lost' });
     this.scheduleReconnect();
   }
 
   replaySubscriptions() {
+    diag({ type: 'ready_replay', ref: null, count: this.activeSubscriptions.size });
     for (const [ref, dims] of this.activeSubscriptions) {
-      this.sendControl('subscribe', { ref, rows: dims.rows, cols: dims.cols });
+      const sent = this.sendControl('subscribe', { ref, rows: dims.rows, cols: dims.cols });
+      if (sent) markSubscribed(ref);
+      const host = hostGeomOf(ref);
+      diag({
+        type: 'subscribe', ref, rows: dims.rows, cols: dims.cols,
+        sent, reason: sent ? 'replay' : 'replay_send_failed',
+        host_rows: host ? host.rows : null,
+        host_cols: host ? host.cols : null,
+        listing_seq: host ? host.listing_seq : null,
+      });
     }
     if (this.overlaySocket) {
       this.sendControl('overlay_subscribe', { socket: this.overlaySocket });

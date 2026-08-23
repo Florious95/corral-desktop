@@ -75,6 +75,10 @@ export default function AgentsList({
             <div
               key={ag.key}
               className={`agents-row${openKeys.includes(ag.key) ? ' is-open' : ''}`}
+              data-ref={ag.ref || ''}
+              data-fav={ag.fav ? '1' : '0'}
+              data-host-cols={ag.hostCols != null ? String(ag.hostCols) : ''}
+              data-host-rows={ag.hostRows != null ? String(ag.hostRows) : ''}
               style={{
                 top: tops.get(ag.key),
                 opacity: closing[ag.key] ? 0 : 1,
