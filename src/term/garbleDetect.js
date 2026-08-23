@@ -6,7 +6,7 @@
 const CSI_OR_ESC = /\x1b(?:\[[0-?]*[ -/]*[@-~]|].*?(?:\x07|\x1b\\)|[PX^_].*?\x1b\\|[\[\]()#%][0-9;]*[0-9A-Za-z]|.)/gs;
 const BOX_RUN = /[\u2500\u2501\u2550\u2504\u2505\u2508\u2509]+/g;
 
-function displayWidth(str) {
+export function displayWidth(str) {
   let w = 0;
   for (const ch of str) {
     const c = ch.codePointAt(0);
@@ -18,7 +18,7 @@ function displayWidth(str) {
   return w;
 }
 
-function isWide(c) {
+export function isWide(c) {
   return (c >= 0x1100 && c <= 0x115f)
     || (c >= 0x2e80 && c <= 0x9fff)
     || (c >= 0xac00 && c <= 0xd7af)
@@ -31,6 +31,81 @@ function isWide(c) {
 
 function stripAnsi(text) {
   return text.replace(CSI_OR_ESC, '');
+}
+
+function charDisplayWidth(c) {
+  if (c <= 0x1f || (c >= 0x7f && c <= 0x9f)) return 0;
+  if (c >= 0x300 && c <= 0x36f) return 0;
+  if (isWide(c)) return 2;
+  return 1;
+}
+
+function matchCsiAt(s, i) {
+  const re = new RegExp(CSI_OR_ESC.source, 'ys');
+  re.lastIndex = i;
+  const m = re.exec(s);
+  return m && m.index === i ? m[0] : null;
+}
+
+function clipLine(line, cols) {
+  let out = '';
+  let w = 0;
+  let i = 0;
+  let overflow = false;
+  while (i < line.length) {
+    const csi = matchCsiAt(line, i);
+    if (csi) {
+      out += csi;
+      i += csi.length;
+      continue;
+    }
+    if (line.charCodeAt(i) === 0x1b) {
+      out += line.slice(i);
+      break;
+    }
+    const cp = line.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    const dw = charDisplayWidth(cp);
+    if (overflow) {
+      i += ch.length;
+      continue;
+    }
+    if (w + dw > cols) {
+      overflow = true;
+      i += ch.length;
+      continue;
+    }
+    out += ch;
+    w += dw;
+    i += ch.length;
+  }
+  return out;
+}
+
+/**
+ * Clip capture-pane text so each newline-delimited line occupies at most `cols`
+ * display cells. CSI/OSC copied intact. A width-2 char that does not fit is dropped
+ * (no space pad). Does not change detectGarble thresholds.
+ */
+export function clipCaptureToCols(input, cols) {
+  if (!Number.isFinite(cols) || cols < 1) return String(input ?? '');
+  const raw = String(input ?? '');
+  const parts = raw.split(/(\n)/);
+  let out = '';
+  for (const p of parts) {
+    out += p === '\n' ? '\n' : clipLine(p, cols);
+  }
+  return out;
+}
+
+export function clipCaptureBytes(u8, cols) {
+  if (u8 == null) return u8;
+  const text = typeof u8 === 'string'
+    ? u8
+    : new TextDecoder('utf-8', { fatal: false }).decode(u8 instanceof Uint8Array ? u8 : new Uint8Array(u8));
+  const clipped = clipCaptureToCols(text, cols);
+  if (clipped === text && u8 instanceof Uint8Array) return u8;
+  return new TextEncoder().encode(clipped);
 }
 
 function asText(snapshot) {

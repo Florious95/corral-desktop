@@ -2,8 +2,8 @@
  * AgentMirror 桌面端 —— xterm 底座（CLIENT-CONTRACT §1.3 的重写版）。
  *
  * 保留 web 版 TerminalView 的全部语义，只换实现底座：
- *   - snapshot → reset() + write()（清屏重建；游标锚 ESC[row;colH 在字节尾，必须整段原样喂）
- *   - delta    → write()（追加）
+ *   - snapshot → reset() + write()（清屏重建；写入前按显示宽度把每一捕获行裁到 term.cols）
+ *   - delta    → 同一套裁剪后 write()
  *   - resize   → 120ms debounce 合并后回调（服务端每次真 reflow 都补一帧 snapshot，不合并会闪）
  *   - 滚到顶   → onHistoryBoundary()，由调用方去拉协议 scrollback
  *
@@ -19,6 +19,7 @@ import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 import { isLocalSidebarToggle, unsupportedKeyEvent, consumeTerminalReplies, REPLY_HOLD_MAX } from './nativeInput.js';
 import { attachWebglRenderer } from './webglRenderer.js';
 import { push as diag } from './amDiag.js';
+import { clipCaptureBytes } from './garbleDetect.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -209,25 +210,27 @@ export class TerminalView {
     }
   }
 
-  /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */
+  /** 全屏快照：清屏重建（protocol §6.2）。捕获行按显示宽度裁到 term.cols（裁定 2026-08-23）。 */
   writeSnapshot(u8) {
     const t_reset = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     this.term.reset();
     const t_write = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    this.term.write(u8);
+    const payload = clipCaptureBytes(u8, this.term.cols);
+    this.term.write(payload);
     diag({
       type: 'write_snapshot', ref: this.diagRef,
       t_reset, t_write, term_cols: this.term.cols, term_rows: this.term.rows,
-      bytes: u8 && u8.length != null ? u8.length : 0,
+      bytes: payload && payload.length != null ? payload.length : 0,
     });
   }
 
-  /** 增量：追加到当前屏。 */
+  /** 增量：同一套按显示宽度裁到 term.cols 后追加。 */
   writeDelta(u8) {
-    this.term.write(u8);
+    const payload = clipCaptureBytes(u8, this.term.cols);
+    this.term.write(payload);
     diag({
       type: 'write_delta', ref: this.diagRef,
-      term_cols: this.term.cols, bytes: u8 && u8.length != null ? u8.length : 0,
+      term_cols: this.term.cols, bytes: payload && payload.length != null ? payload.length : 0,
     });
   }
 

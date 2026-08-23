@@ -597,6 +597,7 @@ src/
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`、
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize` 并 `client.resize`（裁定 2026-08-23）。首帧立刻落到格子。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow：回到原几何时 daemon `resize` 是 no-op、不补快照，错乱会钉死。真正变宽/变窄仍走 `resize` 等补快照。
+  **捕获行按显示宽度裁到 `term.cols`（裁定 2026-08-23）**：`capture-pane` 一行必须只占一个渲染行。写入 xterm 前（`writeSnapshot` / `writeDelta` 同一守卫）按 `garbleDetect.displayWidth` 裁到 `term.cols`；宽 2 而只剩 1 格则丢弃该字符，⛔ 不以空格补齐。CSI/SGR 原样保留。标注器 `detectGarble` 仍看未裁字节（量具，不改阈值）。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
