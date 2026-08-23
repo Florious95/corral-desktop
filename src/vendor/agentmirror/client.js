@@ -19,7 +19,7 @@
 
 import { encodeControl, decodeControl } from './protocol.js';
 import { decodeBinary } from './binary.js';
-import { push as diag } from '../../term/amDiag.js';
+import { push as diag, recordHostGeom, forgetHostGeom, hostGeomOf } from '../../term/amDiag.js';
 
 export const ClientState = Object.freeze({
   STOPPED: 'stopped',
@@ -123,12 +123,18 @@ export class Client {
   /** Subscribe to a session mirror; bookkept for replay across reconnects. */
   subscribe(ref, rows, cols) {
     this.activeSubscriptions.set(ref, { rows, cols });
+    const host = hostGeomOf(ref);
+    const hostFields = {
+      host_rows: host ? host.rows : null,
+      host_cols: host ? host.cols : null,
+      listing_seq: host ? host.listing_seq : null,
+    };
     if (!this.isReady) {
-      diag({ type: 'subscribe', ref, rows, cols, sent: false, reason: 'not_ready_bookkept' });
+      diag({ type: 'subscribe', ref, rows, cols, sent: false, reason: 'not_ready_bookkept', ...hostFields });
       return true; // bookkept; replayed on READY
     }
     const sent = this.sendControl('subscribe', { ref, rows, cols });
-    diag({ type: 'subscribe', ref, rows, cols, sent, reason: sent ? null : 'send_failed' });
+    diag({ type: 'subscribe', ref, rows, cols, sent, reason: sent ? null : 'send_failed', ...hostFields });
     return sent;
   }
 
@@ -338,6 +344,7 @@ export class Client {
           }
         }
         diag({ type: 'listing', ref: null, listing_seq: payload.seq, panes });
+        recordHostGeom(panes, payload.seq);
         return;
       }
       case 'list_delta': {
@@ -359,6 +366,8 @@ export class Client {
           type: 'list_delta', ref: null, listing_seq: payload.seq,
           panes, removed: (payload.removed_refs || []).length,
         });
+        recordHostGeom(panes, payload.seq);
+        forgetHostGeom(payload.removed_refs);
         return;
       }
       case 'input_ack': {
@@ -391,7 +400,14 @@ export class Client {
     diag({ type: 'ready_replay', ref: null, count: this.activeSubscriptions.size });
     for (const [ref, dims] of this.activeSubscriptions) {
       const sent = this.sendControl('subscribe', { ref, rows: dims.rows, cols: dims.cols });
-      diag({ type: 'subscribe', ref, rows: dims.rows, cols: dims.cols, sent, reason: sent ? 'replay' : 'replay_send_failed' });
+      const host = hostGeomOf(ref);
+      diag({
+        type: 'subscribe', ref, rows: dims.rows, cols: dims.cols,
+        sent, reason: sent ? 'replay' : 'replay_send_failed',
+        host_rows: host ? host.rows : null,
+        host_cols: host ? host.cols : null,
+        listing_seq: host ? host.listing_seq : null,
+      });
     }
     if (this.overlaySocket) {
       this.sendControl('overlay_subscribe', { socket: this.overlaySocket });

@@ -64,6 +64,8 @@ export function detectGarble(state) {
     termRows,
     lineCount: 0,
     maxLineWidth: 0,
+    maxLineChars: 0,
+    maxLineHasWide: false,
     overwideLines: 0,
     maxBoxRun: 0,
     overwideBoxRuns: 0,
@@ -95,7 +97,15 @@ export function detectGarble(state) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\s+$/g, '');
     const w = displayWidth(line);
-    if (w > metrics.maxLineWidth) metrics.maxLineWidth = w;
+    if (w > metrics.maxLineWidth) {
+      metrics.maxLineWidth = w;
+      metrics.maxLineChars = [...line].length;
+      metrics.maxLineHasWide = false;
+      for (const ch of line) {
+        const c = ch.codePointAt(0);
+        if (isWide(c)) { metrics.maxLineHasWide = true; break; }
+      }
+    }
     if (w > termCols) {
       metrics.overwideLines += 1;
     }

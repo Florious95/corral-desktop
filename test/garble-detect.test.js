@@ -43,3 +43,15 @@ test('does not treat max CUP column as grid width', () => {
   assert.ok(r.metrics.maxLineWidth > (r.metrics.maxCupCol || 0) || r.metrics.overwideLines > 0);
   assert.equal(r.garbled, true);
 });
+
+test('metrics: maxLineChars is code points of the widest stripped line; maxLineHasWide tracks CJK', () => {
+  const ascii = detectGarble({ snapshot: 'hello\n', termCols: 80 });
+  assert.equal(ascii.metrics.maxLineWidth, 5);
+  assert.equal(ascii.metrics.maxLineChars, 5);
+  assert.equal(ascii.metrics.maxLineHasWide, false);
+
+  const cjk = detectGarble({ snapshot: '中\n', termCols: 80 });
+  assert.equal(cjk.metrics.maxLineWidth, 2);
+  assert.equal(cjk.metrics.maxLineChars, 1);
+  assert.equal(cjk.metrics.maxLineHasWide, true);
+});
