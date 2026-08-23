@@ -18,3 +18,6 @@ repro2-daemon.log
 am-state-cause/
 cwd-cause/
 cause-raw/
+am-state-realcli/
+cwd-realcli/
+realcli-daemon.log
