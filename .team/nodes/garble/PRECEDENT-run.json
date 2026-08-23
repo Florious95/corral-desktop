@@ -1,0 +1,141 @@
+{
+  "ok": true,
+  "listen": "127.0.0.1:19371",
+  "socket": "/tmp/amp-tmux/tmux-501/amp",
+  "discovery_dirs": "/tmp/amp-tmux/tmux-501",
+  "used_9900": false,
+  "scanned_user_tmux": false,
+  "lines": [
+    "geom activate ref=/tmp/amp-tmux/tmux-501/amp\u001f%0",
+    "geom derived ref=/tmp/amp-tmux/tmux-501/amp\u001f%0 derived_cols=80 derived_rows=24 last_sent_cols=null note=xterm_default_before_fit",
+    "geom subscribe ref=/tmp/amp-tmux/tmux-501/amp\u001f%0 rows=47 cols=157 reason=activate ok=true skipped=null bookkept_rows=47 bookkept_cols=157",
+    "geom resize ref=/tmp/amp-tmux/tmux-501/amp\u001f%0 rows=47 cols=157 reason=fit ok=true skipped=null bookkept_rows=47 bookkept_cols=157",
+    "geom snapshot ref=/tmp/amp-tmux/tmux-501/amp\u001f%0 kind=1 frame_cols=235 frame_rows=50 bytes_len=8243",
+    "geom activate ref=/tmp/amp-tmux/tmux-501/amp\u001f%1",
+    "geom derived ref=/tmp/amp-tmux/tmux-501/amp\u001f%1 derived_cols=80 derived_rows=24 last_sent_cols=null note=xterm_default_before_fit",
+    "geom subscribe ref=/tmp/amp-tmux/tmux-501/amp\u001f%1 rows=24 cols=80 reason=activate ok=true skipped=null bookkept_rows=24 bookkept_cols=80",
+    "geom resize ref=/tmp/amp-tmux/tmux-501/amp\u001f%1 rows=24 cols=80 reason=fit ok=true skipped=null bookkept_rows=24 bookkept_cols=80",
+    "geom snapshot ref=/tmp/amp-tmux/tmux-501/amp\u001f%1 kind=1 frame_cols=80 frame_rows=24 bytes_len=2360"
+  ],
+  "events": [
+    {
+      "t": 1787484472524,
+      "event": "activate",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%0"
+    },
+    {
+      "t": 1787484472524,
+      "event": "derived",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%0",
+      "derived_cols": 80,
+      "derived_rows": 24,
+      "last_sent_cols": null,
+      "note": "xterm_default_before_fit"
+    },
+    {
+      "t": 1787484472524,
+      "event": "subscribe",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%0",
+      "rows": 47,
+      "cols": 157,
+      "reason": "activate",
+      "ok": true,
+      "skipped": null,
+      "bookkept_rows": 47,
+      "bookkept_cols": 157
+    },
+    {
+      "t": 1787484472525,
+      "event": "resize",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%0",
+      "rows": 47,
+      "cols": 157,
+      "reason": "fit",
+      "ok": true,
+      "skipped": null,
+      "bookkept_rows": 47,
+      "bookkept_cols": 157
+    },
+    {
+      "t": 1787484472625,
+      "event": "snapshot",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%0",
+      "kind": 1,
+      "frame_cols": 235,
+      "frame_rows": 50,
+      "bytes_len": 8243
+    },
+    {
+      "t": 1787484472724,
+      "event": "activate",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%1"
+    },
+    {
+      "t": 1787484472724,
+      "event": "derived",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%1",
+      "derived_cols": 80,
+      "derived_rows": 24,
+      "last_sent_cols": null,
+      "note": "xterm_default_before_fit"
+    },
+    {
+      "t": 1787484472725,
+      "event": "subscribe",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%1",
+      "rows": 24,
+      "cols": 80,
+      "reason": "activate",
+      "ok": true,
+      "skipped": null,
+      "bookkept_rows": 24,
+      "bookkept_cols": 80
+    },
+    {
+      "t": 1787484472725,
+      "event": "resize",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%1",
+      "rows": 24,
+      "cols": 80,
+      "reason": "fit",
+      "ok": true,
+      "skipped": null,
+      "bookkept_rows": 24,
+      "bookkept_cols": 80
+    },
+    {
+      "t": 1787484472817,
+      "event": "snapshot",
+      "ref": "/tmp/amp-tmux/tmux-501/amp\u001f%1",
+      "kind": 1,
+      "frame_cols": 80,
+      "frame_rows": 24,
+      "bytes_len": 2360
+    }
+  ],
+  "after_fit": {
+    "pane": {
+      "cols": 157,
+      "rows": 47,
+      "raw": "157x47"
+    },
+    "listing_cols": 157,
+    "listing_rows": 47
+  },
+  "after_alt": {
+    "pane": {
+      "cols": 80,
+      "rows": 24,
+      "raw": "80x24"
+    },
+    "listing_cols": 80,
+    "book235": {
+      "bookkept_rows": 47,
+      "bookkept_cols": 157
+    },
+    "book80": {
+      "bookkept_rows": 24,
+      "bookkept_cols": 80
+    }
+  }
+}

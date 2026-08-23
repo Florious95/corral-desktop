@@ -281,9 +281,9 @@ export class DeviceManager {
 
   // ---- session actions (routed by uid) ----
 
-  subscribe(uid, rows, cols) {
+  subscribe(uid, rows, cols, reason = 'user') {
     const t = this._route(uid);
-    return t ? t.client.subscribe(t.ref, rows, cols) : false;
+    return t ? t.client.subscribe(t.ref, rows, cols, reason) : false;
   }
 
   unsubscribe(uid) {
@@ -312,9 +312,9 @@ export class DeviceManager {
     return reqId === null ? null : { deviceId: t.deviceId, reqId };
   }
 
-  resize(uid, rows, cols) {
+  resize(uid, rows, cols, reason = 'fit') {
     const t = this._route(uid);
-    return t ? t.client.resize(t.ref, rows, cols) : false;
+    return t ? t.client.resize(t.ref, rows, cols, reason) : false;
   }
 
   /** @returns {boolean} no ack; failure is an error frame. */

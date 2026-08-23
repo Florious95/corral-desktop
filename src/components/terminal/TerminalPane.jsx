@@ -4,6 +4,7 @@ import './terminal.css';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
 import { TerminalView } from '../../term/TerminalView.js';
 import { SameWidthController } from '../../term/sameWidth.js';
+import { geomTrace, bookOf } from '../../term/geomTrace.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
@@ -96,14 +97,41 @@ export default function TerminalPane({
       onUnsupported: showUnsupported,
     });
     const gate = new SameWidthController();
-    const sendIfNeeded = (act) => {
-      if (!act || act.type !== 'subscribe') return;
-      clientRef.current?.subscribe(target, act.rows, act.cols);
+    let firstSub = true;
+    let view;
+    const sendIfNeeded = (act, reason) => {
+      const fit = view?.lastFit || {};
+      geomTrace('derived', {
+        ref: target,
+        container_width_px: fit.container_width_px ?? null,
+        cell_width_px: fit.cell_width_px ?? null,
+        derived_cols: fit.derived_cols ?? (act && act.cols) ?? (gate.grid && gate.grid.cols) ?? null,
+        derived_rows: fit.derived_rows ?? (act && act.rows) ?? (gate.grid && gate.grid.rows) ?? null,
+        last_sent_cols: gate.sent ? gate.sent.cols : null,
+        last_sent_rows: gate.sent ? gate.sent.rows : null,
+      });
+      if (!act || act.type !== 'subscribe') {
+        geomTrace('subscribe', {
+          ref: target,
+          rows: gate.grid ? gate.grid.rows : null,
+          cols: gate.grid ? gate.grid.cols : null,
+          reason,
+          ok: false,
+          skipped: 'gate_none',
+          grid_cols: gate.grid ? gate.grid.cols : null,
+          ...bookOf(target),
+        });
+        return;
+      }
+      clientRef.current?.subscribe(target, act.rows, act.cols, reason);
       gate.noteSent(act.rows, act.cols);
     };
-    const view = new TerminalView(host, {
+    view = new TerminalView(host, {
       onResize: (rows, cols) => {
-        sendIfNeeded(gate.settle(rows, cols));
+        const act = gate.settle(rows, cols);
+        const reason = firstSub ? 'activate' : 'settle';
+        sendIfNeeded(act, reason);
+        if (act && act.type === 'subscribe') firstSub = false;
         onResizeRef.current?.(rows, cols);
       },
       onHistoryBoundary: () => loadHistory(),
@@ -149,15 +177,37 @@ export default function TerminalPane({
       // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
       switch (frame.kind) {
-        case BINARY_KIND.SNAPSHOT:
-          if (!gate.acceptSnapshot()) return;
+        case BINARY_KIND.SNAPSHOT: {
+          const painted = gate.acceptSnapshot();
+          geomTrace('snapshot', {
+            ref: frame.ref || target,
+            frame_cols: agent.cols ?? null,
+            frame_rows: agent.rows ?? null,
+            grid_cols: gate.grid ? gate.grid.cols : (view.cols ?? null),
+            grid_rows: gate.grid ? gate.grid.rows : (view.rows ?? null),
+            painted,
+            skipped: painted ? null : 'gate_reject',
+            bytes_len: frame.data ? frame.data.byteLength || frame.data.length : 0,
+          });
+          if (!painted) return;
           view.writeSnapshot(frame.data);
           setReady(true);
           break;
-        case BINARY_KIND.DELTA:
-          if (!gate.acceptDelta()) return;
+        }
+        case BINARY_KIND.DELTA: {
+          const painted = gate.acceptDelta();
+          geomTrace('delta', {
+            ref: frame.ref || target,
+            frame_cols: agent.cols ?? null,
+            grid_cols: gate.grid ? gate.grid.cols : (view.cols ?? null),
+            painted,
+            skipped: painted ? null : 'gate_reject',
+            bytes_len: frame.data ? frame.data.byteLength || frame.data.length : 0,
+          });
+          if (!painted) return;
           view.writeDelta(frame.data);
           break;
+        }
         case BINARY_KIND.SCROLLBACK:
           acceptScrollback(g, frame);
           break;

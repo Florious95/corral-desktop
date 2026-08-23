@@ -135,6 +135,13 @@ export class TerminalView {
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
+    this.lastFit = {
+      container_width_px: w,
+      container_height_px: h,
+      cell_width_px: cell.w,
+      derived_cols: cols,
+      derived_rows: rows,
+    };
     this._pendingCols = cols;
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {

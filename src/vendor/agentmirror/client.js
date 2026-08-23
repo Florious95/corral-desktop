@@ -19,6 +19,7 @@
 
 import { encodeControl, decodeControl } from './protocol.js';
 import { decodeBinary } from './binary.js';
+import { bookkeep, unbook, bookOf, geomTrace } from '../../term/geomTrace.js';
 
 export const ClientState = Object.freeze({
   STOPPED: 'stopped',
@@ -120,15 +121,26 @@ export class Client {
   }
 
   /** Subscribe to a session mirror; bookkept for replay across reconnects. */
-  subscribe(ref, rows, cols) {
+  subscribe(ref, rows, cols, reason = 'user') {
     this.activeSubscriptions.set(ref, { rows, cols });
-    if (!this.isReady) return true; // bookkept; replayed on READY
-    return this.sendControl('subscribe', { ref, rows, cols });
+    bookkeep(ref, rows, cols);
+    if (!this.isReady) {
+      geomTrace('subscribe', {
+        ref, rows, cols, reason, ok: false, skipped: 'not_ready', ...bookOf(ref),
+      });
+      return true; // bookkept; replayed on READY
+    }
+    const ok = this.sendControl('subscribe', { ref, rows, cols });
+    geomTrace('subscribe', {
+      ref, rows, cols, reason, ok, skipped: ok ? null : 'send_failed', ...bookOf(ref),
+    });
+    return ok;
   }
 
   /** Stop mirroring (idempotent); removed from replay bookkeeping. */
   unsubscribe(ref) {
     this.activeSubscriptions.delete(ref);
+    unbook(ref);
     if (!this.isReady) return true;
     return this.sendControl('unsubscribe', { ref });
   }
@@ -181,9 +193,19 @@ export class Client {
   }
 
   /** Report client terminal dims (applies to a subscribed session). */
-  resize(ref, rows, cols) {
-    if (!this.isReady) return false;
-    return this.sendControl('resize', { ref, rows, cols });
+  resize(ref, rows, cols, reason = 'user') {
+    const booked = bookOf(ref);
+    if (!this.isReady) {
+      geomTrace('resize', {
+        ref, rows, cols, reason, ok: false, skipped: 'not_ready', ...booked,
+      });
+      return false;
+    }
+    const ok = this.sendControl('resize', { ref, rows, cols });
+    geomTrace('resize', {
+      ref, rows, cols, reason, ok, skipped: ok ? null : 'send_failed', ...booked,
+    });
+    return ok;
   }
 
   /**
@@ -281,6 +303,14 @@ export class Client {
         this.onLocalError(e.code, e.message);
         return;
       }
+      const sess = this.sessionsByRef.get(frame.ref);
+      geomTrace(frame.kind === 1 ? 'snapshot' : frame.kind === 2 ? 'delta' : 'scrollback', {
+        ref: frame.ref,
+        kind: frame.kind,
+        frame_cols: sess && sess.cols != null ? sess.cols : null,
+        frame_rows: sess && sess.rows != null ? sess.rows : null,
+        bytes_len: frame.data ? frame.data.byteLength || frame.data.length : 0,
+      });
       this.onBinary(frame);
     }
   }
@@ -350,7 +380,11 @@ export class Client {
 
   replaySubscriptions() {
     for (const [ref, dims] of this.activeSubscriptions) {
-      this.sendControl('subscribe', { ref, rows: dims.rows, cols: dims.cols });
+      const ok = this.sendControl('subscribe', { ref, rows: dims.rows, cols: dims.cols });
+      geomTrace('subscribe', {
+        ref, rows: dims.rows, cols: dims.cols, reason: 'reconnect', ok,
+        skipped: ok ? null : 'send_failed', ...bookOf(ref),
+      });
     }
     if (this.overlaySocket) {
       this.sendControl('overlay_subscribe', { socket: this.overlaySocket });

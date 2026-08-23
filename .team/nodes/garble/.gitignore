@@ -20,4 +20,10 @@ cwd-cause/
 cause-raw/
 am-state-realcli/
 cwd-realcli/
+am-state-precedent/
+cwd-precedent/
+precedent-daemon.log
 realcli-daemon.log
+am-state-precedent/
+cwd-precedent/
+precedent-daemon.log
