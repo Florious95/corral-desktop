@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   AM_DIAG_CAPACITY, SETTLE_QUIET_MS, push, dump, resetDiag, beginActivate,
   recordHostGeom, hostGeomOf, resetHostGeom,
+  markSubscribed, recordLiveHostGeom, liveHostGeomOf, stampHostAtSnap,
 } from '../src/term/amDiag.js';
 
 test('__amDiag dump is JSON and ring drops oldest', () => {
@@ -85,4 +86,17 @@ test('host geom cache survives __amDiag.reset and is not the ring', () => {
   resetDiag();
   assert.deepEqual(hostGeomOf('sock\u001f%1'), { rows: 50, cols: 235, listing_seq: 7 });
   assert.equal(dump().length, 0);
+});
+
+test('live host geom ignores listing before subscribe and stamps after', () => {
+  resetHostGeom();
+  resetDiag();
+  recordLiveHostGeom([{ ref: 's1', rows: 50, cols: 235 }], 1);
+  assert.equal(liveHostGeomOf('s1'), null);
+  markSubscribed('s1');
+  recordLiveHostGeom([{ ref: 's1', rows: 39, cols: 114 }], 2);
+  assert.deepEqual(liveHostGeomOf('s1'), { rows: 39, cols: 114, listing_seq: 2 });
+  resetDiag();
+  assert.equal(stampHostAtSnap('s1').host_cols_at_snap, 114);
+  assert.equal(stampHostAtSnap('s1').host_cols_live, 114);
 });
