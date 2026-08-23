@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DeviceManager } from './core/devices.js';
 import { inferProvider } from './core/providers.js';
+import { geomTrace } from './term/geomTrace.js';
 import {
   CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon,
 } from './lib/icons.jsx';
@@ -263,6 +264,7 @@ export default function App({ seedDevices } = {}) {
   /* ——— 会话动作 ——— */
   const openAgent = useCallback((key) => {
     // 已在列里：只聚焦（U-06）。未打开：单列替换（C-053，左键不是追加）。
+    geomTrace('activate', { ref: key });
     setPaneKeys((p) => (p.includes(key) ? p : [key]));
     setActiveKey(key);
   }, []);
@@ -289,9 +291,9 @@ export default function App({ seedDevices } = {}) {
       const uid = agent.key;
       shim = {
         get isReady() { return dm.isReady(agent.deviceId) },
-        subscribe: (_ref, rows, cols) => dm.subscribe(uid, rows, cols),
+        subscribe: (_ref, rows, cols, reason) => dm.subscribe(uid, rows, cols, reason),
         unsubscribe: () => dm.unsubscribe(uid),
-        resize: (_ref, rows, cols) => dm.resize(uid, rows, cols),
+        resize: (_ref, rows, cols, reason) => dm.resize(uid, rows, cols, reason),
         scrollWheel: (_ref, delta) => dm.scrollWheel(uid, delta),
         scrollback: (_ref, fromLine, count) => dm.scrollback(uid, fromLine, count)?.reqId ?? null,
         /** 只投递本列的二进制帧；返回退订函数 */
@@ -341,7 +343,7 @@ export default function App({ seedDevices } = {}) {
       agent={agent}
       client={clientFor(agent)}
       focused={activeAgent ? agent.key === activeAgent.key : false}
-      onResize={(rows, cols) => dm.resize(agent.key, rows, cols)}
+      onResize={(rows, cols) => dm.resize(agent.key, rows, cols, 'fit')}
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
       onEnter={() => handlePaneEnter(agent.key)}
