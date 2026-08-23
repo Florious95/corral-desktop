@@ -1,0 +1,14 @@
+{
+  "wide_235": {
+    "bufferLen": 99,
+    "wrapped": 49,
+    "ratio": 0.494949494949495,
+    "line2_public": "[redacted]"
+  },
+  "wide_114": {
+    "bufferLen": 152,
+    "wrapped": 102,
+    "ratio": 0.6710526315789473,
+    "line2_public": "/ 500K"
+  }
+}

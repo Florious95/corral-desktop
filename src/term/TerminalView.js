@@ -77,6 +77,7 @@ export class TerminalView {
     this._lastWheelAt = 0;
     this._disposed = false;
     this._replyHold = '';
+    this._hasPainted = false;
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -157,7 +158,18 @@ export class TerminalView {
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
     if (cols !== this.term.cols || rows !== this.term.rows) {
+      // C: 有旧快照时先 reset 再 resize，避免把捕获宽度 A 的格子 wrap 进宽度 B。
+      if (this._hasPainted) {
+        this.term.reset();
+        this._hasPainted = false;
+      }
       this.term.resize(cols, rows);
+      if (reportDelay) this._report();
+      else {
+        this._lastDims = `${rows}x${cols}`;
+        this.onResize(rows, cols);
+      }
+    } else if (this._lastDims == null) {
       if (reportDelay) this._report();
       else {
         this._lastDims = `${rows}x${cols}`;
@@ -170,6 +182,7 @@ export class TerminalView {
   writeSnapshot(u8) {
     this.term.reset();
     this.term.write(u8);
+    this._hasPainted = true;
   }
 
   /** 增量：追加到当前屏。 */

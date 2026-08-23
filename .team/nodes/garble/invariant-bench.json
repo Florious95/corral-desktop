@@ -1,0 +1,100 @@
+{
+  "ok": true,
+  "n_phases": 3,
+  "phases": [
+    {
+      "name": "open",
+      "sent": {
+        "rows": 24,
+        "cols": 80
+      },
+      "accepted": true,
+      "invariant": true,
+      "matched_screen": {
+        "wrap": {
+          "bufferLen": 24,
+          "wrapped": 0,
+          "ratio": 0
+        },
+        "mark": {
+          "y": 0,
+          "firstCol": 0,
+          "hasMark": true
+        }
+      },
+      "mismatch_40": {
+        "wrap": {
+          "bufferLen": 24,
+          "wrapped": 0,
+          "ratio": 0
+        },
+        "mark": {
+          "y": 0,
+          "firstCol": 0,
+          "hasMark": true
+        }
+      },
+      "got_snapshot": true,
+      "snapshot_bytes": 19
+    },
+    {
+      "name": "window-width",
+      "sent": {
+        "rows": 24,
+        "cols": 100
+      },
+      "accepted": true,
+      "invariant": true,
+      "matched_screen": {
+        "wrap": {
+          "bufferLen": 24,
+          "wrapped": 0,
+          "ratio": 0
+        },
+        "mark": {
+          "y": 0,
+          "firstCol": 0,
+          "hasMark": true
+        }
+      },
+      "mismatch_40": null,
+      "got_snapshot": true,
+      "snapshot_bytes": 19
+    },
+    {
+      "name": "split",
+      "sent": {
+        "rows": 24,
+        "cols": 40
+      },
+      "accepted": true,
+      "invariant": true,
+      "matched_screen": {
+        "wrap": {
+          "bufferLen": 24,
+          "wrapped": 0,
+          "ratio": 0
+        },
+        "mark": {
+          "y": 0,
+          "firstCol": 0,
+          "hasMark": true
+        }
+      },
+      "mismatch_40": {
+        "wrap": {
+          "bufferLen": 24,
+          "wrapped": 0,
+          "ratio": 0
+        },
+        "mark": {
+          "y": 0,
+          "firstCol": 0,
+          "hasMark": true
+        }
+      },
+      "got_snapshot": true,
+      "snapshot_bytes": 19
+    }
+  ]
+}

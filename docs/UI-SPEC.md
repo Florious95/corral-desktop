@@ -596,9 +596,10 @@ src/
 - **终端区**：`flex:1; min-height:0; padding:8px 10px 0; background:var(--bg)`。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`、
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize` 并 `client.resize`（裁定 2026-08-23）。首帧立刻落到格子。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow：回到原几何时 daemon `resize` 是 no-op、不补快照，错乱会钉死。真正变宽/变窄仍走 `resize` 等补快照。
+  尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize`（裁定 2026-08-23）。首帧立刻落到格子。
+  **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就重发 `subscribe`（协议 `resize` 在主机几何未变时 no-op、不补快照）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
-- 挂载 `subscribe(ref, rows, cols)`，卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
+- 挂载：网格落定后 `subscribe(ref, rows, cols)`；改宽重订；卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
 **终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与 InputBar `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
 
@@ -821,3 +822,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。
 16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。
 17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）；未落定不 reflow 旧快照。
+18. **2026-08-23**：捕获宽度 == 渲染网格宽度为不变量；落定后 subscribe、改宽重订、错宽帧不画。
