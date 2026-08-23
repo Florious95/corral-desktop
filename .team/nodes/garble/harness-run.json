@@ -1,10 +1,10 @@
 {
-  "app_root": "/Volumes/nvme/Projects/tmux桌面端/.worktrees/wt-deepen",
-  "origin": "http://127.0.0.1:1457",
-  "cdp": 9353,
-  "timeout_ms": 5000,
+  "app_root": "/Volumes/nvme/Projects/tmux桌面端/.worktrees/wt-fix2",
+  "origin": "http://127.0.0.1:1437",
+  "cdp": 9333,
+  "timeout_ms": 8000,
   "session_count": 55,
   "self_check": {},
   "sample_rows": 550,
-  "out": "/Volumes/nvme/Projects/tmux桌面端/.worktrees/wt-r2scan/.team/nodes/garble/sweep-full-2.jsonl"
+  "out": "/Volumes/nvme/Projects/tmux桌面端/.worktrees/wt-fix2/.team/nodes/garble/sweep-after-2.jsonl"
 }

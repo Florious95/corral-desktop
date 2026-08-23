@@ -232,7 +232,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!WS_PKG_OK) throw new Error('ws missing');
   const opt = parseArgs(argv);
   mkdirSync(dirname(opt.out), { recursive: true });
-  const chromeDir = join(WT, '.team/nodes/garble/chrome-profile');
+  const chromeDir = join(WT, '.team/nodes/garble/chrome-profile-fix2');
   mkdirSync(chromeDir, { recursive: true });
 
   opt.port = await pickFreePort(opt.port);
