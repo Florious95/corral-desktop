@@ -1,0 +1,190 @@
+{
+  "snaps": 55,
+  "garbled115": 6,
+  "overwide_lines_seen": 15,
+  "overwide_from_snapshot": 11,
+  "overwide_from_capture_p": 4,
+  "table": [
+    {
+      "cp": "U+7684",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 29,
+      "n_at_overflow": 3,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+6B65",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 9,
+      "n_at_overflow": 2,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+7ED3",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 6,
+      "n_at_overflow": 2,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+5047",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 6,
+      "n_at_overflow": 2,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+5F80",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 4,
+      "n_at_overflow": 2,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+662F",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 19,
+      "n_at_overflow": 1,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+8FDB",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 4,
+      "n_at_overflow": 1,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+8A00",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 2,
+      "n_at_overflow": 1,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+7EA6",
+      "block": "CJK Unified Ideographs",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 2,
+      "n_at_overflow": 1,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+FF0C",
+      "block": "Halfwidth and Fullwidth Forms",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 13,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+3002",
+      "block": "CJK Symbols and Punctuation",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 12,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+FF08",
+      "block": "Halfwidth and Fullwidth Forms",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 5,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+300C",
+      "block": "CJK Symbols and Punctuation",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 5,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+300D",
+      "block": "CJK Symbols and Punctuation",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 5,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+3001",
+      "block": "CJK Symbols and Punctuation",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 5,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+FF1A",
+      "block": "Halfwidth and Fullwidth Forms",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 4,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+FF1B",
+      "block": "Halfwidth and Fullwidth Forms",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 2,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    },
+    {
+      "cp": "U+FF09",
+      "block": "Halfwidth and Fullwidth Forms",
+      "tmux_w": 2,
+      "xterm_w": 2,
+      "n": 2,
+      "n_at_overflow": 0,
+      "mismatch": false,
+      "tmux_err": null
+    }
+  ],
+  "mismatch": []
+}
