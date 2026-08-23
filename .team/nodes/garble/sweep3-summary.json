@@ -1,0 +1,16 @@
+{
+  "n_rows": 550,
+  "n_with_query_and_label": 550,
+  "n_query_fail": 0,
+  "n_no_snap": 0,
+  "table": {
+    "garbled_eq_114": 58,
+    "garbled_ge_115": 0,
+    "normal_eq_114": 492,
+    "normal_ge_115": 0
+  },
+  "lags": {
+    "snap_to_query_ms_max": 46.768542,
+    "query_ms_max": 46.747875
+  }
+}
