@@ -1,0 +1,438 @@
+{
+  "captured_at": "2026-08-23T01:23:33.441Z",
+  "subscribe_geom": "39x114 (same as sweep headless)",
+  "positive_control": {
+    "file": "test/testdata/garble/wide-host.snapshot.bin",
+    "xterm_114": {
+      "bufferLength": 152,
+      "wrappedLines": 102
+    },
+    "xterm_80": {
+      "bufferLength": 196,
+      "wrappedLines": 146
+    },
+    "xterm_235": {
+      "bufferLength": 99,
+      "wrappedLines": 49
+    },
+    "gauge_ok": true
+  },
+  "live": [
+    {
+      "hint": "pair-session",
+      "pane": "%0",
+      "listing_cols": 142,
+      "listing_rows": 42,
+      "bytes": 4196,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 59,
+        "wrappedLines": 20
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%1",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 7,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 0,
+      "overwideLines": 0,
+      "maxBoxRun": 0,
+      "xterm114": {
+        "bufferLength": 39,
+        "wrappedLines": 0
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%100",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3233,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 52,
+        "wrappedLines": 13
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%101",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3973,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 58,
+        "wrappedLines": 19
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%102",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3242,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 52,
+        "wrappedLines": 13
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%103",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3242,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 52,
+        "wrappedLines": 13
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%2",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 7,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 0,
+      "overwideLines": 0,
+      "maxBoxRun": 0,
+      "xterm114": {
+        "bufferLength": 39,
+        "wrappedLines": 0
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%72",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 8721,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%73",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 8464,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%74",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 10849,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%75",
+      "listing_cols": 137,
+      "listing_rows": 42,
+      "bytes": 10048,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%76",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 10201,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%77",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 10098,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%80",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 10667,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 110,
+      "xterm114": {
+        "bufferLength": 77,
+        "wrappedLines": 38
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%85",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 6,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 0,
+      "overwideLines": 0,
+      "maxBoxRun": 0,
+      "xterm114": {
+        "bufferLength": 39,
+        "wrappedLines": 0
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%90",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3985,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 2,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 59,
+        "wrappedLines": 20
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%92",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3050,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 2,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 53,
+        "wrappedLines": 14
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%93",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3187,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 2,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 54,
+        "wrappedLines": 15
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%94",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3938,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 59,
+        "wrappedLines": 20
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%95",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 4739,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 2,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 59,
+        "wrappedLines": 20
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%96",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 4018,
+      "garbled": false,
+      "reasons": [],
+      "maxLineWidth": 114,
+      "overwideLines": 0,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 58,
+        "wrappedLines": 19
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%97",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3995,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 4,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 59,
+        "wrappedLines": 20
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%98",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3437,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 2,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 56,
+        "wrappedLines": 17
+      }
+    },
+    {
+      "hint": "pair-session",
+      "pane": "%99",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 3817,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 3,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 57,
+        "wrappedLines": 18
+      }
+    },
+    {
+      "hint": "default-socket",
+      "pane": "%1",
+      "listing_cols": 235,
+      "listing_rows": 50,
+      "bytes": 4083,
+      "garbled": true,
+      "reasons": [
+        "overwide_line"
+      ],
+      "maxLineWidth": 115,
+      "overwideLines": 1,
+      "maxBoxRun": 114,
+      "xterm114": {
+        "bufferLength": 55,
+        "wrappedLines": 16
+      }
+    }
+  ]
+}

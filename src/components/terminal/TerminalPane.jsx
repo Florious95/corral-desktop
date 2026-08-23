@@ -160,6 +160,8 @@ export default function TerminalPane({
               reasons: label.reasons,
               overwide_lines: label.metrics.overwideLines,
               max_line_width: label.metrics.maxLineWidth,
+              max_line_chars: label.metrics.maxLineChars,
+              max_line_has_wide: label.metrics.maxLineHasWide,
               max_box_run: label.metrics.maxBoxRun,
               cup_clamped: label.metrics.cupClamped,
               geom: `${view.rows}x${view.cols}`,

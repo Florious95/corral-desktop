@@ -10,7 +10,7 @@
 | 事件名 | 位置 | 字段 | 用来回答什么 |
 |---|---|---|---|
 | `activate` | `App.jsx` `openAgent` / `splitAgent` | `ref`, `t` | t0：用户点开会话。settle 的起点。 |
-| `subscribe` | `client.js` `subscribe` / `replaySubscriptions` | `ref`, `rows`, `cols`, `sent`, `reason`（`not_ready_bookkept` / `replay` / `send_failed`） | 申报了什么几何？帧真的上路了吗？重连重放是否把旧尺寸又订回去？ |
+| `subscribe` | `client.js` `subscribe` / `replaySubscriptions` | `ref`, `rows`, `cols`, `sent`, `reason`（`not_ready_bookkept` / `replay` / `send_failed`），以及 `host_rows`/`host_cols`/`listing_seq`（最近 listing 缓存，活过 `reset()`） | 申报了什么几何？主机 listing 是 114、115 还是 235？ |
 | `unsubscribe` | `client.js` `unsubscribe` | `ref`, `sent`, `reason` | 订阅生命周期是否成对；退订后还在收 snapshot 就是偷管/死订阅。 |
 | `listing` | `client.js` `handleFrame` listing | `listing_seq`, `panes[{ref,rows,cols}]` | 主机此刻报的几何。与最近 `subscribe.cols` 持续不一致 = 争用/死订阅。 |
 | `list_delta` | `client.js` list_delta 成功应用后 | `listing_seq`, `panes[{ref,rows,cols}]`, `removed` | 几何是突变还是扫到的；removed 对上 unsubscribe 时间线。 |
@@ -22,7 +22,7 @@
 | `resize_up` | `client.js` `resize`；以及 `TerminalView._report` 的 `geom_unchanged` 早退 | `ref`, `rows`, `cols`, `sent`, `reason`（`not_ready`/`send_failed`/`geom_unchanged`/`null`） | 上行 resize 发了还是本地判未变 no-op。daemon 只在 before≠after 时补快照。 |
 | `write_snapshot` | `TerminalView.writeSnapshot` | `t_reset`, `t_write`, `term_cols`, `term_rows`, `bytes` | reset/write 时刻与当时格子。宽字节进窄格子：看 `term_cols` vs 标注器 `max_line_width`。 |
 | `write_delta` | `TerminalView.writeDelta` | `term_cols`, `bytes` | 增量是写在已对齐网格还是已折行网格上。 |
-| `garble_label` | `TerminalPane` 收到 SNAPSHOT 后 | `garbled`, `reasons[]`, `overwide_lines`, `max_line_width`, `max_box_run`, `cup_clamped`, `geom` | **只打标签**。连续 not-garbled + 几何不变 → t_stable。分析根因禁止只用这一条。 |
+| `garble_label` | `TerminalPane` 收到 SNAPSHOT 后 | `garbled`, `reasons[]`, `overwide_lines`, `max_line_width`, `max_line_chars`, `max_line_has_wide`, `max_box_run`, `cup_clamped`, `geom` | **只打标签**。`max_line_chars`/`max_line_has_wide` 只打点。t_stable = 一次 label 后 100ms 无 resize/write_snapshot。 |
 | `conn_state` | `client.js` `setState` | `from`, `to` | READY 迁移、重连。replay 是否紧跟 READY。 |
 | `ready_replay` | `replaySubscriptions` 入口 | `count` | 重连后重放了几个订阅。 |
 | `reconnect` | `handleClose` 非永久关闭 | `reason` | 生命周期：丢连接 → 重放 subscribe。 |
@@ -59,11 +59,11 @@ t0            activate（点击 open/split）
 t_sub_sent    该 ref 第一条 sent:true 的 subscribe
 t_snap_first  该 ref 第一条 snapshot
 t_last_resize 该 ref 最后一次 term_resize
-t_stable      garble_label 连续 2 次 garbled:false 且 geom 字符串不变
+t_stable      一次 garble_label 之后 SETTLE_QUIET_MS（100）内无 term_resize / write_snapshot
 settle_ms     t_stable - t0
 ```
 
-埋点：`activate`→t0；`subscribe.sent`→t_sub_sent；`snapshot`→t_snap_first；`term_resize`→t_last_resize；`garble_label`→稳定计数。
+埋点：`activate`→t0；`subscribe.sent`→t_sub_sent；`snapshot`→t_snap_first；`term_resize`→t_last_resize；`garble_label`→启动 100ms 静默窗（`garbled:true` 也算一次）；`write_snapshot`/`term_resize` 打断该窗。
 
 **对「10 次均值 < 50ms」**：`sub_to_snap` 是 daemon 往返（本机 loopback 也是捕获+编码+WS）。产品路径还要等 WebGL `readyWebgl` 才 subscribe。因此 **50ms 总预算不可能只靠客户端微优化吃掉网络段**；分段就是为了把「卡在 RTT」和「卡在 fit/resize 防抖 120ms」拆开。`GRID_DEBOUNCE_MS=120` 一旦触发，单段就已 >50ms。
 

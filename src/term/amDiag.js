@@ -7,7 +7,11 @@
 /** 10 rounds × ~50 sessions × ~20 events, with headroom. */
 export const AM_DIAG_CAPACITY = 16384;
 
-const STABLE_NEED = 2;
+/** Quiet window after a garble_label with no term_resize / write_snapshot. */
+export const SETTLE_QUIET_MS = 100;
+
+/** Last listing/list_delta geom per ref. Survives reset() — ring may clear, this must not. */
+const hostGeom = new Map();
 
 function monotonicMs() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -36,12 +40,28 @@ function settleOf(ref) {
       t_snap_first: null,
       t_last_resize: null,
       t_stable: null,
-      lastGeom: null,
-      stableHits: 0,
+      t_label: null,
+      quietGen: 0,
+      quietArmedGen: -1,
     };
     state.settle.set(ref, s);
   }
   return s;
+}
+
+function bumpQuiet(s) {
+  s.quietGen += 1;
+  s.t_stable = null;
+}
+
+function armQuietStable(s) {
+  const gen = s.quietGen;
+  const timer = setTimeout(() => {
+    if (s.quietGen === gen && s.t_stable == null && s.t_label != null) {
+      s.t_stable = s.t_label + SETTLE_QUIET_MS;
+    }
+  }, SETTLE_QUIET_MS);
+  if (timer && typeof timer.unref === 'function') timer.unref();
 }
 
 function touchSettle(ev) {
@@ -52,17 +72,17 @@ function touchSettle(ev) {
   if (ev.type === 'activate' && s.t0 == null) s.t0 = t;
   if (ev.type === 'subscribe' && ev.sent === true && s.t_sub_sent == null) s.t_sub_sent = t;
   if (ev.type === 'snapshot' && s.t_snap_first == null) s.t_snap_first = t;
-  if (ev.type === 'term_resize') s.t_last_resize = t;
+  if (ev.type === 'term_resize') {
+    s.t_last_resize = t;
+    bumpQuiet(s);
+  }
+  if (ev.type === 'write_snapshot') bumpQuiet(s);
   if (ev.type === 'garble_label') {
-    const geom = ev.geom || null;
-    if (ev.garbled === false && geom && geom === s.lastGeom) {
-      s.stableHits += 1;
-      if (s.stableHits >= STABLE_NEED && s.t_stable == null) s.t_stable = t;
-    } else {
-      s.stableHits = ev.garbled === false && geom ? 1 : 0;
-      s.t_stable = null;
-    }
-    s.lastGeom = geom;
+    s.t_label = t;
+    s.t_stable = null;
+    s.quietGen += 1;
+    s.quietArmedGen = s.quietGen;
+    armQuietStable(s);
   }
 }
 
@@ -76,8 +96,17 @@ function events() {
 }
 
 function settleDump() {
+  const now = monotonicMs();
   const out = {};
   for (const [ref, s] of state.settle) {
+    if (
+      s.t_stable == null
+      && s.t_label != null
+      && s.quietGen === s.quietArmedGen
+      && now - s.t_label >= SETTLE_QUIET_MS
+    ) {
+      s.t_stable = s.t_label + SETTLE_QUIET_MS;
+    }
     const t0 = s.t0;
     const tStable = s.t_stable;
     out[ref] = {
@@ -105,6 +134,32 @@ export function resetDiag() {
   state.head = 0;
   state.length = 0;
   state.settle = new Map();
+  // hostGeom intentionally not cleared
+}
+
+export function recordHostGeom(panes, listing_seq) {
+  for (const p of panes || []) {
+    if (!p || !p.ref) continue;
+    hostGeom.set(p.ref, {
+      rows: p.rows,
+      cols: p.cols,
+      listing_seq: listing_seq != null ? listing_seq : null,
+    });
+  }
+}
+
+export function forgetHostGeom(refs) {
+  for (const ref of refs || []) hostGeom.delete(ref);
+}
+
+export function hostGeomOf(ref) {
+  if (!ref) return null;
+  return hostGeom.get(ref) || null;
+}
+
+/** Test helper only — product reset() must not call this. */
+export function resetHostGeom() {
+  hostGeom.clear();
 }
 
 export function beginActivate(ref) {
@@ -142,6 +197,7 @@ function install() {
   const api = {
     dump: () => dump(),
     reset: () => resetDiag(),
+    hostGeomOf: (ref) => hostGeomOf(ref),
     push,
     beginActivate,
     capacity: AM_DIAG_CAPACITY,

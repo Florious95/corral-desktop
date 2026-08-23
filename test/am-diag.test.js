@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AM_DIAG_CAPACITY, push, dump, resetDiag, beginActivate,
+  AM_DIAG_CAPACITY, SETTLE_QUIET_MS, push, dump, resetDiag, beginActivate,
+  recordHostGeom, hostGeomOf, resetHostGeom,
 } from '../src/term/amDiag.js';
 
 test('__amDiag dump is JSON and ring drops oldest', () => {
@@ -29,14 +30,14 @@ test('__amDiag dump is JSON and ring drops oldest', () => {
   assert.equal(d.events[0].i, extra);
 });
 
-test('settle decomposes click → sub → snap → last resize → stable', () => {
+test('settle decomposes click → sub → snap → last resize → stable', async () => {
   resetDiag();
   beginActivate('pane-a');
   push({ type: 'subscribe', ref: 'pane-a', rows: 24, cols: 80, sent: true });
   push({ type: 'snapshot', ref: 'pane-a', bytes: 100, kind: 1 });
   push({ type: 'term_resize', ref: 'pane-a', from_cols: 80, to_cols: 80, from_rows: 24, to_rows: 24 });
   push({ type: 'garble_label', ref: 'pane-a', garbled: false, reasons: [], geom: '24x80' });
-  push({ type: 'garble_label', ref: 'pane-a', garbled: false, reasons: [], geom: '24x80' });
+  await new Promise((r) => setTimeout(r, SETTLE_QUIET_MS + 20));
   const s = dump().settle['pane-a'];
   assert.ok(s.t0 != null);
   assert.ok(s.t_sub_sent != null);
@@ -46,4 +47,42 @@ test('settle decomposes click → sub → snap → last resize → stable', () =
   assert.ok(s.settle_ms >= 0);
   assert.ok(s.segments.click_to_sub != null);
   assert.ok(s.segments.sub_to_snap != null);
+});
+
+test('t_stable arms after one garble_label and SETTLE_QUIET_MS without resize/snapshot', async () => {
+  resetDiag();
+  beginActivate('pane-b');
+  push({ type: 'garble_label', ref: 'pane-b', garbled: true, reasons: ['overwide_line'], geom: '39x114' });
+  const before = dump().settle['pane-b'];
+  assert.equal(before.t_stable, null);
+  await new Promise((r) => setTimeout(r, SETTLE_QUIET_MS + 20));
+  const after = dump().settle['pane-b'];
+  assert.ok(after.t_stable != null);
+  assert.equal(after.t_stable - after.t0 >= 0, true);
+});
+
+test('term_resize or write_snapshot in the quiet window cancels t_stable', async () => {
+  resetDiag();
+  beginActivate('pane-c');
+  push({ type: 'garble_label', ref: 'pane-c', garbled: false, reasons: [], geom: '24x80' });
+  push({ type: 'write_snapshot', ref: 'pane-c', bytes: 10, term_cols: 80 });
+  await new Promise((r) => setTimeout(r, SETTLE_QUIET_MS + 20));
+  assert.equal(dump().settle['pane-c'].t_stable, null);
+
+  resetDiag();
+  beginActivate('pane-d');
+  push({ type: 'garble_label', ref: 'pane-d', garbled: false, reasons: [], geom: '24x80' });
+  push({ type: 'term_resize', ref: 'pane-d', from_cols: 80, to_cols: 81, from_rows: 24, to_rows: 24 });
+  await new Promise((r) => setTimeout(r, SETTLE_QUIET_MS + 20));
+  assert.equal(dump().settle['pane-d'].t_stable, null);
+});
+
+test('host geom cache survives __amDiag.reset and is not the ring', () => {
+  resetHostGeom();
+  resetDiag();
+  recordHostGeom([{ ref: 'sock\u001f%1', rows: 50, cols: 235 }], 7);
+  assert.deepEqual(hostGeomOf('sock\u001f%1'), { rows: 50, cols: 235, listing_seq: 7 });
+  resetDiag();
+  assert.deepEqual(hostGeomOf('sock\u001f%1'), { rows: 50, cols: 235, listing_seq: 7 });
+  assert.equal(dump().length, 0);
 });
