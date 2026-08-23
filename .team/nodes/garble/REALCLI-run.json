@@ -1,0 +1,129 @@
+{
+  "ok": true,
+  "cli": "/Users/alauda/.local/bin/cursor-agent",
+  "listen": "127.0.0.1:19271",
+  "socket": "/tmp/amr-tmux/tmux-501/amr",
+  "discovery_dirs": "/tmp/amr-tmux/tmux-501",
+  "used_9900": false,
+  "scanned_user_tmux": false,
+  "want": {
+    "fp235": "31b9908121a6367c",
+    "fp157": "2eb1c535632a69b1",
+    "geom235": "235x50",
+    "geom157": "157x47",
+    "paint235": {
+      "fp": "31b9908121a6367c",
+      "wait_ms": 4948,
+      "nonempty": true,
+      "timed_out": false
+    },
+    "paint157": {
+      "fp": "2eb1c535632a69b1",
+      "wait_ms": 1079,
+      "nonempty": true,
+      "timed_out": false
+    }
+  },
+  "tmux": {
+    "sessions": 6
+  },
+  "arms": [
+    {
+      "id": "A′",
+      "predict": "red",
+      "actual": "red",
+      "match_predict": true,
+      "first_mismatch_row": 4,
+      "first_mismatch_col": 13,
+      "got_len": 280,
+      "exp_len": 284,
+      "got_fp": "c831eb6249509c0f",
+      "exp_fp": "2eb1c535632a69b1",
+      "pane_after": {
+        "cols": 157,
+        "rows": 47,
+        "raw": "157x47"
+      },
+      "fp_before_sub": "396aa13ddd43aa05",
+      "fp_at_resize": "c831eb6249509c0f",
+      "fp_changed_at_reshape": true,
+      "fp_changed_after_reshape": false,
+      "first_fp_change_ms": null,
+      "fp_change_count": 0,
+      "wait_ms": 3000,
+      "snapshot_count": 1
+    },
+    {
+      "id": "A″",
+      "predict": "red",
+      "actual": "red",
+      "match_predict": true,
+      "first_mismatch_row": 4,
+      "first_mismatch_col": 8,
+      "got_len": 301,
+      "exp_len": 284,
+      "got_fp": "69d4b6dbfdaa8a32",
+      "exp_fp": "2eb1c535632a69b1",
+      "pane_after": {
+        "cols": 157,
+        "rows": 47,
+        "raw": "157x47"
+      },
+      "fp_before_sub": "34179009a03a40fa",
+      "fp_at_resize": "69d4b6dbfdaa8a32",
+      "fp_changed_at_reshape": true,
+      "fp_changed_after_reshape": false,
+      "first_fp_change_ms": null,
+      "fp_change_count": 0,
+      "wait_ms": 30000,
+      "snapshot_count": 1
+    },
+    {
+      "id": "B′",
+      "predict": "green",
+      "actual": "red",
+      "match_predict": false,
+      "first_mismatch_row": 4,
+      "first_mismatch_col": 8,
+      "got_len": 267,
+      "exp_len": 284,
+      "got_fp": "1499937b3c93a2de",
+      "exp_fp": "2eb1c535632a69b1",
+      "pane_after": {
+        "cols": 157,
+        "rows": 47,
+        "raw": "157x47"
+      },
+      "fp_before_sub": "396aa13ddd43aa05",
+      "fp_at_resize": "1499937b3c93a2de",
+      "fp_changed_at_reshape": true,
+      "fp_changed_after_reshape": false,
+      "first_fp_change_ms": null,
+      "fp_change_count": 0,
+      "wait_ms": 3000,
+      "snapshot_count": 1
+    },
+    {
+      "id": "D′",
+      "predict": "green",
+      "actual": "red",
+      "match_predict": false,
+      "first_mismatch_row": 4,
+      "first_mismatch_col": 8,
+      "got_len": 273,
+      "exp_len": 301,
+      "got_fp": "58a0b6b961825c76",
+      "exp_fp": "31b9908121a6367c",
+      "pane_after": {
+        "cols": 235,
+        "rows": 50,
+        "raw": "235x50"
+      },
+      "snapshot_count": 1,
+      "fp_before_sub": "58a0b6b961825c76",
+      "fp_after_sub": "58a0b6b961825c76",
+      "fp_changed_by_subscribe": false,
+      "control_want235_still_same": true
+    }
+  ]
+}
