@@ -1,0 +1,1405 @@
+{
+  "rows": 550,
+  "sessions": 55,
+  "dumpMissing": 0,
+  "tokenHits": 0,
+  "garbledTrue": 75,
+  "garbledFalse": 475,
+  "garbledNull": 0,
+  "listingEv": 56,
+  "subTotal": 550,
+  "subWithHost": 550,
+  "labelChars": 550,
+  "types": {
+    "activate": 550,
+    "delta": 37229,
+    "fit": 2200,
+    "garble_label": 550,
+    "list_delta": 56,
+    "resize_up": 1100,
+    "snapshot": 550,
+    "subscribe": 550,
+    "term_resize": 1650,
+    "unsubscribe": 1099,
+    "write_delta": 34341,
+    "write_snapshot": 550
+  },
+  "hostCols": {
+    "80": 40,
+    "137": 10,
+    "140": 10,
+    "142": 10,
+    "235": 480
+  },
+  "settle": {
+    "n": 550,
+    "mean": 245.9,
+    "med": 240.8,
+    "p95": 290.5,
+    "min": 211.5,
+    "max": 385
+  },
+  "click_to_sub": {
+    "n": 550,
+    "mean": 42.6,
+    "med": 42.3,
+    "p95": 48,
+    "min": 35.6,
+    "max": 85.8
+  },
+  "sub_to_snap": {
+    "n": 550,
+    "mean": 102.9,
+    "med": 97.4,
+    "p95": 146.5,
+    "min": 73.9,
+    "max": 232.8
+  },
+  "snap_to_last_resize": {
+    "n": 550,
+    "mean": -102.9,
+    "med": -97.4,
+    "p95": -80.3,
+    "min": -232.9,
+    "max": -73.9
+  },
+  "last_resize_to_stable": {
+    "n": 550,
+    "mean": 203.3,
+    "med": 197.8,
+    "p95": 246.8,
+    "min": 174.4,
+    "max": 333.4
+  },
+  "sess": [
+    {
+      "key": "default %1",
+      "n": 10,
+      "garbled": 10,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 10
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 271.8,
+        "med": 268.2,
+        "p95": 332.5,
+        "min": 234.9,
+        "max": 332.5
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "default %4",
+      "n": 10,
+      "garbled": 10,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 10
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 257.7,
+        "med": 257.2,
+        "p95": 284.3,
+        "min": 232.2,
+        "max": 284.3
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %0",
+      "n": 10,
+      "garbled": 6,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 6
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 256.7,
+        "med": 254.9,
+        "p95": 298.6,
+        "min": 224.5,
+        "max": 298.6
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %93",
+      "n": 10,
+      "garbled": 6,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 6
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 269.7,
+        "med": 263,
+        "p95": 327.7,
+        "min": 241,
+        "max": 327.7
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-b7cc1c640ccf %0",
+      "n": 10,
+      "garbled": 6,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 6
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 253.8,
+        "med": 263.3,
+        "p95": 277.8,
+        "min": 217.4,
+        "max": 277.8
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-105089ea391b %0",
+      "n": 10,
+      "garbled": 5,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 5
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 248.8,
+        "med": 246.8,
+        "p95": 288.4,
+        "min": 222,
+        "max": 288.4
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 5
+    },
+    {
+      "key": "ta-a9fd5b7defbd %92",
+      "n": 10,
+      "garbled": 5,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 5
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 240.4,
+        "med": 240.8,
+        "p95": 257.1,
+        "min": 221.8,
+        "max": 257.1
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 5
+    },
+    {
+      "key": "ta-a9fd5b7defbd %99",
+      "n": 10,
+      "garbled": 5,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 5
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 250.3,
+        "med": 251.7,
+        "p95": 277,
+        "min": 231.5,
+        "max": 277
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %90",
+      "n": 10,
+      "garbled": 4,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 4
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 264.7,
+        "med": 262.7,
+        "p95": 298.5,
+        "min": 245.5,
+        "max": 298.5
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %95",
+      "n": 10,
+      "garbled": 4,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 4
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 248.8,
+        "med": 250.2,
+        "p95": 308,
+        "min": 224,
+        "max": 308
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %98",
+      "n": 10,
+      "garbled": 4,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 4
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 231,
+        "med": 228.2,
+        "p95": 252.9,
+        "min": 217.6,
+        "max": 252.9
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %94",
+      "n": 10,
+      "garbled": 3,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 3
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 265.5,
+        "med": 258.2,
+        "p95": 311.8,
+        "min": 240.3,
+        "max": 311.8
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-26fb88f58006 %0",
+      "n": 10,
+      "garbled": 2,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 2
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 243.3,
+        "med": 248.3,
+        "p95": 270.8,
+        "min": 218.9,
+        "max": 270.8
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %96",
+      "n": 10,
+      "garbled": 2,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 2
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 244.7,
+        "med": 255.7,
+        "p95": 264.8,
+        "min": 222.5,
+        "max": 264.8
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-eb63cbe5b286 %0",
+      "n": 10,
+      "garbled": 2,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 2
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 250.2,
+        "med": 249.9,
+        "p95": 261.4,
+        "min": 238.2,
+        "max": 261.4
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %97",
+      "n": 10,
+      "garbled": 1,
+      "none": 0,
+      "reasons": {
+        "overwide_line": 1
+      },
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 240.1,
+        "med": 236.2,
+        "p95": 268.2,
+        "min": 222.9,
+        "max": 268.2
+      },
+      "mlw_garbled": [
+        115
+      ],
+      "mwide": 10
+    },
+    {
+      "key": "default %0",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "48x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 233.4,
+        "med": 231.7,
+        "p95": 251,
+        "min": 224.1,
+        "max": 251
+      },
+      "mlw_garbled": [],
+      "mwide": 10
+    },
+    {
+      "key": "default %2",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "24x80": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 243.1,
+        "med": 230.3,
+        "p95": 350.8,
+        "min": 218.7,
+        "max": 350.8
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-5674137b752d %0",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "40x140": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 236.4,
+        "med": 242.6,
+        "p95": 259.1,
+        "min": 218.9,
+        "max": 259.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %10",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 250.5,
+        "med": 249.1,
+        "p95": 281.4,
+        "min": 229.3,
+        "max": 281.4
+      },
+      "mlw_garbled": [],
+      "mwide": 4
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %11",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "24x80": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 232.9,
+        "med": 229.3,
+        "p95": 261.3,
+        "min": 220.1,
+        "max": 261.3
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %2",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 243,
+        "med": 241.3,
+        "p95": 264.4,
+        "min": 229.9,
+        "max": 264.4
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %4",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 252.6,
+        "med": 241.8,
+        "p95": 318.5,
+        "min": 234.5,
+        "max": 318.5
+      },
+      "mlw_garbled": [],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %5",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 322.2,
+        "med": 325.5,
+        "p95": 385,
+        "min": 251.7,
+        "max": 385
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %6",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 252.5,
+        "med": 248,
+        "p95": 279.5,
+        "min": 227.5,
+        "max": 279.5
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %7",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 231.5,
+        "med": 224.4,
+        "p95": 263.2,
+        "min": 216.6,
+        "max": 263.2
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %8",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 230.7,
+        "med": 232.8,
+        "p95": 240.8,
+        "min": 220.7,
+        "max": 240.8
+      },
+      "mlw_garbled": [],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a0afa5f9c7f6 %9",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 242.6,
+        "med": 238.6,
+        "p95": 304.8,
+        "min": 215.9,
+        "max": 304.8
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %0",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "42x142": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 248.8,
+        "med": 237.7,
+        "p95": 356.7,
+        "min": 225.5,
+        "max": 356.7
+      },
+      "mlw_garbled": [],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %1",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 229.3,
+        "med": 231.7,
+        "p95": 241.1,
+        "min": 213,
+        "max": 241.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %100",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 249.3,
+        "med": 246.1,
+        "p95": 290.5,
+        "min": 231.2,
+        "max": 290.5
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %101",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 242.5,
+        "med": 243.9,
+        "p95": 261.4,
+        "min": 225.6,
+        "max": 261.4
+      },
+      "mlw_garbled": [],
+      "mwide": 10
+    },
+    {
+      "key": "ta-a9fd5b7defbd %102",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 239.9,
+        "med": 243.4,
+        "p95": 275.2,
+        "min": 220.8,
+        "max": 275.2
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %103",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 244.3,
+        "med": 241.8,
+        "p95": 274,
+        "min": 228.9,
+        "max": 274
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %2",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 237.7,
+        "med": 241.5,
+        "p95": 257.6,
+        "min": 217.1,
+        "max": 257.6
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %72",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 227,
+        "med": 224.6,
+        "p95": 246.8,
+        "min": 218.2,
+        "max": 246.8
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %73",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 233.9,
+        "med": 231.1,
+        "p95": 263.5,
+        "min": 226.3,
+        "max": 263.5
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %74",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 236.2,
+        "med": 236.2,
+        "p95": 251.6,
+        "min": 223.1,
+        "max": 251.6
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %75",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "42x137": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 228.1,
+        "med": 232.2,
+        "p95": 238.8,
+        "min": 211.5,
+        "max": 238.8
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %76",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 235.9,
+        "med": 234.7,
+        "p95": 257.6,
+        "min": 221.2,
+        "max": 257.6
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %77",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 239.9,
+        "med": 238.3,
+        "p95": 255.5,
+        "min": 230.1,
+        "max": 255.5
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %80",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 230.8,
+        "med": 231.3,
+        "p95": 240.6,
+        "min": 220.7,
+        "max": 240.6
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-a9fd5b7defbd %85",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 242.2,
+        "med": 240.7,
+        "p95": 267.7,
+        "min": 217.7,
+        "max": 267.7
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %1",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "24x80": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 248.9,
+        "med": 248.6,
+        "p95": 285.1,
+        "min": 225.3,
+        "max": 285.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %102",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 241.7,
+        "med": 243.3,
+        "p95": 261.2,
+        "min": 226.3,
+        "max": 261.2
+      },
+      "mlw_garbled": [],
+      "mwide": 5
+    },
+    {
+      "key": "ta-b7cc1c640ccf %3",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 242.6,
+        "med": 244.2,
+        "p95": 249.8,
+        "min": 231.6,
+        "max": 249.8
+      },
+      "mlw_garbled": [],
+      "mwide": 10
+    },
+    {
+      "key": "ta-b7cc1c640ccf %88",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 253,
+        "med": 253.9,
+        "p95": 268.2,
+        "min": 238.5,
+        "max": 268.2
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %89",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 233,
+        "med": 237.3,
+        "p95": 250.1,
+        "min": 215.1,
+        "max": 250.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %90",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 241.3,
+        "med": 238.1,
+        "p95": 275.1,
+        "min": 219.1,
+        "max": 275.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %94",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 245.8,
+        "med": 241.7,
+        "p95": 310.2,
+        "min": 220.5,
+        "max": 310.2
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %95",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 228.9,
+        "med": 224,
+        "p95": 257.1,
+        "min": 215.6,
+        "max": 257.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-b7cc1c640ccf %96",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 232.5,
+        "med": 233.1,
+        "p95": 248.8,
+        "min": 221.5,
+        "max": 248.8
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-eb63cbe5b286 %17",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 250.1,
+        "med": 248.2,
+        "p95": 272.9,
+        "min": 237.2,
+        "max": 272.9
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-eb63cbe5b286 %21",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "24x80": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 241.8,
+        "med": 239.2,
+        "p95": 277.1,
+        "min": 221.5,
+        "max": 277.1
+      },
+      "mlw_garbled": [],
+      "mwide": 0
+    },
+    {
+      "key": "ta-ffdc525c5f83 %0",
+      "n": 10,
+      "garbled": 0,
+      "none": 0,
+      "reasons": {},
+      "local": {
+        "39x114": 10
+      },
+      "host": {
+        "50x235": 10
+      },
+      "settle": {
+        "n": 10,
+        "mean": 289.2,
+        "med": 290.5,
+        "p95": 370,
+        "min": 234.8,
+        "max": 370
+      },
+      "mlw_garbled": [],
+      "mwide": 4
+    }
+  ]
+}
