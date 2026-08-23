@@ -1,0 +1,11 @@
+{
+  "route": "B",
+  "nSocks": 31,
+  "nListed": 79,
+  "nPng": 79,
+  "nMiss": 3,
+  "nSockFail": 3,
+  "geomChanged": false,
+  "httpPort": 18771,
+  "cdpPort": 18821
+}

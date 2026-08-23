@@ -15,3 +15,5 @@ cwd-inv/
 npm-test.out
 daemon.log
 repro2-daemon.log
+shots/.chrome-user/
+shots/.tmp/

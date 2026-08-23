@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>shot</title>
+<link rel="stylesheet" href="/xterm.css">
+<style>
+  html, body { margin: 0; background: #fbfaf8; }
+  #t { display: inline-block; }
+</style>
+<div id="t"></div>
+<script type="module">
+import { Terminal } from '/xterm.mjs';
+window.boot = (cols, rows) => {
+  const host = document.getElementById('t');
+  host.replaceChildren();
+  if (window.term) {
+    try { window.term.dispose(); } catch { /* */ }
+  }
+  const term = new Terminal({
+    cols, rows,
+    convertEol: true,
+    fontSize: 13,
+    lineHeight: 1.25,
+    fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
+    scrollback: 0,
+    cursorBlink: false,
+    theme: { background: '#fbfaf8', foreground: '#3a3835', cursor: '#fbfaf8' },
+  });
+  term.open(host);
+  window.term = term;
+  return { cols: term.cols, rows: term.rows };
+};
+window.paint = (b64) => new Promise((resolve) => {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  window.term.reset();
+  window.term.write(u8, () => resolve(true));
+});
+window.ready = true;
+</script>
