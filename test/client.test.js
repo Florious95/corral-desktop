@@ -13,7 +13,6 @@ import assert from 'node:assert/strict';
 import { Client } from '../src/vendor/agentmirror/client.js';
 import { decodeControl } from '../src/vendor/agentmirror/protocol.js';
 import { encodeBinary, BINARY_KIND } from '../src/vendor/agentmirror/binary.js';
-import { dump, resetDiag, resetHostGeom } from '../src/term/amDiag.js';
 
 /** Minimal fake WebSocket. Client assigns ws.onopen/onmessage/onclose/onerror
  *  directly; the harness calls the _* helpers to fire events. */
@@ -305,56 +304,4 @@ test('disconnect is permanent and drops the socket', () => {
   // Subscriptions stay bookkept (replay intent, mirroring Kotlin); a fresh
   // connect() would replay them — the connection itself is gone.
   assert.equal(client.activeRefs.includes('s1'), true);
-});
-
-test('subscribe attaches last listing geom; cache survives diag reset', () => {
-  resetHostGeom();
-  resetDiag();
-  const { client, sockets } = makeClient();
-  client.connect();
-  const ws = sockets[0];
-  openAndAuth(client, ws);
-  ws._text(JSON.stringify({ v: 1, type: 'listing', payload: {
-    req_id: 1, seq: 9, workspaces: [
-      { cwd: '/proj/a', session_count: 1, aggregate_state: 'working', sessions: [
-        { ref: 's1', name: 'claude', cwd: '/proj/a', state: 'working', rows: 50, cols: 235 },
-      ] },
-    ],
-  } }));
-  resetDiag();
-  assert.equal(dump().length, 0);
-  client.subscribe('s1', 39, 114);
-  const sub = dump().events.find((e) => e.type === 'subscribe' && e.ref === 's1');
-  assert.ok(sub);
-  assert.equal(sub.cols, 114);
-  assert.equal(sub.host_cols, 235);
-  assert.equal(sub.host_rows, 50);
-  assert.equal(sub.listing_seq, 9);
-});
-
-test('snapshot stamps host_cols_live from post-subscribe listing, not pre-click cache', () => {
-  resetHostGeom();
-  resetDiag();
-  const { client, sockets } = makeClient();
-  client.connect();
-  const ws = sockets[0];
-  openAndAuth(client, ws);
-  ws._text(JSON.stringify({ v: 1, type: 'listing', payload: {
-    req_id: 1, seq: 9, workspaces: [
-      { cwd: '/proj/a', session_count: 1, aggregate_state: 'working', sessions: [
-        { ref: 's1', name: 'claude', cwd: '/proj/a', state: 'working', rows: 50, cols: 235 },
-      ] },
-    ],
-  } }));
-  client.subscribe('s1', 39, 114);
-  ws._text(JSON.stringify({ v: 1, type: 'list_delta', payload: {
-    seq: 10,
-    changed_sessions: [{ ref: 's1', name: 'claude', cwd: '/proj/a', state: 'working', rows: 39, cols: 114 }],
-  } }));
-  const snap = encodeBinary({ kind: BINARY_KIND.SNAPSHOT, ref: 's1', data: new Uint8Array([0x41]) });
-  ws._binary(snap);
-  const ev = dump().events.filter((e) => e.type === 'snapshot').at(-1);
-  assert.equal(ev.host_cols_live, 114);
-  assert.equal(ev.host_cols_at_snap, 114);
-  assert.notEqual(ev.host_cols_at_snap, 235);
 });

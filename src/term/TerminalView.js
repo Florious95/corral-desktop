@@ -2,8 +2,8 @@
  * AgentMirror 桌面端 —— xterm 底座（CLIENT-CONTRACT §1.3 的重写版）。
  *
  * 保留 web 版 TerminalView 的全部语义，只换实现底座：
- *   - snapshot → reset() + write()（清屏重建；写入前按显示宽度把每一捕获行裁到 term.cols）
- *   - delta    → 同一套裁剪后 write()
+ *   - snapshot → reset() + write()（清屏重建；游标锚 ESC[row;colH 在字节尾，必须整段原样喂）
+ *   - delta    → write()（追加）
  *   - resize   → 120ms debounce 合并后回调（服务端每次真 reflow 都补一帧 snapshot，不合并会闪）
  *   - 滚到顶   → onHistoryBoundary()，由调用方去拉协议 scrollback
  *
@@ -18,8 +18,6 @@
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 import { isLocalSidebarToggle, unsupportedKeyEvent, consumeTerminalReplies, REPLY_HOLD_MAX } from './nativeInput.js';
 import { attachWebglRenderer } from './webglRenderer.js';
-import { push as diag } from './amDiag.js';
-import { clipCaptureBytes } from './garbleDetect.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -42,10 +40,8 @@ export class TerminalView {
   constructor(container, {
     onResize, onHistoryBoundary, onData, onUnsupportedKey,
     scrollback = 0, fontSize = 13, TerminalCtor = Terminal,
-    diagRef = null,
   } = {}) {
     this.container = container;
-    this.diagRef = diagRef;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
@@ -131,25 +127,10 @@ export class TerminalView {
    */
   fit({ immediate = false } = {}) {
     const el = this.container;
-    const ref = this.diagRef;
-    if (this._disposed || !el || !el.isConnected) {
-      diag({
-        type: 'fit', ref, early_exit: 'not_connected',
-        container_w: el ? el.clientWidth : 0, container_h: el ? el.clientHeight : 0,
-        debounce_armed: !!this._gridTimer, has_fit: this._hasFit,
-      });
-      return;
-    }
+    if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
     const h = el.clientHeight;
-    if (w === 0 || h === 0) {
-      diag({
-        type: 'fit', ref, early_exit: 'zero_px',
-        container_w: w, container_h: h,
-        debounce_armed: !!this._gridTimer, has_fit: this._hasFit,
-      });
-      return;
-    }
+    if (w === 0 || h === 0) return;
     const cell = this._cell();
     const cols = Math.max(2, Math.floor(w / cell.w));
     const rows = Math.max(2, Math.floor(h / cell.h));
@@ -157,25 +138,12 @@ export class TerminalView {
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {
       this._hasFit = true;
-      diag({
-        type: 'fit', ref, early_exit: null, path: immediate ? 'immediate' : 'first',
-        container_w: w, container_h: h, cols, rows,
-        term_cols: this.term.cols, term_rows: this.term.rows,
-        will_resize: cols !== this.term.cols || rows !== this.term.rows,
-        debounce_armed: !!this._gridTimer,
-      });
       this._commitGrid(cols, rows, { reportDelay: true });
       return;
     }
     if (cols === this.term.cols && rows === this.term.rows) {
       clearTimeout(this._gridTimer);
       this._gridTimer = null;
-      diag({
-        type: 'fit', ref, early_exit: 'grid_unchanged',
-        container_w: w, container_h: h, cols, rows,
-        term_cols: this.term.cols, term_rows: this.term.rows,
-        will_resize: false, debounce_armed: false,
-      });
       return;
     }
     clearTimeout(this._gridTimer);
@@ -185,23 +153,11 @@ export class TerminalView {
       if (this._disposed) return;
       this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
     }, GRID_DEBOUNCE_MS);
-    diag({
-      type: 'fit', ref, early_exit: null, path: 'debounce',
-      container_w: w, container_h: h, cols, rows,
-      term_cols: this.term.cols, term_rows: this.term.rows,
-      will_resize: false, debounce_armed: true,
-    });
   }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
     if (cols !== this.term.cols || rows !== this.term.rows) {
-      const from_cols = this.term.cols;
-      const from_rows = this.term.rows;
       this.term.resize(cols, rows);
-      diag({
-        type: 'term_resize', ref: this.diagRef,
-        from_cols, from_rows, to_cols: cols, to_rows: rows,
-      });
       if (reportDelay) this._report();
       else {
         this._lastDims = `${rows}x${cols}`;
@@ -210,28 +166,15 @@ export class TerminalView {
     }
   }
 
-  /** 全屏快照：清屏重建（protocol §6.2）。捕获行按显示宽度裁到 term.cols（裁定 2026-08-23）。 */
+  /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
-    const t_reset = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     this.term.reset();
-    const t_write = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const payload = clipCaptureBytes(u8, this.term.cols);
-    this.term.write(payload);
-    diag({
-      type: 'write_snapshot', ref: this.diagRef,
-      t_reset, t_write, term_cols: this.term.cols, term_rows: this.term.rows,
-      bytes: payload && payload.length != null ? payload.length : 0,
-    });
+    this.term.write(u8);
   }
 
-  /** 增量：同一套按显示宽度裁到 term.cols 后追加。 */
+  /** 增量：追加到当前屏。 */
   writeDelta(u8) {
-    const payload = clipCaptureBytes(u8, this.term.cols);
-    this.term.write(payload);
-    diag({
-      type: 'write_delta', ref: this.diagRef,
-      term_cols: this.term.cols, bytes: payload && payload.length != null ? payload.length : 0,
-    });
+    this.term.write(u8);
   }
 
   clear() { this.term.reset(); }
@@ -260,13 +203,7 @@ export class TerminalView {
 
   _report() {
     const dims = `${this.term.rows}x${this.term.cols}`;
-    if (dims === this._lastDims) {
-      diag({
-        type: 'resize_up', ref: this.diagRef, sent: false, reason: 'geom_unchanged',
-        rows: this.term.rows, cols: this.term.cols,
-      });
-      return;
-    }
+    if (dims === this._lastDims) return;
     this._lastDims = dims;
     clearTimeout(this._resizeTimer);
     // 服务端对每次真 reflow 都补一帧 snapshot；拖窗口时不合并会闪烁重画。
