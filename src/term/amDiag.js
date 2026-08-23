@@ -12,6 +12,9 @@ export const SETTLE_QUIET_MS = 100;
 
 /** Last listing/list_delta geom per ref. Survives reset() — ring may clear, this must not. */
 const hostGeom = new Map();
+/** Subscribe-after live geom. Pre-click cache must not substitute. */
+const liveHostGeom = new Map();
+const subscribedAt = new Map();
 
 function monotonicMs() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -157,9 +160,46 @@ export function hostGeomOf(ref) {
   return hostGeom.get(ref) || null;
 }
 
+export function markSubscribed(ref) {
+  if (!ref) return;
+  subscribedAt.set(ref, monotonicMs());
+}
+
+export function recordLiveHostGeom(panes, listing_seq) {
+  const now = monotonicMs();
+  for (const p of panes || []) {
+    if (!p || !p.ref) continue;
+    const tSub = subscribedAt.get(p.ref);
+    if (tSub == null || now < tSub) continue;
+    liveHostGeom.set(p.ref, {
+      rows: p.rows,
+      cols: p.cols,
+      listing_seq: listing_seq != null ? listing_seq : null,
+    });
+  }
+}
+
+export function liveHostGeomOf(ref) {
+  if (!ref) return null;
+  return liveHostGeom.get(ref) || null;
+}
+
+export function stampHostAtSnap(ref) {
+  const live = liveHostGeomOf(ref);
+  return {
+    host_cols_live: live ? live.cols : null,
+    host_rows_live: live ? live.rows : null,
+    host_cols_at_snap: live ? live.cols : null,
+    host_rows_at_snap: live ? live.rows : null,
+    live_listing_seq: live ? live.listing_seq : null,
+  };
+}
+
 /** Test helper only — product reset() must not call this. */
 export function resetHostGeom() {
   hostGeom.clear();
+  liveHostGeom.clear();
+  subscribedAt.clear();
 }
 
 export function beginActivate(ref) {
@@ -198,6 +238,7 @@ function install() {
     dump: () => dump(),
     reset: () => resetDiag(),
     hostGeomOf: (ref) => hostGeomOf(ref),
+    liveHostGeomOf: (ref) => liveHostGeomOf(ref),
     push,
     beginActivate,
     capacity: AM_DIAG_CAPACITY,

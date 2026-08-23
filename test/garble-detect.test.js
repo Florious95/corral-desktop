@@ -55,3 +55,15 @@ test('metrics: maxLineChars is code points of the widest stripped line; maxLineH
   assert.equal(cjk.metrics.maxLineChars, 1);
   assert.equal(cjk.metrics.maxLineHasWide, true);
 });
+
+test('metrics: nLinesWidthEqCols and nLinesWidthColsPlus1', () => {
+  const eq = detectGarble({ snapshot: `${'a'.repeat(80)}\n`, termCols: 80 });
+  assert.equal(eq.metrics.nLinesWidthEqCols, 1);
+  assert.equal(eq.metrics.nLinesWidthColsPlus1, 0);
+  assert.equal(eq.garbled, false);
+
+  const plus = detectGarble({ snapshot: `${'a'.repeat(81)}\n`, termCols: 80 });
+  assert.equal(plus.metrics.nLinesWidthEqCols, 0);
+  assert.equal(plus.metrics.nLinesWidthColsPlus1, 1);
+  assert.equal(plus.garbled, true);
+});

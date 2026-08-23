@@ -19,7 +19,7 @@
 
 import { encodeControl, decodeControl } from './protocol.js';
 import { decodeBinary } from './binary.js';
-import { push as diag, recordHostGeom, forgetHostGeom, hostGeomOf } from '../../term/amDiag.js';
+import { push as diag, recordHostGeom, forgetHostGeom, hostGeomOf, markSubscribed, recordLiveHostGeom, stampHostAtSnap } from '../../term/amDiag.js';
 
 export const ClientState = Object.freeze({
   STOPPED: 'stopped',
@@ -134,6 +134,7 @@ export class Client {
       return true; // bookkept; replayed on READY
     }
     const sent = this.sendControl('subscribe', { ref, rows, cols });
+    if (sent) markSubscribed(ref);
     diag({ type: 'subscribe', ref, rows, cols, sent, reason: sent ? null : 'send_failed', ...hostFields });
     return sent;
   }
@@ -306,9 +307,11 @@ export class Client {
         return;
       }
       const kindName = frame.kind === 1 ? 'snapshot' : frame.kind === 2 ? 'delta' : 'scrollback';
+      const live = kindName === 'snapshot' ? stampHostAtSnap(frame.ref) : {};
       diag({
         type: kindName, ref: frame.ref, kind: frame.kind,
         bytes: frame.data ? frame.data.length : 0,
+        ...live,
       });
       this.onBinary(frame);
     }
@@ -345,6 +348,7 @@ export class Client {
         }
         diag({ type: 'listing', ref: null, listing_seq: payload.seq, panes });
         recordHostGeom(panes, payload.seq);
+        recordLiveHostGeom(panes, payload.seq);
         return;
       }
       case 'list_delta': {
@@ -367,6 +371,7 @@ export class Client {
           panes, removed: (payload.removed_refs || []).length,
         });
         recordHostGeom(panes, payload.seq);
+        recordLiveHostGeom(panes, payload.seq);
         forgetHostGeom(payload.removed_refs);
         return;
       }
@@ -400,6 +405,7 @@ export class Client {
     diag({ type: 'ready_replay', ref: null, count: this.activeSubscriptions.size });
     for (const [ref, dims] of this.activeSubscriptions) {
       const sent = this.sendControl('subscribe', { ref, rows: dims.rows, cols: dims.cols });
+      if (sent) markSubscribed(ref);
       const host = hostGeomOf(ref);
       diag({
         type: 'subscribe', ref, rows: dims.rows, cols: dims.cols,

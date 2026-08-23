@@ -9,7 +9,7 @@ import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
 import { detectGarble } from '../../term/garbleDetect.js';
-import { push as diag } from '../../term/amDiag.js';
+import { push as diag, liveHostGeomOf } from '../../term/amDiag.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -153,6 +153,7 @@ export default function TerminalPane({
               termCols: view.cols,
               termRows: view.rows,
             });
+            const live = liveHostGeomOf(target);
             diag({
               type: 'garble_label',
               ref: target,
@@ -162,9 +163,14 @@ export default function TerminalPane({
               max_line_width: label.metrics.maxLineWidth,
               max_line_chars: label.metrics.maxLineChars,
               max_line_has_wide: label.metrics.maxLineHasWide,
+              n_lines_width_eq_cols: label.metrics.nLinesWidthEqCols,
+              n_lines_width_cols_plus_1: label.metrics.nLinesWidthColsPlus1,
               max_box_run: label.metrics.maxBoxRun,
               cup_clamped: label.metrics.cupClamped,
               geom: `${view.rows}x${view.cols}`,
+              host_cols_live: live ? live.cols : null,
+              host_rows_live: live ? live.rows : null,
+              host_cols_at_snap: live ? live.cols : null,
             });
           }
           setReady(true);

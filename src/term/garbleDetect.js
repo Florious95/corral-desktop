@@ -67,6 +67,8 @@ export function detectGarble(state) {
     maxLineChars: 0,
     maxLineHasWide: false,
     overwideLines: 0,
+    nLinesWidthEqCols: 0,
+    nLinesWidthColsPlus1: 0,
     maxBoxRun: 0,
     overwideBoxRuns: 0,
     cupCount: 0,
@@ -109,6 +111,8 @@ export function detectGarble(state) {
     if (w > termCols) {
       metrics.overwideLines += 1;
     }
+    if (w === termCols) metrics.nLinesWidthEqCols += 1;
+    if (w === termCols + 1) metrics.nLinesWidthColsPlus1 += 1;
     BOX_RUN.lastIndex = 0;
     let bm;
     while ((bm = BOX_RUN.exec(line))) {

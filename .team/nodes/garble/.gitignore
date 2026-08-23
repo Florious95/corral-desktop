@@ -1,0 +1,9 @@
+bin/
+am-state/
+am-state-r3/
+cwd-A/
+cwd-B/
+cwd-C/
+cwd-D/
+npm-test.out
+daemon.log
