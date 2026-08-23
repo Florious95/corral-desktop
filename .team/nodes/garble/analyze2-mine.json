@@ -1,0 +1,521 @@
+{
+  "n": 550,
+  "nPos": 75,
+  "nNeg": 475,
+  "pos_range": {
+    "snap_bytes": {
+      "n": 75,
+      "min": 1973,
+      "max": 5005
+    },
+    "host_cols": {
+      "n": 75,
+      "min": 235,
+      "max": 235
+    },
+    "mchars": {
+      "n": 75,
+      "min": 61,
+      "max": 96
+    },
+    "mlw": {
+      "n": 75,
+      "min": 115,
+      "max": 115
+    },
+    "settle": {
+      "n": 75,
+      "min": 221.59999999403954,
+      "max": 332.5
+    },
+    "sub_to_snap": {
+      "n": 75,
+      "min": 82.2000000178814,
+      "max": 188
+    }
+  },
+  "neg_range": {
+    "snap_bytes": {
+      "n": 475,
+      "min": 6,
+      "max": 13011
+    },
+    "host_cols": {
+      "n": 475,
+      "min": 80,
+      "max": 235
+    },
+    "mchars": {
+      "n": 475,
+      "min": 0,
+      "max": 114
+    },
+    "mlw": {
+      "n": 475,
+      "min": 0,
+      "max": 114
+    },
+    "settle": {
+      "n": 475,
+      "min": 211.5,
+      "max": 385
+    },
+    "sub_to_snap": {
+      "n": 475,
+      "min": 73.90000000596046,
+      "max": 232.80000001192093
+    }
+  },
+  "host_cols_pos": {
+    "235": 75
+  },
+  "host_cols_neg": {
+    "80": 40,
+    "137": 10,
+    "140": 10,
+    "142": 10,
+    "235": 405
+  },
+  "mwide_pos": {
+    "true": 75
+  },
+  "mwide_neg": {
+    "false": 327,
+    "true": 148
+  },
+  "ruleResults": [
+    {
+      "name": "host_cols !== sub_cols",
+      "tp": 75,
+      "fp": 475,
+      "fn": 0,
+      "tn": 0,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols === 235",
+      "tp": 75,
+      "fp": 405,
+      "fn": 0,
+      "tn": 70,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols > 114",
+      "tp": 75,
+      "fp": 435,
+      "fn": 0,
+      "tn": 40,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols - sub_cols === 121",
+      "tp": 75,
+      "fp": 405,
+      "fn": 0,
+      "tn": 70,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols === 235 AND mwide",
+      "tp": 75,
+      "fp": 138,
+      "fn": 0,
+      "tn": 337,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "mwide === true",
+      "tp": 75,
+      "fp": 148,
+      "fn": 0,
+      "tn": 327,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "mchars > 114",
+      "tp": 0,
+      "fp": 0,
+      "fn": 75,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "snap_bytes > 4000",
+      "tp": 21,
+      "fp": 261,
+      "fn": 54,
+      "tn": 214,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "n_delta > 20",
+      "tp": 4,
+      "fp": 51,
+      "fn": 71,
+      "tn": 424,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "resize_after_snap",
+      "tp": 52,
+      "fp": 424,
+      "fn": 23,
+      "tn": 51,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "snap_before_last_resize",
+      "tp": 0,
+      "fp": 0,
+      "fn": 75,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "sub_to_snap > 150",
+      "tp": 7,
+      "fp": 15,
+      "fn": 68,
+      "tn": 460,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "settle_ms > 260",
+      "tp": 28,
+      "fp": 71,
+      "fn": 47,
+      "tn": 404,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "TAUTOLOGY mlw > term_cols",
+      "tp": 75,
+      "fp": 0,
+      "fn": 0,
+      "tn": 475,
+      "n": 550,
+      "perfect": true
+    },
+    {
+      "name": "TAUTOLOGY overwide > 0",
+      "tp": 75,
+      "fp": 0,
+      "fn": 0,
+      "tn": 475,
+      "n": 550,
+      "perfect": true
+    }
+  ],
+  "threshScan": [
+    {
+      "key": "snap_bytes",
+      "dir": "eq",
+      "t": 3799,
+      "score": 65,
+      "tp": 10,
+      "fp": 0,
+      "fn": 65,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "mchars",
+      "dir": "eq",
+      "t": 71,
+      "score": 65,
+      "tp": 10,
+      "fp": 0,
+      "fn": 65,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "click_to_sub",
+      "dir": "eq",
+      "t": 48,
+      "score": 73,
+      "tp": 2,
+      "fp": 0,
+      "fn": 73,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "sub_to_snap",
+      "dir": "eq",
+      "t": 105.30000001192093,
+      "score": 73,
+      "tp": 2,
+      "fp": 0,
+      "fn": 73,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "n_delta",
+      "dir": "eq",
+      "t": 9,
+      "score": 74,
+      "tp": 2,
+      "fp": 1,
+      "fn": 73,
+      "tn": 474,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "settle_ms",
+      "dir": "eq",
+      "t": 237.90000000596046,
+      "score": 74,
+      "tp": 2,
+      "fp": 1,
+      "fn": 73,
+      "tn": 474,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "n_resize_up",
+      "dir": "gt",
+      "t": 2,
+      "score": 75,
+      "tp": 0,
+      "fp": 0,
+      "fn": 75,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "host_cols",
+      "dir": "lt",
+      "t": 80,
+      "score": 75,
+      "tp": 0,
+      "fp": 0,
+      "fn": 75,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "host_minus_sub",
+      "dir": "lt",
+      "t": -34,
+      "score": 75,
+      "tp": 0,
+      "fp": 0,
+      "fn": 75,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "key": "n_list_delta",
+      "dir": "lt",
+      "t": 0,
+      "score": 75,
+      "tp": 0,
+      "fp": 0,
+      "fn": 75,
+      "tn": 475,
+      "n": 550,
+      "perfect": false
+    }
+  ],
+  "conj": [
+    {
+      "name": "host_ne_sub && resize_after_snap",
+      "tp": 52,
+      "fp": 424,
+      "fn": 23,
+      "tn": 51,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols===235 && snap_bytes>3000",
+      "tp": 59,
+      "fp": 286,
+      "fn": 16,
+      "tn": 189,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols===235 && n_delta>=1",
+      "tp": 69,
+      "fp": 299,
+      "fn": 6,
+      "tn": 176,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_ne_sub && settle_ms>240",
+      "tp": 62,
+      "fp": 219,
+      "fn": 13,
+      "tn": 256,
+      "n": 550,
+      "perfect": false
+    },
+    {
+      "name": "host_cols===235 && mchars>=71",
+      "tp": 57,
+      "fp": 326,
+      "fn": 18,
+      "tn": 149,
+      "n": 550,
+      "perfect": false
+    }
+  ],
+  "mixed": [
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%90",
+      "n": 10,
+      "g": 4
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%92",
+      "n": 10,
+      "g": 5
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%93",
+      "n": 10,
+      "g": 6
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%94",
+      "n": 10,
+      "g": 3
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%95",
+      "n": 10,
+      "g": 4
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%96",
+      "n": 10,
+      "g": 2
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%97",
+      "n": 10,
+      "g": 1
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%98",
+      "n": 10,
+      "g": 4
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%99",
+      "n": 10,
+      "g": 5
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-eb63cbe5b286\u001f%0",
+      "n": 10,
+      "g": 2
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-26fb88f58006\u001f%0",
+      "n": 10,
+      "g": 2
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%0",
+      "n": 10,
+      "g": 6
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%0",
+      "n": 10,
+      "g": 6
+    },
+    {
+      "ref": "/tmp/tmux-501/ta-105089ea391b\u001f%0",
+      "n": 10,
+      "g": 5
+    }
+  ],
+  "inseparableGeomCount": 1,
+  "inseparableTop": [
+    {
+      "sig": {
+        "host_cols": 235,
+        "host_rows": 50,
+        "sub_cols": 114,
+        "sub_rows": 39,
+        "term_cols": 114,
+        "term_rows": 39,
+        "last_fit_cols": 114,
+        "last_resize_to": 114,
+        "fit_path": "first:102x39>first:102x39>grid_unchanged:102x39>immediate:114x39",
+        "n_fit": 4,
+        "n_term_resize": 3,
+        "host_ne_sub": true
+      },
+      "nPos": 75,
+      "nNeg": 395,
+      "posEx": {
+        "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%90",
+        "round": 1,
+        "garbled": true,
+        "host_cols": 235,
+        "sub_cols": 114,
+        "term_cols": 114,
+        "snap_bytes": 3985,
+        "n_delta": 188,
+        "mlw": 115,
+        "mchars": 87,
+        "mwide": true,
+        "overwide": 2,
+        "box": 114,
+        "settle_ms": 263.89999997615814,
+        "sub_to_snap": 115.5,
+        "resize_after_snap": true
+      },
+      "negEx": {
+        "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%1",
+        "round": 1,
+        "garbled": false,
+        "host_cols": 235,
+        "sub_cols": 114,
+        "term_cols": 114,
+        "snap_bytes": 7,
+        "n_delta": 12,
+        "mlw": 0,
+        "mchars": 0,
+        "mwide": false,
+        "overwide": 0,
+        "box": 0,
+        "settle_ms": 238.30000001192093,
+        "sub_to_snap": 89.69999998807907,
+        "resize_after_snap": true
+      }
+    }
+  ]
+}
