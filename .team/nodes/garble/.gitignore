@@ -5,5 +5,11 @@ cwd-A/
 cwd-B/
 cwd-C/
 cwd-D/
+cwd-Er/
+cwd-Fr/
+cwd-En/
+cwd-Fn/
+am-state-r4/
 npm-test.out
 daemon.log
+repro2-daemon.log
