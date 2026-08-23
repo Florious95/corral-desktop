@@ -16,7 +16,6 @@ import Toast from './components/chrome/Toast.jsx';
 import { watchFullscreen } from './lib/fullscreen.js';
 import { isLocalSidebarToggle } from './term/nativeInput.js';
 import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from './term/inputAckGate.js';
-import { beginActivate } from './term/amDiag.js';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
@@ -263,14 +262,12 @@ export default function App({ seedDevices } = {}) {
 
   /* ——— 会话动作 ——— */
   const openAgent = useCallback((key) => {
-    beginActivate(key);
     // 已在列里：只聚焦（U-06）。未打开：单列替换（C-053，左键不是追加）。
     setPaneKeys((p) => (p.includes(key) ? p : [key]));
     setActiveKey(key);
   }, []);
 
   const splitAgent = useCallback((key) => {
-    beginActivate(key);
     setPaneKeys((p) => (p.includes(key) ? p : [...p, key]));
     setActiveKey(key);
   }, []);

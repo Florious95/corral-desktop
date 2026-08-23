@@ -122,15 +122,13 @@ test('顶部上滚滚轮触发拉历史（scrollback=0 时 onScroll 永不触发
   view.dispose();
 });
 
-test('snapshot 清屏重建、delta 追加；短行裁剪后内容不变', () => {
+test('snapshot 清屏重建、delta 追加，字节原样不动', () => {
   const { view } = makeView();
   view.open();
   const snap = new Uint8Array([0x41, 0x1b, 0x5b, 0x31, 0x3b, 0x31, 0x48]);
   view.writeSnapshot(snap);
   assert.equal(view.term.resets, 1);
-  const got = view.term.writes[0];
-  const text = typeof got === 'string' ? got : new TextDecoder().decode(got);
-  assert.equal(text, '\x41\x1b[1;1H');
+  assert.equal(view.term.writes[0], snap, '整段原样喂给 xterm，不 trim、不按行拆');
   view.writeDelta(new Uint8Array([0x42]));
   assert.equal(view.term.resets, 1);
   assert.equal(view.term.writes.length, 2);
