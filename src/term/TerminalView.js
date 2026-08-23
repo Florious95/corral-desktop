@@ -24,6 +24,20 @@ const WHEEL_THROTTLE_MS = 400;
 /** 本地 grid 与上报共用：列宽抖动未落定前 ⛔ 不 term.resize 旧快照。 */
 export const GRID_DEBOUNCE_MS = 120;
 
+function withImplicitCr(bytes) {
+  let lfCount = 0;
+  for (const byte of bytes) if (byte === 0x0a) lfCount += 1;
+  if (lfCount === 0) return bytes;
+
+  const normalized = new Uint8Array(bytes.length + lfCount);
+  let out = 0;
+  for (const byte of bytes) {
+    if (byte === 0x0a) normalized[out++] = 0x0d;
+    normalized[out++] = byte;
+  }
+  return normalized;
+}
+
 export class TerminalView {
   /**
    * @param {HTMLElement} container 已有确定尺寸的挂载容器
@@ -185,10 +199,10 @@ export class TerminalView {
     }
   }
 
-  /** 全屏快照：清屏重建（protocol §6.2）。字节整段原样喂，⛔ 不 trim、不按行拆。 */
+  /** 全屏快照：清屏重建；只为裸 LF 补隐含 CR，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
     this.term.reset();
-    this.term.write(u8);
+    this.term.write(withImplicitCr(u8));
     this._hasPainted = true;
   }
 

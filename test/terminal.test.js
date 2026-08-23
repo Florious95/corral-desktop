@@ -137,7 +137,7 @@ test('C: after snapshot, settled shrink resets before resize (no wrap of old cel
   view.dispose();
 });
 
-test('snapshot 清屏重建、delta 追加，字节原样不动', () => {
+test('snapshot 清屏重建、delta 追加；快照补回车语义而不改 delta', () => {
   const { view } = makeView();
   view.open();
   const snap = new Uint8Array([0x41, 0x1b, 0x5b, 0x31, 0x3b, 0x31, 0x48]);
@@ -147,6 +147,21 @@ test('snapshot 清屏重建、delta 追加，字节原样不动', () => {
   view.writeDelta(new Uint8Array([0x42]));
   assert.equal(view.term.resets, 1);
   assert.equal(view.term.writes.length, 2);
+  view.dispose();
+});
+
+test('snapshot 裸 LF 隐含 CR，delta 保持原始字节', () => {
+  const { view } = makeView();
+  view.open();
+  const snap = new Uint8Array([0x41, 0x0a, 0x42]);
+  view.writeSnapshot(snap);
+  assert.deepEqual([...view.term.writes[0]], [0x41, 0x0d, 0x0a, 0x42]);
+  assert.deepEqual([...snap], [0x41, 0x0a, 0x42], 'snapshot source bytes are not mutated');
+
+  const delta = new Uint8Array([0x43, 0x0a]);
+  view.writeDelta(delta);
+  assert.equal(view.term.writes.length, 2);
+  assert.equal(view.term.writes[1], delta, 'delta stays byte-identical');
   view.dispose();
 });
 

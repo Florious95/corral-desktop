@@ -594,7 +594,7 @@ src/
   `height:34px; flex:none; display:flex; align-items:center; gap:8px; padding:0 40px 0 12px; border-bottom:1px solid var(--border-hairline)`；
   `<ProviderIcon size={17}/>` + title（`--fs-125`/600/`var(--text-secondary)`/省略号）+ 8px 状态点（规格同 §5.3）+ 设备徽章（仅 `multiDevice`）。
 - **终端区**：`flex:1; min-height:0; padding:8px 10px 0; background:var(--bg)`。
-  xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`、
+  xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize`（裁定 2026-08-23）。首帧立刻落到格子。
   **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就重发 `subscribe`（协议 `resize` 在主机几何未变时 no-op、不补快照）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
@@ -823,3 +823,4 @@ PROVIDER_LABEL  // §8.2 最后一列
 16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。
 17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）；未落定不 reflow 旧快照。
 18. **2026-08-23**：捕获宽度 == 渲染网格宽度为不变量；落定后 subscribe、改宽重订、错宽帧不画。
+19. **2026-08-23**：snapshot 重放对裸 LF 采用隐含 CR 语义；仅作用于 snapshot，delta 保持原始字节。
