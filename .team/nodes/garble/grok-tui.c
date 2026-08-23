@@ -1,6 +1,7 @@
 /*
  * Fake Agent TUI named "grok" (provider whitelist).
- * Redraws on SIGWINCH from TIOCGWINSZ.
+ * Redraws on SIGWINCH from TIOCGWINSZ unless --ignore-winch.
+ * SIGUSR1 prints one line (arm C: output after reshape, no full redraw).
  * AM_TUI_WIDE_AS_1=1 → treat CJK as 1 column (破坏齿).
  * Default → CJK is 2 columns.
  * Box drawing + CJK on the inner width boundary.
@@ -14,11 +15,18 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t got_winch = 0;
+static volatile sig_atomic_t got_usr1 = 0;
 static int wide_as_1 = 0;
+static int ignore_winch = 0;
 
 static void on_winch(int sig) {
   (void)sig;
   got_winch = 1;
+}
+
+static void on_usr1(int sig) {
+  (void)sig;
+  got_usr1 = 1;
 }
 
 static void put_utf8(const char *s) {
@@ -45,11 +53,9 @@ static void put_payload(int inner) {
     return;
   }
   if (wide_as_1) {
-    /* (inner-1) ASCII + CJK; fake=inner, real=inner+1 */
     for (i = 0; i < inner - 1; i++) putchar('x');
     put_utf8("中");
   } else {
-    /* (inner-2) ASCII + CJK; fake=inner, real=inner */
     for (i = 0; i < inner - 2; i++) putchar('x');
     put_utf8("中");
   }
@@ -59,9 +65,6 @@ static void draw(void) {
   int cols = 80, rows = 24, r, i, inner;
   winsize(&cols, &rows);
   inner = cols - 2;
-  /* Grid paint only (\\r\\n). CUP is omitted: capture-pane -e may keep
-   * host CUP that would cup_clamp against the 39-row client grid and
-   * paint both E and F red, hiding the width-algorithm tooth. */
   fputs("\x1b[2J\x1b[H", stdout);
   put_utf8("┌");
   for (i = 0; i < inner; i++) put_utf8("─");
@@ -83,16 +86,26 @@ static void draw(void) {
   fflush(stdout);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  int i;
   const char *env = getenv("AM_TUI_WIDE_AS_1");
   wide_as_1 = env && env[0] == '1';
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--ignore-winch") == 0) ignore_winch = 1;
+  }
   signal(SIGWINCH, on_winch);
+  signal(SIGUSR1, on_usr1);
   draw();
   for (;;) {
     pause();
+    if (got_usr1) {
+      got_usr1 = 0;
+      fputs("HEAL\r\n", stdout);
+      fflush(stdout);
+    }
     if (got_winch) {
       got_winch = 0;
-      draw();
+      if (!ignore_winch) draw();
     }
   }
   return 0;

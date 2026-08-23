@@ -1,0 +1,168 @@
+{
+  "ok": true,
+  "hypothesis_holds": true,
+  "listen": "127.0.0.1:19171",
+  "socket": "/tmp/amc-tmux/tmux-501/amc",
+  "used_9900": false,
+  "want": {
+    "fp235": "4990a7e3d93930b5",
+    "fp157": "b7b0ef9cb22e01a4",
+    "geom235": "235x50",
+    "geom157": "157x47"
+  },
+  "arms": [
+    {
+      "id": "D",
+      "predict": "green",
+      "actual": "green",
+      "match_predict": true,
+      "first_mismatch_row": null,
+      "first_mismatch_col": null,
+      "got_len": 11798,
+      "exp_len": 11798,
+      "got_fp": "4990a7e3d93930b5",
+      "exp_fp": "4990a7e3d93930b5",
+      "pane_after": {
+        "cols": 235,
+        "rows": 50,
+        "raw": "235x50"
+      },
+      "subscribe": "50x235",
+      "snapshot_count": 1
+    },
+    {
+      "id": "A",
+      "predict": "red",
+      "actual": "red",
+      "match_predict": true,
+      "first_mismatch_row": 1,
+      "first_mismatch_col": 1,
+      "got_len": 2097,
+      "exp_len": 7424,
+      "got_fp": "9b096bd3b3aff46f",
+      "exp_fp": "b7b0ef9cb22e01a4",
+      "pane_after": {
+        "cols": 157,
+        "rows": 47,
+        "raw": "157x47"
+      },
+      "subscribe": "47x157",
+      "snapshot_count": 1
+    },
+    {
+      "id": "B",
+      "predict": "green",
+      "actual": "green",
+      "match_predict": true,
+      "first_mismatch_row": null,
+      "first_mismatch_col": null,
+      "got_len": 7424,
+      "exp_len": 7424,
+      "got_fp": "b7b0ef9cb22e01a4",
+      "exp_fp": "b7b0ef9cb22e01a4",
+      "pane_after": {
+        "cols": 157,
+        "rows": 47,
+        "raw": "157x47"
+      },
+      "subscribe": "47x157",
+      "settle_ms": 426,
+      "snapshot_count": 1
+    },
+    {
+      "id": "C",
+      "predict": "green",
+      "actual": "red",
+      "match_predict": false,
+      "first_mismatch_row": 1,
+      "first_mismatch_col": 1,
+      "got_len": 2022,
+      "exp_len": 7424,
+      "got_fp": "588617ed62893d3b",
+      "exp_fp": "b7b0ef9cb22e01a4",
+      "pane_after": {
+        "cols": 157,
+        "rows": 47,
+        "raw": "157x47"
+      },
+      "subscribe": "47x157",
+      "usr1_pid": 67159,
+      "snapshot_count": 1
+    },
+    {
+      "id": "E",
+      "predict": "red",
+      "actual": "green",
+      "match_predict": false,
+      "first_mismatch_row": null,
+      "first_mismatch_col": null,
+      "mismatch_rounds": 0,
+      "rounds": 16,
+      "dwell_ms": 600
+    },
+    {
+      "id": "F",
+      "predict": "green",
+      "actual": "green",
+      "match_predict": true,
+      "first_mismatch_row": null,
+      "first_mismatch_col": null,
+      "mismatch_rounds": 0,
+      "rounds": 16,
+      "dwell_ms": 2200
+    }
+  ],
+  "timings_ms": [
+    {
+      "i": 0,
+      "ms": 362,
+      "matched": true
+    },
+    {
+      "i": 1,
+      "ms": 368,
+      "matched": true
+    },
+    {
+      "i": 2,
+      "ms": 365,
+      "matched": true
+    },
+    {
+      "i": 3,
+      "ms": 369,
+      "matched": true
+    },
+    {
+      "i": 4,
+      "ms": 362,
+      "matched": true
+    },
+    {
+      "i": 5,
+      "ms": 366,
+      "matched": true
+    },
+    {
+      "i": 6,
+      "ms": 368,
+      "matched": true
+    },
+    {
+      "i": 7,
+      "ms": 369,
+      "matched": true
+    },
+    {
+      "i": 8,
+      "ms": 368,
+      "matched": true
+    },
+    {
+      "i": 9,
+      "ms": 376,
+      "matched": true
+    }
+  ],
+  "timing_mean_ms": 367
+}
