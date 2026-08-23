@@ -1,0 +1,300 @@
+{
+  "garbled": false,
+  "round": 1,
+  "click_to_sub": 50.20000001788139,
+  "sub_to_snap": 175.2999999821186,
+  "snap_to_last_resize": -175.2999999821186,
+  "settle_ms": null,
+  "listing_cols": null,
+  "listing_rows": null,
+  "dump_seq": 24,
+  "dump_dropped": 0,
+  "dump_length": 24,
+  "events": [
+    {
+      "t": 2246.5999999940395,
+      "seq": 1,
+      "type": "activate",
+      "ref": "local::/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0"
+    },
+    {
+      "t": 2266,
+      "seq": 2,
+      "type": "unsubscribe",
+      "ref": "/tmp/tmux-501/default\u001f%2",
+      "sent": true,
+      "reason": null
+    },
+    {
+      "t": 2271.0999999940395,
+      "seq": 3,
+      "type": "fit",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "early_exit": null,
+      "path": "first",
+      "container_w": 800,
+      "container_h": 705,
+      "cols": 102,
+      "rows": 39,
+      "term_cols": 80,
+      "term_rows": 24,
+      "will_resize": true,
+      "debounce_armed": false
+    },
+    {
+      "t": 2271.699999988079,
+      "seq": 4,
+      "type": "term_resize",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "from_cols": 80,
+      "from_rows": 24,
+      "to_cols": 102,
+      "to_rows": 39
+    },
+    {
+      "t": 2272.699999988079,
+      "seq": 5,
+      "type": "unsubscribe",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "sent": true,
+      "reason": null
+    },
+    {
+      "t": 2277.4000000059605,
+      "seq": 6,
+      "type": "fit",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "early_exit": null,
+      "path": "first",
+      "container_w": 800,
+      "container_h": 705,
+      "cols": 102,
+      "rows": 39,
+      "term_cols": 80,
+      "term_rows": 24,
+      "will_resize": true,
+      "debounce_armed": false
+    },
+    {
+      "t": 2278,
+      "seq": 7,
+      "type": "term_resize",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "from_cols": 80,
+      "from_rows": 24,
+      "to_cols": 102,
+      "to_rows": 39
+    },
+    {
+      "t": 2279.199999988079,
+      "seq": 8,
+      "type": "fit",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "early_exit": "grid_unchanged",
+      "container_w": 800,
+      "container_h": 705,
+      "cols": 102,
+      "rows": 39,
+      "term_cols": 102,
+      "term_rows": 39,
+      "will_resize": false,
+      "debounce_armed": false
+    },
+    {
+      "t": 2295.300000011921,
+      "seq": 9,
+      "type": "fit",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "early_exit": null,
+      "path": "immediate",
+      "container_w": 800,
+      "container_h": 705,
+      "cols": 114,
+      "rows": 39,
+      "term_cols": 102,
+      "term_rows": 39,
+      "will_resize": true,
+      "debounce_armed": false
+    },
+    {
+      "t": 2296.800000011921,
+      "seq": 10,
+      "type": "term_resize",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "from_cols": 102,
+      "from_rows": 39,
+      "to_cols": 114,
+      "to_rows": 39
+    },
+    {
+      "t": 2296.800000011921,
+      "seq": 11,
+      "type": "subscribe",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "rows": 39,
+      "cols": 114,
+      "sent": true,
+      "reason": null
+    },
+    {
+      "t": 2417.699999988079,
+      "seq": 12,
+      "type": "resize_up",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "rows": 39,
+      "cols": 114,
+      "sent": true,
+      "reason": null
+    },
+    {
+      "t": 2417.699999988079,
+      "seq": 13,
+      "type": "resize_up",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "rows": 39,
+      "cols": 114,
+      "sent": true,
+      "reason": null
+    },
+    {
+      "t": 2472.0999999940395,
+      "seq": 14,
+      "type": "snapshot",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "kind": 1,
+      "bytes": 4282
+    },
+    {
+      "t": 2472.5999999940395,
+      "seq": 15,
+      "type": "write_snapshot",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "t_reset": 2472.0999999940395,
+      "t_write": 2472.5999999940395,
+      "term_cols": 114,
+      "term_rows": 39,
+      "bytes": 4282
+    },
+    {
+      "t": 2473,
+      "seq": 16,
+      "type": "garble_label",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "garbled": false,
+      "reasons": [],
+      "overwide_lines": 0,
+      "max_line_width": 114,
+      "max_box_run": 114,
+      "cup_clamped": 0,
+      "geom": "39x114"
+    },
+    {
+      "t": 2473.199999988079,
+      "seq": 17,
+      "type": "delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "kind": 2,
+      "bytes": 2048
+    },
+    {
+      "t": 2473.199999988079,
+      "seq": 18,
+      "type": "write_delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "term_cols": 114,
+      "bytes": 2048
+    },
+    {
+      "t": 2473.300000011921,
+      "seq": 19,
+      "type": "delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "kind": 2,
+      "bytes": 1024
+    },
+    {
+      "t": 2473.300000011921,
+      "seq": 20,
+      "type": "write_delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "term_cols": 114,
+      "bytes": 1024
+    },
+    {
+      "t": 2475.800000011921,
+      "seq": 21,
+      "type": "delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "kind": 2,
+      "bytes": 2048
+    },
+    {
+      "t": 2475.9000000059605,
+      "seq": 22,
+      "type": "write_delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "term_cols": 114,
+      "bytes": 2048
+    },
+    {
+      "t": 2475.9000000059605,
+      "seq": 23,
+      "type": "delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "kind": 2,
+      "bytes": 118
+    },
+    {
+      "t": 2475.9000000059605,
+      "seq": 24,
+      "type": "write_delta",
+      "ref": "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0",
+      "term_cols": 114,
+      "bytes": 118
+    }
+  ],
+  "settle": {
+    "local::/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0": {
+      "t0": 2246.5999999940395,
+      "t_sub_sent": null,
+      "t_snap_first": null,
+      "t_last_resize": null,
+      "t_stable": null,
+      "settle_ms": null,
+      "segments": {
+        "click_to_sub": null,
+        "sub_to_snap": null,
+        "snap_to_last_resize": null,
+        "last_resize_to_stable": null
+      }
+    },
+    "/tmp/tmux-501/default\u001f%2": {
+      "t0": null,
+      "t_sub_sent": null,
+      "t_snap_first": null,
+      "t_last_resize": null,
+      "t_stable": null,
+      "settle_ms": null,
+      "segments": {
+        "click_to_sub": null,
+        "sub_to_snap": null,
+        "snap_to_last_resize": null,
+        "last_resize_to_stable": null
+      }
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0": {
+      "t0": null,
+      "t_sub_sent": 2296.800000011921,
+      "t_snap_first": 2472.0999999940395,
+      "t_last_resize": 2296.800000011921,
+      "t_stable": null,
+      "settle_ms": null,
+      "segments": {
+        "click_to_sub": null,
+        "sub_to_snap": 175.2999999821186,
+        "snap_to_last_resize": -175.2999999821186,
+        "last_resize_to_stable": null
+      }
+    }
+  }
+}

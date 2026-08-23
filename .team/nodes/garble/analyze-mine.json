@@ -1,0 +1,459 @@
+{
+  "n": 550,
+  "pos": 79,
+  "neg": 471,
+  "snap_bytes": {
+    "minP": 1973,
+    "maxP": 5005,
+    "minN": 6,
+    "maxN": 13011
+  },
+  "best_bytes": {
+    "name": "snap_bytes > 13050",
+    "tp": 0,
+    "fp": 0,
+    "tn": 471,
+    "fn": 79,
+    "unk": 0,
+    "n": 550,
+    "ok": false,
+    "t": 13050
+  },
+  "best_bpc": {
+    "name": "bpc > 2.95",
+    "tp": 0,
+    "fp": 0,
+    "tn": 471,
+    "fn": 79,
+    "unk": 0,
+    "n": 550,
+    "ok": false,
+    "t": 2.9499999999999975
+  },
+  "top": [
+    {
+      "name": "bytes_per_cell > 4",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "bytes_per_cell > 3",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_before_last_resize",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "sub_cols !== term_cols",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "resize_up_noop",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>12000 && n_delta===0",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>15000 && n_delta===0",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>20000 && n_delta===0",
+      "tp": 0,
+      "fp": 0,
+      "tn": 471,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>11000 && n_delta===0",
+      "tp": 0,
+      "fp": 5,
+      "tn": 466,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes > 12000",
+      "tp": 0,
+      "fp": 10,
+      "tn": 461,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "bytes_per_cell > 2.5",
+      "tp": 0,
+      "fp": 20,
+      "tn": 451,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>9000 && n_delta===0",
+      "tp": 0,
+      "fp": 20,
+      "tn": 451,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>10000 && n_delta===0",
+      "tp": 0,
+      "fp": 20,
+      "tn": 451,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "sub_to_snap > 250",
+      "tp": 19,
+      "fp": 64,
+      "tn": 407,
+      "fn": 60,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>5000 && n_delta===0",
+      "tp": 0,
+      "fp": 48,
+      "tn": 423,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>6000 && n_delta===0",
+      "tp": 0,
+      "fp": 48,
+      "tn": 423,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>7000 && n_delta===0",
+      "tp": 0,
+      "fp": 48,
+      "tn": 423,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>8000 && n_delta===0",
+      "tp": 0,
+      "fp": 48,
+      "tn": 423,
+      "fn": 79,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "snap_bytes>4000 && n_delta===0",
+      "tp": 11,
+      "fp": 61,
+      "tn": 410,
+      "fn": 68,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    },
+    {
+      "name": "n_delta === 0",
+      "tp": 19,
+      "fp": 132,
+      "tn": 339,
+      "fn": 60,
+      "unk": 0,
+      "n": 550,
+      "ok": false
+    }
+  ],
+  "mixed_buckets": 0,
+  "mixed_example": null,
+  "byRef": {
+    "/tmp/tmux-501/default\u001f%2": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%0": {
+      "p": 4,
+      "n": 6
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%1": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%100": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%101": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%102": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%103": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%2": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%72": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%73": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%74": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%75": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%76": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%77": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%80": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%85": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%90": {
+      "p": 4,
+      "n": 6
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%92": {
+      "p": 3,
+      "n": 7
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%93": {
+      "p": 8,
+      "n": 2
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%94": {
+      "p": 6,
+      "n": 4
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%95": {
+      "p": 7,
+      "n": 3
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%96": {
+      "p": 5,
+      "n": 5
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%97": {
+      "p": 1,
+      "n": 9
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%98": {
+      "p": 1,
+      "n": 9
+    },
+    "/tmp/tmux-501/ta-a9fd5b7defbd\u001f%99": {
+      "p": 3,
+      "n": 7
+    },
+    "/tmp/tmux-501/ta-eb63cbe5b286\u001f%0": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-eb63cbe5b286\u001f%18": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-eb63cbe5b286\u001f%17": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%10": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%4": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%5": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%6": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%7": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%8": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%11": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-26fb88f58006\u001f%0": {
+      "p": 9,
+      "n": 1
+    },
+    "/tmp/tmux-501/default\u001f%4": {
+      "p": 10,
+      "n": 0
+    },
+    "/tmp/tmux-501/default\u001f%1": {
+      "p": 10,
+      "n": 0
+    },
+    "/tmp/tmux-501/ta-ffdc525c5f83\u001f%0": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%0": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%2": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-a0afa5f9c7f6\u001f%9": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%0": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%1": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%102": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%3": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%88": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%89": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%90": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%94": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%95": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-b7cc1c640ccf\u001f%96": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/default\u001f%0": {
+      "p": 0,
+      "n": 10
+    },
+    "/tmp/tmux-501/ta-105089ea391b\u001f%0": {
+      "p": 8,
+      "n": 2
+    },
+    "/tmp/tmux-501/ta-5674137b752d\u001f%0": {
+      "p": 0,
+      "n": 10
+    }
+  }
+}
