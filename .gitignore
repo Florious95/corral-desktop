@@ -11,3 +11,14 @@ src-tauri/gen/schemas/
 
 # 巡检夹具的 Chrome 用户目录：localStorage 里有配对 token，⛔ 绝不入库
 .team/nodes/garble/chrome-profile/
+
+# 🔴 pane 画面永不入库（2026-08-23 实撞：46 张巡检图含用户私有会话，被推上 PUBLIC 仓库）
+# 截图=pane 正文的像素形式，与「⛔ 正文不落盘」同一条红线。⛔ 不许 git add -f 绕过。
+.team/nodes/garble/**/*.png
+.team/nodes/garble/**/*.jpg
+.team/nodes/garble/shots/
+.team/nodes/garble/shots-web/
+.team/nodes/garble/shots-rounds/
+.team/nodes/garble/shots2/
+.team/nodes/garble/toggle/
+.team/nodes/garble/chrome-profile-web/
