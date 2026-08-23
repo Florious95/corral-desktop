@@ -1,0 +1,209 @@
+{
+  "lab": {
+    "pane_width": 114,
+    "method": "printf to #{pane_tty} after CSI home+erase; sleep 3600 pane"
+  },
+  "controls": {
+    "wide_straddle": {
+      "fixture": "113 ASCII x + U+4E2D",
+      "our_w": 115,
+      "n_chars": 114,
+      "ok": true,
+      "cursor_x": 2,
+      "cursor_y": 1,
+      "wrapped": true,
+      "tmux_fits_114": false,
+      "ruling": "tmux_overflow",
+      "wrap": {
+        "wrapped": true,
+        "wrap_char_index": 114,
+        "wrap_u": "U+4E2D",
+        "wrap_block": "CJK Unified Ideographs",
+        "wrap_our_w": 115,
+        "wrap_cursor_x": 2,
+        "wrap_cursor_y": 1,
+        "prev_char_index": 113,
+        "prev_u": "U+0078",
+        "prev_our_w": 113,
+        "prev_cursor_x": 113,
+        "prev_cursor_y": 0,
+        "our_delta": 2,
+        "col_before_wrap": 113
+      }
+    },
+    "fill_ascii": {
+      "fixture": "114 ASCII x",
+      "our_w": 114,
+      "n_chars": 114,
+      "ok": true,
+      "cursor_x": 114,
+      "cursor_y": 0,
+      "wrapped": false,
+      "tmux_fits_114": true,
+      "ruling": "both_fit"
+    },
+    "fill_cjk": {
+      "fixture": "57 U+4E2D",
+      "our_w": 114,
+      "n_chars": 57,
+      "ok": true,
+      "cursor_x": 114,
+      "cursor_y": 0,
+      "wrapped": false,
+      "tmux_fits_114": true,
+      "ruling": "both_fit"
+    },
+    "almost_fill": {
+      "fixture": "113 ASCII x",
+      "our_w": 113,
+      "n_chars": 113,
+      "ok": true,
+      "cursor_x": 113,
+      "cursor_y": 0,
+      "wrapped": false,
+      "tmux_fits_114": true,
+      "ruling": "both_fit"
+    }
+  },
+  "live": {
+    "ok": true,
+    "n_sessions": 55,
+    "tot": {
+      "n_live": 4,
+      "we_overcount": 0,
+      "tmux_overflow": 4,
+      "both_fit": 0,
+      "other": 0
+    },
+    "replay": [
+      {
+        "our_w": 115,
+        "n_chars": 77,
+        "whole": {
+          "our_w": 115,
+          "n_chars": 77,
+          "ok": true,
+          "cursor_x": 2,
+          "cursor_y": 1,
+          "wrapped": true,
+          "tmux_fits_114": false,
+          "ruling": "tmux_overflow"
+        },
+        "wrap": {
+          "wrapped": true,
+          "wrap_char_index": 77,
+          "wrap_u": "U+6B65",
+          "wrap_block": "CJK Unified Ideographs",
+          "wrap_our_w": 115,
+          "wrap_cursor_x": 2,
+          "wrap_cursor_y": 1,
+          "prev_char_index": 76,
+          "prev_u": "U+0020",
+          "prev_our_w": 113,
+          "prev_cursor_x": 113,
+          "prev_cursor_y": 0,
+          "our_delta": 2,
+          "col_before_wrap": 113
+        },
+        "fork": null,
+        "last_agree": null
+      },
+      {
+        "our_w": 115,
+        "n_chars": 61,
+        "whole": {
+          "our_w": 115,
+          "n_chars": 61,
+          "ok": true,
+          "cursor_x": 2,
+          "cursor_y": 1,
+          "wrapped": true,
+          "tmux_fits_114": false,
+          "ruling": "tmux_overflow"
+        },
+        "wrap": {
+          "wrapped": true,
+          "wrap_char_index": 61,
+          "wrap_u": "U+7684",
+          "wrap_block": "CJK Unified Ideographs",
+          "wrap_our_w": 115,
+          "wrap_cursor_x": 2,
+          "wrap_cursor_y": 1,
+          "prev_char_index": 60,
+          "prev_u": "U+7BA1",
+          "prev_our_w": 113,
+          "prev_cursor_x": 113,
+          "prev_cursor_y": 0,
+          "our_delta": 2,
+          "col_before_wrap": 113
+        },
+        "fork": null,
+        "last_agree": null
+      },
+      {
+        "our_w": 115,
+        "n_chars": 61,
+        "whole": {
+          "our_w": 115,
+          "n_chars": 61,
+          "ok": true,
+          "cursor_x": 2,
+          "cursor_y": 1,
+          "wrapped": true,
+          "tmux_fits_114": false,
+          "ruling": "tmux_overflow"
+        },
+        "wrap": {
+          "wrapped": true,
+          "wrap_char_index": 61,
+          "wrap_u": "U+5F80",
+          "wrap_block": "CJK Unified Ideographs",
+          "wrap_our_w": 115,
+          "wrap_cursor_x": 2,
+          "wrap_cursor_y": 1,
+          "prev_char_index": 60,
+          "prev_u": "U+8D8A",
+          "prev_our_w": 113,
+          "prev_cursor_x": 113,
+          "prev_cursor_y": 0,
+          "our_delta": 2,
+          "col_before_wrap": 113
+        },
+        "fork": null,
+        "last_agree": null
+      },
+      {
+        "our_w": 115,
+        "n_chars": 71,
+        "whole": {
+          "our_w": 115,
+          "n_chars": 71,
+          "ok": true,
+          "cursor_x": 2,
+          "cursor_y": 1,
+          "wrapped": true,
+          "tmux_fits_114": false,
+          "ruling": "tmux_overflow"
+        },
+        "wrap": {
+          "wrapped": true,
+          "wrap_char_index": 71,
+          "wrap_u": "U+5047",
+          "wrap_block": "CJK Unified Ideographs",
+          "wrap_our_w": 115,
+          "wrap_cursor_x": 2,
+          "wrap_cursor_y": 1,
+          "prev_char_index": 70,
+          "prev_u": "U+8BA1",
+          "prev_our_w": 113,
+          "prev_cursor_x": 113,
+          "prev_cursor_y": 0,
+          "our_delta": 2,
+          "col_before_wrap": 113
+        },
+        "fork": null,
+        "last_agree": null
+      }
+    ]
+  }
+}
