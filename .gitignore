@@ -22,3 +22,5 @@ src-tauri/gen/schemas/
 .team/nodes/garble/shots2/
 .team/nodes/garble/toggle/
 .team/nodes/garble/chrome-profile-web/
+# 🔴 pane 原始字节 = 正文本身，⛔ 永不入库（§一点八）。只留本地做标签固化。
+.team/nodes/garble/goldbytes/
