@@ -173,30 +173,3 @@
   color: var(--text-muted);
   pointer-events: none;
 }
-
-.terminal-inputbar {
-  flex: none;
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-top: 1px solid var(--border-hairline);
-  background: var(--bar-bg);
-}
-
-.terminal-inputbar-plus {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--r-8);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.terminal-inputbar-plus:hover { background: var(--hover-2) }
-.terminal-inputbar-plus:disabled { opacity: .35; cursor: default }
-.terminal-inputbar-file { display: none }
-.terminal-inputbar-hint { font-size: var(--fs-11); color: var(--text-faint) }

@@ -81,7 +81,7 @@
 --titlebar-top:#eeebe6;
 --titlebar-bottom:#e9e6e1;
 --titlebar-grad:linear-gradient(180deg,var(--titlebar-top),var(--titlebar-bottom));
---bar-bg:#f7f5f1;             /* InputBar 底条 */
+--bar-bg:#f7f5f1;             /* 次级工具条表面 */
 --surface-sunken:#f0ede8;     /* 空态 44×44 图标盒 */
 --field-bg:#ffffff;           /* input / textarea */
 
@@ -296,7 +296,6 @@ src/
     sidebar/AgentsList.jsx      §5.3
     terminal/SplitPanes.jsx     §6.1
     terminal/TerminalPane.jsx   §6.2
-    terminal/InputBar.jsx       §6.3
   lib/
     provider.js                 inferProvider() + PROVIDER_LABEL
     providerIcons.js            slug → 本地 svg URL 映射（Vite 打包，不走 CDN）
@@ -584,7 +583,7 @@ src/
 /**
  * @param {Agent} agent
  * @param {Object} client                        该设备的协议 Client 实例
- * @param {boolean} focused                      是否为键盘焦点列（InputBar 归属）
+ * @param {boolean} focused                      是否为键盘焦点列
  * @param {(rows:number, cols:number) => void} [onResize]
  */
 ```
@@ -601,35 +600,17 @@ src/
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载：网格落定后 `subscribe(ref, rows, cols)`；改宽重订；卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
-**终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与 InputBar `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
+**终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与本地发送 `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
 
 **xterm 应答不上行（裁定 2026-08-23）**：我方是被动镜像，⛔ 不许替远端终端回答 OSC/CSI 查询。xterm 自动生成的 OSC（含 4/10/11/12）、DA（`CSI … c`）、CPR（`CSI … R`）、DSR（`CSI … n`）、DCS 在 `NativeInputPump` / `TerminalView.onData` **丢掉，不发 `input.text` / `input.keys`**。方向键是 `CSI A/B/C/D`（终字节大写），与 CPR 的 `R`、DA 的 `c` 分开。远端拿不到颜色应答会回落到默认主题，可接受。⛔ 修前 OSC 11 应答会变成输入行垃圾并可能打出 `esc`。
 
 **粘贴（裁定 2026-08-24）**：Cmd+V 始终是文本：DOM `paste` 只读 `text/plain`，即使剪贴板含图片也不上传、不发
 `attachment_path`；图片-only 时提示「图片请用 Ctrl+V」。Ctrl+V 单独拦 keydown，图片字节经原生 `upload_http`
-上传后只发 `input.attachment_path`；Ctrl+V 纯文本响亮提示无图片且不发帧。左侧加号选择 `image/*` 文件，
-与 Ctrl+V 复用同一上传/attachment API。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
+上传后只发 `input.attachment_path`；Ctrl+V 纯文本响亮提示无图片且不发帧。主区不再挂载底部图片条、图片加号或键位说明；Ctrl+V 图片仍经原生上传和 attachment API。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
 
-### 6.3 `terminal/InputBar.jsx`
+### 6.3 终端输入
 
-```js
-/**
- * @param {(text:string) => Promise<void>} onSend      协议 input.text（服务端自动补回车）
- * @param {(key:string) => Promise<void>} onKey        闭集：esc|ctrl_c|tab|up|down|left|right
- * @param {boolean} disabled                            无选中 Agent 或连接断开
- */
-```
-内部状态：`text`、`pending`（等待 `input_ack`）。
-
-- 根：`flex:none; border-top:1px solid var(--border-hairline); background:var(--bar-bg); padding:8px 10px; display:flex; flex-direction:column; gap:6px`。
-- **快捷键行**：`display:flex; gap:6px`。7 个 chip（label / 协议 key）：`Esc/esc`、`Ctrl-C/ctrl_c`、`Tab/tab`、`↑/up`、`↓/down`、`←/left`、`→/right`。
-  chip：`height:24px; padding:0 10px; display:flex;center; border-radius:var(--r-6); font-size:var(--fs-11); font-weight:600; color:var(--text-secondary); cursor:pointer; box-shadow:var(--ring-chip); transition:background var(--d-fast)`；hover `background:var(--hover-2)`；active `background:var(--active-1)`。
-  🔴 `keys` **不附加回车**（协议 §输入语义）；`text` 与 `keys` **互斥**，一帧只带其一。
-- **输入行**：`display:flex; gap:8px; align-items:flex-end`。
-  - `<textarea>`：`flex:1; min-height:32px; max-height:122px`（自增高 1–6 行，`line-height:18px`），`font-size:var(--fs-13); font-family:inherit; padding:7px 10px; border:1px solid var(--border-input); border-radius:var(--r-8); background:var(--field-bg); resize:none; outline:none; color:var(--text)`；`:focus` 同 §4.3；placeholder `输入并回车发送 · Shift+Enter 换行`，色 `var(--text-faint)`。
-  - **键盘**：`Enter`（无 Shift）→ `preventDefault()` + 发送并清空；`Shift+Enter` → 换行。空文本发送 = 协议「仅回车」，**允许**。
-  - 发送按钮：`32×32px; flex:none; border-radius:var(--r-8); background:var(--ink-800); color:#fff; display:flex;center; cursor:pointer`；hover `var(--ink-900)`；active `#000`；`disabled || pending` → `opacity:.35; cursor:default`；`<ArrowUpIcon size={14} strokeWidth={2}/>`；`title="发送（留空 = 仅回车）"`。
-  - `pending` 期间禁用发送；`input_ack` 到达或 5s 超时后解除；`ok:false` → `toast('发送失败：' + reason)`。
+终端列直接承接 xterm 的键盘输入和粘贴事件；主区不挂载额外的底部图片条。
 
 ---
 
@@ -814,13 +795,13 @@ PROVIDER_LABEL  // §8.2 最后一列
 4. Space 行**新增**设备徽章与聚合状态点（仅多设备 / 非 idle 时渲染），设计稿的 Space 行没有这两样。
 5. **补出 pane 列头**：设计稿算出了 `title/iconEl/statusEl` 却没渲染；分裂多列必须能分辨归属。
 6. `Add Device…` 从「插一条『等待配对』假设备」改成 **AddDeviceDialog（ws URL + token）**。
-7. **新增 InputBar**（设计稿主区是「不在设计范围」占位）；快捷键闭集严格对齐协议 `esc/ctrl_c/tab/up/down/left/right`，`text` 与 `keys` 互斥、`keys` 不补回车。
+7. **终端输入**（设计稿主区是「不在设计范围」占位）；快捷键闭集严格对齐协议 `esc/ctrl_c/tab/up/down/left/right`，`text` 与 `keys` 互斥、`keys` 不补回车。主区不额外挂载底部图片条；Ctrl+V 图片上传路径仍保留。
 8. 「关闭」语义改为**关闭分裂列**并在无列时置灰；190ms 关闭动画改挂到「服务端删除会话」路径。
 9. 分裂列 `:first-child` 去掉 `border-left`（原型与侧栏 border-right 会并出双线）。
 10. `max-height:clamp(96px, 100dvh - 464px, 288px)` 的 `100dvh` → `100vh`（桌面端窗口无动态视口）。
 11. 新增 `prefers-reduced-motion` 降级（脉冲/过渡关闭）与输入框可见 focus ring —— 无障碍基础不省。
 12. token 不写 localStorage，落 Rust 侧 store 文件（安全红线，见协议 §9）。
-13. **2026-08-24**：Cmd/Ctrl 粘贴分键：Cmd+V 只发文本，Ctrl+V 图片经原生上传包装为 `attachment_path`；加号复用图片链，CSP 不放宽。
+13. **2026-08-24**：Cmd/Ctrl 粘贴分键：Cmd+V 只发文本，Ctrl+V 图片经原生上传包装为 `attachment_path`；底部图片加号和说明已删除，CSP 不放宽。
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
 15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。
 16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。
