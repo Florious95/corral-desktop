@@ -20,9 +20,7 @@ import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from '.
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
-import InputBar from './components/terminal/InputBar.jsx';
 import { readCtrlV, textFromPasteEvent } from './term/clipboard.js';
-import { fileToAttachment } from './core/upload.js';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
 const CLOSE_MS = 190;
@@ -311,7 +309,7 @@ export default function App({ seedDevices } = {}) {
     return shim;
   }, [dm]);
 
-  /* ——— 原生输入：xterm onData → 该列 uid，不经底部 InputBar ——— */
+  /* ——— 原生输入：xterm onData → 该列 uid ——— */
   const uidReady = useCallback((uid) => {
     const i = String(uid).indexOf('::');
     const deviceId = i === -1 ? uid : uid.slice(0, i);
@@ -364,15 +362,6 @@ export default function App({ seedDevices } = {}) {
     if (text) handlePaneText(uid, text);
     else setToastMsg('图片请用 Ctrl+V');
   }, [handlePaneText]);
-
-  const handleFileForActive = useCallback(async (file) => {
-    if (!activeAgent) return;
-    try {
-      await handleAttachment(activeAgent.key, await fileToAttachment(file));
-    } catch (e) {
-      setToastMsg(e?.message || '图片文件无效');
-    }
-  }, [activeAgent, handleAttachment]);
 
   const renderPane = useCallback((agent) => (
     <TerminalPane
@@ -569,10 +558,6 @@ export default function App({ seedDevices } = {}) {
                 onFocusPane={setActiveKey}
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
-              />
-              <InputBar
-                disabled={!activeAgent || !uidReady(activeAgent.key)}
-                onFile={handleFileForActive}
               />
             </>
           )}

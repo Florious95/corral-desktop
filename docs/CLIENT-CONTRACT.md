@@ -64,7 +64,7 @@ workspace 聚合 = 有任一 working → working;否则有任一 idle → idle;�
 | `keys` 非空 | `br.SendKeys(...)` — 按一下,不追加 Enter |
 
 `protocol.md §4.2` 写的「整条文本一次性注入并回车」**已作废**。
-桌面端 InputBar 的「发送」= **两帧**,见 §3.5。
+桌面端终端输入的「发送」= **两帧**,见 §3.5。
 
 ---
 
@@ -314,7 +314,7 @@ AggregatedSession = {
 
 ## 3. 会话面板数据流
 
-角色:`TerminalPane`(一个分裂列 = 一个 uid)、`InputBar`。全部经 DeviceManager,不直接摸 Client。
+角色:`TerminalPane`(一个分裂列 = 一个 uid)。全部经 DeviceManager,不直接摸 Client。
 
 ### 3.1 挂载:subscribe → snapshot → delta
 
@@ -399,7 +399,7 @@ fetchOlder(() => this, { onLoading: n => setStatus(`加载 ${n} 行历史…`), 
 
 ### 3.5 input:两帧提交,不是一帧
 
-**⚠️ 见 §0.3:`text` 不带回车。** InputBar 的「发送」(回车或按钮):
+**⚠️ 见 §0.3:`text` 不带回车。** 终端输入的「发送」(回车或按钮):
 
 ```
 send(text):
@@ -599,8 +599,8 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
 13. **`subscribe` 对同一 ref 幂等**,重订 = 重放 snapshot + 重流。可以放心用它做「刷新这一列」。
 14. **图片上传走原生 HTTP,不走 WS**（2026-08-24 键位裁定）：`POST /upload`(同端口),头
     `Authorization: Bearer <token>`,回 `{"path":"/绝对/路径"}`；桌面端只把返回 path
-    作为 `input.attachment_path` 提交。Cmd+V 始终只发 `input.text`；Ctrl+V 图片与加号选图
-    共用上传和 attachment API；路径不得进入 `input.text`。
+    作为 `input.attachment_path` 提交。Cmd+V 始终只发 `input.text`；Ctrl+V 图片仍经上传和
+    attachment API；主区不再挂载底部图片条、图片加号或键位说明，路径不得进入 `input.text`。
 15. **协议 v1 不支持远程创建 Agent**。「新建 Agent」对话框的创建按钮 → toast
     「当前 daemon 协议不支持远程创建 Agent」。没有对应帧类型,别去发明。
 16. **不要跨仓引用上游路径**。夹具必须复制进本仓 `test/fixtures/protocol/`;
