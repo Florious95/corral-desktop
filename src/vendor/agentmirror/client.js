@@ -183,6 +183,15 @@ export class Client {
     return reqId;
   }
 
+  /** Attach an uploaded host image to the remote CLI input without submitting it. */
+  attachPreview(ref, path) {
+    if (typeof path !== 'string' || !path.startsWith('/')) {
+      this.onLocalError('invalid_field', 'attachment path must be absolute');
+      return false;
+    }
+    return this.sendControl('attach_preview', { ref, path });
+  }
+
   /** Inject one named special key (no Enter appended). Result via onInputResult. */
   keys(ref, key) {
     const reqId = this.nextReqId++;
