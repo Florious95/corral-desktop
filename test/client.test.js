@@ -234,6 +234,31 @@ test('input: sends frame, resolves on input_ack', () => {
   assert.deepEqual(events.onInputResult[0], [reqId, true, null]);
 });
 
+test('inputAttachment: path is a separate field and never text', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+  client.subscribe('s1', 40, 100);
+  const reqId = client.inputAttachment('s1', '/host/uploads/image.png');
+  const frame = decodeControl(ws.sent[ws.sent.length - 1]);
+  assert.equal(frame.type, 'input');
+  assert.equal(frame.payload.attachment_path, '/host/uploads/image.png');
+  assert.equal(frame.payload.text, undefined);
+  ws._text(JSON.stringify({ v: 1, type: 'input_ack', payload: { req_id: reqId, ok: true } }));
+  assert.deepEqual(events.onInputResult.at(-1), [reqId, true, null]);
+});
+
+test('inputAttachment rejects a non-absolute path before the wire', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+  assert.equal(client.inputAttachment('s1', 'image.png'), null);
+  assert.match(events.onLocalError.at(-1) || '', /absolute/);
+  assert.equal(ws.sent.filter((x) => x.includes('attachment_path')).length, 0);
+});
+
 test('input: timeout is a decidable failure (no silent loss)', async () => {
   const { client, sockets, events } = makeClient();
   client.connect();

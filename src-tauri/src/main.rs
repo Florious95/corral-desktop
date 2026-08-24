@@ -4,6 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
+mod upload;
+
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
 
@@ -70,7 +72,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![lock_devices_file])
+        .invoke_handler(tauri::generate_handler![lock_devices_file, upload::upload_http, upload::read_clipboard_image])
         .run(tauri::generate_context!())
         .expect("error while running AgentMirror desktop");
 }

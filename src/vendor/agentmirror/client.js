@@ -164,6 +164,25 @@ export class Client {
     return reqId;
   }
 
+  /** Submit a host image path through the attachment field, never as text. */
+  inputAttachment(ref, path, text = '') {
+    if (typeof path !== 'string' || !path.startsWith('/')) {
+      this.onLocalError('invalid_field', 'attachment path must be absolute');
+      return null;
+    }
+    const reqId = this.nextReqId++;
+    let frame;
+    try {
+      frame = encodeControl('input', { req_id: reqId, ref, text, attachment_path: path });
+    } catch (e) {
+      this.onLocalError(e.code, e.message);
+      return null;
+    }
+    if (!this.sendRaw(frame)) return null;
+    this.registerPending(reqId);
+    return reqId;
+  }
+
   /** Inject one named special key (no Enter appended). Result via onInputResult. */
   keys(ref, key) {
     const reqId = this.nextReqId++;

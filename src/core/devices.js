@@ -14,6 +14,7 @@
 
 import { Client, ClientState } from '../vendor/agentmirror/client.js';
 import { inferProvider } from './providers.js';
+import { uploadImage } from './upload.js';
 import * as store from './store.js';
 
 const MODEL_DEBOUNCE_MS = 100;
@@ -92,6 +93,8 @@ export class DeviceManager {
     this.storage = opts.storage !== undefined ? opts.storage : globalThis.localStorage;
     this.wsFactory = opts.wsFactory;
     this.backoff = opts.backoff;
+    this.nativeInvoke = opts.nativeInvoke;
+    this.fetchImpl = opts.fetchImpl;
     this.modelDebounceMs = opts.modelDebounceMs ?? MODEL_DEBOUNCE_MS;
 
     this.onModelChange = opts.onModelChange || (() => {});
@@ -296,6 +299,32 @@ export class DeviceManager {
     const t = this._route(uid);
     const reqId = t ? t.client.input(t.ref, text) : null;
     return reqId === null ? null : { deviceId: t.deviceId, reqId };
+  }
+
+  /** Send an already-uploaded absolute host path in attachment_path only. */
+  inputAttachment(uid, path, text = '') {
+    const t = this._route(uid);
+    const reqId = t ? t.client.inputAttachment(t.ref, path, text) : null;
+    return reqId === null ? null : { deviceId: t.deviceId, reqId };
+  }
+
+  /** Shared Ctrl+V / file-picker chain: upload once, then submit once. */
+  async uploadAndAttach(uid, attachment, text = '') {
+    const t = this._route(uid);
+    const d = this._devices.find((x) => x.id === t?.deviceId);
+    if (!t || !d) throw new Error('未找到设备');
+    const path = await uploadImage({
+      url: d.url,
+      token: d.token,
+      name: attachment?.name,
+      mime: attachment?.mime,
+      bytes: attachment?.bytes,
+      nativeInvoke: this.nativeInvoke,
+      fetchImpl: this.fetchImpl,
+    });
+    const sent = this.inputAttachment(uid, path, text);
+    if (!sent) throw new Error('未发送附件');
+    return { ...sent, path };
   }
 
   /** @returns {{deviceId:string,reqId:number}|null} one named key, no Enter appended. */
