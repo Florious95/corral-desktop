@@ -11,6 +11,9 @@
  * change the geometry answers with nothing at all.
  */
 import { WebSocketServer } from 'ws';
+import { createServer } from 'node:http';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** Real-shaped refs (tmux socket + \x1f + pane id) so uid splitting is exercised. */
@@ -240,13 +243,37 @@ export function startMockDaemon(opts = {}) {
   };
   hub.refs = new Set(hub.workspaces.flatMap((w) => w.sessions.map((s) => s.ref)));
 
-  const wss = new WebSocketServer({ port: opts.port ?? Number(process.env.PORT ?? 9911), host: opts.host ?? '127.0.0.1' });
+  const port = opts.port ?? Number(process.env.PORT ?? 9911);
+  const host = opts.host ?? '127.0.0.1';
+  const uploadDir = process.env.UPLOAD_DIR ? resolve(process.env.UPLOAD_DIR) : null;
+  const http = createServer((req, res) => {
+    if (!uploadDir || req.method !== 'POST' || req.url !== '/upload') {
+      res.statusCode = 404;
+      return res.end();
+    }
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', async () => {
+      const path = join(uploadDir, `upload-${Date.now()}.bin`);
+      try {
+        await mkdir(uploadDir, { recursive: true });
+        await writeFile(path, Buffer.concat(chunks));
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ path }));
+      } catch {
+        res.statusCode = 500;
+        res.end();
+      }
+    });
+  });
+  const wss = new WebSocketServer({ server: http });
   wss.on('connection', (ws) => hub.conns.add(new Conn(ws, hub)));
+  http.listen(port, host);
 
   return {
     hub,
     wss,
-    get port() { return wss.address()?.port; },
+    get port() { return http.address()?.port; },
     get url() { return `ws://127.0.0.1:${wss.address()?.port}/ws`; },
     get received() { return hub.received; },
     ready: new Promise((res, rej) => { wss.on('listening', res); wss.on('error', rej); }),
@@ -259,7 +286,10 @@ export function startMockDaemon(opts = {}) {
     pushLevel2() { for (const c of hub.conns) c.sendLevel2Frame(); },
     close() {
       for (const c of [...hub.conns]) { c.dispose(); c.ws.terminate(); }
-      return new Promise((res) => wss.close(res));
+      return new Promise((res) => wss.close(() => {
+        if (http.listening) http.close(res);
+        else res();
+      }));
     },
   };
 }

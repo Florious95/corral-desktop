@@ -49,6 +49,8 @@ async function setup(opts = {}) {
     onError: (e) => events.errors.push(e),
     onModelChange: () => { events.models++; },
     onDeviceChange: () => { events.devices++; },
+    nativeInvoke: opts.nativeInvoke,
+    fetchImpl: opts.fetchImpl,
   });
   const id = dm.addDevice({ name: 'A-mac', url: daemon.url, token: opts.token ?? 'mock-token' });
   dm.connectAll();
@@ -194,6 +196,28 @@ test('subscribe routes binary frames with deviceId; input acks; resize no-op sta
 
     t.dm.unsubscribe(uid);
     assert.equal(t.dm.input(`${t.id}::nope`, 'x') !== null, true); // unknown ref still routes to the device
+  } finally { await t.teardown(); }
+});
+
+test('uploadAndAttach: one native upload then one attachment_path frame', async () => {
+  const calls = [];
+  const t = await setup({ nativeInvoke: async (name, args) => {
+    calls.push([name, args]);
+    return '/host/uploads/test.png';
+  } });
+  try {
+    await waitFor(() => t.dm.workspaces.length === 2, 'listing');
+    const uid = `${t.id}::${REFS.a1}`;
+    t.dm.subscribe(uid, 40, 100);
+    await waitFor(() => t.events.binary.some((e) => e.frame.kind === 1), 'snapshot');
+    const sent = await t.dm.uploadAndAttach(uid, { name: 'test.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
+    await waitFor(() => t.events.input.find((e) => e.reqId === sent.reqId), 'attachment input_ack');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], 'upload_http');
+    const frame = t.daemon.received.find((f) => f.type === 'input' && f.payload.req_id === sent.reqId);
+    assert.equal(frame.payload.attachment_path, '/host/uploads/test.png');
+    assert.equal(frame.payload.text, undefined);
+    assert.equal(JSON.stringify(frame.payload).includes('/host/uploads/test.png'), true);
   } finally { await t.teardown(); }
 });
 

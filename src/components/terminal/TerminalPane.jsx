@@ -10,6 +10,7 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
 import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
 import { parseAnsi } from './ansi.js';
+import { isCtrlV } from '../../term/clipboard.js';
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -35,10 +36,13 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
  * @param {(text:string) => void} [props.onText]
  * @param {(key:string) => void} [props.onKey]
  * @param {() => void} [props.onEnter]
+ * @param {() => void} [props.onCtrlV]
+ * @param {(event:ClipboardEvent) => void} [props.onPaste]
  */
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
   onText, onKey, onEnter,
+  onCtrlV, onPaste,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -56,9 +60,13 @@ export default function TerminalPane({
   const onTextRef = useRef(onText);
   const onKeyRef = useRef(onKey);
   const onEnterRef = useRef(onEnter);
+  const onCtrlVRef = useRef(onCtrlV);
+  const onPasteRef = useRef(onPaste);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onEnterRef.current = onEnter;
+  onCtrlVRef.current = onCtrlV;
+  onPasteRef.current = onPaste;
 
   const target = addr || agent.ref;
 
@@ -150,6 +158,19 @@ export default function TerminalPane({
       wheel.onWheel(ev);
     };
     host.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    const onKeyDown = (ev) => {
+      if (!isCtrlV(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      Promise.resolve(onCtrlVRef.current?.()).catch(() => setHint('图片读取失败'));
+    };
+    const onPasteEvent = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      onPasteRef.current?.(ev);
+    };
+    host.addEventListener('keydown', onKeyDown, true);
+    host.addEventListener('paste', onPasteEvent, true);
 
     // fetchOlder/acceptScrollback 直接读写这个对象上的 pendingScrollback / nextScrollbackLine。
     const g = {
@@ -229,6 +250,8 @@ export default function TerminalPane({
       ro.disconnect();
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
+      host.removeEventListener('keydown', onKeyDown, true);
+      host.removeEventListener('paste', onPasteEvent, true);
       clearTimeout(g.timer);
       clearTimeout(flashTimer);
       pump.dispose();

@@ -20,6 +20,9 @@ import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from '.
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
+import InputBar from './components/terminal/InputBar.jsx';
+import { readCtrlV, textFromPasteEvent } from './term/clipboard.js';
+import { fileToAttachment } from './core/upload.js';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
 const CLOSE_MS = 190;
@@ -338,6 +341,39 @@ export default function App({ seedDevices } = {}) {
     });
   }, [dm, uidReady]);
 
+  const handleAttachment = useCallback(async (uid, attachment) => {
+    if (!uidReady(uid)) { setToastMsg('未连接，图片未发送'); return; }
+    try {
+      await dm.uploadAndAttach(uid, attachment);
+    } catch (e) {
+      setToastMsg(e?.message || '图片上传失败');
+    }
+  }, [dm, uidReady]);
+
+  const handlePaneCtrlV = useCallback(async (uid) => {
+    const result = await readCtrlV();
+    if (result.kind === 'image') {
+      await handleAttachment(uid, result.attachment);
+    } else {
+      setToastMsg('Ctrl+V 仅支持图片，请使用 Cmd+V 粘贴文字');
+    }
+  }, [handleAttachment]);
+
+  const handlePanePaste = useCallback((uid, event) => {
+    const text = textFromPasteEvent(event);
+    if (text) handlePaneText(uid, text);
+    else setToastMsg('图片请用 Ctrl+V');
+  }, [handlePaneText]);
+
+  const handleFileForActive = useCallback(async (file) => {
+    if (!activeAgent) return;
+    try {
+      await handleAttachment(activeAgent.key, await fileToAttachment(file));
+    } catch (e) {
+      setToastMsg(e?.message || '图片文件无效');
+    }
+  }, [activeAgent, handleAttachment]);
+
   const renderPane = useCallback((agent) => (
     <TerminalPane
       agent={agent}
@@ -347,8 +383,10 @@ export default function App({ seedDevices } = {}) {
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
       onEnter={() => handlePaneEnter(agent.key)}
+      onCtrlV={() => handlePaneCtrlV(agent.key)}
+      onPaste={(event) => handlePanePaste(agent.key, event)}
     />
-  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneEnter]);
+  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneEnter, handlePaneCtrlV, handlePanePaste]);
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {
@@ -531,6 +569,10 @@ export default function App({ seedDevices } = {}) {
                 onFocusPane={setActiveKey}
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
+              />
+              <InputBar
+                disabled={!activeAgent || !uidReady(activeAgent.key)}
+                onFile={handleFileForActive}
               />
             </>
           )}

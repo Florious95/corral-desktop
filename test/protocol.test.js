@@ -40,6 +40,14 @@ test('encode: input keys variant matches golden field order', () => {
   assert.deepEqual(parsed, { v: 1, type: 'input', payload: { req_id: 10, ref: 's1', keys: ['esc', 'ctrl_c', 'tab'] } });
 });
 
+test('encode: input attachment variant keeps path out of text', () => {
+  const parsed = JSON.parse(encodeControl('input', {
+    req_id: 11, ref: 's1', attachment_path: '/host/uploads/image.png',
+  }));
+  assert.deepEqual(parsed.payload, { req_id: 11, ref: 's1', attachment_path: '/host/uploads/image.png' });
+  assert.equal(parsed.payload.text, undefined);
+});
+
 test('encode: input with both text and keys is rejected (mutually exclusive)', () => {
   assert.throws(
     () => encodeControl('input', { req_id: 1, ref: 's1', text: 'x', keys: ['esc'] }),
