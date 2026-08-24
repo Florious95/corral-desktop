@@ -308,8 +308,14 @@ export class DeviceManager {
     return reqId === null ? null : { deviceId: t.deviceId, reqId };
   }
 
-  /** Shared Ctrl+V / file-picker chain: upload once, then submit once. */
-  async uploadAndAttach(uid, attachment, text = '') {
+  /** Attach an already-uploaded absolute path without creating an input ack. */
+  attachPreview(uid, path) {
+    const t = this._route(uid);
+    return t ? t.client.attachPreview(t.ref, path) : false;
+  }
+
+  /** Shared Ctrl+V / file-picker chain: upload once, then leave a preview. */
+  async uploadAndPreview(uid, attachment) {
     const t = this._route(uid);
     const d = this._devices.find((x) => x.id === t?.deviceId);
     if (!t || !d) throw new Error('未找到设备');
@@ -322,9 +328,8 @@ export class DeviceManager {
       nativeInvoke: this.nativeInvoke,
       fetchImpl: this.fetchImpl,
     });
-    const sent = this.inputAttachment(uid, path, text);
-    if (!sent) throw new Error('未发送附件');
-    return { ...sent, path };
+    if (!this.attachPreview(uid, path)) throw new Error('未发送图片预览');
+    return { path };
   }
 
   /** @returns {{deviceId:string,reqId:number}|null} one named key, no Enter appended. */

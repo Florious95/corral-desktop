@@ -199,7 +199,7 @@ test('subscribe routes binary frames with deviceId; input acks; resize no-op sta
   } finally { await t.teardown(); }
 });
 
-test('uploadAndAttach: one native upload then one attachment_path frame', async () => {
+test('uploadAndPreview: one native upload then one attach_preview frame, manual Enter remains separate', async () => {
   const calls = [];
   const t = await setup({ nativeInvoke: async (name, args) => {
     calls.push([name, args]);
@@ -210,14 +210,19 @@ test('uploadAndAttach: one native upload then one attachment_path frame', async 
     const uid = `${t.id}::${REFS.a1}`;
     t.dm.subscribe(uid, 40, 100);
     await waitFor(() => t.events.binary.some((e) => e.frame.kind === 1), 'snapshot');
-    const sent = await t.dm.uploadAndAttach(uid, { name: 'test.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
-    await waitFor(() => t.events.input.find((e) => e.reqId === sent.reqId), 'attachment input_ack');
+    const sent = await t.dm.uploadAndPreview(uid, { name: 'test.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
+    await waitFor(() => t.daemon.count('attach_preview') === 1, 'attach_preview frame');
     assert.equal(calls.length, 1);
     assert.equal(calls[0][0], 'upload_http');
-    const frame = t.daemon.received.find((f) => f.type === 'input' && f.payload.req_id === sent.reqId);
-    assert.equal(frame.payload.attachment_path, '/host/uploads/test.png');
-    assert.equal(frame.payload.text, undefined);
-    assert.equal(JSON.stringify(frame.payload).includes('/host/uploads/test.png'), true);
+    assert.equal(sent.path, '/host/uploads/test.png');
+    assert.equal(t.daemon.count('input'), 0);
+    assert.equal(t.events.input.length, 0);
+
+    const enter = t.dm.input(uid, '');
+    assert.ok(enter);
+    await waitFor(() => t.events.input.find((e) => e.reqId === enter.reqId), 'manual Enter input_ack');
+    assert.equal(t.daemon.count('input'), 1);
+    assert.equal(t.daemon.received.find((f) => f.type === 'input').payload.attachment_path, undefined);
   } finally { await t.teardown(); }
 });
 

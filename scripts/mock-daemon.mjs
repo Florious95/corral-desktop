@@ -157,8 +157,13 @@ class Conn {
         return this.startLevel2(p.workspace);
       case 'level2_unsubscribe':
         return this.stopLevel2();
+      case 'attach_preview': {
+        if (!this.subs.has(p.ref)) return this.error('session_not_found', 'not subscribed');
+        // Preview work is observable through the mirror delta, not input_ack.
+        return this.sendBinary(encodeBinary(2, p.ref, deltaBytes('[image preview attached]')));
+      }
       default:
-        return; // overlay_* / pane_mode_changed / scroll_wheel / attach_preview: accepted, no reply
+        return; // overlay_* / pane_mode_changed / scroll_wheel: accepted, no reply
     }
   }
 

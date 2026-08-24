@@ -598,9 +598,10 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
     `session_not_found` / `internal`。(`invalid_field` 文档漏了,实现有。)
 13. **`subscribe` 对同一 ref 幂等**,重订 = 重放 snapshot + 重流。可以放心用它做「刷新这一列」。
 14. **图片上传走原生 HTTP,不走 WS**（2026-08-24 键位裁定）：`POST /upload`(同端口),头
-    `Authorization: Bearer <token>`,回 `{"path":"/绝对/路径"}`；桌面端只把返回 path
-    作为 `input.attachment_path` 提交。Cmd+V 始终只发 `input.text`；Ctrl+V 图片仍经上传和
-    attachment API；主区不再挂载底部图片条、图片加号或键位说明，路径不得进入 `input.text`。
+    `Authorization: Bearer <token>`,回 `{"path":"/绝对/路径"}`；桌面端上传成功后只发
+    `attach_preview {ref,path}`，不注册 `input_ack`，不发 `input.attachment_path` 或 `input.text`，也不自动 Enter。
+    图片留在远端 CLI 输入框，用户后续真实回车才沿裸 Enter 路由提交。Cmd+V 始终只发 `input.text`；
+    Ctrl+V 纯文本不发帧；主区不再挂载底部图片条、图片加号或键位说明，路径不得进入 `input.text`。
 15. **协议 v1 不支持远程创建 Agent**。「新建 Agent」对话框的创建按钮 → toast
     「当前 daemon 协议不支持远程创建 Agent」。没有对应帧类型,别去发明。
 16. **不要跨仓引用上游路径**。夹具必须复制进本仓 `test/fixtures/protocol/`;

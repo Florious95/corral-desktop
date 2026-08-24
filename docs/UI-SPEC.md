@@ -604,9 +604,9 @@ src/
 
 **xterm 应答不上行（裁定 2026-08-23）**：我方是被动镜像，⛔ 不许替远端终端回答 OSC/CSI 查询。xterm 自动生成的 OSC（含 4/10/11/12）、DA（`CSI … c`）、CPR（`CSI … R`）、DSR（`CSI … n`）、DCS 在 `NativeInputPump` / `TerminalView.onData` **丢掉，不发 `input.text` / `input.keys`**。方向键是 `CSI A/B/C/D`（终字节大写），与 CPR 的 `R`、DA 的 `c` 分开。远端拿不到颜色应答会回落到默认主题，可接受。⛔ 修前 OSC 11 应答会变成输入行垃圾并可能打出 `esc`。
 
-**粘贴（裁定 2026-08-24）**：Cmd+V 始终是文本：DOM `paste` 只读 `text/plain`，即使剪贴板含图片也不上传、不发
+**粘贴（裁定 2026-08-24，B 预贴修订）**：Cmd+V 始终是文本：DOM `paste` 只读 `text/plain`，即使剪贴板含图片也不上传、不发
 `attachment_path`；图片-only 时提示「图片请用 Ctrl+V」。Ctrl+V 单独拦 keydown，图片字节经原生 `upload_http`
-上传后只发 `input.attachment_path`；Ctrl+V 纯文本响亮提示无图片且不发帧。主区不再挂载底部图片条、图片加号或键位说明；Ctrl+V 图片仍经原生上传和 attachment API。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
+上传后只发 `attach_preview {ref,path}`，不发 `input.attachment_path`、`input.text` 或空 `input`，也不自动 Enter；图片留在远端 CLI 输入框，用户后续真实回车才提交。Ctrl+V 纯文本响亮提示无图片且不发帧。主区不再挂载底部图片条、图片加号或键位说明。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
 
 ### 6.3 终端输入
 
@@ -801,7 +801,7 @@ PROVIDER_LABEL  // §8.2 最后一列
 10. `max-height:clamp(96px, 100dvh - 464px, 288px)` 的 `100dvh` → `100vh`（桌面端窗口无动态视口）。
 11. 新增 `prefers-reduced-motion` 降级（脉冲/过渡关闭）与输入框可见 focus ring —— 无障碍基础不省。
 12. token 不写 localStorage，落 Rust 侧 store 文件（安全红线，见协议 §9）。
-13. **2026-08-24**：Cmd/Ctrl 粘贴分键：Cmd+V 只发文本，Ctrl+V 图片经原生上传包装为 `attachment_path`；底部图片加号和说明已删除，CSP 不放宽。
+13. **2026-08-24**：Cmd/Ctrl 粘贴分键：Cmd+V 只发文本，Ctrl+V 图片经原生上传包装为无 ack 的 `attach_preview`；后续真实回车才提交，底部图片加号和说明已删除，CSP 不放宽。
 14. **2026-08-22**：终端列回车等待 `input_ack` 必须有界；重连清场孤儿 waiter。多客户端重排后回车死锁的根因。
 15. **2026-08-22**：全屏/折叠悬浮胶囊 chrome（用户确认 mockup）：藏系统灯、四钮运动场形、hover 才出、全屏热区 top 62px、红钮真关闭、Cmd+B/W/Q 兜底。
 16. **2026-08-23**：xterm OSC/DA/CPR/DSR/DCS 应答不上行（被动镜像；远端超时回落默认主题可接受）。
