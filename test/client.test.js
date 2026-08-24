@@ -234,6 +234,20 @@ test('input: sends frame, resolves on input_ack', () => {
   assert.deepEqual(events.onInputResult[0], [reqId, true, null]);
 });
 
+test('attachPreview: sends a no-ack preview frame and never registers input pending', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+
+  assert.equal(client.attachPreview('s1', '/host/uploads/image.png'), true);
+  const frame = decodeControl(ws.sent[ws.sent.length - 1]);
+  assert.equal(frame.type, 'attach_preview');
+  assert.deepEqual(frame.payload, { ref: 's1', path: '/host/uploads/image.png' });
+  assert.equal(client.pendingInputs.size, 0);
+  assert.deepEqual(events.onInputResult, []);
+});
+
 test('inputAttachment: path is a separate field and never text', () => {
   const { client, sockets, events } = makeClient();
   client.connect();

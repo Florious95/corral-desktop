@@ -342,7 +342,7 @@ export default function App({ seedDevices } = {}) {
   const handleAttachment = useCallback(async (uid, attachment) => {
     if (!uidReady(uid)) { setToastMsg('未连接，图片未发送'); return; }
     try {
-      await dm.uploadAndAttach(uid, attachment);
+      await dm.uploadAndPreview(uid, attachment);
     } catch (e) {
       setToastMsg(e?.message || '图片上传失败');
     }
