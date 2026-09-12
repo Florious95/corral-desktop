@@ -68,72 +68,31 @@ workspace 聚合 = 有任一 working → working;否则有任一 idle → idle;�
 
 ---
 
-## 1. vendor 清单
+## 1. core 直接依赖（裁定 2026-09-12）
 
-目标目录 `/Volumes/nvme/Projects/tmux桌面端/src/vendor/agentmirror/`。
-源目录 `/Volumes/nvme/Projects/远程Agent安卓/web/js/`。
+标准 Git submodule `deps/corral-core` 引用 `https://github.com/Florious95/corral-core.git`，
+固定 `05e234374a05aea092de6aabd9f928b3f9ddbbfc`。首次运行 `npm run core:init`；
+普通 test/build/dev 只核 gitlink、检出 SHA、文件与清洁度，不联网更新。缺失、错 SHA 或修改过的依赖明确失败。
+不得复制、patch 上游源码或回退本地 vendor。许可证与源码出处保留在 submodule。
 
-| 源文件 | 判定 | 理由 |
-|---|---|---|
-| `binary.js` | ✅ **原样复制** | 零 DOM 依赖;只用 `TextEncoder`/`TextDecoder`/`DataView`,浏览器与 Node 22 都有。唯一 import 是 `./protocol.js`,相对路径不变。 |
-| `scrollback.js` | ✅ **原样复制** | 纯函数 `fetchOlder(builder,{onLoading,onError})` / `acceptScrollback(g,frame)`;DOM 全部藏在调用方传入的 `g.showScrollbackPanel()` 回调后面。零 import。 |
-| `protocol.js` | ⚠️ **复制 + 追加式补丁**(§1.1) | 零 DOM 依赖,但 `FRAME_TYPES` 缺 5 个真 daemon 会推的类型,`decodeControl` 对未知 type **抛 `unsupported_type`** → 帧被丢弃 + 刷 `onLocalError`。不补必错。 |
-| `client.js` | ⚠️ **复制 + 追加式补丁**(§1.2) | 零 DOM 依赖(`WebSocket` 走可注入的 `wsFactory`,timer 有 `unref` 守卫)。需要补 level2 订阅 + 重连重放。 |
-| `terminal.js` | ❌ **不 vendor,重写**(§1.3) | 三条硬依赖:① 要求 `globalThis.Terminal`(UMD `<script>` 全局),Vite 下是 `import { Terminal } from '@xterm/xterm'`;② `_charWidth()` 手工插探针 span 量宽,`@xterm/addon-fit` 做得更准;③ `document.createElement`/`window.getComputedStyle` 直接写死。 |
-| `preferences.js` | ❌ **不 vendor,重写** | 数据模型是**单档** `{url, token}`,桌面端是多设备数组(§4)。函数签名对不上,复制反而误导。 |
-| `app.js` | ❌ 不 vendor | 全 DOM + 依赖 `index.html` 的 `#ws-url`/`#session-panels` 等 20 余个 id。**但 `SessionPage` 是行为参照物**,§3 已逐条抽干。 |
-| `overlay.js` | ❌ 不 vendor | tmux `choose-tree` 悬浮窗(需求 064/065),桌面端 v1 不做。 |
+### 1.1 协议边界
 
-### 1.1 `protocol.js` 补丁清单(全部是**追加**,不改已有行为)
+`src/core/protocol.js` 直接 import 未修改的 `deps/corral-core/web/js/protocol.js`。
+基础帧的校验、字段选择、编解码由 core 执行；桌面仅适配其尚不支持的
+level2_subscribe/unsubscribe/frame/heartbeat、pane_mode_changed、scroll_wheel、attach_preview，
+以及 input.attachment_path/backspace。扩展保持字段白名单、版本/类型校验、文本与键互斥；
+路径必须绝对，delta 必须非零整数。不得修改 core 的 FRAME_TYPES 或用无校验 JSON 绕过 codec。
+不增加 Bytes 输入，不改变 Cmd/Ctrl+V 或现有键映射。
 
-1. `FRAME_TYPES` 追加:`'level2_subscribe','level2_unsubscribe','level2_frame','level2_heartbeat','pane_mode_changed','scroll_wheel','attach_preview'`
-   (`overlay_*` 三项已在,保留不用。)
-2. `INPUT_KEYS` 追加 `'backspace'` —— Go `protocol/keys.go` 是 **8 值**闭集,web 端漏了。
-3. `ERROR_CODES` 追加 `'invalid_field'` —— Go `ErrCodeInvalidField` 会真发出来(070:不能只说 malformed frame)。
-4. `KNOWN_FIELDS` 追加(字段名逐字来自 Go struct tag):
+### 1.2 连接边界
 
-   ```js
-   level2_subscribe:   ['workspace'],
-   level2_unsubscribe: ['workspace'],
-   level2_frame:       ['workspace', 'seq', 'sessions'],
-   level2_heartbeat:   ['workspace', 'seq'],
-   pane_mode_changed:  ['ref', 'in_copy_mode'],
-   scroll_wheel:       ['ref', 'delta'],
-   attach_preview:     ['ref', 'path'],
-   // 已有的 input 追加一项:
-   input: ['req_id', 'ref', 'text', 'keys', 'attachment_path'],
-   ```
-5. `validateFrame` 追加分支(照抄 Go `Validate`):
-   `level2_subscribe`→`workspace` 非空;`level2_unsubscribe`→无约束;
-   `level2_frame`→`workspace` 非空且 `seq>=1`;`level2_heartbeat`→同;
-   `pane_mode_changed`→`ref` 非空;`scroll_wheel`→`ref` 非空且 `delta !== 0`;
-   `attach_preview`→`ref`、`path` 均非空。
-   `input` 的互斥规则改为 **(text 或 attachment_path) 与 keys 互斥**。
-6. `canonicalPayload` 追加同名分支(字段顺序照 §1.1.4 的数组顺序,保住夹具字节稳定)。
-7. 追加导出 `export const SESSION_STATUS = Object.freeze(['working','idle','unknown']);`。
-   `AGENT_STATES`(五值)保留但标注 `@deprecated 060 uproot`,渲染层不得依赖。
-
-> 补丁必须**只加不改**:`encodeControl/decodeControl` 的既有路径一字节不动,
-> 这样 §1.4 复制过来的 golden 夹具测试仍然全绿 —— 那是协议没漂移的唯一证据。
-
-### 1.2 `client.js` 补丁清单
-
-1. 新方法(命名对齐既有的 `subscribeOverlay/unsubscribeOverlay`):
-
-   ```js
-   /** 订阅一个 workspace 的二级直播流。一个连接同时只能订阅一个 cwd(服务端 level2WS 是单值)。 */
-   subscribeLevel2(cwd) {              // 空 cwd 拒绝并返回 false
-     this.level2Workspace = cwd;
-     if (!this.isReady) return true;   // 记账,READY 后重放
-     return this.sendControl('level2_subscribe', { workspace: cwd });
-   }
-   unsubscribeLevel2() { this.level2Workspace = null; /* READY 时发 level2_unsubscribe */ }
-   ```
-2. `constructor` 里加 `this.level2Workspace = null;`
-3. `replaySubscriptions()` 末尾追加:`if (this.level2Workspace) this.sendControl('level2_subscribe', { workspace: this.level2Workspace });`
-4. 可选(桌面鼠标滚轮转发,v1 可不做):`scrollWheel(ref, delta) { return this.sendControl('scroll_wheel', { ref, delta }); }` —— 无 ack,失败以 `error` 帧回。
-5. **不要动** `buildFromListing/applyDelta` 里读 `aggregate_state` 的兜底逻辑(它降级成 `'unknown'`,无害);
-   但渲染层**不得读** `workspace.aggregate_state`,聚合按 §0.2 自算。
+`src/core/client.js` 继承实际 core Client。认证、重连退避、listing/seq 连续性、
+请求编号、pending/ACK/timeout、二进制解码、基础订阅与 overlay 重放都由 core 持有。
+桌面仅追加单 workspace level2 重放、扩展输入/预贴/滚轮入口以及 geomTrace hook。
+基础 input/keys 闭包使用上游 codec，故只有 attachment_path/backspace 需要独立发送入口，
+仍使用 core 的 registerPending/resolveInput/clearPending。二进制接收委托 super 后在回调记几何。
+resize 不更新 core 订阅簿，保持既有行为；TerminalPane 的同宽控制与重订路径不变。
+DeviceManager 继续负责设备隔离及 level2 模型，不能另写基础连接状态机。
 
 ### 1.3 `TerminalView` 重写规格(`src/term/TerminalView.js`)
 
@@ -163,27 +122,11 @@ export class TerminalView {
 
 ### 1.4 测试与夹具
 
-复制到 `/Volumes/nvme/Projects/tmux桌面端/test/`:
-
-| 源 | 目标 | 改动 |
-|---|---|---|
-| `web/test/protocol.test.js` | `test/protocol.test.js` | import `../js/protocol.js` → `../src/vendor/agentmirror/protocol.js`;`FIXTURES` 见下 |
-| `web/test/binary.test.js` | `test/binary.test.js` | 同上(`../js/binary.js`、`../js/protocol.js`) |
-| `web/test/client.test.js` | `test/client.test.js` | 同上,三处 import |
-| `web/test/scrollback.test.js` | `test/scrollback.test.js` | 同上,一处 import |
-| `web/test/terminal.test.js` | `test/terminal.test.js` | **改写**:`FakeTerminal` 注入方式随 §1.3 改成 mock `@xterm/xterm` 模块;两条断言(120ms 合并、滚到顶触发历史)语义不变 |
-| `preferences/app-wiring/overlay/dev-server` 四个 | ❌ 不复制 | 分别对应已弃用的单档存储 / app.js 源码正则 / overlay / web dev-server |
-
-夹具:`server/internal/protocol/testdata/` 全部 22 个文件复制到
-`/Volumes/nvme/Projects/tmux桌面端/test/fixtures/protocol/`(上游只读,不可跨仓引用路径)。
-两个测试里的路径改成:
-
-```js
-const FIXTURES = fileURLToPath(new URL('./fixtures/protocol/', import.meta.url));
-```
-
-新增 `test/devices.test.js`(DeviceManager,§2)与 `test/storage.test.js`(§4)。
-跑测:`node --test "test/*.test.js"`(与 web 端一致,不引测试框架)。
+现有协议 golden fixtures 保留在 `test/testdata`，全部断言保留。
+Node 与 Vite 直接解析同一个 submodule；binary/scrollback 测试直接 import core，
+client/protocol 测试验证桌面薄适配。`node scripts/core-module-graph.mjs` 输出真实 Vite 模块来源，
+证明四个模块来自依赖而非桌面复制。fresh checkout 必须执行 core:init → npm ci → npm test → npm run build。
+构建与 Node 通过不代表真实 `.app` 已验；独立测试包验收单列。
 
 ---
 
@@ -353,7 +296,7 @@ TerminalPane.unmount():
 
 ### 3.3 scrollback:12 字节元数据头与视口锚定
 
-请求(直接复用 vendor 的 `fetchOlder`):
+请求(直接复用 core 的 `fetchOlder`):
 
 ```js
 fetchOlder(() => this, { onLoading: n => setStatus(`加载 ${n} 行历史…`), onError: setStatus });
@@ -420,7 +363,7 @@ send(text):
 
 **keys 闭集(8 值,不是 7)**:`esc` / `ctrl_c` / `tab` / `up` / `down` / `left` / `right` / `backspace`。
 `text` 与 `keys` **互斥**,同帧带两者 = 协议错(服务端回 `error: bad_frame`,**不回 input_ack**,
-你的 pending 会挂到 10s 超时)。vendor 的 `client.keys(ref, key)` 一次只发一个键,够用。
+你的 pending 会挂到 10s 超时)。core 的 `client.keys(ref, key)` 一次只发一个键,够用。
 keys **不追加 Enter** —— 「按一下那个键」。
 
 **xterm 应答不上行（裁定 2026-08-23）**：`term.onData` 会混进仿真器对 OSC 11/10/12/4、DA、CPR、DSR、DCS 的自动应答。那些字节不是用户按键。共享入口 `consumeTerminalReplies`（`NativeInputPump.onData` 与 `TerminalView` 的 `term.onData`）丢掉后再交给 `parseOnData`。方向键 `ESC [ A/B/C/D` 保留；CPR 是 `ESC [ … R`。应答不上行后远端查询超时、回落默认主题，与「不支持该查询的终端」一致，可接受。⛔ 不得把应答当 `input.text` 或把前导 ESC 当 `keys:esc`。
@@ -440,17 +383,17 @@ keys **不追加 Enter** —— 「按一下那个键」。
 - 进入应用 / 手动刷新 → `client.list()`。服务端 `handleList` **每次都真扫一遍 tmux**(不是读缓存)。
 - 服务端**主动推** `list_delta`(无轮询)。四组字段两两不相交:
   `added_sessions` / `removed_refs` / `changed_sessions`(整体 replace)/ `changed_workspaces`(只带 cwd + session_count)。
-- `seq` 单调递增。vendor `client.js` 已实现:`payload.seq !== lastSeq + 1`(含 delta 早于任何 listing 到达)
+- `seq` 单调递增。core `client.js` 已实现:`payload.seq !== lastSeq + 1`(含 delta 早于任何 listing 到达)
   → **自动重发 `list()` 并丢弃这条 delta**。⛔ 不要在 DeviceManager 里重复实现,会双倍 list。
 - `client.workspaces` 在 `onFrame` 回调**之前**就已更新,所以 `onFrame('listing'|'list_delta')` 里直接读即可。
 
 ### 3.7 重连:指数退避 + 订阅重放
 
-vendor `client.js` 已实现,DeviceManager 只需转发状态:
+core `client.js` 已实现,DeviceManager 只需转发状态:
 
 - 退避参数:`baseMs=1000, factor=2, maxMs=30000, jitter=0.3`(即 1s→2s→4s…封顶 30s,±30% 抖动)。
 - READY 时自动:`list()` + 重放全部 `activeSubscriptions`(每个 ref 带原 rows/cols)+ 重放 overlay。
-  **补丁后还要重放 level2**(§1.2.3)。
+  **桌面 adapter 还要重放 level2**(§1.2.3)。
 - 重连 = 重新 auth + 重新 subscribe = 重新 snapshot(整屏重放)。服务端不保存任何客户端状态,
   **不存在「消息丢了」**。TerminalPane 收到新 snapshot 自动 `reset()`,无需自己清屏。
 - `auth_ack {ok:false}` → `_permanent=true` → **不重连**,进 STOPPED。UI 要提示「token 无效」并让用户改配置。
@@ -577,8 +520,8 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
 
 ## 6. 陷阱清单
 
-1. **未知 JSON 字段必须忽略,未知 type 必须报错。** vendor `protocol.js` 用 `KNOWN_FIELDS` 白名单挑字段,
-   未知 type 抛 `ProtocolError('unsupported_type')`。→ 所以**服务端新增的 type 必须先补进 FRAME_TYPES**(§1.1),
+1. **未知 JSON 字段必须忽略,未知 type 必须报错。** core `protocol.js` 用 `KNOWN_FIELDS` 白名单挑字段,
+   未知 type 抛 `ProtocolError('unsupported_type')`。→ 所以**当前桌面扩展 type 必须经过 adapter 的独立校验**(§1.1),
    否则整帧被吞 + 每次刷一条 `onLocalError`。这是最容易踩的一个。
 2. **二进制帧 magic `RA` + version 字节 = 1**,先验 magic/version 再信任何字节。校验失败抛,不静默续读 —— 
    坏镜像流必须浮出来,不能污染终端网格。
@@ -604,5 +547,5 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
     Ctrl+V 纯文本不发帧；主区不再挂载底部图片条、图片加号或键位说明，路径不得进入 `input.text`。
 15. **协议 v1 不支持远程创建 Agent**。「新建 Agent」对话框的创建按钮 → toast
     「当前 daemon 协议不支持远程创建 Agent」。没有对应帧类型,别去发明。
-16. **不要跨仓引用上游路径**。夹具必须复制进本仓 `test/fixtures/protocol/`;
+16. **不要引用外部工作树的绝对路径**。构建仅消费本仓 gitlink 管理的 `deps/corral-core`；既有夹具留在 `test/testdata/`；
     `/Volumes/nvme/Projects/远程Agent安卓/` 只读,且不能成为本仓构建期依赖。

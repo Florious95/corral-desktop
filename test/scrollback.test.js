@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchOlder, acceptScrollback } from '../src/vendor/agentmirror/scrollback.js';
+import { fetchOlder, acceptScrollback } from '../deps/corral-core/web/js/scrollback.js';
 
 test('history requests paginate backward from the previous returned range', () => {
   const calls = [];

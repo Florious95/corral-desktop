@@ -7,8 +7,8 @@ import { SameWidthController } from '../../term/sameWidth.js';
 import { geomTrace, bookOf } from '../../term/geomTrace.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
-import { BINARY_KIND } from '../../vendor/agentmirror/binary.js';
-import { fetchOlder, acceptScrollback } from '../../vendor/agentmirror/scrollback.js';
+import { BINARY_KIND } from '../../../deps/corral-core/web/js/binary.js';
+import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
 import { isCtrlV } from '../../term/clipboard.js';
 
