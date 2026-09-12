@@ -15,7 +15,8 @@ export const SESSION_STATUS = Object.freeze(['working', 'idle', 'unknown']);
 export const INPUT_KEYS = Object.freeze([...core.INPUT_KEYS, 'backspace']);
 export const isKnownKey = (key) => INPUT_KEYS.includes(key);
 export const isExtension = (type, p) => Object.hasOwn(fields, type)
-  || (type === 'input' && (p?.attachment_path !== undefined || p?.keys?.includes?.('backspace')));
+  || (type === 'input' && (p?.attachment_path !== undefined
+    || (p?.keys !== undefined && (!Array.isArray(p.keys) || p.keys.includes('backspace')))));
 
 // Use core validation/canonicalization for req_id/ref/text and all original keys.
 // A supported placeholder lets core validate the shape; the wire retains backspace.
