@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { encodeControl, decodeControl, ProtocolError, VERSION, AGENT_STATES, ERROR_CODES } from '../src/vendor/agentmirror/protocol.js';
+import { encodeControl, decodeControl, ProtocolError, VERSION, AGENT_STATES, ERROR_CODES } from '../src/core/protocol.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURES = join(ROOT, 'test', 'testdata');

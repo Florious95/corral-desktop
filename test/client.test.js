@@ -10,9 +10,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { Client } from '../src/vendor/agentmirror/client.js';
-import { decodeControl } from '../src/vendor/agentmirror/protocol.js';
-import { encodeBinary, BINARY_KIND } from '../src/vendor/agentmirror/binary.js';
+import { Client } from '../src/core/client.js';
+import { decodeControl } from '../src/core/protocol.js';
+import { encodeBinary, BINARY_KIND } from '../deps/corral-core/web/js/binary.js';
 
 /** Minimal fake WebSocket. Client assigns ws.onopen/onmessage/onclose/onerror
  *  directly; the harness calls the _* helpers to fire events. */

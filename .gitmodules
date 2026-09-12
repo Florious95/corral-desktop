@@ -1,0 +1,3 @@
+[submodule "deps/corral-core"]
+	path = deps/corral-core
+	url = https://github.com/Florious95/corral-core.git

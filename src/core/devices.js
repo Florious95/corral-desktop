@@ -2,17 +2,17 @@
  * DeviceManager — the single boundary between the UI and the protocol layer
  * (CLIENT-CONTRACT §2).
  *
- * One agentmirrord connection = one Device = one vendor Client. The manager
+ * One agentmirrord connection = one Device = one core Client. The manager
  * owns N of them and publishes one merged, device-tagged model. Addressing is
  * always by uid (`${deviceId}::${ref}`) / spaceKey (`${deviceId}::${cwd}`):
  * bare refs must never cross device boundaries, two hosts collide on
  * `socket\x1f%paneId` far too easily.
  *
  * What this layer does NOT do: re-implement seq recovery, backoff or
- * subscription replay — the vendor Client already owns those (§3.6, §3.7).
+ * subscription replay — the core Client already owns those (§3.6, §3.7).
  */
 
-import { Client, ClientState } from '../vendor/agentmirror/client.js';
+import { Client, ClientState } from './client.js';
 import { inferProvider } from './providers.js';
 import { uploadImage } from './upload.js';
 import * as store from './store.js';

@@ -8,8 +8,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { decodeBinary, encodeBinary, BINARY_KIND } from '../src/vendor/agentmirror/binary.js';
-import { ProtocolError } from '../src/vendor/agentmirror/protocol.js';
+import { decodeBinary, encodeBinary, BINARY_KIND } from '../deps/corral-core/web/js/binary.js';
+import { ProtocolError } from '../src/core/protocol.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURES = join(ROOT, 'test', 'testdata');
