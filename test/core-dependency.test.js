@@ -46,6 +46,7 @@ test('extension codecs preserve documented fields and reject invalid envelopes/p
     ['pane_mode_changed', { ref: '', in_copy_mode: false }],
     ['pane_mode_changed', { ref: 'a', in_copy_mode: 'false' }],
     ['input', { req_id: 1, ref: 'a', keys: 'backspace' }],
+    ['input', { req_id: 1, ref: 'a', keys: { includes: true } }],
     ['input', { req_id: 1, ref: 'a', text: 3, attachment_path: '/image' }],
     ['input', { req_id: 0, ref: 'a', keys: ['backspace'] }],
     ['input', { req_id: 1, ref: '', keys: ['backspace'] }],
