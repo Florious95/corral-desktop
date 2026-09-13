@@ -53,12 +53,23 @@ test('extension codecs preserve documented fields and reject invalid envelopes/p
     ['input', { req_id: 1, ref: 'a', keys: ['backspace', 'unknown'] }],
     ['input', { req_id: 1, ref: 'a', keys: ['backspace'], text: 'text' }],
     ['input', { req_id: 1, ref: 'a', keys: ['esc'], attachment_path: '/image' }],
+    ['input', { req_id: 1, ref: 'a', bytes: new Uint8Array() }],
+    ['input', { req_id: 1, ref: 'a', bytes: 'not-base64' }],
+    ['input', { req_id: 1, ref: 'a', bytes: new Uint8Array([0x41]), text: 'text' }],
   ]) {
     assert.throws(() => encodeControl(type, payload), { code: 'invalid_field' });
     assert.throws(() => decodeControl(wire(type, payload)), { code: 'invalid_field' });
   }
   assert.throws(() => decodeControl(wire('level2_unsubscribe', [])), { code: 'bad_frame' });
   assert.throws(() => decodeControl(wire('future', {})), { code: 'unsupported_type' });
+});
+
+test('bytes input stays base64 on the wire and is mutually exclusive', () => {
+  const bytes = new Uint8Array([0x1b, 0x5b, 0x31, 0x35, 0x7e]);
+  const text = encodeControl('input', { req_id: 5, ref: 'a', bytes });
+  assert.deepEqual(JSON.parse(text).payload, { req_id: 5, ref: 'a', bytes: 'G1sxNX4=' });
+  assert.deepEqual(decodeControl(text), { type: 'input', payload: { req_id: 5, ref: 'a', bytes: 'G1sxNX4=' } });
+  assert.throws(() => encodeControl('input', { req_id: 5, ref: 'a', bytes, keys: ['esc'] }), { code: 'invalid_field' });
 });
 
 test('basic frames remain byte-identical to core codec', () => {

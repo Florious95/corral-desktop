@@ -602,7 +602,7 @@ src/
 
 **终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与本地发送 `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
 
-**xterm 应答不上行（裁定 2026-08-23）**：我方是被动镜像，⛔ 不许替远端终端回答 OSC/CSI 查询。xterm 自动生成的 OSC（含 4/10/11/12）、DA（`CSI … c`）、CPR（`CSI … R`）、DSR（`CSI … n`）、DCS 在 `NativeInputPump` / `TerminalView.onData` **丢掉，不发 `input.text` / `input.keys`**。方向键是 `CSI A/B/C/D`（终字节大写），与 CPR 的 `R`、DA 的 `c` 分开。远端拿不到颜色应答会回落到默认主题，可接受。⛔ 修前 OSC 11 应答会变成输入行垃圾并可能打出 `esc`。
+**xterm 应答不上行（裁定 2026-08-23）**：我方是被动镜像，⛔ 不许替远端终端回答 OSC/CSI 查询。xterm 自动生成的 OSC（含 4/10/11/12）、DA（`CSI … c`）、CPR（`CSI … R`）、DSR（`CSI … n`）、DCS 在 `NativeInputPump` 中 **丢掉，不发 `input.text` / `input.keys` / `input.bytes`**。方向键是 `CSI A/B/C/D`（终字节大写），与 CPR 的 `R`、DA 的 `c` 分开。远端拿不到颜色应答会回落到默认主题，可接受。⛔ 修前 OSC 11 应答会变成输入行垃圾并可能打出 `esc`。
 
 **粘贴（裁定 2026-08-24，B 预贴修订）**：Cmd+V 始终是文本：DOM `paste` 只读 `text/plain`，即使剪贴板含图片也不上传、不发
 `attachment_path`；图片-only 时提示「图片请用 Ctrl+V」。Ctrl+V 单独拦 keydown，图片字节经原生 `upload_http`
@@ -610,7 +610,7 @@ src/
 
 ### 6.3 终端输入
 
-终端列直接承接 xterm 的键盘输入和粘贴事件；主区不挂载额外的底部图片条。
+终端列直接承接 xterm 的键盘输入和粘贴事件；可识别的命名键走 `input.keys`，其他有意输入序列由桌面薄 adapter 以非空 RFC 4648 base64 `input.bytes` 直达 PTY；主区不挂载额外的底部图片条。
 
 ---
 
@@ -795,7 +795,7 @@ PROVIDER_LABEL  // §8.2 最后一列
 4. Space 行**新增**设备徽章与聚合状态点（仅多设备 / 非 idle 时渲染），设计稿的 Space 行没有这两样。
 5. **补出 pane 列头**：设计稿算出了 `title/iconEl/statusEl` 却没渲染；分裂多列必须能分辨归属。
 6. `Add Device…` 从「插一条『等待配对』假设备」改成 **AddDeviceDialog（ws URL + token）**。
-7. **终端输入**（设计稿主区是「不在设计范围」占位）；快捷键闭集严格对齐协议 `esc/ctrl_c/tab/up/down/left/right`，`text` 与 `keys` 互斥、`keys` 不补回车。主区不额外挂载底部图片条；Ctrl+V 图片上传路径仍保留。
+7. **终端输入**（设计稿主区是「不在设计范围」占位）；命名快捷键保留协议闭集 `esc/ctrl_c/tab/up/down/left/right/backspace`，xterm 编好的其他有意序列走非空 `input.bytes`（标准 base64）；`keys`、`bytes`、`text`/`attachment_path` 三类载荷互斥且均不补回车。主区不额外挂载底部图片条；Ctrl+V 图片上传路径仍保留。
 8. 「关闭」语义改为**关闭分裂列**并在无列时置灰；190ms 关闭动画改挂到「服务端删除会话」路径。
 9. 分裂列 `:first-child` 去掉 `border-left`（原型与侧栏 border-right 会并出双线）。
 10. `max-height:clamp(96px, 100dvh - 464px, 288px)` 的 `100dvh` → `100vh`（桌面端窗口无动态视口）。
@@ -814,5 +814,5 @@ PROVIDER_LABEL  // §8.2 最后一列
 客户端直接引用固定 corral-core submodule 的未修改 web/js，桌面只保留协议扩展和几何追踪适配。
 目录/Agent 列表、分列镜像、断线恢复、历史翻页、滚轮及现有输入保持原行为。
 PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 Enter 继续生效；
-不新增 Bytes、Finder 路径、provider 图标或快捷键策略。初始化与离线构建约束见 CLIENT-CONTRACT §1。
+不新增 Finder 路径、provider 图标或快捷键策略；xterm 有意输入的原始 bytes 已按 §6.3 接入。初始化与离线构建约束见 CLIENT-CONTRACT §1。
 本次 Node/构建证据与真实测试 `.app` 证据分开，不能相互替代。

@@ -152,10 +152,30 @@ test('NativeInputPump uplinks intentional non-text keys via sendBytes', () => {
     sendBytes: (bytes) => sent.push(bytes),
     onUnsupported: () => {},
   });
-  // F5 ANSI escape: \x1b[15~
-  pump.onData('\x1b[15~');
-  assert.equal(sent.length, 1);
-  assert.deepEqual([...sent[0]], [0x1b, 0x5b, 0x31, 0x35, 0x7e]);
+  for (const sequence of ['\x01', '\x05', '\x12', '\x04', '\x1b[H', '\x1b[F', '\x1b[3~', '\x1bOP', '\x1b[15~', '\x1b[Z', '\x1bx']) {
+    pump.onData(sequence);
+  }
+  assert.deepEqual(sent.map((bytes) => new TextDecoder().decode(bytes)), [
+    '\x01', '\x05', '\x12', '\x04', '\x1b[H', '\x1b[F', '\x1b[3~', '\x1bOP', '\x1b[15~', '\x1b[Z', '\x1bx',
+  ]);
+  pump.dispose();
+});
+
+test('NativeInputPump preserves split escape sequences and order', () => {
+  const sent = [];
+  const pump = new NativeInputPump({
+    sendText: () => {},
+    sendKey: () => {},
+    sendEnter: () => sent.push('enter'),
+    sendBytes: (bytes) => sent.push(new TextDecoder().decode(bytes)),
+    onUnsupported: () => {},
+  });
+  pump.onData('\x1b');
+  pump.onData('[');
+  pump.onData('15~');
+  pump.onData('\r');
+  assert.deepEqual(sent, ['\x1b[15~', 'enter']);
+  pump.dispose();
 });
 
 const OSC11 = '\x1b]11;rgb:fbfb/fafa/f8f8\x07';

@@ -273,6 +273,32 @@ test('inputAttachment rejects a non-absolute path before the wire', () => {
   assert.equal(ws.sent.filter((x) => x.includes('attachment_path')).length, 0);
 });
 
+test('inputBytes sends standard base64 bytes and registers one pending ACK', () => {
+  const { client, sockets } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+  client.subscribe('s1', 40, 100);
+  const bytes = new Uint8Array([0, 1, 2, 255]);
+  const reqId = client.inputBytes('s1', bytes);
+  assert.ok(reqId !== null);
+  const frame = decodeControl(ws.sent[ws.sent.length - 1]);
+  assert.deepEqual(frame.payload, { req_id: reqId, ref: 's1', bytes: 'AAEC/w==' });
+  assert.equal(client.pendingInputs.size, 1);
+});
+
+test('inputBytes rejects empty or malformed bytes before the wire', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+  assert.equal(client.inputBytes('s1', new Uint8Array()), null);
+  assert.match(events.onLocalError.at(-1) || '', /non-empty/);
+  assert.equal(client.inputBytes('s1', [256]), null);
+  assert.match(events.onLocalError.at(-1) || '', /non-empty/);
+  assert.equal(ws.sent.filter((x) => x.includes('"bytes"')).length, 0);
+});
+
 test('input: timeout is a decidable failure (no silent loss)', async () => {
   const { client, sockets, events } = makeClient();
   client.connect();

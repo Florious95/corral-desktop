@@ -80,16 +80,17 @@ workspace 聚合 = 有任一 working → working;否则有任一 idle → idle;�
 `src/core/protocol.js` 直接 import 未修改的 `deps/corral-core/web/js/protocol.js`。
 基础帧的校验、字段选择、编解码由 core 执行；桌面仅适配其尚不支持的
 level2_subscribe/unsubscribe/frame/heartbeat、pane_mode_changed、scroll_wheel、attach_preview，
-以及 input.attachment_path/backspace。扩展保持字段白名单、版本/类型校验、文本与键互斥；
+以及 input.attachment_path/input.bytes/backspace。扩展保持字段白名单、版本/类型校验、输入载荷类别互斥；
 路径必须绝对，delta 必须非零整数。不得修改 core 的 FRAME_TYPES 或用无校验 JSON 绕过 codec。
-不增加 Bytes 输入，不改变 Cmd/Ctrl+V 或现有键映射。
+`input.bytes` 在桌面薄 codec 中以标准 RFC 4648 base64 编码，必须非空且不超过 1 MiB；
+它与 `keys`、`text`/`attachment_path` 三类载荷互斥。
 
 ### 1.2 连接边界
 
 `src/core/client.js` 继承实际 core Client。认证、重连退避、listing/seq 连续性、
 请求编号、pending/ACK/timeout、二进制解码、基础订阅与 overlay 重放都由 core 持有。
 桌面仅追加单 workspace level2 重放、扩展输入/预贴/滚轮入口以及 geomTrace hook。
-基础 input/keys 闭包使用上游 codec，故只有 attachment_path/backspace 需要独立发送入口，
+基础 input/keys 闭包使用上游 codec，故只有 attachment_path/bytes/backspace 需要独立发送入口，
 仍使用 core 的 registerPending/resolveInput/clearPending。二进制接收委托 super 后在回调记几何。
 resize 不更新 core 订阅簿，保持既有行为；TerminalPane 的同宽控制与重订路径不变。
 DeviceManager 继续负责设备隔离及 level2 模型，不能另写基础连接状态机。
@@ -366,7 +367,12 @@ send(text):
 你的 pending 会挂到 10s 超时)。core 的 `client.keys(ref, key)` 一次只发一个键,够用。
 keys **不追加 Enter** —— 「按一下那个键」。
 
-**xterm 应答不上行（裁定 2026-08-23）**：`term.onData` 会混进仿真器对 OSC 11/10/12/4、DA、CPR、DSR、DCS 的自动应答。那些字节不是用户按键。共享入口 `consumeTerminalReplies`（`NativeInputPump.onData` 与 `TerminalView` 的 `term.onData`）丢掉后再交给 `parseOnData`。方向键 `ESC [ A/B/C/D` 保留；CPR 是 `ESC [ … R`。应答不上行后远端查询超时、回落默认主题，与「不支持该查询的终端」一致，可接受。⛔ 不得把应答当 `input.text` 或把前导 ESC 当 `keys:esc`。
+**原始 xterm 输入**：`NativeInputPump` 对 xterm 编好的、协议没有命名键的有意序列
+（Ctrl-A/E/R/D、Home/End/Delete、F1-F12、Shift-Tab、Alt、UTF-8 与分块 ESC）走
+`input.bytes`，桌面 codec 编为非空标准 base64 后发送；空 bytes 在 client 入口前拒发。
+`keys`、`bytes`、`text`/`attachment_path` 三种载荷类别互斥，bytes 不追加 Enter。
+
+**xterm 应答不上行（裁定 2026-08-23）**：`term.onData` 会混进仿真器对 OSC 11/10/12/4、DA、CPR、DSR、DCS 的自动应答。那些字节不是用户按键。`NativeInputPump` 的共享入口 `consumeTerminalReplies` 丢掉后再交给 `parseOnData`。方向键 `ESC [ A/B/C/D` 保留；CPR 是 `ESC [ … R`。应答不上行后远端查询超时、回落默认主题，与「不支持该查询的终端」一致，可接受。⛔ 不得把应答当 `input.text` 或把前导 ESC 当 `keys:esc`。
 
 **input_ack 必达 + 超时**:
 - 每个 `input()`/`keys()` 注册一个 **10s** 本地定时器(`inputTimeoutMs`)。
