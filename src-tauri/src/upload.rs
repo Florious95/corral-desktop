@@ -9,6 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use objc::{class, msg_send, sel, sel_impl};
 #[cfg(target_os = "macos")]
 use objc::runtime::Object;
+#[cfg(target_os = "macos")]
+use std::ffi::CStr;
 
 #[derive(Debug, Serialize)]
 pub struct ClipboardImage {
@@ -142,6 +144,47 @@ fn read_macos_clipboard() -> Result<Option<ClipboardImage>, String> {
         }
     }
     Ok(None)
+}
+
+/// Return Finder file URLs as decoded absolute paths, preserving pasteboard order.
+#[tauri::command]
+pub fn read_clipboard_files() -> Result<Option<Vec<String>>, String> {
+    #[cfg(target_os = "macos")]
+    { return read_macos_clipboard_files(); }
+    #[cfg(not(target_os = "macos"))]
+    { Err("unsupported_platform: clipboard file reader is macOS-only".to_string()) }
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_clipboard_files() -> Result<Option<Vec<String>>, String> {
+    unsafe {
+        let pb: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
+        if pb.is_null() { return Err("clipboard_unavailable: pasteboard unavailable".to_string()); }
+
+        let classes: *mut Object = msg_send![class!(NSArray), arrayWithObject: class!(NSURL) as *mut Object];
+        let key_c = std::ffi::CString::new("NSPasteboardURLReadingFileURLsOnlyKey").unwrap();
+        let key: *mut Object = msg_send![class!(NSString), stringWithUTF8String: key_c.as_ptr()];
+        let yes: *mut Object = msg_send![class!(NSNumber), numberWithBool: true];
+        let options: *mut Object = msg_send![class!(NSDictionary), dictionaryWithObject: yes forKey: key];
+        let urls: *mut Object = msg_send![pb, readObjectsForClasses: classes options: options];
+        if urls.is_null() { return Ok(None); }
+
+        let count: usize = msg_send![urls, count];
+        let mut paths = Vec::with_capacity(count);
+        for index in 0..count {
+            let url: *mut Object = msg_send![urls, objectAtIndex: index];
+            if url.is_null() { continue; }
+            let is_file: bool = msg_send![url, isFileURL];
+            if !is_file { continue; }
+            let path_obj: *mut Object = msg_send![url, path];
+            if path_obj.is_null() { continue; }
+            let utf8: *const std::os::raw::c_char = msg_send![path_obj, UTF8String];
+            if utf8.is_null() { continue; }
+            let path = CStr::from_ptr(utf8).to_string_lossy().into_owned();
+            if path.starts_with('/') { paths.push(path); }
+        }
+        Ok((!paths.is_empty()).then_some(paths))
+    }
 }
 
 #[cfg(test)]

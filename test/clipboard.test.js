@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isCmdV, isCtrlV, readCtrlV, readClipboardImage, textFromPasteEvent } from '../src/term/clipboard.js';
+import {
+  isCmdV, isCtrlV, readCtrlV, readClipboardImage, readClipboardFiles,
+  formatClipboardFiles, textFromPasteEvent,
+} from '../src/term/clipboard.js';
 
 test('clipboard shortcuts keep Cmd+V and Ctrl+V distinct', () => {
   assert.equal(isCmdV({ type: 'keydown', key: 'v', metaKey: true, ctrlKey: false, altKey: false }), true);
@@ -62,4 +65,22 @@ test('native clipboard no-image result is an empty Ctrl+V without Web text fallb
   });
   assert.deepEqual(result, { kind: 'empty' });
   assert.equal(webReadTextCalls, 0);
+});
+
+test('native clipboard file reader preserves order and returns null as no files', async () => {
+  const calls = [];
+  const files = await readClipboardFiles({ nativeInvoke: async (name) => {
+    calls.push(name);
+    return ['/Users/me/one.txt', '/Users/me/two.txt'];
+  } });
+  assert.deepEqual(files, ['/Users/me/one.txt', '/Users/me/two.txt']);
+  assert.deepEqual(calls, ['read_clipboard_files']);
+  assert.deepEqual(await readClipboardFiles({ nativeInvoke: async () => null }), []);
+});
+
+test('Finder file paths use POSIX quoting only when needed', () => {
+  assert.equal(formatClipboardFiles(['/Users/me/one.txt', '/Users/me/dir/file name.txt']), "/Users/me/one.txt '/Users/me/dir/file name.txt'");
+  assert.equal(formatClipboardFiles(["/Users/me/o'k.txt", '/Users/me/$draft`1`']), "'/Users/me/o'\"'\"'k.txt' '/Users/me/$draft`1`'");
+  assert.throws(() => formatClipboardFiles(['/Users/me/bad\nname']), /无法安全粘贴/);
+  assert.throws(() => formatClipboardFiles(['relative.txt']), /无法安全粘贴/);
 });

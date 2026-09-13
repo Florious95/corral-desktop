@@ -72,7 +72,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![lock_devices_file, upload::upload_http, upload::read_clipboard_image])
+        .invoke_handler(tauri::generate_handler![lock_devices_file, upload::upload_http, upload::read_clipboard_image, upload::read_clipboard_files])
         .run(tauri::generate_context!())
         .expect("error while running AgentMirror desktop");
 }
