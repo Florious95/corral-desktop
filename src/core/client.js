@@ -77,7 +77,9 @@ export class Client extends CoreClient {
       ? bytes
       : bytes instanceof ArrayBuffer
         ? new Uint8Array(bytes)
-        : Array.isArray(bytes) ? Uint8Array.from(bytes) : null;
+        : Array.isArray(bytes) && bytes.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
+          ? Uint8Array.from(bytes)
+          : null;
     if (!value || value.length === 0) {
       this.onLocalError('invalid_field', 'input bytes must be non-empty');
       return null;
