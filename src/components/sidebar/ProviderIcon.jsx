@@ -1,35 +1,35 @@
-// provider 图标（UI-SPEC §8）。svg 由 Vite 打包进产物，⛔ 不走 CDN，离线可用。
-import claudeColorUrl from '@lobehub/icons-static-svg/icons/claude-color.svg';
-import claudeUrl from '@lobehub/icons-static-svg/icons/claude.svg';
-import codexUrl from '@lobehub/icons-static-svg/icons/codex.svg';
-import grokUrl from '@lobehub/icons-static-svg/icons/grok.svg';
-import opencodeUrl from '@lobehub/icons-static-svg/icons/opencode.svg';
-import cursorUrl from '@lobehub/icons-static-svg/icons/cursor.svg';
-import zaiUrl from '@lobehub/icons-static-svg/icons/zai.svg';
-import kimiUrl from '@lobehub/icons-static-svg/icons/kimi.svg';
+// Canonical provider assets are consumed directly from the pinned core
+// submodule. Vite emits them into the bundle; no CDN or runtime fetch.
+import claudeCodeUrl from '../../../deps/corral-core/app/app/src/main/res/raw/provider_icon_claude_code.svg';
+import codexUrl from '../../../deps/corral-core/app/app/src/main/res/raw/provider_icon_codex.svg';
+import copilotUrl from '../../../deps/corral-core/app/app/src/main/res/drawable-nodpi/provider_copilot_color.png';
+import grokUrl from '../../../deps/corral-core/app/app/src/main/res/drawable-nodpi/provider_grok.png';
+import cursorUrl from '../../../deps/corral-core/app/app/src/main/res/raw/provider_icon_cursor.svg';
+import piUrl from '../../../deps/corral-core/app/app/src/main/res/drawable-nodpi/provider_pi.png';
 
-/** provider → [运行态 slug, 空闲态 slug]（UI-SPEC §8.2） */
+/** Canonical provider → [active, idle] asset. State only changes opacity. */
 const ICONS = {
-  'claude-code': [claudeColorUrl, claudeUrl],
-  claude: [claudeColorUrl, claudeUrl],
+  claude_code: [claudeCodeUrl, claudeCodeUrl],
   codex: [codexUrl, codexUrl],
+  copilot: [copilotUrl, copilotUrl],
   grok: [grokUrl, grokUrl],
-  opencode: [opencodeUrl, opencodeUrl],
   cursor: [cursorUrl, cursorUrl],
-  zai: [zaiUrl, zaiUrl],
-  kimi: [kimiUrl, kimiUrl],
+  pi: [piUrl, piUrl],
+  // Sealed new-agent dialog compatibility aliases; DTOs use canonical IDs.
+  'claude-code': [claudeCodeUrl, claudeCodeUrl],
+  claude: [claudeCodeUrl, claudeCodeUrl],
 };
 
 /** 兜底首字母圆圈的色调 */
 const TINT = {
+  claude_code: 'var(--tint-claude)',
+  codex: 'var(--tint-codex)',
+  copilot: 'var(--tint-default)',
+  grok: 'var(--tint-grok)',
+  cursor: 'var(--tint-cursor)',
+  pi: 'var(--tint-default)',
   'claude-code': 'var(--tint-claude)',
   claude: 'var(--tint-claude)',
-  codex: 'var(--tint-codex)',
-  grok: 'var(--tint-grok)',
-  opencode: 'var(--tint-opencode)',
-  cursor: 'var(--tint-cursor)',
-  zai: 'var(--tint-zai)',
-  kimi: 'var(--tint-kimi)',
 };
 
 /**

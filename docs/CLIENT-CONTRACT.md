@@ -10,34 +10,17 @@
 `/Volumes/nvme/Projects/远程Agent安卓/docs/protocol.md` **有三处已被服务端实现推翻**。
 按文档写会得到静默错误(字段永远 undefined / 输入发不出去)。下面三条是本文档的第一优先级。
 
-### 0.1 `state` / `aggregate_state` 已被整体拔除
+### 0.1 provider / state 字段来源
 
-`server/internal/api/listing.go` 头部注释(060 uproot, 2026-08-15):
+当前 daemon 的 listing、list_delta 与 level2 frame 都可携带 session `provider`。
+其中 listing/list_delta 的 provider 是可靠 DTO；level2 在已订阅 workspace 时提供较新的实时投影。
+桌面端必须优先使用 DTO provider：字段存在（包括显式 `unknown` 或非法值）时不按名称猜测，
+仅在旧 listing 完全缺少 provider 时才允许有限兼容推断。归一化后的集合为
+`claude_code` / `codex` / `copilot` / `grok` / `cursor` / `pi` / `unknown`。
 
-> the agent-state pipeline was removed wholesale … The 012 aggregation rules and
-> the state fields on Session/Workspace are gone with it.
-
-实测 `internal/protocol/frames.go`:
-
-```go
-type Workspace struct {  // 没有 AggregateState
-    Cwd string; SessionCount int; Sessions []Session
-}
-type Session struct {
-    Ref, Name, Cwd, Title string
-    Status   string `json:"status,omitempty"`   // 只在 level2_frame 里被填
-    Provider string `json:"provider,omitempty"` // 同上
-    Rows, Cols uint16
-}
-```
-
-`toSession()`(listing 的唯一构造点)只填 `Ref/Name/Cwd/Rows/Cols`。
-所以 **listing / list_delta 里的 session 永远没有 status、没有 provider、`title` 恒为 `""`;
-workspace 永远没有 aggregate_state**。夹具 `testdata/listing.json` 可自证(有 `title`,无 `status`)。
-
-**后果:** 侧栏状态点不能从 listing 拿。必须走 §3.6 的 `level2_*` 直播流。
-Web 端 `client.js` 里读 `s.state` / `w.aggregate_state` 的代码是**死代码**(对真 daemon 恒为 undefined),
-`web/scripts/e2e.mjs` 的 "session states are closed-set" 断言对真 daemon 会 FAIL。别照抄这段渲染。
+`status`、`title` 与 workspace 聚合状态仍以 level2 为主；未订阅时 status/title 使用
+`unknown`/空值，workspace 聚合由桌面客户端计算。历史 fixture 可能省略 provider，
+这只覆盖旧格式兼容，不得据此覆盖新格式的可靠 provider。
 
 ### 0.2 状态值是三值,不是五值;设计稿的 blocked/done 永远不会出现
 

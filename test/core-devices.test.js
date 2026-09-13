@@ -73,7 +73,7 @@ test('auth → listing → aggregated model carries uid/spaceKey/device name', a
     const s = ws[0].sessions[0];
     assert.equal(s.uid, `${t.id}::${REFS.a1}`);
     assert.equal(s.ref, REFS.a1);
-    assert.equal(s.provider, 'claude-code');        // inferred from name; listing has no provider
+    assert.equal(s.provider, 'claude_code');       // compatibility inference; listing has no provider
     assert.equal(s.status, 'unknown');              // never subscribed to level2 → not faked as idle
     assert.equal(s.title, '');
     assert.equal(ws[0].aggregateState, 'unknown');
@@ -87,6 +87,42 @@ test('auth → listing → aggregated model carries uid/spaceKey/device name', a
     assert.ok(t.events.models > 0 && t.events.devices > 0);
     // Tokens live in storage only, never in the published model.
     assert.ok(!JSON.stringify(t.dm.workspaces).includes('mock-token'));
+  } finally { await t.teardown(); }
+});
+
+test('canonical provider DTO wins over title inference and fails closed', async () => {
+  const t = await setup({ daemon: {
+    workspaces: [{ cwd: '/prov', session_count: 3, sessions: [
+      { ref: 'pi-ref', name: 'codex-title', provider: 'pi', cwd: '/prov', rows: 24, cols: 80 },
+      { ref: 'unknown-ref', name: 'codex-title', provider: 'unknown', cwd: '/prov', rows: 24, cols: 80 },
+      { ref: 'invalid-ref', name: 'copilot-title', provider: 'not-a-provider', cwd: '/prov', rows: 24, cols: 80 },
+    ] }],
+    level2: { '/prov': [] },
+  } });
+  try {
+    const w = await waitFor(() => t.dm.workspaces.find((x) => x.cwd === '/prov'), 'canonical provider listing');
+    assert.deepEqual(w.sessions.map((s) => s.provider), ['pi', 'unknown', 'unknown']);
+  } finally { await t.teardown(); }
+});
+
+test('level2 missing provider retains listing DTO while explicit unknown overrides it', async () => {
+  const level2 = { '/prov': [{ ref: 'pi-ref', name: 'codex-title', title: 'live', status: 'idle', cwd: '/prov', rows: 24, cols: 80 }] };
+  const t = await setup({ daemon: {
+    workspaces: [{ cwd: '/prov', session_count: 1, sessions: [
+      { ref: 'pi-ref', name: 'codex-title', provider: 'pi', cwd: '/prov', rows: 24, cols: 80 },
+    ] }],
+    level2,
+  } });
+  try {
+    const spaceKey = `${t.id}::/prov`;
+    await waitFor(() => t.dm.space(spaceKey)?.sessions[0]?.provider === 'pi', 'listing provider');
+    t.dm.subscribeLevel2(spaceKey);
+    await waitFor(() => t.dm.space(spaceKey)?.sessions[0]?.title === 'live', 'level2 frame');
+    assert.equal(t.dm.space(spaceKey).sessions[0].provider, 'pi');
+    level2['/prov'] = [{ ref: 'pi-ref', name: 'codex-title', title: 'unknown live', status: 'idle', provider: 'unknown', cwd: '/prov', rows: 24, cols: 80 }];
+    t.daemon.pushLevel2();
+    await waitFor(() => t.dm.space(spaceKey)?.sessions[0]?.title === 'unknown live', 'explicit unknown update');
+    assert.equal(t.dm.space(spaceKey).sessions[0].provider, 'unknown');
   } finally { await t.teardown(); }
 });
 
@@ -146,7 +182,7 @@ test('level2 fills title/status/provider and drives the client-side aggregate', 
     }, 'level2 frame');
     assert.equal(a.sessions[0].title, '✳ Thinking…');
     assert.equal(a.sessions[0].status, 'working');
-    assert.equal(a.sessions[0].provider, 'claude-code'); // claude_code normalised to the UI key
+    assert.equal(a.sessions[0].provider, 'claude_code'); // canonical DTO provider
     assert.equal(a.sessions[1].status, 'idle');
     // Unsubscribed spaces stay unknown — never faked as idle.
     assert.equal(t.dm.space(`${t.id}::/proj/b`).aggregateState, 'unknown');

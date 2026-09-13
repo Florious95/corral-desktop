@@ -50,7 +50,7 @@
  *  @property {string}     spaceKey
  *  @property {string}     spaceName
  *  @property {string}     title      = session.name 原样
- *  @property {string|null} provider  inferProvider(session.name) 结果，认不出为 null
+ *  @property {string} provider  daemon 的 canonical DTO provider；缺失/非法统一为 unknown
  *  @property {AgentState} state
  *  @property {boolean}    fav        本地收藏
  */
@@ -297,12 +297,12 @@ src/
     terminal/SplitPanes.jsx     §6.1
     terminal/TerminalPane.jsx   §6.2
   lib/
-    provider.js                 inferProvider() + PROVIDER_LABEL
-    providerIcons.js            slug → 本地 svg URL 映射（Vite 打包，不走 CDN）
+    provider.js                 provider canonicalization + PROVIDER_LABEL
+    providerIcons.js            （保留目录规划；当前资源直接由 ProviderIcon 导入）
     icons.jsx                   §9 全部内联 SVG 组件
     store.js                    localStorage 读写（见 §7.4）
     aggregate.js                多设备 listing → Space[]/Agent[] 聚合与去重
-  assets/provider/*.svg         vendor 自 @lobehub/icons-static-svg
+  assets/provider/              （不再复制；资源固定来自 deps/corral-core）
 ```
 
 组件签名一律 JSDoc 注释 + 解构 props，无 TypeScript。
@@ -692,26 +692,34 @@ am.collapsed / am.spacesOpen / am.agentsOpen   boolean
 
 ## 8. Provider 图标
 
-### 8.1 vendor（不走 CDN）
+### 8.1 固定 core 资源（不走 CDN）
 
-```bash
-npm i -D @lobehub/icons-static-svg
-```
-构建期把用到的 8 个 svg 复制进 `src/assets/provider/`（或直接 `import url from '@lobehub/icons-static-svg/icons/claude-color.svg'` 让 Vite 打包）。已验证存在的 slug：`claude-color`、`claude`、`codex`、`grok`、`opencode`、`cursor`、`zai`、`kimi`。
-⛔ 不要照抄设计稿里 `fetch('https://unpkg.com/...')` + blob URL 的做法——桌面端离线必须能用。
+Provider 资源直接从固定 `deps/corral-core` submodule 导入，Vite 在构建期打包，离线可用：
 
-### 8.2 slug 映射（`lib/providerIcons.js`）
+| canonical provider | 固定资源 |
+|---|---|
+| `claude_code` | `app/app/src/main/res/raw/provider_icon_claude_code.svg` |
+| `codex` | `app/app/src/main/res/raw/provider_icon_codex.svg` |
+| `copilot` | `app/app/src/main/res/drawable-nodpi/provider_copilot_color.png` |
+| `grok` | `app/app/src/main/res/drawable-nodpi/provider_grok.png` |
+| `cursor` | `app/app/src/main/res/raw/provider_icon_cursor.svg` |
+| `pi` | `app/app/src/main/res/drawable-nodpi/provider_pi.png` |
 
-| provider key | 运行态 slug | 空闲态 slug | 显示名 |
+⛔ 不要引入 CDN、运行时 fetch、第二份复制资源或新的图标依赖。
+
+### 8.2 canonical 映射（`components/sidebar/ProviderIcon.jsx`）
+
+| provider key | working/blocked | idle/unknown | 显示名 |
 |---|---|---|---|
-| `claude-code` | `claude-color` | `claude` | Claude Code |
-| `claude` | `claude-color` | `claude` | Claude |
-| `codex` | `codex` | `codex` | Codex |
-| `grok` | `grok` | `grok` | Grok |
-| `opencode` | `opencode` | `opencode` | OpenCode |
-| `cursor` | `cursor` | `cursor` | Cursor |
-| `zai` | `zai` | `zai` | Z Code |
-| `kimi` | `kimi` | `kimi` | Kimi Code |
+| `claude_code` | `provider_icon_claude_code.svg` | 同一资源，opacity=.4 | Claude Code |
+| `codex` | `provider_icon_codex.svg` | 同一资源，opacity=.4 | Codex |
+| `copilot` | `provider_copilot_color.png` | 同一资源，opacity=.4 | Copilot |
+| `grok` | `provider_grok.png` | 同一资源，opacity=.4 | Grok |
+| `cursor` | `provider_icon_cursor.svg` | 同一资源，opacity=.4 | Cursor |
+| `pi` | `provider_pi.png` | 同一资源，opacity=.4 | Pi |
+| `unknown` | 中性首字母圆圈 | 中性首字母圆圈 | Unknown |
+
+`claude` / `claude-code` 只作为封存 UI 的显示兼容别名映射到 `claude_code` 资源，不属于服务 canonical 集合。
 
 ### 8.3 `components/ProviderIcon.jsx`
 
@@ -731,10 +739,11 @@ npm i -D @lobehub/icons-static-svg
 ### 8.4 `lib/provider.js`
 
 ```js
-inferProvider(sessionName)  // 小写后按顺序子串匹配：
-// claude→'claude-code' | codex→'codex' | cursor→'cursor' | grok→'grok'
-// opencode→'opencode' | kimi→'kimi' | (zai|glm|zcode|z-code)→'zai' | 其余 → null
-PROVIDER_LABEL  // §8.2 最后一列
+normalizeProvider(value)  // 仅 canonical DTO 精确匹配；非法/显式 unknown → 'unknown'
+inferCanonicalProvider(sessionName)  // 仅旧 listing 缺 provider 时的兼容回退
+// claude / claude-code / claude_code → 'claude_code'
+// codex | copilot | cursor | grok | pi → 原 canonical 值；其余 → 'unknown'
+PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 ```
 
 ---

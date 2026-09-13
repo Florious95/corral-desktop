@@ -13,7 +13,7 @@
  */
 
 import { Client, ClientState } from './client.js';
-import { inferProvider } from './providers.js';
+import { inferCanonicalProvider, normalizeProvider } from './providers.js';
 import { uploadImage } from './upload.js';
 import * as store from './store.js';
 
@@ -26,10 +26,15 @@ function aggregateState(sessions) {
   return 'unknown';
 }
 
-/** level2 provider strings are snake_case ("claude_code"); UI keys are kebab-case. */
+/**
+ * Provider DTOs are authoritative. Only a completely absent provider field
+ * uses the old session-name inference fallback; explicit unknown/invalid
+ * values fail closed instead of being replaced by a title-derived provider.
+ */
 function providerOf(name, serverProvider) {
-  return inferProvider(name)
-    ?? (typeof serverProvider === 'string' ? inferProvider(serverProvider.replace(/_/g, '-')) : null);
+  return serverProvider === undefined
+    ? inferCanonicalProvider(name)
+    : normalizeProvider(serverProvider);
 }
 
 function segmentsOf(cwd) {
@@ -250,7 +255,9 @@ export class DeviceManager {
             cols: s.cols,
             title: x?.title || '',
             status: x?.status || 'unknown',
-            provider: providerOf(s.name, x?.provider),
+            // level2 is newer than listing when it supplies a provider; if its
+            // field is absent, retain the reliable listing DTO value.
+            provider: providerOf(s.name, x?.provider !== undefined ? x.provider : s.provider),
           };
         });
         out.push({
