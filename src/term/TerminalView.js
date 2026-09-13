@@ -16,7 +16,7 @@
 // 走裸 '@xterm/xterm' 的话，打包器拿 .mjs（具名导出）、Node 拿 .js（CJS，具名导入直接
 // SyntaxError），`node --test` 就加载不了本模块 —— 两边指同一个文件才不用写互操作补丁。
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
-import { isLocalSidebarToggle, unsupportedKeyEvent, consumeTerminalReplies, REPLY_HOLD_MAX } from './nativeInput.js';
+
 import { attachWebglRenderer } from './webglRenderer.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
@@ -45,21 +45,21 @@ export class TerminalView {
    * @param {(rows:number, cols:number) => void} [opts.onResize]         几何变了（已 debounce）
    * @param {() => void}                         [opts.onHistoryBoundary] 视口滚到顶 / 顶部继续上滚
    * @param {(data:string) => void}               [opts.onData]            xterm 编好的按键字节
-   * @param {(label:string) => void}              [opts.onUnsupportedKey]  协议表达不了的键
+
    * @param {number}   [opts.scrollback=0]  本地回滚行数。默认 0：历史唯一事实来源是协议
    *                                        scrollback 帧（UI-SPEC §6.2）
    * @param {number}   [opts.fontSize=13]
    * @param {Function} [opts.TerminalCtor]  仅供单测注入 FakeTerminal；生产走 @xterm/xterm
    */
   constructor(container, {
-    onResize, onHistoryBoundary, onData, onUnsupportedKey,
+    onResize, onHistoryBoundary, onData,
     scrollback = 0, fontSize = 13, TerminalCtor = Terminal,
   } = {}) {
     this.container = container;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
-    this.onUnsupportedKey = onUnsupportedKey || (() => {});
+
     this.fontSize = fontSize;
     this.term = new TerminalCtor({
       scrollback,
@@ -90,27 +90,13 @@ export class TerminalView {
     this._pendingRows = null;
     this._lastWheelAt = 0;
     this._disposed = false;
-    this._replyHold = '';
     this._hasPainted = false;
   }
 
   /** 挂载进容器并做一次 fit。 */
   open() {
     this.term.open(this.container);
-    this._dataDisposable = this.term.onData((data) => {
-      const r = consumeTerminalReplies(data, this._replyHold);
-      this._replyHold = r.hold.length > REPLY_HOLD_MAX ? '' : r.hold;
-      if (r.kept.length) this.onData(r.kept);
-    });
-    if (typeof this.term.attachCustomKeyEventHandler === 'function') {
-      this.term.attachCustomKeyEventHandler((ev) => {
-        if (isLocalSidebarToggle(ev)) return false;
-        const label = unsupportedKeyEvent(ev);
-        if (!label) return true;
-        this.onUnsupportedKey(label);
-        return false;
-      });
-    }
+    this._dataDisposable = this.term.onData((data) => this.onData(data));
     this._scrollDisposable = this.term.onScroll((line) => {
       if (line <= 0 && this._lastScrollLine > 0) this.onHistoryBoundary();
       this._lastScrollLine = line;
@@ -221,7 +207,6 @@ export class TerminalView {
 
   dispose() {
     this._disposed = true;
-    this._replyHold = '';
     clearTimeout(this._resizeTimer);
     clearTimeout(this._gridTimer);
     try { this._webglAddon?.dispose(); } catch { /* already gone */ }

@@ -11,17 +11,54 @@ const fields = Object.freeze({
   scroll_wheel: ['ref', 'delta'],
   attach_preview: ['ref', 'path'],
 });
+export const MAX_INPUT_BYTES = 1 << 20;
 export const SESSION_STATUS = Object.freeze(['working', 'idle', 'unknown']);
 export const INPUT_KEYS = Object.freeze([...core.INPUT_KEYS, 'backspace']);
 export const isKnownKey = (key) => INPUT_KEYS.includes(key);
 export const isExtension = (type, p) => Object.hasOwn(fields, type)
   || (type === 'input' && (p?.attachment_path !== undefined
+    || p?.bytes !== undefined
     || (p?.keys !== undefined && (!Array.isArray(p.keys) || p.keys.includes('backspace')))));
 
+function asBytes(value) {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (Array.isArray(value) && value.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+    return Uint8Array.from(value);
+  }
+  return null;
+}
+
+function base64Encode(value) {
+  if (typeof value === 'string') return base64Length(value) >= 0 ? value : null;
+  const bytes = asBytes(value);
+  if (!bytes) return null;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function base64Length(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length % 4 !== 0
+    || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return -1;
+  try { return atob(value).length; } catch { return -1; }
+}
+
+function bytesLength(value) {
+  const bytes = asBytes(value);
+  return bytes ? bytes.length : base64Length(value);
+}
+
 // Use core validation/canonicalization for req_id/ref/text and all original keys.
-// A supported placeholder lets core validate the shape; the wire retains backspace.
+// A supported placeholder lets core validate the shape; the wire retains extensions.
 function baseInput(p) {
-  return { ...p, keys: Array.isArray(p.keys) ? p.keys.map(k => k === 'backspace' ? 'esc' : k) : p.keys };
+  const { bytes: _bytes, ...withoutBytes } = p;
+  return {
+    ...withoutBytes,
+    keys: Array.isArray(p.keys) ? p.keys.map(k => k === 'backspace' ? 'esc' : k) : p.keys,
+  };
 }
 
 export function validateFrame(type, p = {}) {
@@ -32,9 +69,22 @@ export function validateFrame(type, p = {}) {
     if (p.text !== undefined && typeof p.text !== 'string') return 'input text must be a string';
     const error = core.validateFrame(type, baseInput(p));
     if (error) return error;
-    if (p.attachment_path !== undefined) {
-      if (typeof p.attachment_path !== 'string' || !p.attachment_path.startsWith('/')) return 'attachment path must be absolute';
-      if (p.keys?.length) return 'input carries both text and keys; at most one is allowed';
+    const hasText = (typeof p.text === 'string' && p.text.length > 0)
+      || (typeof p.attachment_path === 'string' && p.attachment_path.length > 0);
+    const hasKeys = Array.isArray(p.keys) && p.keys.length > 0;
+    if (p.attachment_path !== undefined
+      && (typeof p.attachment_path !== 'string' || !p.attachment_path.startsWith('/'))) {
+      return 'attachment path must be absolute';
+    }
+    if (p.bytes !== undefined) {
+      const size = bytesLength(p.bytes);
+      if (size < 0) return 'input bytes must be standard base64 or byte array';
+      if (size === 0) return 'input bytes must be non-empty';
+      if (size > MAX_INPUT_BYTES) return `input bytes exceeds max-input-bytes (${MAX_INPUT_BYTES})`;
+    }
+    const hasBytes = p.bytes !== undefined;
+    if ((hasText ? 1 : 0) + (hasKeys ? 1 : 0) + (hasBytes ? 1 : 0) > 1) {
+      return 'input carries more than one of text/attachment_path, keys, bytes; at most one is allowed';
     }
     return null;
   }
@@ -65,6 +115,7 @@ export function encodeControl(type, payload = {}) {
     p = JSON.parse(core.encodeControl(type, baseInput(payload))).payload;
     if (p.keys) p.keys = payload.keys;
     if (payload.attachment_path !== undefined) p.attachment_path = payload.attachment_path;
+    if (payload.bytes !== undefined) p.bytes = base64Encode(payload.bytes);
   } else {
     p = Object.fromEntries(fields[type].filter(k => payload[k] !== undefined).map(k => [k, payload[k]]));
     if (type === 'level2_frame') p.sessions ??= [];
@@ -86,6 +137,7 @@ export function decodeControl(text) {
     const decoded = core.decodeControl(JSON.stringify({ ...root, payload: baseInput(p) }));
     if (decoded.payload.keys) decoded.payload.keys = p.keys;
     if (p.attachment_path !== undefined) decoded.payload.attachment_path = p.attachment_path;
+    if (p.bytes !== undefined) decoded.payload.bytes = p.bytes;
     return decoded;
   }
   return { type: root.type, payload: Object.fromEntries(fields[root.type].filter(k => p[k] !== undefined).map(k => [k, p[k]])) };

@@ -35,13 +35,14 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
  * @param {(rows:number, cols:number) => void} [props.onResize]
  * @param {(text:string) => void} [props.onText]
  * @param {(key:string) => void} [props.onKey]
+ * @param {(bytes:Uint8Array) => void} [props.onBytes]
  * @param {() => void} [props.onEnter]
  * @param {() => void} [props.onCtrlV]
  * @param {(event:ClipboardEvent) => void} [props.onPaste]
  */
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
-  onText, onKey, onEnter,
+  onText, onKey, onBytes, onEnter,
   onCtrlV, onPaste,
 }) {
   const hostRef = useRef(null);
@@ -59,11 +60,13 @@ export default function TerminalPane({
   const [hint, setHint] = useState('');
   const onTextRef = useRef(onText);
   const onKeyRef = useRef(onKey);
+  const onBytesRef = useRef(onBytes);
   const onEnterRef = useRef(onEnter);
   const onCtrlVRef = useRef(onCtrlV);
   const onPasteRef = useRef(onPaste);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
+  onBytesRef.current = onBytes;
   onEnterRef.current = onEnter;
   onCtrlVRef.current = onCtrlV;
   onPasteRef.current = onPaste;
@@ -101,6 +104,7 @@ export default function TerminalPane({
     const pump = new NativeInputPump({
       sendText: (text) => onTextRef.current?.(text),
       sendKey: (key) => onKeyRef.current?.(key),
+      sendBytes: (bytes) => onBytesRef.current?.(bytes),
       sendEnter: () => onEnterRef.current?.(),
       onUnsupported: showUnsupported,
     });

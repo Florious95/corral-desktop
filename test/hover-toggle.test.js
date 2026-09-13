@@ -57,12 +57,12 @@ test('runWindowChrome close/min/zoom against a mock API', async () => {
   assert.deepEqual(log, ['close', 'min', ['fs', true]]);
 });
 
-test('Cmd+B is local; Cmd+W and Cmd+Q are not protocol keys (native close/quit)', async () => {
+test('Cmd+B passes through to terminal; Cmd+W and Cmd+Q are not protocol keys (native close/quit)', async () => {
   const { isLocalSidebarToggle, unsupportedKeyEvent } = await import('../src/term/nativeInput.js');
   const cmdB = { type: 'keydown', key: 'b', metaKey: true, ctrlKey: false, altKey: false };
   const cmdW = { type: 'keydown', key: 'w', metaKey: true, ctrlKey: false, altKey: false };
   const cmdQ = { type: 'keydown', key: 'q', metaKey: true, ctrlKey: false, altKey: false };
-  assert.equal(isLocalSidebarToggle(cmdB), true);
+  assert.equal(isLocalSidebarToggle(cmdB), false);
   assert.equal(isLocalSidebarToggle(cmdW), false);
   assert.equal(unsupportedKeyEvent(cmdB), null);
   assert.equal(unsupportedKeyEvent(cmdW), null);
