@@ -134,13 +134,28 @@ test('NativeInputPump: Ctrl-D still hints (user key, not mouse noise)', () => {
   pump.dispose();
 });
 
-test('unsupportedKeyEvent lets mapped keys through', () => {
+test('unsupportedKeyEvent lets intentional terminal keys through to xterm', () => {
   assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'a' }), null);
   assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'Enter' }), null);
   assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'c', ctrlKey: true }), null);
-  assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'd', ctrlKey: true }), 'Ctrl-D');
-  assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'F5' }), 'F5');
-  assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'Home' }), 'Home');
+  assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'd', ctrlKey: true }), null);
+  assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'F5' }), null);
+  assert.equal(unsupportedKeyEvent({ type: 'keydown', key: 'Home' }), null);
+});
+
+test('NativeInputPump uplinks intentional non-text keys via sendBytes', () => {
+  const sent = [];
+  const pump = new NativeInputPump({
+    sendText: () => {},
+    sendKey: () => {},
+    sendEnter: () => {},
+    sendBytes: (bytes) => sent.push(bytes),
+    onUnsupported: () => {},
+  });
+  // F5 ANSI escape: \x1b[15~
+  pump.onData('\x1b[15~');
+  assert.equal(sent.length, 1);
+  assert.deepEqual([...sent[0]], [0x1b, 0x5b, 0x31, 0x35, 0x7e]);
 });
 
 const OSC11 = '\x1b]11;rgb:fbfb/fafa/f8f8\x07';

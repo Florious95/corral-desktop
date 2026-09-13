@@ -15,7 +15,6 @@ import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
 import { watchFullscreen } from './lib/fullscreen.js';
-import { isLocalSidebarToggle } from './term/nativeInput.js';
 import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from './term/inputAckGate.js';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
@@ -130,17 +129,6 @@ export default function App({ seedDevices } = {}) {
     let off;
     watchFullscreen(setNativeFullscreen).then((u) => { off = u; });
     return () => { if (typeof off === 'function') off(); };
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (!isLocalSidebarToggle(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setCollapsed((v) => !v);
-    };
-    window.addEventListener('keydown', onKey, { capture: true });
-    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, []);
 
   useEffect(() => { LS.write('am.fav', favs) }, [favs]);
@@ -336,6 +324,11 @@ export default function App({ seedDevices } = {}) {
     if (!dm.keys(uid, key)) setToastMsg('未发送');
   }, [dm, uidReady]);
 
+  const handlePaneBytes = useCallback((uid, bytes) => {
+    if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
+    if (!dm.inputBytes(uid, bytes)) setToastMsg('未发送');
+  }, [dm, uidReady]);
+
   const paneCanSend = useCallback((uid) => (
     paneKeysRef.current.includes(uid)
       && liveAgentKeysRef.current.has(uid)
@@ -412,11 +405,12 @@ export default function App({ seedDevices } = {}) {
       onResize={(rows, cols) => dm.resize(agent.key, rows, cols, 'fit')}
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
+      onBytes={(bytes) => handlePaneBytes(agent.key, bytes)}
       onEnter={() => handlePaneEnter(agent.key)}
       onCtrlV={() => handlePaneCtrlV(agent.key)}
       onPaste={(event) => handlePanePaste(agent.key, event)}
     />
-  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneEnter, handlePaneCtrlV, handlePanePaste]);
+  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneBytes, handlePaneEnter, handlePaneCtrlV, handlePanePaste]);
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {

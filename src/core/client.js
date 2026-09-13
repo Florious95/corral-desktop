@@ -72,6 +72,19 @@ export class Client extends CoreClient {
     return this.sendExtendedInput({ ref, text, attachment_path: path });
   }
 
+  inputBytes(ref, bytes) {
+    const value = bytes instanceof Uint8Array
+      ? bytes
+      : bytes instanceof ArrayBuffer
+        ? new Uint8Array(bytes)
+        : Array.isArray(bytes) ? Uint8Array.from(bytes) : null;
+    if (!value || value.length === 0) {
+      this.onLocalError('invalid_field', 'input bytes must be non-empty');
+      return null;
+    }
+    return this.sendExtendedInput({ ref, bytes: value });
+  }
+
   keys(ref, key) {
     return key === 'backspace' ? this.sendExtendedInput({ ref, keys: [key] }) : super.keys(ref, key);
   }

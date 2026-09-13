@@ -308,6 +308,12 @@ export class DeviceManager {
     return reqId === null ? null : { deviceId: t.deviceId, reqId };
   }
 
+  inputBytes(uid, bytes) {
+    const t = this._route(uid);
+    const reqId = t ? t.client.inputBytes(t.ref, bytes) : null;
+    return reqId === null ? null : { deviceId: t.deviceId, reqId };
+  }
+
   /** Attach an already-uploaded absolute path without creating an input ack. */
   attachPreview(uid, path) {
     const t = this._route(uid);

@@ -1,6 +1,6 @@
 /*
- * xterm onData → protocol input.text / input.keys (CLIENT-CONTRACT §0.3 / §3.5).
- * 不把 keydown 映射成字符；只吃 xterm 已经编好的字节，再按 8 值闭集分流。
+ * xterm onData → protocol input.text / input.keys / input.bytes (CLIENT-CONTRACT §0.3 / §3.5).
+ * 不把 keydown 映射成字符；只吃 xterm 已经编好的输入，协议不认识的序列走 bytes。
  */
 
 export const TEXT_FLUSH_MS = 32;
@@ -11,6 +11,9 @@ export const CLICK_HINT_MS = 3000;
 const ARROW = { A: 'up', B: 'down', C: 'right', D: 'left' };
 
 export const REPLY_HOLD_MAX = 8192;
+
+const encoder = new TextEncoder();
+const toBytes = (value) => encoder.encode(value);
 
 function findStringTerm(buf, from) {
   for (let j = from; j < buf.length; j += 1) {
@@ -54,7 +57,7 @@ export function consumeTerminalReplies(chunk, hold = '') {
       i += 1;
       continue;
     }
-    if (i + 1 >= buf.length) return { kept, hold: buf.slice(i) };
+    if (i + 1 >= buf.length) return { kept: kept + buf[i], hold: '' };
     const n = buf[i + 1];
     if (n === ']' || n === 'P') {
       const end = findStringTerm(buf, i + 2);
@@ -137,7 +140,7 @@ function mouseEvent(kind, seq) {
  * @param {string} s xterm onData payload
  * @returns {Array<{type:'text',value:string}|{type:'enter'}|{type:'key',value:string}|{type:'unsupported',label:string,seq:string}>}
  */
-export function parseOnData(s) {
+export function parseOnData(s, { holdIncomplete = false } = {}) {
   const events = [];
   if (typeof s !== 'string' || s.length === 0) return events;
   let i = 0;
@@ -180,7 +183,8 @@ export function parseOnData(s) {
       // X10 鼠标：ESC [ M + 3 字节（btn/x/y 各 +32）
       if (s[i + 1] === '[' && s[i + 2] === 'M') {
         if (i + 5 >= s.length) {
-          events.push(mouseEvent('silent', s.slice(i)));
+          if (holdIncomplete) events.push({ type: 'incomplete', seq: s.slice(i) });
+          else events.push(mouseEvent('silent', s.slice(i)));
           break;
         }
         const btn = s.charCodeAt(i + 3) - 32;
@@ -194,7 +198,8 @@ export function parseOnData(s) {
           let j = i + 3;
           while (j < s.length && s[j] !== 'M' && s[j] !== 'm') j += 1;
           if (j >= s.length) {
-            events.push(mouseEvent('silent', s.slice(i)));
+            if (holdIncomplete) events.push({ type: 'incomplete', seq: s.slice(i) });
+            else events.push(mouseEvent('silent', s.slice(i)));
             break;
           }
           const seq = s.slice(i, j + 1);
@@ -226,10 +231,16 @@ export function parseOnData(s) {
             continue;
           }
         }
-        events.push({ type: 'unsupported', label: 'incomplete escape', seq: s.slice(i) });
+        if (holdIncomplete) events.push({ type: 'incomplete', seq: s.slice(i) });
+        else events.push({ type: 'unsupported', label: 'incomplete escape', seq: s.slice(i) });
         break;
       }
-      if (s[i + 1] === 'O' && i + 2 < s.length) {
+      if (s[i + 1] === 'O') {
+        if (i + 2 >= s.length) {
+          if (holdIncomplete) events.push({ type: 'incomplete', seq: s.slice(i) });
+          else events.push({ type: 'unsupported', label: 'incomplete escape', seq: s.slice(i) });
+          break;
+        }
         const f = s[i + 2];
         if (ARROW[f]) events.push({ type: 'key', value: ARROW[f] });
         else events.push({ type: 'unsupported', label: f >= 'P' && f <= 'S' ? `F${f.charCodeAt(0) - 79}` : `SS3 ${f}`, seq: s.slice(i, i + 3) });
@@ -237,9 +248,9 @@ export function parseOnData(s) {
         continue;
       }
       if (i === s.length - 1) {
-        events.push({ type: 'key', value: 'esc' });
-        i += 1;
-        continue;
+        if (holdIncomplete) events.push({ type: 'incomplete', seq: s.slice(i) });
+        else events.push({ type: 'key', value: 'esc' });
+        break;
       }
       events.push({ type: 'unsupported', label: 'Alt/Meta 组合', seq: s.slice(i, i + 2) });
       i += 2;
@@ -258,58 +269,49 @@ export function parseOnData(s) {
   return events;
 }
 
-/** 本地 chrome：Cmd+B 折叠/展开侧栏。⛔ 不进远端 CLI。 */
-export function isLocalSidebarToggle(ev) {
-  if (!ev || ev.type !== 'keydown' || ev.isComposing) return false;
-  if (ev.altKey || ev.ctrlKey) return false;
-  return !!(ev.metaKey && (ev.key === 'b' || ev.key === 'B'));
-}
+/** Deprecated compatibility hook: Cmd+B is no longer consumed by the desktop shell. */
+export function isLocalSidebarToggle() { return false; }
 
-/** KeyboardEvent 里协议表达不了、且不该交给 xterm 再编一串我们仍发不出去的序列。 */
-export function unsupportedKeyEvent(ev) {
-  if (!ev || ev.type !== 'keydown') return null;
-  if (ev.isComposing) return null;
-  if (ev.metaKey) return null; // 系统快捷键留给浏览器
-  const k = ev.key;
-  if (isLocalSidebarToggle(ev)) return null;
-  if (k === 'Enter' || k === 'Backspace' || k === 'Tab' || k === 'Escape') return null;
-  if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') return null;
-  if (ev.ctrlKey && (k === 'c' || k === 'C')) return null;
-  if (!ev.ctrlKey && !ev.altKey && k.length === 1) return null;
-  if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta' || k === 'Process') return null;
-  if (k === 'Dead') return null;
-  if (/^F([1-9]|1[0-2])$/.test(k)) return k;
-  if (k === 'Home' || k === 'End' || k === 'PageUp' || k === 'PageDown' || k === 'Insert' || k === 'Delete') return k;
-  if (k === 'Tab' && ev.shiftKey) return 'Shift-Tab';
-  if (ev.ctrlKey && k.length === 1) return `Ctrl-${k.toUpperCase()}`;
-  if (ev.altKey) return `Alt-${k}`;
-  return k || 'unknown key';
-}
+/** Deprecated compatibility hook: xterm's encoded data is always allowed through. */
+export function unsupportedKeyEvent() { return null; }
 
 export class NativeInputPump {
   /**
    * @param {Object} hooks
    * @param {(text:string)=>void} hooks.sendText
    * @param {(key:string)=>void} hooks.sendKey
+   * @param {(bytes:Uint8Array)=>void} hooks.sendBytes
    * @param {()=>void} hooks.sendEnter
    * @param {(label:string)=>void} hooks.onUnsupported
    */
-  constructor({ sendText, sendKey, sendEnter, onUnsupported }) {
+  constructor({ sendText, sendKey, sendBytes, sendEnter, onUnsupported }) {
     this.sendText = sendText;
     this.sendKey = sendKey;
+    this.sendBytes = sendBytes;
     this.sendEnter = sendEnter;
-    this.onUnsupported = onUnsupported;
+    this.onUnsupported = onUnsupported || (() => {});
     this._buf = '';
     this._timer = null;
+    this._inputTimer = null;
+    this._inputHold = '';
     this._lastClickHint = 0;
     this._replyHold = '';
   }
 
   onData(s) {
-    const stripped = consumeTerminalReplies(s, this._replyHold);
+    const raw = this._inputHold + (typeof s === 'string' ? s : '');
+    this._inputHold = '';
+    clearTimeout(this._inputTimer);
+    this._inputTimer = null;
+    const stripped = consumeTerminalReplies(raw, this._replyHold);
     this._replyHold = stripped.hold.length > REPLY_HOLD_MAX ? '' : stripped.hold;
     if (stripped.kept.length === 0) return;
-    for (const e of parseOnData(stripped.kept)) {
+    for (const e of parseOnData(stripped.kept, { holdIncomplete: true })) {
+      if (e.type === 'incomplete') {
+        this._inputHold = e.seq;
+        this._armInputHold();
+        continue;
+      }
       if (e.type === 'text') {
         this._buf += e.value;
         if (this._buf.length >= TEXT_FLUSH_CHARS) this.flush();
@@ -325,7 +327,8 @@ export class NativeInputPump {
         if (now - this._lastClickHint < CLICK_HINT_MS) continue;
         this._lastClickHint = now;
         this.onUnsupported(e.label);
-      } else this.onUnsupported(e.label);
+      } else if (this.sendBytes) this.sendBytes(toBytes(e.seq));
+      else this.onUnsupported(e.label);
     }
   }
 
@@ -339,12 +342,36 @@ export class NativeInputPump {
   }
 
   dispose() {
+    clearTimeout(this._inputTimer);
+    this._inputTimer = null;
+    const hold = this._inputHold;
+    this._inputHold = '';
     this._replyHold = '';
+    if (hold) {
+      this.flush();
+      if (this.sendBytes) this.sendBytes(toBytes(hold));
+      else if (hold === '\x1b') this.sendKey('esc');
+      else this.onUnsupported('incomplete escape');
+    }
     this.flush();
   }
 
   _arm() {
     if (this._timer) return;
     this._timer = setTimeout(() => this.flush(), TEXT_FLUSH_MS);
+  }
+
+  _armInputHold() {
+    clearTimeout(this._inputTimer);
+    this._inputTimer = setTimeout(() => {
+      this._inputTimer = null;
+      const hold = this._inputHold;
+      this._inputHold = '';
+      if (!hold) return;
+      this.flush();
+      if (this.sendBytes) this.sendBytes(toBytes(hold));
+      else if (hold === '\x1b') this.sendKey('esc');
+      else this.onUnsupported('incomplete escape');
+    }, TEXT_FLUSH_MS);
   }
 }
