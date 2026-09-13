@@ -349,8 +349,8 @@ export class NativeInputPump {
     this._replyHold = '';
     if (hold) {
       this.flush();
-      if (this.sendBytes) this.sendBytes(toBytes(hold));
-      else if (hold === '\x1b') this.sendKey('esc');
+      if (hold === '\x1b') this.sendKey('esc');
+      else if (this.sendBytes) this.sendBytes(toBytes(hold));
       else this.onUnsupported('incomplete escape');
     }
     this.flush();
@@ -369,8 +369,8 @@ export class NativeInputPump {
       this._inputHold = '';
       if (!hold) return;
       this.flush();
-      if (this.sendBytes) this.sendBytes(toBytes(hold));
-      else if (hold === '\x1b') this.sendKey('esc');
+      if (hold === '\x1b') this.sendKey('esc');
+      else if (this.sendBytes) this.sendBytes(toBytes(hold));
       else this.onUnsupported('incomplete escape');
     }, TEXT_FLUSH_MS);
   }

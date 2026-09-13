@@ -178,6 +178,23 @@ test('NativeInputPump preserves split escape sequences and order', () => {
   pump.dispose();
 });
 
+test('NativeInputPump keeps a bare Escape as the named key', async () => {
+  const keys = [];
+  const bytes = [];
+  const pump = new NativeInputPump({
+    sendText: () => {},
+    sendKey: (key) => keys.push(key),
+    sendEnter: () => {},
+    sendBytes: (value) => bytes.push(value),
+    onUnsupported: () => {},
+  });
+  pump.onData('\x1b');
+  await sleep(TEXT_FLUSH_MS + 20);
+  assert.deepEqual(keys, ['esc']);
+  assert.deepEqual(bytes, []);
+  pump.dispose();
+});
+
 const OSC11 = '\x1b]11;rgb:fbfb/fafa/f8f8\x07';
 
 test('bad state: raw parseOnData treats OSC 11 reply as text (and may emit esc)', () => {
