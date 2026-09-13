@@ -248,7 +248,7 @@ AggregatedSession = {
 ```
 TerminalPane.mount(uid):
   term = new TerminalView(hostEl, {
-    onResize: (rows, cols) => dm.resize(uid, rows, cols),      // 见 3.4
+    onResize: (rows, cols) => this.onSettledGrid(rows, cols),  // 通用本地几何回调
     onHistoryBoundary: () => this.loadHistory(),               // 见 3.3
   })
   term.open()
@@ -312,17 +312,18 @@ fetchOlder(() => this, { onLoading: n => setStatus(`加载 ${n} 行历史…`), 
 
 ### 3.4 resize → 补发 snapshot(可能不补)
 
-`onResize` 由 `TerminalView` 的 120ms debounce 触发 → `dm.resize(uid, rows, cols)` → `resize` 帧。
+TerminalView 仍以 120ms debounce 计算并回报落定几何；TerminalPane 的通用 `onResize`
+可供本地消费者使用，但主 App 不再将它连接到网络 `dm.resize`。落定网格统一通过带最新
+`rows/cols` 的 `subscribe`（必要时重订）获取匹配 snapshot，避免随后重复发送同尺寸 `resize` 帧。
 
-服务端 `handleResize` 实测:
+服务端 `handleResize` 仍支持其它客户端调用:
 - 只对**已订阅**的 ref 生效;未订阅 = 静默 no-op,无任何回复。
 - 只有发生**真实 reflow**(几何确实变了)才补发一帧 snapshot;
   几何没变会走 `"ws: resize no-op, skip snapshot"` 分支,**什么都不回**。
 - 没有独立的 resize ack —— 补发的 snapshot 就是事实回执。
 
-⛔ 因此 UI **不得**进入「等 snapshot」的阻塞态,也不得对 resize 设超时报错。发完即忘。
-
-窗口拖拽 / 分裂列宽变化 → `ResizeObserver` → `term.fit()` → 变了才走上面这条链。
+⛔ 桌面终端改宽不可再发送同尺寸 `resize`；其它 UI 消费者如需调用 resize 仍须自行判定订阅状态。
+窗口拖拽 / 分裂列宽变化 → `ResizeObserver` → `term.fit()` → 120ms 落定后重订 subscribe。
 
 ### 3.5 input:两帧提交,不是一帧
 
