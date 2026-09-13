@@ -20,7 +20,9 @@ import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from '.
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
-import { readCtrlV, textFromPasteEvent } from './term/clipboard.js';
+import {
+  readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
+} from './term/clipboard.js';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
 const CLOSE_MS = 190;
@@ -357,8 +359,23 @@ export default function App({ seedDevices } = {}) {
     }
   }, [handleAttachment]);
 
-  const handlePanePaste = useCallback((uid, event) => {
+  const handlePanePaste = useCallback(async (uid, event) => {
     const text = textFromPasteEvent(event);
+    let files = null;
+    try {
+      files = await readClipboardFiles();
+    } catch {
+      // A native reader error must not break ordinary browser text paste.
+    }
+    if (files?.length) {
+      try {
+        const paths = formatClipboardFiles(files);
+        if (paths) handlePaneText(uid, paths);
+      } catch (e) {
+        setToastMsg(e?.message || '文件路径无法粘贴');
+      }
+      return;
+    }
     if (text) handlePaneText(uid, text);
     else setToastMsg('图片请用 Ctrl+V');
   }, [handlePaneText]);
