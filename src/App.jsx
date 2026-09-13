@@ -98,6 +98,9 @@ export default function App({ seedDevices } = {}) {
   /* ——— UI 本地态 ——— */
   const [favs, setFavs] = useState(() => LS.read('am.fav', []));
   const [paneKeys, setPaneKeys] = useState(() => LS.read('am.panes', []));
+  const paneKeysRef = useRef([]);
+  const liveAgentKeysRef = useRef(new Set());
+  const pendingPasteRef = useRef(new Map());
   const [activeKey, setActiveKey] = useState(() => LS.read('am.activePane', null));
   const [selected, setSelected] = useState(() => LS.read('am.selected', 'all'));
   const [collapsed, setCollapsed] = useState(() => LS.read('am.collapsed', false));
@@ -195,6 +198,8 @@ export default function App({ seedDevices } = {}) {
   }, [workspaces, localById, favSet]);
 
   const agentByKey = useMemo(() => new Map(allAgents.map((a) => [a.key, a])), [allAgents]);
+  paneKeysRef.current = paneKeys;
+  liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
 
   // 服务端删会话 → 标记 closing → CLOSE_MS 后真正卸载并剔出分裂列
   const prevAgents = useRef([]);
@@ -331,15 +336,24 @@ export default function App({ seedDevices } = {}) {
     if (!dm.keys(uid, key)) setToastMsg('未发送');
   }, [dm, uidReady]);
 
+  const paneCanSend = useCallback((uid) => (
+    paneKeysRef.current.includes(uid)
+      && liveAgentKeysRef.current.has(uid)
+      && uidReady(uid)
+  ), [uidReady]);
+
   const handlePaneEnter = useCallback(async (uid) => {
+    const pendingPaste = pendingPasteRef.current.get(uid);
+    if (pendingPaste) await pendingPaste.catch(() => {});
+    if (!paneCanSend(uid)) return;
     await submitPaneEnter({
-      ready: uidReady(uid),
+      ready: true,
       pending: ackGate.current.takePending(uid),
       waitAck: (sent) => ackGate.current.waitAck(sent),
       sendBareEnter: () => dm.input(uid, ''),
       onToast: setToastMsg,
     });
-  }, [dm, uidReady]);
+  }, [dm, paneCanSend]);
 
   const handleAttachment = useCallback(async (uid, attachment) => {
     if (!uidReady(uid)) { setToastMsg('未连接，图片未发送'); return; }
@@ -359,26 +373,36 @@ export default function App({ seedDevices } = {}) {
     }
   }, [handleAttachment]);
 
-  const handlePanePaste = useCallback(async (uid, event) => {
+  const handlePanePaste = useCallback((uid, event) => {
     const text = textFromPasteEvent(event);
-    let files = null;
-    try {
-      files = await readClipboardFiles();
-    } catch {
-      // A native reader error must not break ordinary browser text paste.
-    }
-    if (files?.length) {
+    const previous = pendingPasteRef.current.get(uid) || Promise.resolve();
+    const pendingPaste = previous.catch(() => {}).then(async () => {
+      let files = null;
       try {
-        const paths = formatClipboardFiles(files);
-        if (paths) handlePaneText(uid, paths);
-      } catch (e) {
-        setToastMsg(e?.message || '文件路径无法粘贴');
+        files = await readClipboardFiles();
+      } catch {
+        // A native reader error must not break ordinary browser text paste.
       }
-      return;
-    }
-    if (text) handlePaneText(uid, text);
-    else setToastMsg('图片请用 Ctrl+V');
-  }, [handlePaneText]);
+      if (!paneCanSend(uid)) return;
+      if (files?.length) {
+        try {
+          const paths = formatClipboardFiles(files);
+          if (paths) handlePaneText(uid, paths);
+        } catch (e) {
+          setToastMsg(e?.message || '文件路径无法粘贴');
+        }
+        return;
+      }
+      if (text) handlePaneText(uid, text);
+      else setToastMsg('图片请用 Ctrl+V');
+    });
+    pendingPasteRef.current.set(uid, pendingPaste);
+    pendingPaste.then(
+      () => { if (pendingPasteRef.current.get(uid) === pendingPaste) pendingPasteRef.current.delete(uid); },
+      () => { if (pendingPasteRef.current.get(uid) === pendingPaste) pendingPasteRef.current.delete(uid); },
+    );
+    return pendingPaste;
+  }, [handlePaneText, paneCanSend]);
 
   const renderPane = useCallback((agent) => (
     <TerminalPane
