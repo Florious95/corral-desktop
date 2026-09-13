@@ -148,7 +148,6 @@ export default function TerminalPane({
       },
       onHistoryBoundary: () => loadHistory(),
       onData: (data) => pump.onData(data),
-      onUnsupportedKey: showUnsupported,
     });
     view.open();
     viewRef.current = view;
