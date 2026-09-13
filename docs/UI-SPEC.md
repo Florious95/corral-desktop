@@ -585,6 +585,7 @@ src/
  * @param {Object} client                        该设备的协议 Client 实例
  * @param {boolean} focused                      是否为键盘焦点列
  * @param {(rows:number, cols:number) => void} [onResize]
+ *        通用本地几何通知；主 App 不连接它发送重复网络 resize。
  */
 ```
 内部状态：xterm 实例、FitAddon、订阅生命周期、`ready`（是否收到首帧 snapshot）。
@@ -596,7 +597,7 @@ src/
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize`（裁定 2026-08-23）。首帧立刻落到格子。
-  **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就重发 `subscribe`（协议 `resize` 在主机几何未变时 no-op、不补快照）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
+  **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就用最新几何重发 `subscribe`（不再紧跟同尺寸网络 `resize`）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载：网格落定后 `subscribe(ref, rows, cols)`；改宽重订；卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
 
