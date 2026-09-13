@@ -1,11 +1,9 @@
 /*
- * session.name → provider inference.
+ * Provider identity helpers.
  *
- * The daemon never tells us which CLI runs in a pane (listing carries no
- * provider field, see CLIENT-CONTRACT §0.1; level2_frame carries one only for
- * subscribed workspaces). The tmux session name is the only always-available
- * hint, so the sidebar infers from it. Unrecognised → null, rendered as the
- * first-letter fallback circle (UI-SPEC §8.3).
+ * A provider value supplied by the daemon is authoritative and is normalised
+ * against the closed canonical DTO set. Name inference remains only the
+ * compatibility fallback for old listing frames that omit provider entirely.
  */
 
 /**
@@ -27,32 +25,65 @@ const RULES = Object.freeze([
   ['zai', 'zai'],
 ]);
 
-/** Display name per provider key (UI-SPEC §8.2, last column). */
+/** Canonical provider IDs emitted by the daemon (plus the fail-closed sentinel). */
+export const CANONICAL_PROVIDERS = Object.freeze([
+  'claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown',
+]);
+
+/** Exact DTO values accepted by the desktop; aliases are compatibility-only. */
+const PROVIDER_ALIASES = Object.freeze({
+  claude_code: 'claude_code',
+  'claude-code': 'claude_code',
+  claude: 'claude_code',
+  codex: 'codex',
+  copilot: 'copilot',
+  grok: 'grok',
+  cursor: 'cursor',
+  pi: 'pi',
+  unknown: 'unknown',
+});
+
+/** Normalise a provider DTO without fuzzy matching or title fallback. */
+export function normalizeProvider(value) {
+  if (typeof value !== 'string') return 'unknown';
+  return PROVIDER_ALIASES[value.trim().toLowerCase()] ?? 'unknown';
+}
+
+/** Fallback for old listing frames whose provider field is completely absent. */
+export function inferCanonicalProvider(sessionName) {
+  return normalizeProvider(inferProvider(sessionName));
+}
+
+/** Display name per canonical provider key (UI-SPEC §8.2, last column). */
 export const PROVIDER_LABEL = Object.freeze({
-  'claude-code': 'Claude Code',
-  claude: 'Claude',
+  claude_code: 'Claude Code',
   codex: 'Codex',
+  copilot: 'Copilot',
   grok: 'Grok',
-  opencode: 'OpenCode',
   cursor: 'Cursor',
+  pi: 'Pi',
+  // Legacy UI-only aliases remain readable in the sealed new-agent dialog.
+  'claude-code': 'Claude Code',
+  claude: 'Claude Code',
+  opencode: 'OpenCode',
   zai: 'Z Code',
   kimi: 'Kimi Code',
 });
 
-/**
- * Icon slug per provider key (UI-SPEC §8.2). Values are @lobehub/icons-static-svg
- * file stems — the UI layer maps them to bundled asset URLs; this module stays
- * bundler-free so it runs under plain `node --test`.
- */
+/** Canonical icon slug metadata; actual assets are imported by ProviderIcon. */
 export const PROVIDER_ICON_SLUG = Object.freeze({
-  'claude-code': { active: 'claude-color', idle: 'claude' },
-  claude: { active: 'claude-color', idle: 'claude' },
+  claude_code: { active: 'claude_code', idle: 'claude_code' },
   codex: { active: 'codex', idle: 'codex' },
+  copilot: { active: 'copilot', idle: 'copilot' },
   grok: { active: 'grok', idle: 'grok' },
-  opencode: { active: 'opencode', idle: 'opencode' },
   cursor: { active: 'cursor', idle: 'cursor' },
-  zai: { active: 'zai', idle: 'zai' },
-  kimi: { active: 'kimi', idle: 'kimi' },
+  pi: { active: 'pi', idle: 'pi' },
+  // Compatibility aliases, not additional canonical providers.
+  'claude-code': { active: 'claude_code', idle: 'claude_code' },
+  claude: { active: 'claude_code', idle: 'claude_code' },
+  opencode: { active: 'unknown', idle: 'unknown' },
+  zai: { active: 'unknown', idle: 'unknown' },
+  kimi: { active: 'unknown', idle: 'unknown' },
 });
 
 /**

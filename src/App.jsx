@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DeviceManager } from './core/devices.js';
-import { inferProvider } from './core/providers.js';
 import { geomTrace } from './term/geomTrace.js';
 import {
   CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon,
@@ -176,7 +175,9 @@ export default function App({ seedDevices } = {}) {
           spaceKey: w.spaceKey,
           spaceName: w.label,
           title,
-          provider: inferProvider(title),
+          // DeviceManager already projects the authoritative DTO provider;
+          // do not let the display title override it in the UI layer.
+          provider: s.provider,
           state: s.status || 'unknown',
           fav: favSet.has(`${w.spaceKey}::${title}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
         });

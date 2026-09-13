@@ -7,7 +7,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  inferProvider, providerLabel, PROVIDER_LABEL, PROVIDER_ICON_SLUG,
+  inferProvider, inferCanonicalProvider, normalizeProvider,
+  providerLabel, PROVIDER_LABEL, PROVIDER_ICON_SLUG, CANONICAL_PROVIDERS,
 } from '../src/core/providers.js';
 
 const CASES = [
@@ -61,4 +62,17 @@ test('providerLabel falls back to the raw session name', () => {
   assert.equal(providerLabel('claude-code'), 'Claude Code');
   assert.equal(providerLabel(null, 'bash'), 'bash');
   assert.equal(providerLabel(undefined), '');
+});
+
+test('canonical provider normalization is exact and fail-closed', () => {
+  assert.deepEqual(CANONICAL_PROVIDERS, ['claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown']);
+  for (const value of ['claude_code', 'claude-code', 'claude', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown']) {
+    assert.equal(normalizeProvider(value), value === 'claude' || value === 'claude-code' ? 'claude_code' : value);
+  }
+  for (const value of [undefined, null, '', 'openai', 'codex-test', 'Claude Code']) {
+    assert.equal(normalizeProvider(value), 'unknown', `normalizeProvider(${JSON.stringify(value)})`);
+  }
+  assert.equal(inferCanonicalProvider('claude'), 'claude_code');
+  assert.equal(inferCanonicalProvider('codex-test'), 'codex');
+  assert.equal(inferCanonicalProvider('copilot-task'), 'unknown', 'legacy fuzzy names do not invent a canonical provider');
 });
