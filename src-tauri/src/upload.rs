@@ -117,7 +117,7 @@ pub fn upload_http(app: tauri::AppHandle, url: String, token: String, filename: 
 }
 
 #[tauri::command]
-pub fn read_clipboard_image() -> Result<ClipboardImage, String> {
+pub fn read_clipboard_image() -> Result<Option<ClipboardImage>, String> {
     #[cfg(target_os = "macos")]
     { return read_macos_clipboard(); }
     #[cfg(not(target_os = "macos"))]
@@ -125,7 +125,7 @@ pub fn read_clipboard_image() -> Result<ClipboardImage, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn read_macos_clipboard() -> Result<ClipboardImage, String> {
+fn read_macos_clipboard() -> Result<Option<ClipboardImage>, String> {
     let formats = [("public.png", "image/png", "clipboard.png"), ("public.jpeg", "image/jpeg", "clipboard.jpg"), ("public.tiff", "image/tiff", "clipboard.tiff")];
     unsafe {
         let pb: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
@@ -138,10 +138,10 @@ fn read_macos_clipboard() -> Result<ClipboardImage, String> {
             let len: usize = msg_send![data, length];
             let ptr: *const u8 = msg_send![data, bytes];
             if ptr.is_null() || len == 0 { continue; }
-            return Ok(ClipboardImage { name: name.to_string(), mime: mime.to_string(), bytes: std::slice::from_raw_parts(ptr, len).to_vec() });
+            return Ok(Some(ClipboardImage { name: name.to_string(), mime: mime.to_string(), bytes: std::slice::from_raw_parts(ptr, len).to_vec() }));
         }
     }
-    Err("no_image: pasteboard has no image item".to_string())
+    Ok(None)
 }
 
 #[cfg(test)]
