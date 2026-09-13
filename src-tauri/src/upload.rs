@@ -161,7 +161,7 @@ fn read_macos_clipboard_files() -> Result<Option<Vec<String>>, String> {
         let pb: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
         if pb.is_null() { return Err("clipboard_unavailable: pasteboard unavailable".to_string()); }
 
-        let classes: *mut Object = msg_send![class!(NSArray), arrayWithObject: class!(NSURL) as *mut Object];
+        let classes: *mut Object = msg_send![class!(NSArray), arrayWithObject: class!(NSURL) as *const _ as *mut Object];
         let key_c = std::ffi::CString::new("NSPasteboardURLReadingFileURLsOnlyKey").unwrap();
         let key: *mut Object = msg_send![class!(NSString), stringWithUTF8String: key_c.as_ptr()];
         let yes: *mut Object = msg_send![class!(NSNumber), numberWithBool: true];
