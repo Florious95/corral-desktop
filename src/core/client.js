@@ -1,4 +1,5 @@
 import { Client as CoreClient } from '../../deps/corral-core/web/js/client.js';
+import { decodeBinary } from './binary.js';
 import { encodeControl, decodeControl, isExtension } from './protocol.js';
 import { bookkeep, unbook, bookOf, geomTrace } from '../term/geomTrace.js';
 export { ClientState } from '../../deps/corral-core/web/js/client.js';
@@ -112,7 +113,13 @@ export class Client extends CoreClient {
   }
 
   handleMessage(data) {
-    if (typeof data !== 'string') return super.handleMessage(data);
+    if (typeof data !== 'string') {
+      let frame;
+      try { frame = decodeBinary(new Uint8Array(data)); }
+      catch (e) { this.onLocalError(e.code, e.message); return; }
+      this.onBinary(frame);
+      return;
+    }
     let root;
     try { root = JSON.parse(data); } catch { return super.handleMessage(data); }
     if (!isExtension(root?.type, root?.payload)) return super.handleMessage(data);

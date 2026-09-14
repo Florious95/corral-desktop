@@ -45,7 +45,7 @@ class FakeTerminal {
   emitBinary(s) { for (const cb of this.binaryHandlers) cb(s) }
   resize(cols, rows) { this.cols = cols; this.rows = rows }
   reset() { this.resets += 1 }
-  write(data) { this.writes.push(data) }
+  write(data, callback) { this.writes.push(data); callback?.(); }
   focused = false;
   focus() { this.focused = true }
   blur() { this.focused = false }
@@ -140,7 +140,7 @@ test('C: after snapshot, settled shrink resets before resize (no wrap of old cel
   view.dispose();
 });
 
-test('snapshot 清屏重建、delta 追加；快照补回车语义而不改 delta', () => {
+test('snapshot 清屏重建、delta 追加；快照补回车语义而不改 delta', async () => {
   const { view } = makeView();
   view.open();
   const snap = new Uint8Array([0x41, 0x1b, 0x5b, 0x31, 0x3b, 0x31, 0x48]);
@@ -148,12 +148,13 @@ test('snapshot 清屏重建、delta 追加；快照补回车语义而不改 delt
   assert.equal(view.term.resets, 1);
   assert.equal(view.term.writes[0], snap, '整段原样喂给 xterm，不 trim、不按行拆');
   view.writeDelta(new Uint8Array([0x42]));
+  await sleep(0);
   assert.equal(view.term.resets, 1);
   assert.equal(view.term.writes.length, 2);
   view.dispose();
 });
 
-test('snapshot 裸 LF 隐含 CR，delta 保持原始字节', () => {
+test('snapshot 裸 LF 隐含 CR，delta 保持原始字节', async () => {
   const { view } = makeView();
   view.open();
   const snap = new Uint8Array([0x41, 0x0a, 0x42]);
@@ -163,8 +164,43 @@ test('snapshot 裸 LF 隐含 CR，delta 保持原始字节', () => {
 
   const delta = new Uint8Array([0x43, 0x0a]);
   view.writeDelta(delta);
+  await sleep(0);
   assert.equal(view.term.writes.length, 2);
   assert.equal(view.term.writes[1], delta, 'delta stays byte-identical');
+  view.dispose();
+});
+
+test('delta burst is coalesced into one ordered complete xterm write', async () => {
+  const { view } = makeView();
+  view.open();
+  const chunks = [new Uint8Array([0x41]), new Uint8Array([0x42, 0x43]), new Uint8Array([0x44])];
+  for (const chunk of chunks) assert.equal(view.writeDelta(chunk), true);
+  assert.equal(view.term.writes.length, 0, 'delta burst waits for the scheduler');
+  await sleep(0);
+  assert.equal(view.term.writes.length, 1);
+  assert.deepEqual([...view.term.writes[0]], [0x41, 0x42, 0x43, 0x44]);
+  view.dispose();
+});
+
+test('delta backlog overflow requests snapshot recovery instead of silently dropping', async () => {
+  const recoveries = [];
+  const { view } = makeView({
+    maxPendingWriteBytes: 4,
+    onWriteBackpressure: (info) => recoveries.push(info),
+  });
+  view.open();
+  assert.equal(view.writeDelta(new Uint8Array([1, 2, 3])), true);
+  assert.equal(view.writeDelta(new Uint8Array([4, 5])), false);
+  assert.deepEqual(recoveries, [{ queuedBytes: 3, maxPendingBytes: 4 }]);
+  await sleep(0);
+  assert.equal(view.term.writes.length, 0, 'overflow clears the queued stale deltas only with recovery signalled');
+
+  view.writeSnapshot(new Uint8Array([9]));
+  assert.equal(view.term.writes.length, 1);
+  assert.deepEqual([...view.term.writes[0]], [9]);
+  assert.equal(view.writeDelta(new Uint8Array([10])), true);
+  await sleep(0);
+  assert.deepEqual([...view.term.writes[1]], [10]);
   view.dispose();
 });
 

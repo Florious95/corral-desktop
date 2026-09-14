@@ -23,6 +23,8 @@ import { attachWebglRenderer } from './webglRenderer.js';
 const WHEEL_THROTTLE_MS = 400;
 /** 本地 grid 与上报共用：列宽抖动未落定前 ⛔ 不 term.resize 旧快照。 */
 export const GRID_DEBOUNCE_MS = 120;
+/** Delta backlog budget; overflow requests a fresh snapshot instead of dropping silently. */
+export const MAX_PENDING_WRITE_BYTES = 4 * 1024 * 1024;
 
 function withImplicitCr(bytes) {
   let lfCount = 0;
@@ -50,17 +52,23 @@ export class TerminalView {
    * @param {number}   [opts.scrollback=0]  本地回滚行数。默认 0：历史唯一事实来源是协议
    *                                        scrollback 帧（UI-SPEC §6.2）
    * @param {number}   [opts.fontSize=13]
+   * @param {(info:{queuedBytes:number,maxPendingBytes:number}) => void} [opts.onWriteBackpressure]
+   * @param {number}   [opts.maxPendingWriteBytes] 仅供单测缩小积压预算
    * @param {Function} [opts.TerminalCtor]  仅供单测注入 FakeTerminal；生产走 @xterm/xterm
    */
   constructor(container, {
-    onResize, onHistoryBoundary, onData, onBinary,
-    scrollback = 0, fontSize = 13, TerminalCtor = Terminal,
+    onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
+    scrollback = 0, fontSize = 13, maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
+    TerminalCtor = Terminal,
   } = {}) {
     this.container = container;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
     this.onBinary = onBinary || (() => {});
+    this.onWriteBackpressure = onWriteBackpressure || (() => {});
+    this.maxPendingWriteBytes = Number.isInteger(maxPendingWriteBytes) && maxPendingWriteBytes > 0
+      ? maxPendingWriteBytes : MAX_PENDING_WRITE_BYTES;
 
     this.fontSize = fontSize;
     this.term = new TerminalCtor({
@@ -93,6 +101,14 @@ export class TerminalView {
     this._lastWheelAt = 0;
     this._disposed = false;
     this._hasPainted = false;
+    this._writeQueue = [];
+    this._writeHead = 0;
+    this._queuedWriteBytes = 0;
+    this._writeInFlight = false;
+    this._writeScheduled = false;
+    this._writeScheduleKind = null;
+    this._writeHandle = null;
+    this._recovering = false;
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -191,19 +207,148 @@ export class TerminalView {
     }
   }
 
+  _cancelWriteSchedule() {
+    if (!this._writeScheduled) return;
+    if (this._writeScheduleKind === 'raf' && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._writeHandle);
+    }
+    this._writeScheduled = false;
+    this._writeScheduleKind = null;
+    this._writeHandle = null;
+  }
+
+  _scheduleWrite() {
+    if (this._disposed || this._recovering || this._writeScheduled || this._writeInFlight
+        || this._writeHead === this._writeQueue.length) return;
+    this._writeScheduled = true;
+    const run = () => {
+      if (!this._writeScheduled) return;
+      this._writeScheduled = false;
+      this._writeScheduleKind = null;
+      this._writeHandle = null;
+      this._flushWrites();
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      this._writeScheduleKind = 'raf';
+      this._writeHandle = requestAnimationFrame(run);
+    } else if (typeof queueMicrotask === 'function') {
+      this._writeScheduleKind = 'microtask';
+      queueMicrotask(run);
+    } else {
+      this._writeScheduleKind = 'microtask';
+      Promise.resolve().then(run);
+    }
+  }
+
+  _triggerWriteRecovery() {
+    if (this._recovering) return;
+    const queuedBytes = this._queuedWriteBytes;
+    this._cancelWriteSchedule();
+    this._writeQueue.length = 0;
+    this._writeHead = 0;
+    this._queuedWriteBytes = 0;
+    this._recovering = true;
+    this.onWriteBackpressure({ queuedBytes, maxPendingBytes: this.maxPendingWriteBytes });
+  }
+
+  _write(kind, data) {
+    this._writeInFlight = true;
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      this._writeInFlight = false;
+      if (!this._disposed && !this._recovering) this._scheduleWrite();
+    };
+    try {
+      if (kind === 'snapshot') {
+        this.term.reset();
+        this._hasPainted = true;
+      }
+      this.term.write(data, done);
+    } catch (error) {
+      done();
+      throw error;
+    }
+  }
+
+  _flushWrites() {
+    if (this._disposed || this._recovering || this._writeInFlight) return;
+    const first = this._writeQueue[this._writeHead];
+    if (!first) return;
+
+    let data;
+    const kind = first.kind;
+    if (kind === 'snapshot') {
+      this._writeHead += 1;
+      this._queuedWriteBytes -= first.data.byteLength;
+      data = first.data;
+    } else {
+      const chunks = [];
+      let total = 0;
+      while (this._writeQueue[this._writeHead]?.kind === 'delta') {
+        const item = this._writeQueue[this._writeHead];
+        this._writeHead += 1;
+        chunks.push(item.data);
+        total += item.data.byteLength;
+        this._queuedWriteBytes -= item.data.byteLength;
+      }
+      if (chunks.length === 1) data = chunks[0];
+      else {
+        data = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          data.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+      }
+    }
+    if (this._writeHead === this._writeQueue.length) {
+      this._writeQueue.length = 0;
+      this._writeHead = 0;
+    }
+    this._write(kind, data);
+  }
+
   /** 全屏快照：清屏重建；只为裸 LF 补隐含 CR，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
-    this.term.reset();
-    this.term.write(withImplicitCr(u8));
-    this._hasPainted = true;
+    const data = withImplicitCr(u8);
+    this._recovering = false;
+    this._cancelWriteSchedule();
+    this._writeQueue.length = 0;
+    this._writeHead = 0;
+    this._queuedWriteBytes = 0;
+    if (this._writeInFlight) {
+      this._writeQueue.push({ kind: 'snapshot', data });
+      this._queuedWriteBytes = data.byteLength;
+      return;
+    }
+    this._write('snapshot', data);
   }
 
-  /** 增量：追加到当前屏。 */
+  /** 增量：在浏览器帧内合并并以 xterm write callback 单飞。 */
   writeDelta(u8) {
-    this.term.write(u8);
+    if (this._disposed || this._recovering) return false;
+    const data = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8 || []);
+    if (data.byteLength === 0) return true;
+    if (this._queuedWriteBytes + data.byteLength > this.maxPendingWriteBytes) {
+      this._triggerWriteRecovery();
+      return false;
+    }
+    this._writeQueue.push({ kind: 'delta', data });
+    this._queuedWriteBytes += data.byteLength;
+    this._scheduleWrite();
+    return true;
   }
 
-  clear() { this.term.reset(); }
+  clear() {
+    this._cancelWriteSchedule();
+    this._writeQueue.length = 0;
+    this._writeHead = 0;
+    this._queuedWriteBytes = 0;
+    this._recovering = false;
+    this.term.reset();
+  }
 
   focus() { try { this.term.focus(); } catch { /* 已 dispose */ } }
 
@@ -213,6 +358,10 @@ export class TerminalView {
 
   dispose() {
     this._disposed = true;
+    this._cancelWriteSchedule();
+    this._writeQueue.length = 0;
+    this._writeHead = 0;
+    this._queuedWriteBytes = 0;
     clearTimeout(this._resizeTimer);
     clearTimeout(this._gridTimer);
     try { this._webglAddon?.dispose(); } catch { /* already gone */ }
