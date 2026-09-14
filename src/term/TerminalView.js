@@ -45,6 +45,7 @@ export class TerminalView {
    * @param {(rows:number, cols:number) => void} [opts.onResize]         几何变了（已 debounce）
    * @param {() => void}                         [opts.onHistoryBoundary] 视口滚到顶 / 顶部继续上滚
    * @param {(data:string) => void}               [opts.onData]            xterm 编好的按键字节
+   * @param {(data:string) => void}               [opts.onBinary]          xterm 原始二进制事件（X10 鼠标）
 
    * @param {number}   [opts.scrollback=0]  本地回滚行数。默认 0：历史唯一事实来源是协议
    *                                        scrollback 帧（UI-SPEC §6.2）
@@ -52,13 +53,14 @@ export class TerminalView {
    * @param {Function} [opts.TerminalCtor]  仅供单测注入 FakeTerminal；生产走 @xterm/xterm
    */
   constructor(container, {
-    onResize, onHistoryBoundary, onData,
+    onResize, onHistoryBoundary, onData, onBinary,
     scrollback = 0, fontSize = 13, TerminalCtor = Terminal,
   } = {}) {
     this.container = container;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
+    this.onBinary = onBinary || (() => {});
 
     this.fontSize = fontSize;
     this.term = new TerminalCtor({
@@ -97,6 +99,10 @@ export class TerminalView {
   open() {
     this.term.open(this.container);
     this._dataDisposable = this.term.onData((data) => this.onData(data));
+    // xterm emits X10 mouse reports through onBinary; each code unit is one raw byte.
+    this._binaryDisposable = this.term.onBinary
+      ? this.term.onBinary((data) => this.onBinary(data))
+      : null;
     this._scrollDisposable = this.term.onScroll((line) => {
       if (line <= 0 && this._lastScrollLine > 0) this.onHistoryBoundary();
       this._lastScrollLine = line;
@@ -213,6 +219,7 @@ export class TerminalView {
     this._webglAddon = null;
     if (this._onWheel && this.container) this.container.removeEventListener('wheel', this._onWheel);
     if (this._dataDisposable) this._dataDisposable.dispose();
+    if (this._binaryDisposable) this._binaryDisposable.dispose();
     if (this._scrollDisposable) this._scrollDisposable.dispose();
     try { this.term.dispose(); } catch { /* 已 dispose */ }
   }
