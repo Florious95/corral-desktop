@@ -4,13 +4,14 @@ import { readFile } from 'node:fs/promises';
 
 import { DeviceManager } from '../src/core/devices.js';
 import {
-  buildPairingPayload, parsePairingPayload, serializePairingPayload,
+  buildPairingPayload, parsePairingPayload, reachableWsUrls, serializePairingPayload, wsUrlForHost,
 } from '../src/core/pairing.js';
 import { createQrMatrix } from '../src/lib/qr.js';
 
 const POP = new URL('../src/components/chrome/DevicesPopover.jsx', import.meta.url);
 const DIALOG = new URL('../src/components/chrome/PairingDialog.jsx', import.meta.url);
 const APP = new URL('../src/App.jsx', import.meta.url);
+const INDEX = new URL('../index.html', import.meta.url);
 
 function storage() {
   const values = new Map();
@@ -90,6 +91,17 @@ test('local zero-config pairing asks for a token, then persists it for QR handof
   assert.equal(dm.createPairingPayload().token, 'pair-token');
 });
 
+test('loopback pairing target is rewritten to reachable hosts and candidates', () => {
+  const base = 'ws://127.0.0.1:19990/ws';
+  assert.equal(wsUrlForHost(base, '192.168.1.23'), 'ws://192.168.1.23:19990/ws');
+  assert.equal(wsUrlForHost(base, '100.64.0.4'), 'ws://100.64.0.4:19990/ws');
+  assert.equal(wsUrlForHost(base, 'ws://10.0.0.8:9900/ws'), 'ws://10.0.0.8:9900/ws');
+  assert.equal(wsUrlForHost(base, '127.0.0.1'), 'ws://127.0.0.1:19990/ws');
+  assert.deepEqual(reachableWsUrls(base, ['127.0.0.1', '192.168.1.23', '192.168.1.23', '100.64.0.4']), [
+    'ws://192.168.1.23:19990/ws', 'ws://100.64.0.4:19990/ws',
+  ]);
+});
+
 test('QR renderer returns a non-empty square matrix for the serialized payload', () => {
   const value = serializePairingPayload({ url: 'ws://host/ws', token: 'pair-token' });
   const matrix = createQrMatrix(value);
@@ -108,8 +120,15 @@ test('pairing entry, modal actions, and close wiring are present in the UI', asy
   assert.match(dialog, /移动端远程连接需要安全 Token/);
   assert.match(dialog, /type="password"/);
   assert.match(dialog, /onSaveToken/);
+  assert.match(dialog, /本机可达地址（局域网 \/ Tailscale）/);
+  assert.match(dialog, /reachableWsUrls/);
   assert.match(dialog, /Escape/);
   assert.match(dialog, /onClick=\{onCancel\}/);
   assert.match(app, /createPairingPayload\(\)/);
   assert.match(app, /<PairingDialog/);
+});
+
+test('index declares an empty data favicon so the browser makes no 404 request', async () => {
+  const index = await readFile(INDEX, 'utf8');
+  assert.match(index, /<link rel="icon" href="data:,"\s*\/>/);
 });
