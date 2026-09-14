@@ -187,6 +187,7 @@ export default function App({ seedDevices } = {}) {
   }, [workspaces, localById, favSet]);
 
   const agentByKey = useMemo(() => new Map(allAgents.map((a) => [a.key, a])), [allAgents]);
+  const favCount = useMemo(() => allAgents.reduce((count, agent) => count + (agent.fav ? 1 : 0), 0), [allAgents]);
   paneKeysRef.current = paneKeys;
   liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
 
@@ -451,6 +452,12 @@ export default function App({ seedDevices } = {}) {
     });
   }, []);
 
+  const handleSpaceMenu = useCallback((e, key) => {
+    if (key === 'all' || key === 'fav') { e.preventDefault(); return; }
+    openMenu(e, 'space', key);
+  }, [openMenu]);
+  const handleAgentMenu = useCallback((e, key) => openMenu(e, 'agent', key), [openMenu]);
+
   const menuItems = useMemo(() => {
     if (!menu) return [];
     const icon = (El, extra) => <El size={14} strokeWidth={1.9} {...extra} />;
@@ -560,14 +567,11 @@ export default function App({ seedDevices } = {}) {
           spaces={spaces}
           agents={visibleAgents}
           allCount={allAgents.length}
-          favCount={allAgents.filter((a) => a.fav).length}
+          favCount={favCount}
           closing={closing}
           openKeys={paneKeys}
-          onSpaceMenu={(e, key) => {
-            if (key === 'all' || key === 'fav') { e.preventDefault(); return } // 虚拟行不弹菜单
-            openMenu(e, 'space', key);
-          }}
-          onAgentMenu={(e, key) => openMenu(e, 'agent', key)}
+          onSpaceMenu={handleSpaceMenu}
+          onAgentMenu={handleAgentMenu}
           onOpenAgent={openAgent}
           deviceLabel={deviceLabel}
           anyDeviceOnline={anyDeviceOnline}
