@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOnData, NativeInputPump, unsupportedKeyEvent, TEXT_FLUSH_MS, CLICK_HINT_MS, classifyMouseBtn, consumeTerminalReplies } from '../src/term/nativeInput.js';
+import { parseOnData, NativeInputPump, unsupportedKeyEvent, TEXT_FLUSH_MS, classifyMouseBtn, consumeTerminalReplies } from '../src/term/nativeInput.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -82,12 +82,14 @@ test('parseOnData: SGR motion 35 is silent, not CSI unsupported', () => {
   assert.equal(ev[0].type, 'mouse-silent');
 });
 
-test('parseOnData: SGR wheel 64/65 silent; click 0 is mouse-click', () => {
+test('parseOnData: SGR wheel/right silent; left button is mouse-click', () => {
   assert.equal(parseOnData('\x1b[<64;1;1M')[0].type, 'mouse-silent');
   assert.equal(parseOnData('\x1b[<65;1;1m')[0].type, 'mouse-silent');
+  assert.equal(parseOnData('\x1b[<2;1;1M')[0].type, 'mouse-silent');
   const click = parseOnData('\x1b[<0;10;10M');
   assert.equal(click[0].type, 'mouse-click');
   assert.equal(click[0].label, '鼠标点击');
+  assert.equal(parseOnData('\x1b[<0;10;10m')[0].type, 'mouse-click');
 });
 
 test('parseOnData: X10 mouse three-byte report is not printable text', () => {
@@ -97,29 +99,70 @@ test('parseOnData: X10 mouse three-byte report is not printable text', () => {
   assert.equal(ev[0].type, 'mouse-silent');
   const click = parseOnData('\x1b[M' + String.fromCharCode(32, 32 + 1, 32 + 1));
   assert.equal(click[0].type, 'mouse-click');
+  const right = parseOnData('\x1b[M' + String.fromCharCode(32 + 2, 32 + 1, 32 + 1));
+  assert.equal(right[0].type, 'mouse-silent');
 });
 
-test('classifyMouseBtn: 32+ is motion, 64/65 wheel, 0-2 click', () => {
+test('classifyMouseBtn: only left button (including modifiers) is click', () => {
   assert.equal(classifyMouseBtn(35), 'silent');
   assert.equal(classifyMouseBtn(64), 'silent');
   assert.equal(classifyMouseBtn(65), 'silent');
   assert.equal(classifyMouseBtn(0), 'click');
-  assert.equal(classifyMouseBtn(2), 'click');
+  assert.equal(classifyMouseBtn(4), 'click');
+  assert.equal(classifyMouseBtn(2), 'silent');
+  assert.equal(classifyMouseBtn(3), 'silent');
 });
 
-test('NativeInputPump: motion does not hint; click hints at most once per window', () => {
+test('NativeInputPump forwards SGR left click bytes and blocks right click', () => {
+  const sent = [];
   const hints = [];
   const pump = new NativeInputPump({
     sendText: () => {}, sendKey: () => {}, sendEnter: () => {},
+    sendBytes: (bytes) => sent.push(new TextDecoder().decode(bytes)),
     onUnsupported: (l) => hints.push(l),
   });
-  pump.onData('\x1b[<35;30;34M');
-  pump.onData('\x1b[<35;31;34M');
-  pump.onData('\x1b[<64;1;1M');
+  const leftPress = '\x1b[<0;2;2M';
+  const leftRelease = '\x1b[<0;2;2m';
+  const modified = [4, 8, 16].flatMap((button) => [
+    `\x1b[<${button};3;3M`,
+    `\x1b[<${button};3;3m`,
+  ]);
+  pump.onData(leftPress);
+  pump.onData(leftRelease);
+  for (const seq of modified) pump.onData(seq);
+  pump.onData('\x1b[<2;2;2M');
+  pump.onData('\x1b[<2;2;2m');
+  pump.onData('\x1b[<3;2;2M');
+  pump.onData('\x1b[<3;2;2m');
+  pump.onData('\x1b[<64;2;2M');
+  assert.deepEqual(sent, [leftPress, leftRelease, ...modified]);
   assert.deepEqual(hints, []);
-  pump.onData('\x1b[<0;2;2M');
-  pump.onData('\x1b[<0;3;3M');
-  assert.deepEqual(hints, ['鼠标点击']);
+  pump.dispose();
+});
+
+test('NativeInputPump forwards X10 left press/release but blocks right/release reports', () => {
+  const sent = [];
+  const pump = new NativeInputPump({
+    sendText: () => {}, sendKey: () => {}, sendEnter: () => {},
+    sendBytes: (bytes) => sent.push(bytes),
+    onUnsupported: () => { throw new Error('blocked mouse must not hint'); },
+  });
+  const left = '\x1b[M' + String.fromCharCode(32, 33, 34);
+  const middle = '\x1b[M' + String.fromCharCode(33, 33, 34);
+  const right = '\x1b[M' + String.fromCharCode(34, 33, 34);
+  const release = '\x1b[M' + String.fromCharCode(35, 33, 34);
+  const wheel = '\x1b[M' + String.fromCharCode(96, 33, 34);
+  const highCoordinateLeft = '\x1b[M' + String.fromCharCode(32, 200, 201);
+  pump.onData(left);
+  pump.onData(release);
+  pump.onData(middle);
+  pump.onData(release);
+  pump.onData(right);
+  pump.onData(release);
+  pump.onData(wheel);
+  pump.onData(highCoordinateLeft);
+  assert.deepEqual(sent.slice(0, 2).map((bytes) => new TextDecoder().decode(bytes)), [left, release]);
+  assert.deepEqual(Array.from(sent[2]), [27, 91, 77, 32, 200, 201]);
   pump.dispose();
 });
 

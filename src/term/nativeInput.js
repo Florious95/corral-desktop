@@ -5,15 +5,16 @@
 
 export const TEXT_FLUSH_MS = 32;
 export const TEXT_FLUSH_CHARS = 64;
-/** 真点击提示：同一泵每这么多毫秒最多一次。移动/滚轮上报不提示。 */
+/** @deprecated clicks are now forwarded as bytes; retained for import compatibility. */
 export const CLICK_HINT_MS = 3000;
-
 const ARROW = { A: 'up', B: 'down', C: 'right', D: 'left' };
 
 export const REPLY_HOLD_MAX = 8192;
 
 const encoder = new TextEncoder();
 const toBytes = (value) => encoder.encode(value);
+// X10 stores each report byte in one JS code unit; do not UTF-8-expand coordinates > 127.
+const toMouseBytes = (value) => Uint8Array.from(value, (char) => char.charCodeAt(0) & 0xff);
 
 function findStringTerm(buf, from) {
   for (let j = from; j < buf.length; j += 1) {
@@ -121,14 +122,15 @@ function mapCsi(seq) {
 }
 
 /**
- * SGR 1006 鼠标：btn 64/65 = 滚轮，≥32 = 移动（含 35），0/1/2 = 真点击。
- * @returns {'silent'|'click'|null}
+ * 鼠标协议分类：只把左键（SGR button 0）作为可直通 PTY 的点击。
+ * 右键/中键、滚轮与移动报告都拦截；滚轮仍由 scroll_wheel 独立处理。
+ * SGR 的修饰位（4/8/16）仍保留左键语义，X10 的 release code 3 不带按键归属，故不转发。
+ * @returns {'silent'|'click'}
  */
 export function classifyMouseBtn(btn) {
   if (!Number.isFinite(btn)) return 'silent';
-  if (btn === 64 || btn === 65 || btn === 66 || btn === 67) return 'silent';
   if (btn >= 32) return 'silent';
-  return 'click';
+  return (btn & 3) === 0 ? 'click' : 'silent';
 }
 
 function mouseEvent(kind, seq) {
@@ -294,8 +296,8 @@ export class NativeInputPump {
     this._timer = null;
     this._inputTimer = null;
     this._inputHold = '';
-    this._lastClickHint = 0;
     this._replyHold = '';
+    this._x10Button = null;
   }
 
   onData(s) {
@@ -321,12 +323,25 @@ export class NativeInputPump {
       this.flush();
       if (e.type === 'enter') this.sendEnter();
       else if (e.type === 'key') this.sendKey(e.value);
-      else if (e.type === 'mouse-silent') continue;
-      else if (e.type === 'mouse-click') {
-        const now = Date.now();
-        if (now - this._lastClickHint < CLICK_HINT_MS) continue;
-        this._lastClickHint = now;
-        this.onUnsupported(e.label);
+      else if (e.type === 'mouse-silent') {
+        // X10 release (button 3) has no button identity. Forward it only when
+        // the matching X10 press we saw was left; right/middle releases stay blocked.
+        if (e.seq?.startsWith('\x1b[M')) {
+          const button = e.seq.length >= 4 ? e.seq.charCodeAt(3) - 32 : NaN;
+          if (button === 1 || button === 2) this._x10Button = 'blocked';
+          else if (button === 3) {
+            const wasLeft = this._x10Button === 'left';
+            this._x10Button = null;
+            if (wasLeft) {
+              if (this.sendBytes) this.sendBytes(toMouseBytes(e.seq));
+              else this.onUnsupported('鼠标点击');
+            }
+          }
+        }
+      } else if (e.type === 'mouse-click') {
+        if (e.seq?.startsWith('\x1b[M')) this._x10Button = 'left';
+        if (this.sendBytes) this.sendBytes(toMouseBytes(e.seq));
+        else this.onUnsupported(e.label);
       } else if (this.sendBytes) this.sendBytes(toBytes(e.seq));
       else this.onUnsupported(e.label);
     }
