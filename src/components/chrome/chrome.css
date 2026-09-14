@@ -412,6 +412,12 @@
 .pair-token {
   text-align: left;
 }
+.pair-host-help {
+  margin: -8px 0 12px;
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+  text-align: left;
+}
 .pair-qr {
   display: block;
   width: 260px;

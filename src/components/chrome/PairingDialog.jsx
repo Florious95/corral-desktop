@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import { serializePairingPayload } from '../../core/pairing.js';
+import { buildPairingPayload, reachableWsUrls, serializePairingPayload } from '../../core/pairing.js';
+import { isLocalUrl } from '../../core/local.js';
 import { createQrMatrix } from '../../lib/qr.js';
 import { XIcon } from '../../lib/icons.jsx';
 import './chrome.css';
 
 function targetLabel(url) {
   try { return new URL(url).host; } catch { return ''; }
+}
+
+function browserReachableHost() {
+  const host = globalThis.location?.hostname || '';
+  if (!host || host.endsWith('.localhost') || isLocalUrl(`ws://${host}`)) return '';
+  return host;
+}
+
+function hostValues(value) {
+  return String(value || '').split(/[\s,]+/).map((host) => host.trim()).filter(Boolean);
 }
 
 function PairingQr({ value }) {
@@ -45,15 +56,26 @@ function PairingQr({ value }) {
  */
 export default function PairingDialog({ open, payload, onCancel, onCopied, onSaveToken }) {
   const [token, setToken] = useState('');
+  const [hosts, setHosts] = useState('');
   const [copyState, setCopyState] = useState('');
   const configuredToken = typeof payload?.token === 'string' ? payload.token : '';
+  const loopback = isLocalUrl(payload?.url);
   const editableToken = configuredToken.length === 0;
   const effectivePayload = useMemo(() => {
     if (!payload) return null;
     const effectiveToken = configuredToken || token.trim();
     if (!effectiveToken) return null;
-    try { return { ...payload, token: effectiveToken }; } catch { return null; }
-  }, [payload, configuredToken, token]);
+    const candidates = loopback ? reachableWsUrls(payload.url, hostValues(hosts)) : payload.candidates;
+    if (loopback && candidates.length === 0) return null;
+    try {
+      return buildPairingPayload({
+        ...payload,
+        url: loopback ? candidates[0] : payload.url,
+        token: effectiveToken,
+        candidates,
+      });
+    } catch { return null; }
+  }, [payload, configuredToken, token, hosts, loopback]);
   const value = useMemo(() => {
     if (!effectivePayload) return '';
     try { return serializePairingPayload(effectivePayload); } catch { return ''; }
@@ -62,13 +84,14 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
   useEffect(() => {
     if (!open) return undefined;
     setToken(configuredToken);
+    setHosts(loopback ? browserReachableHost() : '');
     setCopyState('');
     const onKey = (e) => {
       if (e.key === 'Escape') onCancel();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onCancel, configuredToken]);
+  }, [open, onCancel, configuredToken, loopback]);
 
   if (!open) return null;
 
@@ -78,7 +101,7 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
     try {
       if (!globalThis.navigator?.clipboard?.writeText) throw new Error('clipboard unavailable');
       await globalThis.navigator.clipboard.writeText(value);
-      setCopyState('已保存并复制');
+      setCopyState(editableToken ? '已保存并复制' : '已复制');
       onCopied?.('配对信息已复制');
     } catch {
       setCopyState(editableToken ? '已保存，复制失败' : '复制失败');
@@ -106,6 +129,22 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
               <XIcon size={15} strokeWidth={2} />
             </button>
           </div>
+
+          {loopback && (
+            <>
+              <label className="chr-label pair-token-label" htmlFor="pair-host">本机可达地址（局域网 / Tailscale）</label>
+              <input
+                id="pair-host"
+                className="chr-input pair-token"
+                autoComplete="off"
+                spellCheck={false}
+                value={hosts}
+                placeholder="192.168.1.23，可用逗号分隔多个地址"
+                onChange={(e) => { setHosts(e.target.value); setCopyState(''); }}
+              />
+              <div className="pair-host-help">不要填写 127.0.0.1；手机需能访问此地址。</div>
+            </>
+          )}
 
           {editableToken && (
             <>
@@ -139,8 +178,8 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
             </>
           ) : (
             <>
-              <div className="pair-empty">移动端远程连接需要安全 Token</div>
-              <div className="pair-help">粘贴安全配对 Token 后，将立即生成二维码。</div>
+              <div className="pair-empty">{loopback ? '移动端远程连接需要安全 Token 与可达地址' : '移动端远程连接需要安全 Token'}</div>
+              <div className="pair-help">{loopback ? '填写局域网或 Tailscale 地址，再粘贴安全配对 Token，即可生成二维码。' : '粘贴安全配对 Token 后，将立即生成二维码。'}</div>
               <div className="pair-actions">
                 <button type="button" className="chr-btn-reset chr-btn chr-btn-primary" onClick={onCancel}>
                   关闭

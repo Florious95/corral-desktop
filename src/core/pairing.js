@@ -1,5 +1,7 @@
 /* Desktop/mobile onboarding payload (corral-core protocol.md §2.1). */
 
+import { isLocalUrl } from './local.js';
+
 export const PAIRING_VERSION = 1;
 const WS_RE = /^wss?:\/\/[^\s]+$/i;
 
@@ -18,6 +20,33 @@ function cleanCandidates(url, candidates) {
   for (const candidate of Array.isArray(candidates) ? candidates : []) {
     if (!validWsUrl(candidate) || out.includes(candidate)) continue;
     out.push(candidate);
+  }
+  return out;
+}
+
+/** Replace only the host while retaining the daemon's protocol, port, and path. */
+export function wsUrlForHost(baseUrl, host) {
+  if (!validWsUrl(baseUrl) || typeof host !== 'string') return null;
+  const value = host.trim();
+  if (!value) return null;
+  if (/^wss?:\/\//i.test(value)) return validWsUrl(value) ? value : null;
+  if (/[\s/?#]/.test(value)) return null;
+  try {
+    const endpoint = new URL(baseUrl);
+    endpoint.hostname = value;
+    return validWsUrl(endpoint.href) ? endpoint.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Candidates shown in the mobile QR must never point back to the scanner. */
+export function reachableWsUrls(baseUrl, hosts) {
+  const out = [];
+  for (const host of Array.isArray(hosts) ? hosts : []) {
+    const endpoint = wsUrlForHost(baseUrl, host);
+    if (!endpoint || isLocalUrl(endpoint) || out.includes(endpoint)) continue;
+    out.push(endpoint);
   }
   return out;
 }
