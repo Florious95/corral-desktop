@@ -363,10 +363,11 @@ src/
  * @param {{v:number,url:string,token:string,ts_authkey:string,candidates:string[]}|null} payload
  * @param {() => void} onCancel
  * @param {(message:string) => void} [onCopied]
+ * @param {(token:string) => void} [onSaveToken]
  */
 ```
 
-弹窗复用 `.chr-dialog` 外壳，宽 380px，包含 260px 高清 SVG 二维码（四模块 quiet zone、`shape-rendering:crispEdges`）、主机地址与扫码说明：`打开 AgentMirror 移动端，选择扫码连接并对准此二维码`。`Esc`、遮罩、关闭按钮均关闭。仅当 payload 完整有效时渲染二维码；无 token 时展示不可配对提示。`复制配对链接 / Token` 只把协议 v1 单行 JSON 写入系统剪贴板，不在页面或 toast 回显 token。二维码字段严格为 `{v:1,url,token,ts_authkey,candidates}`，候选地址按协议过滤并将主地址置首。
+弹窗复用 `.chr-dialog` 外壳，宽 380px，包含 260px 高清 SVG 二维码（四模块 quiet zone、`shape-rendering:crispEdges`）、主机地址与扫码说明：`打开 AgentMirror 移动端，选择扫码连接并对准此二维码`。`Esc`、遮罩、关闭按钮均关闭。已有安全 Token 时直接渲染；本机免密直连没有 Token 时显示密文输入框和 `移动端远程连接需要安全 Token` 提示，粘贴后立即动态生成二维码；`保存并复制配对信息` 同时安全保存 Token 并复制协议载荷。`复制配对链接 / Token` 只把协议 v1 单行 JSON 写入系统剪贴板，不在页面或 toast 回显 token。二维码字段严格为 `{v:1,url,token,ts_authkey,candidates}`，候选地址按协议过滤并将主地址置首。
 
 ### 4.3 `chrome/AddDeviceDialog.jsx`
 

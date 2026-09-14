@@ -405,6 +405,13 @@
   background: var(--hover-4);
   color: var(--icon-strong);
 }
+.pair-token-label {
+  margin-top: 4px;
+  text-align: left;
+}
+.pair-token {
+  text-align: left;
+}
 .pair-qr {
   display: block;
   width: 260px;
