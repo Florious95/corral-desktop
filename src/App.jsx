@@ -438,8 +438,12 @@ export default function App({ seedDevices } = {}) {
 
   const handlePairMobile = useCallback(() => {
     setDevicesOpen(false);
-    setPairingPayload(dm.createPairingPayload());
+    setPairingPayload(dm.createPairingPayload() || dm.createPairingDraft());
     setPairingOpen(true);
+  }, [dm]);
+
+  const savePairingToken = useCallback((token) => {
+    dm.savePairingToken(token);
   }, [dm]);
 
   const closePairing = useCallback(() => {
@@ -641,6 +645,7 @@ export default function App({ seedDevices } = {}) {
         payload={pairingPayload}
         onCancel={closePairing}
         onCopied={setToastMsg}
+        onSaveToken={savePairingToken}
       />
 
       <NewAgentDialog

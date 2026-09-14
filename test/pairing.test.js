@@ -76,6 +76,20 @@ test('DeviceManager exposes pairing material only through explicit QR handoff', 
   assert.ok(dm.devices.every((device) => !Object.hasOwn(device, 'token')));
 });
 
+test('local zero-config pairing asks for a token, then persists it for QR handoff', () => {
+  const dm = new DeviceManager({ storage: storage(), autoLocal: true });
+  assert.equal(dm.createPairingPayload(), null);
+  assert.deepEqual(dm.createPairingDraft(), {
+    v: 1,
+    url: 'ws://127.0.0.1:9900/ws',
+    token: '',
+    ts_authkey: '',
+    candidates: ['ws://127.0.0.1:9900/ws'],
+  });
+  assert.equal(dm.savePairingToken('pair-token'), true);
+  assert.equal(dm.createPairingPayload().token, 'pair-token');
+});
+
 test('QR renderer returns a non-empty square matrix for the serialized payload', () => {
   const value = serializePairingPayload({ url: 'ws://host/ws', token: 'pair-token' });
   const matrix = createQrMatrix(value);
@@ -91,6 +105,9 @@ test('pairing entry, modal actions, and close wiring are present in the UI', asy
   ]);
   assert.match(popover, /配对移动端/);
   assert.match(dialog, /复制配对链接 \/ Token/);
+  assert.match(dialog, /移动端远程连接需要安全 Token/);
+  assert.match(dialog, /type="password"/);
+  assert.match(dialog, /onSaveToken/);
   assert.match(dialog, /Escape/);
   assert.match(dialog, /onClick=\{onCancel\}/);
   assert.match(app, /createPairingPayload\(\)/);

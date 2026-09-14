@@ -41,36 +41,48 @@ function PairingQr({ value }) {
  * @param {{v:number,url:string,token:string,ts_authkey:string,candidates:string[]}|null} props.payload
  * @param {() => void} props.onCancel
  * @param {(message:string) => void} [props.onCopied]
+ * @param {(token:string) => void} [props.onSaveToken]
  */
-export default function PairingDialog({ open, payload, onCancel, onCopied }) {
+export default function PairingDialog({ open, payload, onCancel, onCopied, onSaveToken }) {
+  const [token, setToken] = useState('');
   const [copyState, setCopyState] = useState('');
+  const configuredToken = typeof payload?.token === 'string' ? payload.token : '';
+  const editableToken = configuredToken.length === 0;
+  const effectivePayload = useMemo(() => {
+    if (!payload) return null;
+    const effectiveToken = configuredToken || token.trim();
+    if (!effectiveToken) return null;
+    try { return { ...payload, token: effectiveToken }; } catch { return null; }
+  }, [payload, configuredToken, token]);
   const value = useMemo(() => {
-    if (!payload) return '';
-    try { return serializePairingPayload(payload); } catch { return ''; }
-  }, [payload]);
+    if (!effectivePayload) return '';
+    try { return serializePairingPayload(effectivePayload); } catch { return ''; }
+  }, [effectivePayload]);
 
   useEffect(() => {
     if (!open) return undefined;
+    setToken(configuredToken);
     setCopyState('');
     const onKey = (e) => {
       if (e.key === 'Escape') onCancel();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onCancel]);
+  }, [open, onCancel, configuredToken]);
 
   if (!open) return null;
 
   const copy = async () => {
     if (!value) return;
+    if (editableToken) onSaveToken?.(token.trim());
     try {
       if (!globalThis.navigator?.clipboard?.writeText) throw new Error('clipboard unavailable');
       await globalThis.navigator.clipboard.writeText(value);
-      setCopyState('已复制');
+      setCopyState('已保存并复制');
       onCopied?.('配对信息已复制');
     } catch {
-      setCopyState('复制失败');
-      onCopied?.('复制失败，请重试');
+      setCopyState(editableToken ? '已保存，复制失败' : '复制失败');
+      onCopied?.(editableToken ? 'Token 已保存，复制失败，请重试' : '复制失败，请重试');
     }
   };
 
@@ -95,14 +107,30 @@ export default function PairingDialog({ open, payload, onCancel, onCopied }) {
             </button>
           </div>
 
+          {editableToken && (
+            <>
+              <label className="chr-label pair-token-label" htmlFor="pair-token">配对 Token</label>
+              <input
+                id="pair-token"
+                className="chr-input pair-token"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={token}
+                placeholder="粘贴 agentmirrord 配对 Token"
+                onChange={(e) => { setToken(e.target.value); setCopyState(''); }}
+              />
+            </>
+          )}
+
           {value ? (
             <>
               <PairingQr value={value} />
-              <div className="pair-target">{targetLabel(payload.url)}</div>
+              <div className="pair-target">{targetLabel(effectivePayload.url)}</div>
               <div className="pair-help">打开 AgentMirror 移动端，选择扫码连接并对准此二维码</div>
               <div className="pair-actions">
                 <button type="button" className="chr-btn-reset chr-btn" onClick={copy}>
-                  {copyState || '复制配对链接 / Token'}
+                  {copyState || (editableToken ? '保存并复制配对信息' : '复制配对链接 / Token')}
                 </button>
                 <button type="button" className="chr-btn-reset chr-btn chr-btn-primary" onClick={onCancel}>
                   完成
@@ -111,8 +139,8 @@ export default function PairingDialog({ open, payload, onCancel, onCopied }) {
             </>
           ) : (
             <>
-              <div className="pair-empty">当前没有可用于移动端配对的 Token</div>
-              <div className="pair-help">先添加一台带配对 Token 的远程设备，再打开此窗口生成二维码。</div>
+              <div className="pair-empty">移动端远程连接需要安全 Token</div>
+              <div className="pair-help">粘贴安全配对 Token 后，将立即生成二维码。</div>
               <div className="pair-actions">
                 <button type="button" className="chr-btn-reset chr-btn chr-btn-primary" onClick={onCancel}>
                   关闭

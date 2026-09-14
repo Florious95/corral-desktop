@@ -260,6 +260,23 @@ export class DeviceManager {
     }
   }
 
+  /** Return a token-free QR draft when the local endpoint needs manual pairing. */
+  createPairingDraft() {
+    const source = this._devices.find((d) => isLocalUrl(d.url)) || this._devices[0];
+    if (!source) return null;
+    return { v: 1, url: source.url, token: '', ts_authkey: '', candidates: [source.url] };
+  }
+
+  /** Persist a manually supplied secure token for the next pairing handoff. */
+  savePairingToken(token) {
+    if (typeof token !== 'string' || token.length === 0) return false;
+    const source = this._devices.find((d) => isLocalUrl(d.url)) || this._devices[0];
+    if (!source) return false;
+    source.token = token;
+    this._persistDevices();
+    return true;
+  }
+
   // ---- aggregated model ----
 
   /** @returns {Object[]} AggregatedWorkspace[] for checked devices, sorted by device then cwd. */
