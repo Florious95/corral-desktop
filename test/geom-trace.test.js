@@ -1,12 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
 import { Client } from '../src/core/client.js';
 import { decodeControl } from '../src/core/protocol.js';
 import { encodeBinary, BINARY_KIND } from '../deps/corral-core/web/js/binary.js';
 import { SameWidthController } from '../src/term/sameWidth.js';
 import {
   resetGeomTrace, dumpGeomTrace, bookOf, formatLine, geomTrace,
+  setGeomTraceEnabled,
 } from '../src/term/geomTrace.js';
+
+setGeomTraceEnabled(true);
 
 class FakeWS {
   static OPEN = 1;
@@ -47,6 +51,17 @@ function openAndAuth(ws) {
   ws._text(JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }));
 }
 
+test('geomTrace disabled returns immediately without retaining an event', () => {
+  resetGeomTrace();
+  setGeomTraceEnabled(false);
+  try {
+    assert.equal(geomTrace('delta', { ref: 'disabled', rows: 1, cols: 1 }), 0);
+    assert.deepEqual(dumpGeomTrace(), []);
+  } finally {
+    setGeomTraceEnabled(true);
+  }
+});
+
 test('geomTrace: formatLine has both operands, never a token field', () => {
   resetGeomTrace();
   const rec = geomTrace('subscribe', {
@@ -60,6 +75,20 @@ test('geomTrace: formatLine has both operands, never a token field', () => {
   assert.match(line, /cols=157/);
   assert.match(line, /reason=settle/);
   assert.doesNotMatch(line, /SECRET/);
+});
+
+test('geomTrace ring stays bounded for a 10k delta sequence', () => {
+  resetGeomTrace();
+  const started = performance.now();
+  for (let seq = 0; seq < 10_000; seq += 1) {
+    geomTrace('delta', { ref: 'perf', seq, rows: 24, cols: 80 });
+  }
+  const elapsed = performance.now() - started;
+  const records = dumpGeomTrace();
+  assert.equal(records.length, 8192);
+  assert.equal(records[0].seq, 1808);
+  assert.equal(records.at(-1).seq, 9999);
+  assert.ok(elapsed < 2000, `10k geomTrace calls took ${elapsed.toFixed(1)}ms`);
 });
 
 test('subscribe before READY is skipped not_ready but bookkept per ref', () => {
