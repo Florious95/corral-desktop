@@ -287,6 +287,7 @@ src/
     ProviderIcon.jsx            §8
     chrome/TitleBar.jsx         §4.1
     chrome/DevicesPopover.jsx   §4.2
+    chrome/PairingDialog.jsx    §4.2 mobile pairing
     chrome/AddDeviceDialog.jsx  §4.3
     chrome/NewAgentDialog.jsx   §4.4
     chrome/ContextMenu.jsx      §4.5
@@ -337,6 +338,7 @@ src/
  * @param {(id:string, next:boolean) => void} onToggle       单设备勾选
  * @param {(next:boolean) => void} onToggleAll               All Devices 全选/全不选
  * @param {() => void} onAddDevice                           打开 AddDeviceDialog
+ * @param {() => void} onPairMobile                          打开移动端配对二维码
  * @param {() => void} onClose
  */
 ```
@@ -350,7 +352,21 @@ src/
   - 中间：`flex:1;min-width:0`。第一行 `font-size:var(--fs-13); font-weight:600; display:flex; gap:6px` = 名字 + 在线点（All 行**不显示**点）；在线点 `6px` 圆，在线 `background:var(--green)`，离线 `background:transparent;border:1.5px solid var(--dot-hollow)`。第二行 `font-size:var(--fs-11); color:var(--text-muted)` 省略号。
   - 右勾选：选中 = `<CheckIcon size={15} stroke=var(--text) strokeWidth=2.2/>`；未选 = `<span style="width:14px;height:14px;border-radius:var(--r-4);border:1.5px solid var(--checkbox-border);box-sizing:border-box">`。
   - All 行 `sub` = `` `${devices.length} devices · ${onlineCount} connected` ``；`on = devices.every(d => d.checked)`。
+- **配对移动端行**：在 Add Device… 之前渲染，`display:flex; gap:10px; padding:8px 12px; font-size:var(--fs-13); color:var(--text-secondary); cursor:pointer; border-radius:var(--r-8)`；点击打开 PairingDialog；`<QrIcon size={14}/>`。
 - **Add Device… 行**：`border-top:1px solid var(--border); margin-top:4px; padding:8px 12px; display:flex; gap:10px; font-size:var(--fs-13); color:var(--text-secondary); cursor:pointer; border-radius:0 0 var(--r-8) var(--r-8)`；hover `var(--hover-2)`；`<PlusIcon size={14}/>`。
+
+### 4.2.1 `chrome/PairingDialog.jsx`
+
+```js
+/**
+ * @param {boolean} open
+ * @param {{v:number,url:string,token:string,ts_authkey:string,candidates:string[]}|null} payload
+ * @param {() => void} onCancel
+ * @param {(message:string) => void} [onCopied]
+ */
+```
+
+弹窗复用 `.chr-dialog` 外壳，宽 380px，包含 260px 高清 SVG 二维码（四模块 quiet zone、`shape-rendering:crispEdges`）、主机地址与扫码说明：`打开 AgentMirror 移动端，选择扫码连接并对准此二维码`。`Esc`、遮罩、关闭按钮均关闭。仅当 payload 完整有效时渲染二维码；无 token 时展示不可配对提示。`复制配对链接 / Token` 只把协议 v1 单行 JSON 写入系统剪贴板，不在页面或 toast 回显 token。二维码字段严格为 `{v:1,url,token,ts_authkey,candidates}`，候选地址按协议过滤并将主地址置首。
 
 ### 4.3 `chrome/AddDeviceDialog.jsx`
 

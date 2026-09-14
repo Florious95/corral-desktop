@@ -21,6 +21,7 @@
     "@tauri-apps/plugin-store": "^2.4.4",
     "@xterm/addon-webgl": "0.20.0-beta.298",
     "@xterm/xterm": "^6.0.0",
+    "qrcode-generator": "2.0.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

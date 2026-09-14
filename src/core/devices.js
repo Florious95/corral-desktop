@@ -16,6 +16,7 @@ import { Client, ClientState } from './client.js';
 import { inferCanonicalProvider, normalizeProvider } from './providers.js';
 import { uploadImage } from './upload.js';
 import { DEFAULT_LOCAL_DEVICE, isLocalUrl } from './local.js';
+import { buildPairingPayload } from './pairing.js';
 import * as store from './store.js';
 
 const MODEL_DEBOUNCE_MS = 100;
@@ -79,6 +80,7 @@ function labelSpaces(spaces) {
  * @contract
  * @pre storage holds the v1 schema (§4); wsFactory is injectable for tests
  * @post every callback payload carries deviceId; tokens never leave this module
+ *      except an explicit createPairingPayload() QR handoff
  * @err connection/auth failures surface as device state + lastError, not throws
  * @inv checked=false filters the model only — the connection stays up
  */
@@ -240,6 +242,22 @@ export class DeviceManager {
 
   isReady(deviceId) {
     return this._clients.get(deviceId)?.isReady === true;
+  }
+
+  /**
+   * Explicitly hand pairing material to the QR modal. Prefer a reachable
+   * non-loopback device, then fall back to a configured loopback entry.
+   * @returns {{v:number,url:string,token:string,ts_authkey:string,candidates:string[]}|null}
+   */
+  createPairingPayload() {
+    const withToken = this._devices.filter((d) => typeof d.token === 'string' && d.token.length > 0);
+    const source = withToken.find((d) => !isLocalUrl(d.url)) || withToken[0];
+    if (!source) return null;
+    try {
+      return buildPairingPayload({ url: source.url, token: source.token });
+    } catch {
+      return null;
+    }
   }
 
   // ---- aggregated model ----

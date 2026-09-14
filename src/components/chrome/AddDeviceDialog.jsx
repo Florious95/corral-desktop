@@ -1,23 +1,8 @@
 import { useEffect, useState } from 'react';
+import { parsePairingPayload, validWsUrl } from '../../core/pairing.js';
 import './chrome.css';
 
 const WS_RE = /^wss?:\/\//;
-
-/** 解析配对二维码里的单行 JSON（protocol.md §2.1）。不是配对载荷则返回 null。 */
-function parsePairing(text) {
-  let o;
-  try {
-    o = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!o || typeof o.url !== 'string' || !WS_RE.test(o.url)) return null;
-  const candidates = Array.isArray(o.candidates)
-    ? o.candidates.filter((c) => typeof c === 'string' && WS_RE.test(c))
-    : [];
-  if (!candidates.includes(o.url)) candidates.unshift(o.url);
-  return { url: o.url, token: typeof o.token === 'string' ? o.token : '', candidates };
-}
 
 const hostOf = (url) => url.replace(WS_RE, '').split('/')[0];
 
@@ -59,7 +44,7 @@ export default function AddDeviceDialog({ open, onSubmit, onAdd, onCancel }) {
   const submit = (e) => {
     e.preventDefault();
     const u = url.trim();
-    if (!WS_RE.test(u)) {
+    if (!validWsUrl(u)) {
       setError('地址必须以 ws:// 或 wss:// 开头');
       return;
     }
@@ -68,7 +53,7 @@ export default function AddDeviceDialog({ open, onSubmit, onAdd, onCancel }) {
 
   // 任意输入框里粘贴配对 JSON → 一键填充地址、Token 与候选地址。
   const onPaste = (e) => {
-    const hit = parsePairing(e.clipboardData.getData('text'));
+    const hit = parsePairingPayload(e.clipboardData.getData('text'));
     if (!hit) return;
     e.preventDefault();
     setUrl(hit.url);

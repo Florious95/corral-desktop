@@ -11,6 +11,7 @@ import TitleBar from './components/chrome/TitleBar.jsx';
 import ChromePill from './components/chrome/ChromePill.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
+import PairingDialog from './components/chrome/PairingDialog.jsx';
 import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
@@ -103,6 +104,8 @@ export default function App({ seedDevices } = {}) {
 
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
+  const [pairingOpen, setPairingOpen] = useState(false);
+  const [pairingPayload, setPairingPayload] = useState(null);
   const [newAgentSpace, setNewAgentSpace] = useState(null);
   const [menu, setMenu] = useState(null); // { kind:'space'|'agent'|'pane', id, x, y }
 
@@ -433,6 +436,17 @@ export default function App({ seedDevices } = {}) {
     setDevices(dm.devices);
   }, [dm]);
 
+  const handlePairMobile = useCallback(() => {
+    setDevicesOpen(false);
+    setPairingPayload(dm.createPairingPayload());
+    setPairingOpen(true);
+  }, [dm]);
+
+  const closePairing = useCallback(() => {
+    setPairingOpen(false);
+    setPairingPayload(null);
+  }, []);
+
   /* ——— 右键菜单 ——— */
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -603,6 +617,7 @@ export default function App({ seedDevices } = {}) {
           onToggle={handleToggleDevice}
           onToggleAll={handleToggleAllDevices}
           onAddDevice={() => { setDevicesOpen(false); setAddDeviceOpen(true) }}
+          onPairMobile={handlePairMobile}
           onClose={() => setDevicesOpen(false)}
         />
       )}
@@ -619,6 +634,13 @@ export default function App({ seedDevices } = {}) {
         open={addDeviceOpen}
         onSubmit={handleAddDevice}
         onCancel={() => setAddDeviceOpen(false)}
+      />
+
+      <PairingDialog
+        open={pairingOpen}
+        payload={pairingPayload}
+        onCancel={closePairing}
+        onCopied={setToastMsg}
       />
 
       <NewAgentDialog

@@ -1,4 +1,4 @@
-import { CheckIcon, LayersIcon, MonitorIcon, PlusIcon } from '../../lib/icons.jsx';
+import { CheckIcon, LayersIcon, MonitorIcon, PlusIcon, QrIcon } from '../../lib/icons.jsx';
 import './chrome.css';
 
 /** 勾选标记：全选 → 对勾；部分 → 短横；未选 → 空框。 */
@@ -16,9 +16,10 @@ function Mark({ state }) {
  * @param {(id:string, next:boolean) => void} props.onToggle
  * @param {(next:boolean) => void} props.onToggleAll
  * @param {() => void} props.onAddDevice
+ * @param {() => void} props.onPairMobile
  * @param {() => void} props.onClose
  */
-export default function DevicesPopover({ devices, onToggle, onToggleAll, onAddDevice, onClose }) {
+export default function DevicesPopover({ devices, onToggle, onToggleAll, onAddDevice, onPairMobile, onClose }) {
   const onlineCount = devices.filter((d) => d.online).length;
   const checkedCount = devices.filter((d) => d.checked).length;
   const allOn = devices.length > 0 && checkedCount === devices.length;
@@ -76,6 +77,10 @@ export default function DevicesPopover({ devices, onToggle, onToggleAll, onAddDe
           </button>
         ))}
 
+        <button type="button" className="chr-btn-reset dp-add dp-pair" onClick={onPairMobile}>
+          <QrIcon size={14} strokeWidth={1.8} />
+          配对移动端
+        </button>
         <button type="button" className="chr-btn-reset dp-add" onClick={onAddDevice}>
           <PlusIcon size={14} strokeWidth={1.8} />
           Add Device…

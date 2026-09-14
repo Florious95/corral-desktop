@@ -275,6 +275,11 @@
 .dp-add:hover {
   background-color: var(--hover-2);
 }
+.dp-pair {
+  border-top: 0;
+  margin-top: 0;
+  border-radius: var(--r-8);
+}
 
 /* ---------- §4.3 / §4.4 对话框外壳 ---------- */
 .chr-scrim {
@@ -375,6 +380,64 @@
 }
 .chr-btn-primary:active {
   background: #000;
+}
+
+/* ---------- §4.2 mobile pairing ---------- */
+.pair-dialog {
+  width: 380px;
+  text-align: center;
+}
+.pair-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  text-align: left;
+}
+.pair-close {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-6);
+  color: var(--icon);
+}
+.pair-close:hover {
+  background: var(--hover-4);
+  color: var(--icon-strong);
+}
+.pair-qr {
+  display: block;
+  width: 260px;
+  height: 260px;
+  margin: 4px auto 10px;
+  padding: 10px;
+  box-sizing: border-box;
+  border-radius: var(--r-10);
+  box-shadow: var(--ring-tile);
+  background: var(--field-bg);
+}
+.pair-target {
+  font-size: var(--fs-11);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.pair-help {
+  margin: 8px auto 16px;
+  max-width: 300px;
+  font-size: var(--fs-115);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.pair-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.pair-empty {
+  margin: 26px 0 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 /* ---------- §4.4 NewAgentDialog ---------- */
