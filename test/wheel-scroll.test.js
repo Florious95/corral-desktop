@@ -48,10 +48,11 @@ test('mock daemon: input on one uid does not leak scroll_wheel onto the other', 
   };
   const dm = new DeviceManager({
     storage,
+    wsFactory: (url) => new WebSocket(url.replace('device.invalid', '127.0.0.1')),
     backoff: { baseMs: 20, maxMs: 40, factor: 1, jitter: 0 },
     modelDebounceMs: 20,
   });
-  const id = dm.addDevice({ name: 'Local', url: daemon.url, token: 'mock-token' });
+  const id = dm.addDevice({ name: 'Local', url: daemon.url.replace('127.0.0.1', 'device.invalid'), token: 'mock-token' });
   dm.connectAll();
   const t0 = Date.now();
   while (dm.workspaces.length < 1) {

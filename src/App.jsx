@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DeviceManager } from './core/devices.js';
+import { isLocalUrl } from './core/local.js';
 import { geomTrace } from './term/geomTrace.js';
 import {
   CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon,
@@ -46,13 +47,6 @@ function deviceSub(url) {
   try { return `${new URL(url).host} · WebSocket` } catch { return 'WebSocket' }
 }
 
-function isLocalUrl(url) {
-  try {
-    const h = new URL(url).hostname;
-    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
-  } catch { return false }
-}
-
 export default function App({ seedDevices } = {}) {
   /* ——— 协议层：DeviceManager 是 UI 与 Client 之间的唯一边界 ——— */
   const binaryListeners = useRef(new Set());
@@ -72,6 +66,7 @@ export default function App({ seedDevices } = {}) {
   if (dmRef.current === null) {
     dmRef.current = new DeviceManager({
       seedDevices,
+      autoLocal: true,
       onModelChange: (ws) => setWorkspaces(ws),
       onDeviceChange: (ds) => {
         for (const d of ds) {

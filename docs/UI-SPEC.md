@@ -15,7 +15,7 @@
 
 | 产品概念 | 协议对应 | 说明 |
 |---|---|---|
-| Device | 一个 `agentmirrord` 连接（ws URL + token） | 多设备 = 多个 Client 实例并行 |
+| Device | 一个 `agentmirrord` 连接（ws URL + token；本机 loopback 可免 token） | 多设备 = 多个 Client 实例并行 |
 | Space | `workspace`（按 cwd 聚合） | 行名 = cwd basename |
 | Agent | `session` | `ref` / `name` / `state` |
 
@@ -26,7 +26,7 @@
  *  @property {string}  id        本地生成的稳定 id（uid()）
  *  @property {string}  name      用户填的显示名，如 "Mac Studio @ Home"
  *  @property {string}  url       ws:// 或 wss:// 地址
- *  @property {string}  token     配对 token（⛔ 永不明文上屏、永不进日志）
+ *  @property {string}  token     配对 token（本机 loopback 可为空；⛔ 永不明文上屏、永不进日志）
  *  @property {string}  sub       副标题，形如 "10.10.10.87:9900 · WebSocket"（由 url 推导）
  *  @property {boolean} online    Client 当前是否 connected
  *  @property {boolean} checked   是否勾选（参与聚合）

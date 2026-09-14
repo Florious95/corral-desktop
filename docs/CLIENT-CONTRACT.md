@@ -78,6 +78,10 @@ level2_subscribe/unsubscribe/frame/heartbeat、pane_mode_changed、scroll_wheel�
 resize 不更新 core 订阅簿，保持既有行为；TerminalPane 的同宽控制与重订路径不变。
 DeviceManager 继续负责设备隔离及 level2 模型，不能另写基础连接状态机。
 
+### 1.2.1 本机 loopback 直连（裁定 2026-09-15）
+
+桌面端将 `localhost`、`127.0.0.1` 与 `::1` 视为本机物理回路：WebSocket 打开后跳过 `auth` 首帧，直接进入 `READY` 并触发 `list()` 与订阅重放；即使配置中残留 token 也忽略。生产 `DeviceManager` 用 `autoLocal: true` 保证设备列表始终补齐默认 `Local`（`ws://127.0.0.1:9900/ws`），但单测必须显式 opt-in 以避免触碰真实端口。非 loopback 地址继续要求非空 token 并沿 core auth 流程，空 token fail-closed。
+
 ### 1.3 `TerminalView` 重写规格(`src/term/TerminalView.js`)
 
 保留 web 版全部**语义**,只换实现底座:
@@ -418,7 +422,7 @@ core `client.js` 已实现,DeviceManager 只需转发状态:
 读写规则:
 - 每个 loader 都 `try/catch` 吞掉 `JSON.parse` 与 storage 异常,**返回稳定缺省值**(空数组 / 缺省对象),
   照抄 `preferences.js` 的容错姿势。坏数据不能白屏。
-- schema 校验:`devices` 里 `id/name/url/token` 任一非字符串 → **整条丢弃**,不做部分修补。
+- schema 校验:`devices` 里 `id/name/url/token` 任一非字符串 → **整条丢弃**,不做部分修补；loopback 设备允许 token 为空，非 loopback 设备 token 仍必须非空。
 - 版本前缀 `v1` 是未来迁移的钩子;不写迁移代码,不认识的键直接忽略。
 
 ### token 安全

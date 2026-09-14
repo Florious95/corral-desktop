@@ -33,7 +33,7 @@ class FakeWS {
 function makeClient() {
   const sockets = [];
   const client = new Client({
-    url: 'ws://127.0.0.1:9900/ws',
+    url: 'ws://192.0.2.1:9900/ws',
     token: 'tok-test',
     inputTimeoutMs: 500,
     backoff: { baseMs: 5, maxMs: 50, factor: 2, jitter: 0 },
