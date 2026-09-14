@@ -15,6 +15,13 @@ const encoder = new TextEncoder();
 const toBytes = (value) => encoder.encode(value);
 // X10 stores each report byte in one JS code unit; do not UTF-8-expand coordinates > 127.
 const toMouseBytes = (value) => Uint8Array.from(value, (char) => char.charCodeAt(0) & 0xff);
+const binaryString = (value) => {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value.length !== 'number') return '';
+  let raw = '';
+  for (let i = 0; i < value.length; i += 1) raw += String.fromCharCode(value[i] & 0xff);
+  return raw;
+};
 
 function findStringTerm(buf, from) {
   for (let j = from; j < buf.length; j += 1) {
@@ -345,6 +352,11 @@ export class NativeInputPump {
       } else if (this.sendBytes) this.sendBytes(toBytes(e.seq));
       else this.onUnsupported(e.label);
     }
+  }
+
+  onBinary(data) {
+    const raw = binaryString(data);
+    if (raw.length > 0) this.onData(raw);
   }
 
   flush() {

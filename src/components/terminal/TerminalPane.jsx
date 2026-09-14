@@ -148,6 +148,7 @@ export default function TerminalPane({
       },
       onHistoryBoundary: () => loadHistory(),
       onData: (data) => pump.onData(data),
+      onBinary: (data) => pump.onBinary(data),
     });
     view.open();
     viewRef.current = view;

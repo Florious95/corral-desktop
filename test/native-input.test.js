@@ -160,7 +160,7 @@ test('NativeInputPump forwards X10 left press/release but blocks right/release r
   pump.onData(right);
   pump.onData(release);
   pump.onData(wheel);
-  pump.onData(highCoordinateLeft);
+  pump.onBinary(highCoordinateLeft);
   assert.deepEqual(sent.slice(0, 2).map((bytes) => new TextDecoder().decode(bytes)), [left, release]);
   assert.deepEqual(Array.from(sent[2]), [27, 91, 77, 32, 200, 201]);
   pump.dispose();

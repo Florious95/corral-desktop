@@ -26,6 +26,7 @@ class FakeTerminal {
     this.resets = 0;
     this.scrollHandlers = [];
     this.dataHandlers = [];
+    this.binaryHandlers = [];
     this.keyHandler = null;
     this.buffer = { active: { viewportY: 0 } };
     this.element = {
@@ -37,9 +38,11 @@ class FakeTerminal {
   open() {}
   onScroll(cb) { this.scrollHandlers.push(cb); return { dispose: () => {} } }
   onData(cb) { this.dataHandlers.push(cb); return { dispose: () => {} } }
+  onBinary(cb) { this.binaryHandlers.push(cb); return { dispose: () => {} } }
   attachCustomKeyEventHandler(fn) { this.keyHandler = fn; return true }
   emitScroll(line) { for (const cb of this.scrollHandlers) cb(line) }
   emitData(s) { for (const cb of this.dataHandlers) cb(s) }
+  emitBinary(s) { for (const cb of this.binaryHandlers) cb(s) }
   resize(cols, rows) { this.cols = cols; this.rows = rows }
   reset() { this.resets += 1 }
   write(data) { this.writes.push(data) }
@@ -198,5 +201,15 @@ test('onData 把按键交给调用方；disableStdin 为 false', () => {
   assert.equal(view.term.opts.disableStdin, false);
   view.term.emitData('x');
   assert.deepEqual(got, ['x']);
+  view.dispose();
+});
+
+test('onBinary 把 X10 原始二进制 code units 交给调用方', () => {
+  const got = [];
+  const { view } = makeView({ onBinary: (d) => got.push(d) });
+  view.open();
+  const report = String.fromCharCode(0x1b, 0x5b, 0x4d, 0x20, 0xc8, 0xc9);
+  view.term.emitBinary(report);
+  assert.deepEqual(got, [report]);
   view.dispose();
 });
