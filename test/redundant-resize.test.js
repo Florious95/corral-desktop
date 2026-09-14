@@ -10,8 +10,13 @@ const source = (path) => readFileSync(join(ROOT, '..', path), 'utf8');
 /** The App must let TerminalPane's settled grid subscribe be the sole wire action. */
 test('App does not wire TerminalPane onResize to a second network resize', () => {
   const app = source('src/App.jsx');
-  const pane = app.slice(app.indexOf('<TerminalPane'), app.indexOf('/>', app.indexOf('<TerminalPane')));
+  const paneStart = app.indexOf('<TerminalPane');
+  const paneEnd = app.indexOf('/>', paneStart);
+  assert.notEqual(paneStart, -1, 'App must render TerminalPane');
+  assert.notEqual(paneEnd, -1, 'TerminalPane JSX must be closed');
+  const pane = app.slice(paneStart, paneEnd + 2);
   assert.doesNotMatch(pane, /\bonResize\s*=/);
+  assert.doesNotMatch(pane, /\bdm\.resize\s*\(/);
 
   const terminalPane = source('src/components/terminal/TerminalPane.jsx');
   assert.match(terminalPane, /onResizeRef\.current\?\.\(rows, cols\)/);

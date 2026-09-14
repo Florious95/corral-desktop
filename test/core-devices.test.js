@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { DeviceManager } from '../src/core/devices.js';
+import { SameWidthController } from '../src/term/sameWidth.js';
 import * as store from '../src/core/store.js';
 import { startMockDaemon, REFS, ADDED_SESSION } from '../scripts/mock-daemon.mjs';
 
@@ -232,6 +233,34 @@ test('subscribe routes binary frames with deviceId; input acks; resize no-op sta
 
     t.dm.unsubscribe(uid);
     assert.equal(t.dm.input(`${t.id}::nope`, 'x') !== null, true); // unknown ref still routes to the device
+  } finally { await t.teardown(); }
+});
+
+test('settled terminal geometry sends one subscribe per size and no resize frame', async () => {
+  const t = await setup();
+  try {
+    await waitFor(() => t.dm.workspaces.length === 2, 'listing');
+    const uid = `${t.id}::${REFS.a1}`;
+    const gate = new SameWidthController();
+    const snapshots = () => t.events.binary.filter((e) => e.frame.kind === 1).length;
+    const subscribeBefore = t.daemon.count('subscribe');
+    const resizeBefore = t.daemon.count('resize');
+
+    const settle = async (rows, cols) => {
+      const action = gate.settle(rows, cols);
+      if (action.type !== 'subscribe') return action;
+      const before = snapshots();
+      assert.equal(t.dm.subscribe(uid, action.rows, action.cols, 'settle'), true);
+      gate.noteSent(action.rows, action.cols);
+      await waitFor(() => snapshots() > before, 'settled snapshot');
+      return action;
+    };
+
+    assert.deepEqual(await settle(40, 100), { type: 'subscribe', rows: 40, cols: 100 });
+    assert.deepEqual(await settle(40, 100), { type: 'none' });
+    assert.deepEqual(await settle(30, 80), { type: 'subscribe', rows: 30, cols: 80 });
+    assert.equal(t.daemon.count('subscribe'), subscribeBefore + 2);
+    assert.equal(t.daemon.count('resize'), resizeBefore);
   } finally { await t.teardown(); }
 });
 
