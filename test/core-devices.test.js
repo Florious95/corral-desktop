@@ -39,10 +39,13 @@ async function waitFor(fn, what, timeoutMs = 4000) {
 async function setup(opts = {}) {
   const daemon = startMockDaemon({ port: 0, level2Ms: 40, deltaMs: 10_000, ...opts.daemon });
   await daemon.ready;
+  const toRemoteUrl = (url) => url.replace('127.0.0.1', 'device.invalid');
   const storage = fakeStorage();
   const events = { binary: [], input: [], errors: [], models: 0, devices: 0 };
   const dm = new DeviceManager({
     storage,
+    autoLocal: false,
+    wsFactory: (url) => new WebSocket(url.replace('device.invalid', '127.0.0.1')),
     backoff: { baseMs: 20, maxMs: 40, factor: 1, jitter: 0 },
     modelDebounceMs: 20,
     onBinary: (e) => events.binary.push(e),
@@ -53,7 +56,7 @@ async function setup(opts = {}) {
     nativeInvoke: opts.nativeInvoke,
     fetchImpl: opts.fetchImpl,
   });
-  const id = dm.addDevice({ name: 'A-mac', url: daemon.url, token: opts.token ?? 'mock-token' });
+  const id = dm.addDevice({ name: 'A-mac', url: toRemoteUrl(daemon.url), token: opts.token ?? 'mock-token' });
   dm.connectAll();
   return {
     daemon, dm, id, storage, events,
@@ -136,7 +139,7 @@ test('two devices union, colliding basenames disambiguate, uncheck filters witho
   });
   await other.ready;
   try {
-    const id2 = t.dm.addDevice({ name: 'B-mac', url: other.url, token: 'mock-token' });
+    const id2 = t.dm.addDevice({ name: 'B-mac', url: other.url.replace('127.0.0.1', 'device.invalid'), token: 'mock-token' });
     t.dm.connectAll();
     const ws = await waitFor(() => (t.dm.workspaces.length === 3 ? t.dm.workspaces : null), 'both listings');
 

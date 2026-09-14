@@ -1,13 +1,41 @@
-import { Client as CoreClient } from '../../deps/corral-core/web/js/client.js';
+import { Client as CoreClient, ClientState as CoreClientState } from '../../deps/corral-core/web/js/client.js';
 import { decodeBinary } from './binary.js';
+import { isLocalUrl } from './local.js';
 import { encodeControl, decodeControl, isExtension } from './protocol.js';
 import { bookkeep, unbook, bookOf, geomTrace } from '../term/geomTrace.js';
 export { ClientState } from '../../deps/corral-core/web/js/client.js';
 
 /** Desktop extensions only; core owns transport, listing, replay and pending. */
+const LOCAL_AUTH_PLACEHOLDER = 'agentmirror-local-anonymous';
+
 export class Client extends CoreClient {
-  constructor(opts) {
-    super(opts);
+  constructor(opts = {}) {
+    const local = isLocalUrl(opts.url);
+    // The pinned core requires a non-empty token at construction time. Local
+    // loopback is the one trusted exception: use a private placeholder only
+    // to satisfy that invariant, then skip auth entirely and clear it again.
+    // A token on loopback is intentionally ignored; physical local trust is
+    // unconditional, while non-loopback still fails closed in core.
+    const anonymous = local;
+    super(anonymous ? { ...opts, token: LOCAL_AUTH_PLACEHOLDER } : opts);
+    this.anonymous = anonymous;
+    if (anonymous) {
+      this.token = '';
+      // Keep Client.prototype identical to the pinned core. Only local
+      // instances replace the open callback, so remote auth stays upstream.
+      this.handleOpen = () => {
+        if (this.state === CoreClientState.STOPPED) {
+          this.closeWs();
+          return;
+        }
+        this._authenticated = true;
+        this._permanent = false;
+        this.attempt = 0;
+        this.setState(CoreClientState.READY);
+        this.list();
+        this.replaySubscriptions();
+      };
+    }
     this.level2Workspace = null;
     const onBinary = this.onBinary;
     this.onBinary = (frame) => {

@@ -15,6 +15,7 @@
 import { Client, ClientState } from './client.js';
 import { inferCanonicalProvider, normalizeProvider } from './providers.js';
 import { uploadImage } from './upload.js';
+import { DEFAULT_LOCAL_DEVICE, isLocalUrl } from './local.js';
 import * as store from './store.js';
 
 const MODEL_DEBOUNCE_MS = 100;
@@ -86,6 +87,7 @@ export class DeviceManager {
    * @param {Object} [opts]
    * @param {Storage} [opts.storage]
    * @param {(url:string)=>WebSocket} [opts.wsFactory]
+   * @param {boolean} [opts.autoLocal] add the default loopback Local device
    * @param {{baseMs:number,maxMs:number,factor:number,jitter:number}} [opts.backoff]
    * @param {number} [opts.modelDebounceMs]
    * @param {(workspaces:Object[])=>void} [opts.onModelChange]
@@ -116,6 +118,11 @@ export class DeviceManager {
       : store.loadDevices(this.storage);
     this._devices = loaded
       .map((d) => ({ ...d, checked: explicit ? checked.has(d.id) : true }));
+    // Production opts in to keeping one trusted loopback target available;
+    // tests remain isolated unless they explicitly request local discovery.
+    if (opts.autoLocal === true && !this._devices.some((d) => isLocalUrl(d.url))) {
+      this._devices.push({ ...DEFAULT_LOCAL_DEVICE, checked: true });
+    }
 
     this._clients = new Map();   // deviceId -> Client
     this._status = new Map();    // deviceId -> { state, lastError }
@@ -415,9 +422,17 @@ export class DeviceManager {
   _spawn(deviceId) {
     const d = this._devices.find((x) => x.id === deviceId);
     if (!d) return;
+    const local = isLocalUrl(d.url);
+    const token = typeof d.token === 'string' ? d.token : '';
+    if (!local && token.length === 0) {
+      this._status.set(deviceId, { state: ClientState.STOPPED, lastError: 'token required' });
+      this._emitDevices();
+      return;
+    }
     const client = new Client({
       url: d.url,
-      token: d.token,
+      token,
+      anonymous: local,
       wsFactory: this.wsFactory,
       backoff: this.backoff,
       onStateChange: (s) => this._onState(deviceId, s),

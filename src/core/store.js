@@ -1,3 +1,5 @@
+import { isLocalUrl } from './local.js';
+
 /*
  * localStorage persistence (CLIENT-CONTRACT §4).
  *
@@ -73,7 +75,10 @@ export function favKey(deviceId, cwd, sessionName) {
 function normalizeDevices(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((d) => d && ['id', 'name', 'url', 'token'].every((k) => typeof d[k] === 'string' && d[k].length > 0))
+    .filter((d) => d
+      && ['id', 'name', 'url', 'token'].every((k) => typeof d[k] === 'string')
+      && d.id.length > 0 && d.name.length > 0 && d.url.length > 0
+      && (d.token.length > 0 || isLocalUrl(d.url)))
     .map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
 }
 
