@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 
 import { Client } from '../src/core/client.js';
 import { decodeControl } from '../src/core/protocol.js';
-import { encodeBinary, BINARY_KIND } from '../deps/corral-core/web/js/binary.js';
+import { encodeBinary, BINARY_KIND, MAX_BINARY_PAYLOAD } from '../src/core/binary.js';
 
 /** Minimal fake WebSocket. Client assigns ws.onopen/onmessage/onclose/onerror
  *  directly; the harness calls the _* helpers to fire events. */
@@ -215,6 +215,18 @@ test('scrollWheel: sends scroll_wheel with ref and delta, no ack wait', () => {
   assert.equal(frame.type, 'scroll_wheel');
   assert.equal(frame.payload.ref, 's1');
   assert.equal(frame.payload.delta, -3);
+});
+
+test('oversized binary frame is rejected before onBinary delivery', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+  const oversized = new Uint8Array(5 + 2 + MAX_BINARY_PAYLOAD + 1);
+  oversized.set([0x52, 0x41, 0x01, BINARY_KIND.DELTA, 0x02, 0x73, 0x31]);
+  ws._binary(oversized);
+  assert.equal(events.onBinary.length, 0);
+  assert.equal(events.onLocalError.at(-1), 'invalid_field:payload exceeds 1 MiB');
 });
 
 test('input: sends frame, resolves on input_ack', () => {

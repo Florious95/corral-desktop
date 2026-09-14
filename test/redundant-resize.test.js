@@ -22,3 +22,10 @@ test('App does not wire TerminalPane onResize to a second network resize', () =>
   assert.match(terminalPane, /onResizeRef\.current\?\.\(rows, cols\)/);
   assert.match(terminalPane, /clientRef\.current\?\.subscribe\(target, act\.rows, act\.cols/);
 });
+
+test('TerminalPane requests a same-grid snapshot when delta writes overflow', () => {
+  const terminalPane = source('src/components/terminal/TerminalPane.jsx');
+  assert.match(terminalPane, /onWriteBackpressure:/);
+  assert.match(terminalPane, /gate\.noteSent\(grid\.rows, grid\.cols\)/);
+  assert.match(terminalPane, /'write_backpressure'/);
+});

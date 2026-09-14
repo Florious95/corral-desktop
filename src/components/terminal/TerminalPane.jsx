@@ -7,7 +7,7 @@ import { SameWidthController } from '../../term/sameWidth.js';
 import { geomTrace, bookOf } from '../../term/geomTrace.js';
 import { NativeInputPump } from '../../term/nativeInput.js';
 import { WheelAccumulator } from '../../term/wheelScroll.js';
-import { BINARY_KIND } from '../../../deps/corral-core/web/js/binary.js';
+import { BINARY_KIND } from '../../core/binary.js';
 import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
 import { isCtrlV } from '../../term/clipboard.js';
@@ -145,6 +145,12 @@ export default function TerminalPane({
         sendIfNeeded(act, reason);
         if (act && act.type === 'subscribe') firstSub = false;
         onResizeRef.current?.(rows, cols);
+      },
+      onWriteBackpressure: () => {
+        const grid = gate.grid;
+        if (!grid) return;
+        gate.noteSent(grid.rows, grid.cols);
+        clientRef.current?.subscribe(target, grid.rows, grid.cols, 'write_backpressure');
       },
       onHistoryBoundary: () => loadHistory(),
       onData: (data) => pump.onData(data),

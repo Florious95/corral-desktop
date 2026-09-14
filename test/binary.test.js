@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { decodeBinary, encodeBinary, BINARY_KIND } from '../deps/corral-core/web/js/binary.js';
+import { decodeBinary, encodeBinary, BINARY_KIND, MAX_BINARY_PAYLOAD } from '../src/core/binary.js';
 import { ProtocolError } from '../src/core/protocol.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -76,9 +76,16 @@ test('decode: unknown kind is rejected', () => {
   assert.throws(() => decodeBinary(bad), (e) => e instanceof ProtocolError && e.code === 'unknown_kind');
 });
 
-test('decode: empty ref is rejected', () => {
-  const bad = new Uint8Array([0x52, 0x41, 0x01, 0x01, 0x00, 0x00]);
-  assert.throws(() => decodeBinary(bad), (e) => e instanceof ProtocolError && e.code === 'invalid_ref');
+test('decode: payload at 1 MiB is accepted but larger payloads are rejected', () => {
+  const header = new Uint8Array([0x52, 0x41, 0x01, BINARY_KIND.DELTA, 0x02, 0x73, 0x31]);
+  const exact = new Uint8Array(header.length + MAX_BINARY_PAYLOAD);
+  exact.set(header);
+  assert.equal(decodeBinary(exact).data.byteLength, MAX_BINARY_PAYLOAD);
+
+  const oversized = new Uint8Array(header.length + MAX_BINARY_PAYLOAD + 1);
+  oversized.set(header);
+  assert.throws(() => decodeBinary(oversized),
+    (e) => e instanceof ProtocolError && e.code === 'invalid_field' && /1 MiB/.test(e.message));
 });
 
 test('encode: empty ref is rejected on encode side too', () => {

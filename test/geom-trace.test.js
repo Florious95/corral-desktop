@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { Client } from '../src/core/client.js';
 import { decodeControl } from '../src/core/protocol.js';
-import { encodeBinary, BINARY_KIND } from '../deps/corral-core/web/js/binary.js';
+import { encodeBinary, BINARY_KIND } from '../src/core/binary.js';
 import { SameWidthController } from '../src/term/sameWidth.js';
 import {
   resetGeomTrace, dumpGeomTrace, bookOf, formatLine, geomTrace,
