@@ -4,7 +4,9 @@ import { Client } from '../src/core/client.js';
 import { Client as CoreClient } from '../deps/corral-core/web/js/client.js';
 import * as core from '../deps/corral-core/web/js/protocol.js';
 import { encodeControl, decodeControl } from '../src/core/protocol.js';
-import { dumpGeomTrace, resetGeomTrace } from '../src/term/geomTrace.js';
+import { dumpGeomTrace, resetGeomTrace, setGeomTraceEnabled } from '../src/term/geomTrace.js';
+
+setGeomTraceEnabled(true);
 
 const wire = (type, payload, v = 1) => JSON.stringify({ v, type, payload });
 

@@ -4,14 +4,24 @@
  */
 
 const RING = 8192;
-const events = [];
+const events = new Array(RING);
+let eventCount = 0;
+let cursor = 0;
+let ENABLED = typeof process !== 'undefined' && process.env?.AM_GEOM_TRACE === '1';
 const book = new Map(); // ref -> { rows, cols }
 
 const DROP = /token|authkey|password|payload|data|text|title|bytes$/i;
 
 export function resetGeomTrace() {
-  events.length = 0;
+  events.fill(undefined);
+  eventCount = 0;
+  cursor = 0;
   book.clear();
+}
+
+/** Explicitly enable capture for diagnostics/tests; production defaults off. */
+export function setGeomTraceEnabled(value) {
+  ENABLED = Boolean(value);
 }
 
 export function bookkeep(ref, rows, cols) {
@@ -32,16 +42,16 @@ export function bookOf(ref) {
 }
 
 export function geomTrace(event, fields = {}) {
+  if (!ENABLED) return 0;
   const rec = { t: Date.now(), event };
   for (const [k, v] of Object.entries(fields)) {
     if (DROP.test(k)) continue;
     rec[k] = v === undefined ? null : v;
   }
-  events.push(rec);
-  if (events.length > RING) events.shift();
-  if (typeof process !== 'undefined' && process.env.AM_GEOM_TRACE === '1') {
-    process.stderr.write(`${formatLine(rec)}\n`);
-  }
+  events[cursor] = rec;
+  cursor += 1;
+  if (cursor === RING) cursor = 0;
+  if (eventCount < RING) eventCount += 1;
   return rec;
 }
 
@@ -55,5 +65,7 @@ export function formatLine(rec) {
 }
 
 export function dumpGeomTrace() {
-  return events.slice();
+  if (eventCount === 0) return [];
+  if (eventCount < RING) return events.slice(0, eventCount);
+  return events.slice(cursor).concat(events.slice(0, cursor));
 }
