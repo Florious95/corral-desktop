@@ -101,6 +101,17 @@ export function MonitorIcon(p) {
   );
 }
 
+export function QrIcon(p) {
+  return (
+    <Ico strokeWidth={1.8} {...p}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 14h3v3h-3zm5 0h2v2h-2zm-5 5h2v2h-2zm5-2h2v4h-2z" />
+    </Ico>
+  );
+}
+
 export function GearIcon(p) {
   return (
     <Ico strokeWidth={1.8} {...p}>
