@@ -1,10 +1,10 @@
-// Agents 列表（UI-SPEC §5.3）。行高 54px、绝对定位 + top 过渡，收藏置顶靠 top 重排而非 DOM 重排。
-import { useEffect, useRef, useState } from 'react';
+// Agents 列表（UI-SPEC §5.3）。行高 54px、绝对定位 + top 过渡，收藏置顶靠 top 重排。
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from './ProviderIcon.jsx';
 import { PROVIDER_LABEL } from '../../core/providers.js';
 import { StarIcon, CheckIcon } from '../../lib/icons.jsx';
+import { AGENT_ROW_HEIGHT as ROW, sortAgents, visibleWindow } from './agentWindow.js';
 
-const ROW = 54;
 const MIN_H = 108;
 
 const STATE_TITLE = {
@@ -25,9 +25,72 @@ function metaText(ag) {
   return `${label ?? ag.title} · ${ag.spaceName}`;
 }
 
+const sameAgentRow = (prev, next) => {
+  const a = prev.agent;
+  const b = next.agent;
+  return prev.top === next.top
+    && prev.isOpen === next.isOpen
+    && prev.isClosing === next.isClosing
+    && prev.multiDevice === next.multiDevice
+    && prev.onOpen === next.onOpen
+    && prev.onContextMenu === next.onContextMenu
+    && a.key === b.key
+    && a.title === b.title
+    && a.provider === b.provider
+    && a.state === b.state
+    && a.fav === b.fav
+    && a.spaceName === b.spaceName
+    && a.deviceName === b.deviceName
+    && a.deviceLocal === b.deviceLocal;
+};
+
+const AgentRow = memo(function AgentRow({
+  agent: ag, top, isOpen, isClosing, onOpen, onContextMenu, multiDevice,
+}) {
+  return (
+    <div
+      className={`agents-row${isOpen ? ' is-open' : ''}`}
+      style={{
+        top,
+        opacity: isClosing ? 0 : 1,
+        transform: `scale(${isClosing ? 0.94 : 1})`,
+      }}
+      onClick={() => onOpen(ag.key)}
+      onContextMenu={(e) => onContextMenu(e, ag.key)}
+    >
+      <div className="agents-row-main">
+        <ProviderIcon
+          provider={ag.provider}
+          size={18}
+          active={ag.state === 'working' || ag.state === 'blocked'}
+        />
+        <span className="agents-row-title">{ag.title}</span>
+        <span className="agents-row-marks">
+          {ag.state === 'done' ? (
+            <CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4} />
+          ) : null}
+          {ag.fav ? <StarIcon size={12} fill="var(--amber)" /> : null}
+        </span>
+      </div>
+      <div className="agents-row-meta">
+        <span
+          className={`agents-dot is-${stateOf(ag.state)}`}
+          title={STATE_TITLE[stateOf(ag.state)]}
+        />
+        <span className="agents-row-metatext">{metaText(ag)}</span>
+        {multiDevice ? (
+          <span className={`agents-badge${ag.deviceLocal ? ' is-local' : ''}`}>
+            {ag.deviceName}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}, sameAgentRow);
+
 /**
  * @param {Object} props
- * @param {Array}  props.agents                        可见集合，顺序 = 稳定的原始顺序（勿排序）
+ * @param {Array}  props.agents                        可见集合，收藏项会稳定置顶
  * @param {string[]} props.openKeys
  * @param {Object<string,boolean>} [props.closing]     key → 正在播关闭动画
  * @param {(key:string) => void} props.onOpen
@@ -48,6 +111,7 @@ export default function AgentsList({
 }) {
   const hostRef = useRef(null);
   const [vpH, setVpH] = useState(MIN_H);
+  const [scrollTop, setScrollTop] = useState(0);
 
   // 视口高度量化到 54 的整数倍：永远只露出整数行，不出现半行
   useEffect(() => {
@@ -63,53 +127,36 @@ export default function AgentsList({
     return () => ro.disconnect();
   }, []);
 
-  // 收藏置顶：只算 top，DOM 顺序不动，重排走 top 过渡
-  const sorted = [...agents].sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
-  const tops = new Map(sorted.map((ag, i) => [ag.key, i * ROW]));
+  const handleScroll = useCallback((event) => {
+    setScrollTop(event.currentTarget.scrollTop);
+  }, []);
+  const sorted = useMemo(() => sortAgents(agents), [agents]);
+  const tops = useMemo(() => new Map(sorted.map((ag, i) => [ag.key, i * ROW])), [sorted]);
+  const openSet = useMemo(() => new Set(openKeys), [openKeys]);
+  const totalHeight = sorted.length * ROW;
+  const renderTop = Math.min(scrollTop, Math.max(0, totalHeight - vpH));
+  const { start, end } = visibleWindow(sorted.length, renderTop, vpH);
+  const windowed = sorted.slice(start, end);
 
   return (
     <div className="agents-host" ref={hostRef}>
-      <div className="agents-viewport" style={{ height: vpH }}>
-        <div className="agents-track" style={{ height: agents.length * ROW }}>
-          {agents.map((ag) => (
-            <div
+      <div
+        className="agents-viewport"
+        style={{ height: vpH }}
+        onScroll={handleScroll}
+      >
+        <div className="agents-track" style={{ height: totalHeight }}>
+          {windowed.map((ag) => (
+            <AgentRow
               key={ag.key}
-              className={`agents-row${openKeys.includes(ag.key) ? ' is-open' : ''}`}
-              style={{
-                top: tops.get(ag.key),
-                opacity: closing[ag.key] ? 0 : 1,
-                transform: `scale(${closing[ag.key] ? 0.94 : 1})`,
-              }}
-              onClick={() => onOpen(ag.key)}
-              onContextMenu={(e) => onContextMenu(e, ag.key)}
-            >
-              <div className="agents-row-main">
-                <ProviderIcon
-                  provider={ag.provider}
-                  size={18}
-                  active={ag.state === 'working' || ag.state === 'blocked'}
-                />
-                <span className="agents-row-title">{ag.title}</span>
-                <span className="agents-row-marks">
-                  {ag.state === 'done' ? (
-                    <CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4} />
-                  ) : null}
-                  {ag.fav ? <StarIcon size={12} fill="var(--amber)" /> : null}
-                </span>
-              </div>
-              <div className="agents-row-meta">
-                <span
-                  className={`agents-dot is-${stateOf(ag.state)}`}
-                  title={STATE_TITLE[stateOf(ag.state)]}
-                />
-                <span className="agents-row-metatext">{metaText(ag)}</span>
-                {multiDevice ? (
-                  <span className={`agents-badge${ag.deviceLocal ? ' is-local' : ''}`}>
-                    {ag.deviceName}
-                  </span>
-                ) : null}
-              </div>
-            </div>
+              agent={ag}
+              top={tops.get(ag.key)}
+              isOpen={openSet.has(ag.key)}
+              isClosing={!!closing[ag.key]}
+              onOpen={onOpen}
+              onContextMenu={onContextMenu}
+              multiDevice={multiDevice}
+            />
           ))}
         </div>
         {agents.length === 0 ? (
