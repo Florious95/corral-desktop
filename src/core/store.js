@@ -44,8 +44,14 @@ function readJson(storage, key) {
 }
 
 function writeJson(storage, key, value) {
+  const serialized = JSON.stringify(value);
   try {
-    storage?.setItem(key, JSON.stringify(value));
+    if (storage?.getItem(key) === serialized) return true;
+  } catch {
+    // Read failures should not prevent a best-effort write below.
+  }
+  try {
+    storage?.setItem(key, serialized);
     return true;
   } catch {
     return false; // quota / private mode / no storage: state stays in memory
@@ -79,11 +85,96 @@ export function loadDevices(storage) {
 }
 
 export function saveDevices(devices, storage) {
+  const payload = devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
   if (isTauri()) {
-    queueSecureSave(devices);
+    queueSecureSave(payload);
     return true;
   }
-  return writeJson(storage, KEYS.devices, devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token })));
+  return writeJson(storage, KEYS.devices, payload);
+}
+
+/**
+ * Serialize async writes as one in-flight operation and retain only the latest
+ * requested value. Equal serialized values are ignored before they can enter
+ * the queue. The returned idle() hook is intentionally small and deterministic
+ * so persistence behavior can be tested without a Tauri runtime.
+ */
+export function createLatestWinsQueue(write) {
+  let lastSerialized;
+  let desiredSerialized;
+  let pending = null;
+  let inFlight = null;
+  let draining = null;
+
+  const drain = async () => {
+    while (pending) {
+      const next = pending;
+      pending = null;
+      inFlight = next;
+      if (next.serialized !== lastSerialized) {
+        try {
+          await write(next.value);
+          lastSerialized = next.serialized;
+        } catch {
+          // Keep the UI state in memory; a later changed save may retry.
+          if (desiredSerialized === next.serialized) desiredSerialized = lastSerialized;
+        }
+      }
+      inFlight = null;
+    }
+  };
+
+  const start = () => {
+    if (draining) return;
+    const run = drain();
+    draining = run;
+    run.then(() => {
+      if (draining !== run) return;
+      draining = null;
+      if (pending) start();
+    }, () => {
+      if (draining !== run) return;
+      draining = null;
+      if (pending) start();
+    });
+  };
+
+  return {
+    enqueue(value) {
+      const serialized = JSON.stringify(value);
+      if (serialized === desiredSerialized) return false;
+      desiredSerialized = serialized;
+      if (serialized === inFlight?.serialized) {
+        pending = null;
+        return false;
+      }
+      if (serialized === lastSerialized && !inFlight) {
+        pending = null;
+        return false;
+      }
+      pending = { value, serialized };
+      start();
+      return true;
+    },
+    prime(value) {
+      const serialized = JSON.stringify(value);
+      if (draining || pending) return false;
+      lastSerialized = serialized;
+      desiredSerialized = serialized;
+      return true;
+    },
+    async idle() {
+      for (;;) {
+        if (draining) {
+          await draining;
+        } else if (pending) {
+          start();
+        } else {
+          return;
+        }
+      }
+    },
+  };
 }
 
 let storePromise;
@@ -94,32 +185,58 @@ async function pluginStore() {
   // browser graph). Desktop shell still loads the real plugin.
   if (!isTauri()) throw new Error('plugin-store is desktop-only');
   const { load } = await import('@tauri-apps/plugin-store');
-  if (!storePromise) storePromise = load(SECURE_STORE_FILE, { autoSave: true });
+  // The queue below owns the only save boundary; plugin autoSave would race
+  // with the explicit set → save → lock transaction.
+  if (!storePromise) storePromise = load(SECURE_STORE_FILE, { autoSave: false });
   return storePromise;
 }
 
-/** Desktop hydrate. Tests never call this (no Tauri). */
+let secureStoreLoader = pluginStore;
+async function lockSecureStore() {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('lock_devices_file');
+}
+let secureStoreLocker = lockSecureStore;
+
+/** Desktop hydrate. Tests inject a fake backend through setSecureStoreForTests. */
 export async function loadDevicesSecure() {
   if (!isTauri()) return [];
   try {
-    const s = await pluginStore();
-    return normalizeDevices(await s.get('devices'));
+    const s = await secureStoreLoader();
+    const devices = normalizeDevices(await s.get('devices'));
+    secureSaveQueue.prime(devices);
+    return devices;
   } catch {
     return [];
   }
 }
 
+async function writeSecureDevices(payload) {
+  const s = await secureStoreLoader();
+  await s.set('devices', payload);
+  await s.save();
+  await secureStoreLocker();
+}
+
+let secureSaveQueue = createLatestWinsQueue(writeSecureDevices);
+
+/**
+ * Replace the secure backend in isolated tests without loading Tauri modules.
+ * Runtime code always uses the default plugin-store loader above.
+ */
+export function setSecureStoreForTests(backend) {
+  secureStoreLoader = backend?.load || pluginStore;
+  secureStoreLocker = backend?.lock || lockSecureStore;
+  secureSaveQueue = createLatestWinsQueue(writeSecureDevices);
+}
+
 function queueSecureSave(devices) {
-  if (!isTauri()) return;
-  const payload = devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
-  pluginStore()
-    .then(async (s) => {
-      await s.set('devices', payload);
-      await s.save();
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('lock_devices_file');
-    })
-    .catch(() => { /* quota / plugin missing: keep in-memory only */ });
+  if (isTauri()) secureSaveQueue.enqueue(devices);
+}
+
+/** Await all queued secure-store work; useful for deterministic shell tests. */
+export function flushSecureSaves() {
+  return secureSaveQueue.idle();
 }
 
 /** @returns {string[]} device ids that participate in the aggregated model. */
@@ -162,10 +279,13 @@ export function saveUi(ui, storage) {
 }
 
 /** Drop every favourite / pane / checked entry belonging to one device. */
-export function forgetDevice(deviceId, storage) {
+export function forgetDevice(deviceId, storage, checkedIds) {
   const owned = (s) => !s.startsWith(`${deviceId}::`);
   saveFavorites(loadFavorites(storage).filter(owned), storage);
-  saveCheckedDevices(loadCheckedDevices(storage).filter((id) => id !== deviceId), storage);
+  const checked = checkedIds === undefined
+    ? loadCheckedDevices(storage).filter((id) => id !== deviceId)
+    : checkedIds.filter((id) => id !== deviceId);
+  saveCheckedDevices(checked, storage);
   const ui = loadUi(storage);
   saveUi({
     ...ui,

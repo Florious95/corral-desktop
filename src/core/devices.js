@@ -156,6 +156,10 @@ export class DeviceManager {
   updateDevice(id, patch = {}) {
     const d = this._devices.find((x) => x.id === id);
     if (!d) return false;
+    const changed = (patch.name !== undefined && patch.name !== d.name)
+      || (patch.url !== undefined && patch.url !== d.url)
+      || (patch.token !== undefined && patch.token !== d.token);
+    if (!changed) return true;
     const reconnect = (patch.url !== undefined && patch.url !== d.url)
       || (patch.token !== undefined && patch.token !== d.token);
     if (patch.name !== undefined) d.name = patch.name;
@@ -179,8 +183,9 @@ export class DeviceManager {
     this._devices.splice(i, 1);
     this._status.delete(id);
     this._level2.delete(id);
-    this._persistDevices();
-    store.forgetDevice(id, this.storage);
+    const checkedIds = this._devices.filter((x) => x.checked).map((x) => x.id);
+    this._persistDevices(false);
+    store.forgetDevice(id, this.storage, checkedIds);
     this._emitDevices();
     this._scheduleModel();
     return true;
@@ -509,9 +514,11 @@ export class DeviceManager {
     if (this._modelTimer.unref) this._modelTimer.unref();
   }
 
-  _persistDevices() {
+  _persistDevices(saveChecked = true) {
     store.saveDevices(this._devices, this.storage);
-    store.saveCheckedDevices(this._devices.filter((d) => d.checked).map((d) => d.id), this.storage);
+    if (saveChecked) {
+      store.saveCheckedDevices(this._devices.filter((d) => d.checked).map((d) => d.id), this.storage);
+    }
   }
 }
 
