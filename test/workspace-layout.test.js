@@ -542,4 +542,17 @@ test('workspaceLayout: smartOpenSession deduplication, split-pane protection, an
   mw = smartOpenSession(mw, 's6');
   assert.equal(mw.tabs.length, 4, 'Pinned tab cannot be overwritten; creates new workspace tab');
   assert.equal(mw.activeUid, 's6');
+
+  // 6. 测试席拦截核心缺陷复测：切换回已分屏窗口 (s1 | s2)
+  const splitTab = mw.tabs.find((t) => getLeaves(t.root).length >= 2);
+  assert.ok(splitTab);
+  mw = switchWorkspaceTab(mw, splitTab.id);
+  assert.equal(mw.activeTabId, splitTab.id);
+  assert.equal(getLeaves(mw.root).length, 2);
+
+  // 此时点击已存在于 Tab 2 的单会话 s3：分屏保护置于最前第一行生效！
+  // 严格直接 return 原状态，绝对零操作，不切 Tab、不改树！
+  const protectedSplit = smartOpenSession(mw, 's3');
+  assert.equal(protectedSplit.activeTabId, splitTab.id, 'Must stay on current split tab');
+  assert.deepEqual(getLeaves(protectedSplit.root), ['s1', 's2'], 'Must not mutate split root');
 });
