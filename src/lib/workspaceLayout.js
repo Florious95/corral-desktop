@@ -984,7 +984,16 @@ export function smartOpenSession(state, sessionUid) {
   const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
   if (!currentTab) return state;
 
-  // 1. 查重法则：检查全顶栏是否已存在单会话 Tab 刚好展示 sessionUid
+  // 1. 刚性保护规则（最高优先级最前）：若当前选中的 Tab 已经是多分屏窗口（>= 2 个窗格），点击左侧坚决不生效！
+  // 严格直接 return 原状态，绝对零操作，不切 Tab、不改树、不挤占任何已有分屏！
+  if (currentTab.root) {
+    const curLeaves = getLeaves(currentTab.root);
+    if (curLeaves.length >= 2) {
+      return state;
+    }
+  }
+
+  // 2. 查重法则：检查全顶栏是否已存在单会话 Tab 刚好展示 sessionUid
   const existingSingleTab = tabs.find((t) => {
     if (!t.root) {
       return t.activeUid === sessionUid;
@@ -996,15 +1005,6 @@ export function smartOpenSession(state, sessionUid) {
   if (existingSingleTab) {
     // 直接切换到该已存在的单会话 Tab，避免产生重复 Tab
     return switchWorkspaceTab(state, existingSingleTab.id || existingSingleTab.uid);
-  }
-
-  // 2. 刚性保护规则：若当前选中的 Tab 已经是多分屏窗口（>= 2 个窗格），点击左侧坚决不生效！
-  if (currentTab.root) {
-    const curLeaves = getLeaves(currentTab.root);
-    if (curLeaves.length >= 2) {
-      // 坚决禁止挤占、禁止替换分屏中的任何一个窗格！直接 0 操作原样返回！
-      return state;
-    }
   }
 
   // 3. 当前是单会话窗口：
