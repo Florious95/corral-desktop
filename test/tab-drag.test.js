@@ -815,10 +815,10 @@ test('retina crisp overlay and UI alignment: direct pixel dimensions, no scale, 
   assert.equal(mockOverlay.style.transform.includes('scale'), false, 'Must not use transform scale to stretch overlay');
   assert.equal(mockOverlay.style.opacity, '1');
 
-  // Verify CSS styles for crisp Retina overlay
+  // Verify CSS styles for crisp Retina overlay (2026-09-16 顾问审查通透微调 blur 4px)
   const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
   assert.match(chromeCss, /border:\s*1\.5px solid rgba\(59,\s*130,\s*246,\s*0\.85\);/);
-  assert.match(chromeCss, /backdrop-filter:\s*blur\(8px\);/);
+  assert.match(chromeCss, /backdrop-filter:\s*blur\([48]px\);/);
 
   // Verify TitleBar right toggle placement (lights -> drag -> toggle)
   const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');

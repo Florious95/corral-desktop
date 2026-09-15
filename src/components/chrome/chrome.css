@@ -147,8 +147,8 @@ select {
   display: none;
 }
 .tb-tab-add {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   margin-left: 2px;
   border-radius: var(--r-6);
   display: flex;
@@ -176,7 +176,8 @@ select {
   padding: 0 8px;
   border-radius: var(--r-6);
   background: transparent;
-  color: var(--text-faint);
+  color: var(--ink-700);
+  line-height: 16px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -194,14 +195,14 @@ select {
   color: var(--text);
 }
 .tb-tab.is-active {
-  background: var(--surface-2);
+  background: var(--bg);
   color: var(--text);
-  border-color: var(--border-soft);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  border-color: var(--border-input);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 .tb-tab-pinned {
-  min-width: 28px;
-  width: 28px;
+  min-width: 32px;
+  width: 32px;
   padding: 0;
   justify-content: center;
   gap: 3px;
@@ -227,20 +228,20 @@ select {
   box-sizing: border-box;
 }
 .tb-tab-lamp.is-working {
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
-  animation: tb-lamp-pulse 1.8s ease-in-out infinite;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green-ring);
+  animation: tb-lamp-pulse 2.4s ease-in-out infinite;
 }
 .tb-tab-lamp.is-idle {
-  background: rgba(255, 255, 255, 0.28);
+  background: var(--icon-idle);
 }
 .tb-tab-lamp.is-unknown {
   background: transparent;
   border: 1px solid var(--text-faint);
 }
 @keyframes tb-lamp-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(1.15); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tb-tab-lamp.is-working {
@@ -251,8 +252,8 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--r-4);
   border: 0;
   background: none;
@@ -269,8 +270,13 @@ select {
 }
 .tb-tab-close:hover {
   opacity: 1 !important;
-  background: var(--hover-6);
+  background: var(--hover-4);
   color: var(--text);
+}
+.tb-tab-close:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--input-focus);
+  outline-offset: 1px;
 }
 .tb-tab.is-dragging-source {
   opacity: 0.4;
@@ -284,12 +290,12 @@ select {
   width: 0;
   height: 0;
   transform-origin: 0 0;
-  background: rgba(59, 130, 246, 0.12);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(59, 130, 246, 0.08);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   border: 1.5px solid rgba(59, 130, 246, 0.85);
   border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 32px rgba(59, 130, 246, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 32px rgba(59, 130, 246, 0.08);
   pointer-events: none;
   visibility: hidden;
   opacity: 0;
@@ -306,8 +312,8 @@ select {
   height: 26px;
   padding: 0 10px;
   border-radius: var(--r-6);
-  background: var(--surface-2);
-  border: 1px solid var(--border-soft);
+  background: var(--bar-bg);
+  border: 1px solid var(--border-input);
   color: var(--text);
   font-size: 12px;
   display: flex;
@@ -319,7 +325,7 @@ select {
   z-index: 10000;
   transform-origin: 0 0;
   box-sizing: border-box;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
   white-space: nowrap;
   will-change: transform, opacity;
 }

@@ -23,7 +23,18 @@
 }
 
 .pane-host.is-active {
-  box-shadow: inset 0 0 0 1px var(--border-soft);
+  box-shadow: none;
+}
+
+[data-multi-pane="true"] .pane-host.is-active::after,
+.is-multi-pane .pane-host.is-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  border: 1px solid var(--input-focus);
+  box-sizing: border-box;
 }
 
 .pane-host.is-hidden {

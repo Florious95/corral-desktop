@@ -111,7 +111,12 @@ export default function SplitPanes({
   const isEmpty = visibleUids.length === 0;
 
   return (
-    <div className="splitpanes terminal-stage" ref={stageRef} data-stage="terminal-stage">
+    <div
+      className="splitpanes terminal-stage"
+      ref={stageRef}
+      data-stage="terminal-stage"
+      data-multi-pane={visibleUids.length > 1 ? 'true' : undefined}
+    >
       {isEmpty && (
         <div className="splitpanes-empty">
           <div>
