@@ -131,6 +131,31 @@ select {
 .tb-tabs-scroll::-webkit-scrollbar {
   display: none;
 }
+.tb-tab-add {
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  border-radius: var(--r-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--icon-titlebar);
+  background: none;
+  border: 0;
+  padding: 0;
+  flex: none;
+  transition: background var(--d-hover), color var(--d-hover);
+  -webkit-app-region: no-drag;
+}
+.tb-tab-add:hover {
+  background: var(--hover-4);
+  color: var(--icon-strong);
+}
+.tb-tab-add:focus-visible {
+  outline: 2px solid var(--input-focus);
+  outline-offset: 1px;
+}
 .tb-tab {
   height: 26px;
   padding: 0 8px;

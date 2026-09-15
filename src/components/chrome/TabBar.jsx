@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
-import { XIcon } from '../../lib/icons.jsx';
+import { XIcon, PlusIcon } from '../../lib/icons.jsx';
+import { getLeaves } from '../../lib/workspaceLayout.js';
 
 /**
  * 会话状态指示灯
@@ -29,12 +30,14 @@ function StatusLamp({ status = 'unknown' }) {
  */
 export default function TabBar({
   tabs = [],
+  activeTabId = null,
   activeUid = null,
   visibleUids = [],
   draggingUid = null,
   agentsByUid = new Map(),
   onSelectTab,
   onCloseTab,
+  onCreateTab,
   onContextMenu,
   onPointerDown,
 }) {
@@ -54,35 +57,52 @@ export default function TabBar({
     <nav className="tb-tabbar" aria-label="会话标签页">
       {pinnedTabs.length > 0 && (
         <div className="tb-tabs-pinned">
-          {pinnedTabs.map((tab) => {
-            const agent = agentsByUid.get(tab.uid);
-            const title = agent ? agent.title : tab.uid;
-            const subtitle = agent ? `${agent.title} (${agent.deviceName})` : tab.uid;
-            const isActive = tab.uid === activeUid;
-            const isVisible = visibleUids.includes(tab.uid);
-            const isDragging = tab.uid === draggingUid;
+          {pinnedTabs.map((tab, idx) => {
+            const tabKey = tab.id || tab.uid;
+            const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
+            const agent = tab.activeUid ? agentsByUid.get(tab.activeUid) : agentsByUid.get(tab.uid);
+            const activeTitle = agent ? agent.title : (tab.activeUid || tab.uid);
+            const leaves = (tab.root && typeof tab.root === 'object') ? getLeaves(tab.root) : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
+            const title = tab.name || (leaves.length > 1 ? `${activeTitle} (${leaves.length})` : activeTitle);
+            const subtitle = agent ? `${title} (${agent.deviceName})` : title;
+            const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
+            const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
+
+            let tabStatus = 'unknown';
+            if (leaves.length > 0) {
+              const hasWorking = leaves.some((l) => {
+                const a = agentsByUid.get(l);
+                return (a?.state || a?.status) === 'working';
+              });
+              const hasIdle = leaves.some((l) => {
+                const a = agentsByUid.get(l);
+                return (a?.state || a?.status) === 'idle';
+              });
+              tabStatus = hasWorking ? 'working' : (hasIdle ? 'idle' : 'unknown');
+            }
             const status = agent?.state || agent?.status || 'unknown';
+            const finalStatus = leaves.length > 0 ? tabStatus : status;
 
             return (
               <div
-                key={tab.uid}
-                data-tab-uid={tab.uid}
+                key={tabKey}
+                data-tab-uid={tabKey}
                 data-pinned="true"
                 className={`tb-tab tb-tab-pinned${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
                 title={subtitle}
                 aria-label={subtitle}
                 role="tab"
                 aria-selected={isActive}
-                onClick={() => onSelectTab && onSelectTab(tab.uid)}
+                onClick={() => onSelectTab && onSelectTab(tabKey)}
                 onContextMenu={(e) => onContextMenu && onContextMenu(e, tab)}
                 onPointerDown={(e) => onPointerDown && onPointerDown(e, tab, title)}
               >
                 {agent?.provider ? (
                   <ProviderIcon provider={agent.provider} size={15} />
                 ) : (
-                  <span className="tb-tab-initial">{title.slice(0, 1).toUpperCase()}</span>
+                  <span className="tb-tab-initial">{String(title || 'W').slice(0, 1).toUpperCase()}</span>
                 )}
-                <StatusLamp status={status} />
+                <StatusLamp status={finalStatus} />
               </div>
             );
           })}
@@ -90,29 +110,57 @@ export default function TabBar({
       )}
 
       <div className="tb-tabs-scroll">
-        {regularTabs.map((tab) => {
-          const agent = agentsByUid.get(tab.uid);
-          const title = agent ? agent.title : tab.uid;
-          const subtitle = agent ? `${agent.title} (${agent.deviceName})` : tab.uid;
-          const isActive = tab.uid === activeUid;
-          const isVisible = visibleUids.includes(tab.uid);
-          const isDragging = tab.uid === draggingUid;
+        {regularTabs.map((tab, idx) => {
+          const tabKey = tab.id || tab.uid;
+          const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
+          const agent = tab.activeUid ? agentsByUid.get(tab.activeUid) : agentsByUid.get(tab.uid);
+          const activeTitle = agent ? agent.title : (tab.activeUid || tab.uid);
+          const leaves = (tab.root && typeof tab.root === 'object') ? getLeaves(tab.root) : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
+
+          let title;
+          if (tab.name) {
+            title = tab.name;
+          } else if (tab.activeUid || agent) {
+            title = leaves.length > 1 ? `${activeTitle} (${leaves.length})` : activeTitle;
+          } else if (tab.uid && !tab.uid.startsWith('tab-')) {
+            title = tab.uid;
+          } else {
+            title = `工作区 ${idx + 1}`;
+          }
+
+          const subtitle = agent ? `${title} (${agent.deviceName})` : title;
+          const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
+          const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
+
+          let tabStatus = 'unknown';
+          if (leaves.length > 0) {
+            const hasWorking = leaves.some((l) => {
+              const a = agentsByUid.get(l);
+              return (a?.state || a?.status) === 'working';
+            });
+            const hasIdle = leaves.some((l) => {
+              const a = agentsByUid.get(l);
+              return (a?.state || a?.status) === 'idle';
+            });
+            tabStatus = hasWorking ? 'working' : (hasIdle ? 'idle' : 'unknown');
+          }
           const status = agent?.state || agent?.status || 'unknown';
+          const finalStatus = leaves.length > 0 ? tabStatus : status;
 
           return (
             <div
-              key={tab.uid}
-              data-tab-uid={tab.uid}
+              key={tabKey}
+              data-tab-uid={tabKey}
               data-pinned="false"
               className={`tb-tab${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
               title={subtitle}
               role="tab"
               aria-selected={isActive}
-              onClick={() => onSelectTab && onSelectTab(tab.uid)}
+              onClick={() => onSelectTab && onSelectTab(tabKey)}
               onContextMenu={(e) => onContextMenu && onContextMenu(e, tab)}
               onPointerDown={(e) => onPointerDown && onPointerDown(e, tab, title)}
             >
-              <StatusLamp status={status} />
+              <StatusLamp status={finalStatus} />
               <span className="tb-tab-name">{title}</span>
               <button
                 type="button"
@@ -121,7 +169,7 @@ export default function TabBar({
                 aria-label={`关闭 ${title}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onCloseTab && onCloseTab(tab.uid);
+                  onCloseTab && onCloseTab(tabKey);
                 }}
               >
                 <XIcon size={11} strokeWidth={2.2} />
@@ -130,6 +178,16 @@ export default function TabBar({
           );
         })}
       </div>
+
+      <button
+        type="button"
+        className="tb-btn tb-tab-add"
+        title="新建工作台标签页 (Cmd+T)"
+        aria-label="新建工作台标签页"
+        onClick={onCreateTab}
+      >
+        <PlusIcon size={14} strokeWidth={2} />
+      </button>
     </nav>
   );
 }

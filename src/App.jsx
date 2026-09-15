@@ -23,6 +23,17 @@ import TerminalPane from './components/terminal/TerminalPane.jsx';
 import {
   loadWorkspaceFromStorage,
   saveWorkspaceToStorage,
+  createMultiWorkspace,
+  createWorkspaceTab,
+  switchWorkspaceTab,
+  closeWorkspaceTab,
+  openSessionInActiveTab,
+  splitSessionInActiveTab,
+  pinWorkspaceTab,
+  reorderWorkspaceTabs,
+  closeOtherWorkspaceTabs,
+  closeRightWorkspaceTabs,
+  getAllWorkspaceSessions,
   getLeaves,
   openSession,
   focusTab,
@@ -35,6 +46,7 @@ import {
   dropNode,
   reorderTabs,
   findLeaf,
+  removeNode,
 } from './lib/workspaceLayout.js';
 import { TabDragController } from './lib/tabDrag.js';
 import {
@@ -153,44 +165,13 @@ export default function App({ seedDevices } = {}) {
           const expectedRoot = startRoot || snapshot?.root;
 
           // 原子校验（顾问 R2）：
-          // 1. 版本一致性检查（若提供 startRevision，当前版本漂移则不更新）
           if (revVal !== undefined && workspaceRevisionRef.current !== revVal) {
             return prev;
           }
-          // 2. 拓扑一致性检查（若提供 startRoot，被排队动作改写则不更新）
           if (expectedRoot && prev?.root !== expectedRoot) {
             return prev;
           }
-          // 若当前舞台为空或目标为整屏落点，直接作为单叶子激活
-          if (!prev?.root || edge === 'full') {
-            let newTabs = prev?.tabs || [];
-            if (!newTabs.some((t) => t.uid === sourceUid)) {
-              newTabs = [...newTabs, { uid: sourceUid, pinned: false }];
-            }
-            return {
-              ...prev,
-              tabs: newTabs,
-              activeUid: sourceUid,
-              root: { kind: 'leaf', uid: sourceUid },
-            };
-          }
-          // 3. 目标 Leaf 必须仍然存在于当前 root 树中
-          if (!findLeaf(prev.root, targetUid)) {
-            return prev;
-          }
-          // 4. 若来源不在 tabs 中（从侧栏长按拖入），自动追加 Tab
-          let newTabs = prev.tabs || [];
-          if (!newTabs.some((t) => t.uid === sourceUid)) {
-            newTabs = [...newTabs, { uid: sourceUid, pinned: false }];
-          }
-          const nextRoot = dropNode(prev.root, sourceUid, targetUid, edge);
-          if (!nextRoot) return prev;
-          return {
-            ...prev,
-            tabs: newTabs,
-            activeUid: sourceUid,
-            root: nextRoot,
-          };
+          return splitSessionInActiveTab(prev, targetUid, sourceUid, edge);
         });
       },
       onReorderTabs: (fromIndex, toIndex, startRevision, sourceUid, startTabs) => {
@@ -201,11 +182,11 @@ export default function App({ seedDevices } = {}) {
           const expectedTabs = startTabs || snapshot?.tabs;
 
           // 1. 来源 Tab 校验：必须与当前 prev.tabs[fromIndex] 的 uid 吻合
-          if (expectedUid && prev?.tabs && prev.tabs[fromIndex]?.uid !== expectedUid) {
+          if (expectedUid && prev?.tabs && (prev.tabs[fromIndex]?.id !== expectedUid && prev.tabs[fromIndex]?.uid !== expectedUid)) {
             return prev;
           }
           // 2. tabs 完整快照校验：若排队更新导致 tabs 变动，安全取消
-          if (expectedTabs && (!prev?.tabs || prev.tabs.length !== expectedTabs.length || prev.tabs.some((t, i) => t.uid !== expectedTabs[i]?.uid))) {
+          if (expectedTabs && (!prev?.tabs || prev.tabs.length !== expectedTabs.length || prev.tabs.some((t, i) => (t.id || t.uid) !== (expectedTabs[i]?.id || expectedTabs[i]?.uid)))) {
             return prev;
           }
           // 3. 版本校验
@@ -216,7 +197,6 @@ export default function App({ seedDevices } = {}) {
           if (!prev?.tabs || fromIndex < 0 || fromIndex >= prev.tabs.length || toIndex < 0 || toIndex >= prev.tabs.length) {
             return prev;
           }
-          // 5. 排队更新保护：若传入数值型 startRevision 且当前 tabs 长度小于该值，说明前置 Tab 被关闭导致下标失效
           if (typeof startRevision === 'number' && prev.tabs.length < startRevision) {
             return prev;
           }
@@ -227,7 +207,7 @@ export default function App({ seedDevices } = {}) {
         setDraggingUid(state === 'dragging' ? info?.uid : null);
       },
       onOpenTab: (uid) => {
-        setWorkspace((prev) => openSession(prev, uid));
+        setWorkspace((prev) => openSessionInActiveTab(prev, uid));
       },
     });
   }
@@ -373,7 +353,7 @@ export default function App({ seedDevices } = {}) {
   );
 
   const activeAgent = (activeKey && agentByKey.get(activeKey)) || panes[0] || null;
-  const openKeys = useMemo(() => workspace.tabs.map((t) => t.uid), [workspace.tabs]);
+  const openKeys = useMemo(() => getAllWorkspaceSessions(workspace), [workspace]);
 
   /* ——— 设备派生 ——— */
   const popoverDevices = useMemo(() => devices.map((d) => ({
@@ -419,11 +399,11 @@ export default function App({ seedDevices } = {}) {
       return;
     }
     geomTrace('activate', { ref: key });
-    setWorkspace((prev) => openSession(prev, key));
+    setWorkspace((prev) => openSessionInActiveTab(prev, key));
   }, []);
 
   const splitAgent = useCallback((key) => {
-    setWorkspace((prev) => splitSession(prev, prev.activeUid, key, { axis: 'x', ratio: 0.5 }));
+    setWorkspace((prev) => splitSessionInActiveTab(prev, prev.activeUid, key, 'right'));
   }, []);
 
   const toggleFav = useCallback((agent) => {
@@ -432,7 +412,21 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const closeAgent = useCallback((key) => {
-    setWorkspace((prev) => closeTab(prev, key));
+    setWorkspace((prev) => {
+      const curTab = (prev.tabs || []).find((t) => (t.id || t.uid) === prev.activeTabId) || (prev.tabs || [])[0];
+      if (!curTab) return prev;
+      const nextRoot = removeNode(curTab.root, key);
+      const nextLeaves = getLeaves(nextRoot);
+      const nextActive = nextLeaves.includes(curTab.activeUid) ? curTab.activeUid : (nextLeaves[0] || null);
+      const updatedTab = { ...curTab, root: nextRoot, activeUid: nextActive };
+      const updatedTabs = (prev.tabs || []).map((t) => ((t.id || t.uid) === (curTab.id || curTab.uid) ? updatedTab : t));
+      return {
+        ...prev,
+        tabs: updatedTabs,
+        root: nextRoot,
+        activeUid: nextActive,
+      };
+    });
     shims.current.delete(key);
     pendingPasteRef.current.delete(key);
   }, []);
@@ -441,26 +435,42 @@ export default function App({ seedDevices } = {}) {
     if (dragCtrl.current?.suppressClickUntil && Date.now() < dragCtrl.current.suppressClickUntil) {
       return;
     }
-    setWorkspace((prev) => focusTab(prev, uid));
+    setWorkspace((prev) => switchWorkspaceTab(prev, uid));
   }, []);
 
   const handleCloseTab = useCallback((uid) => {
-    setWorkspace((prev) => closeTab(prev, uid));
+    setWorkspace((prev) => closeWorkspaceTab(prev, uid));
     shims.current.delete(uid);
     pendingPasteRef.current.delete(uid);
   }, []);
 
+  const handleCreateTab = useCallback(() => {
+    setWorkspace((prev) => createWorkspaceTab(prev));
+  }, []);
+
   const handlePinTab = useCallback((uid, pinned) => {
-    setWorkspace((prev) => pinTab(prev, uid, pinned));
+    setWorkspace((prev) => pinWorkspaceTab(prev, uid, pinned));
   }, []);
 
   const handleCloseOtherTabs = useCallback((uid) => {
-    setWorkspace((prev) => closeOtherTabs(prev, uid));
+    setWorkspace((prev) => closeOtherWorkspaceTabs(prev, uid));
   }, []);
 
   const handleCloseRightTabs = useCallback((uid) => {
-    setWorkspace((prev) => closeRightTabs(prev, uid));
+    setWorkspace((prev) => closeRightWorkspaceTabs(prev, uid));
   }, []);
+
+  // Cmd+T 全局新建工作台快捷键
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        handleCreateTab();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [handleCreateTab]);
 
   const handleClosePane = useCallback((uid) => {
     setWorkspace((prev) => closePane(prev, uid));
@@ -711,22 +721,22 @@ export default function App({ seedDevices } = {}) {
     }
 
     if (menu.kind === 'tab') {
-      const tab = workspace.tabs.find((t) => t.uid === menu.id);
+      const tab = workspace.tabs.find((t) => (t.id || t.uid) === menu.id);
       const isPinned = !!tab?.pinned;
-      const tabIdx = workspace.tabs.findIndex((t) => t.uid === menu.id);
+      const tabIdx = workspace.tabs.findIndex((t) => (t.id || t.uid) === menu.id);
       const unpinnedCount = workspace.tabs.filter((t) => !t.pinned).length;
 
       return [
         {
           key: 'pin',
-          label: isPinned ? '取消钉选' : '钉选到最左',
+          label: isPinned ? '取消固定' : '固定到最左',
           icon: icon(PinIcon),
           color: 'var(--text)',
           onClick: () => { closeMenu(); handlePinTab(menu.id, !isPinned); },
         },
         {
           key: 'close-tab',
-          label: '关闭',
+          label: '关闭工作台',
           icon: icon(XIcon, { strokeWidth: 2 }),
           color: 'var(--danger)',
           separator: true,
@@ -734,7 +744,7 @@ export default function App({ seedDevices } = {}) {
         },
         {
           key: 'close-others',
-          label: '关闭其他',
+          label: '关闭其他工作台',
           icon: icon(XIcon, { strokeWidth: 2 }),
           color: 'var(--text)',
           disabled: unpinnedCount <= 1 || isPinned,
@@ -742,7 +752,7 @@ export default function App({ seedDevices } = {}) {
         },
         {
           key: 'close-right',
-          label: '关闭右侧所有',
+          label: '关闭右侧所有工作台',
           icon: icon(CloseRightIcon),
           color: 'var(--text)',
           disabled: tabIdx < 0 || tabIdx >= workspace.tabs.length - 1,
@@ -871,13 +881,15 @@ export default function App({ seedDevices } = {}) {
             )}
             <TabBar
               tabs={workspace.tabs}
+              activeTabId={workspace.activeTabId}
               activeUid={workspace.activeUid}
               visibleUids={visibleLeaves}
               draggingUid={draggingUid}
               agentsByUid={agentByKey}
               onSelectTab={handleSelectTab}
               onCloseTab={handleCloseTab}
-              onContextMenu={(e, tab) => openMenu(e, 'tab', tab.uid)}
+              onCreateTab={handleCreateTab}
+              onContextMenu={(e, tab) => openMenu(e, 'tab', tab.id || tab.uid)}
               onPointerDown={handleTabPointerDown}
             />
             <div
