@@ -36,11 +36,11 @@ function storage() {
   };
 }
 
-test('loopback Client skips auth even when an old token is present', () => {
+test('loopback Client skips auth only when no token is configured', () => {
   const sockets = [];
   const client = new Client({
     url: DEFAULT_LOCAL_URL,
-    token: 'stale-token-is-ignored',
+    token: '',
     wsFactory: (url) => {
       const ws = new FakeWS(url);
       sockets.push(ws);
@@ -55,6 +55,82 @@ test('loopback Client skips auth even when an old token is present', () => {
   assert.equal(client.state, 'ready');
   assert.deepEqual(sockets[0].sent.map((frame) => decodeControl(frame).type), ['list', 'subscribe']);
   assert.equal(sockets[0].sent.some((frame) => decodeControl(frame).type === 'auth'), false);
+});
+
+test('loopback Client uses configured token for auth before listing', () => {
+  const sockets = [];
+  const client = new Client({
+    url: DEFAULT_LOCAL_URL,
+    token: 'local-token',
+    wsFactory: (url) => {
+      const ws = new FakeWS(url);
+      sockets.push(ws);
+      return ws;
+    },
+  });
+  client.connect();
+  sockets[0].open();
+
+  assert.equal(client.state, 'authenticating');
+  assert.deepEqual(decodeControl(sockets[0].sent[0]), {
+    type: 'auth', payload: { token: 'local-token' },
+  });
+  sockets[0].onmessage({ data: JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }) });
+  const list = decodeControl(sockets[0].sent[1]);
+  assert.equal(list.type, 'list');
+  assert.equal(Number.isInteger(list.payload.req_id), true);
+  sockets[0].onmessage({ data: JSON.stringify({
+    v: 1, type: 'listing', payload: {
+      req_id: list.payload.req_id,
+      seq: 1,
+      workspaces: [{
+        cwd: '/tmp/project', session_count: 1, aggregate_state: 'unknown',
+        sessions: [{ ref: 's1', name: 'agent', cwd: '/tmp/project', rows: 24, cols: 80 }],
+      }],
+    },
+  }) });
+
+  assert.equal(client.state, 'ready');
+  assert.equal(client.workspaces[0].sessions[0].name, 'agent');
+});
+
+test('DeviceManager authenticates a configured loopback and publishes its listing', () => {
+  const sockets = [];
+  const dm = new DeviceManager({
+    storage: storage(),
+    autoLocal: false,
+    seedDevices: [{ id: 'local', name: 'Local', url: DEFAULT_LOCAL_URL, token: 'local-token' }],
+    wsFactory: (url) => {
+      const ws = new FakeWS(url);
+      sockets.push(ws);
+      return ws;
+    },
+  });
+  dm.connectAll();
+  sockets[0].open();
+  assert.deepEqual(decodeControl(sockets[0].sent[0]), {
+    type: 'auth', payload: { token: 'local-token' },
+  });
+  sockets[0].onmessage({ data: JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }) });
+  const list = decodeControl(sockets[0].sent[1]);
+  assert.equal(list.type, 'list');
+  sockets[0].onmessage({ data: JSON.stringify({
+    v: 1, type: 'listing', payload: {
+      req_id: list.payload.req_id,
+      seq: 3,
+      workspaces: [{
+        cwd: '/Users/alauda', session_count: 2, aggregate_state: 'unknown',
+        sessions: [
+          { ref: 's1', name: 'agent-a', cwd: '/Users/alauda', rows: 24, cols: 80 },
+          { ref: 's2', name: 'agent-b', cwd: '/Users/alauda', rows: 24, cols: 80 },
+        ],
+      }],
+    },
+  }) });
+
+  assert.equal(dm.devices[0].state, 'ready');
+  assert.equal(dm.workspaces[0].sessionCount, 2);
+  assert.deepEqual(dm.workspaces[0].sessions.map((s) => s.name), ['agent-a', 'agent-b']);
 });
 
 test('local trust is instance-only and remote Client still requires a token', () => {
