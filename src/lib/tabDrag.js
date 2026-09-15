@@ -9,7 +9,7 @@
  * 5. 原子 Drop 提交：仅在 pointerup 瞬间原子提交树拓扑变更；终端实例保持平铺绝对定位保活（零 Unmount）。
  */
 
-import { project, findLeaf, removeNode, dropNode } from './workspaceLayout.js';
+import { project, findLeaf, dropNode, getLeaves } from './workspaceLayout.js';
 
 export const HOLD_DELAY_MS = 180;
 export const TOLERANCE_PX = 6;
@@ -102,59 +102,10 @@ export function computePreviewRect(rect, edge) {
 }
 
 /**
- * 从叶子矩形集构建二叉拓扑树（供离线测试或缺失 root 时纯几何推导）
- */
-export function treeFromLeafRects(leafRects) {
-  if (!leafRects || leafRects.length === 0) return null;
-  if (leafRects.length === 1) return { kind: 'leaf', uid: leafRects[0].uid };
-
-  const sortedX = [...leafRects].sort((a, b) => a.rect.x - b.rect.x);
-  for (let i = 1; i < sortedX.length; i++) {
-    const leftGroup = sortedX.slice(0, i);
-    const rightGroup = sortedX.slice(i);
-    const maxLeftX = Math.max(...leftGroup.map((l) => l.rect.x + l.rect.w));
-    const minRightX = Math.min(...rightGroup.map((l) => l.rect.x));
-    if (maxLeftX <= minRightX) {
-      const first = treeFromLeafRects(leftGroup);
-      const second = treeFromLeafRects(rightGroup);
-      const leftW = maxLeftX - Math.min(...leftGroup.map((l) => l.rect.x));
-      const totalW = Math.max(...rightGroup.map((l) => l.rect.x + l.rect.w)) - Math.min(...leftGroup.map((l) => l.rect.x));
-      const ratio = totalW > 0 ? leftW / totalW : 0.5;
-      return { kind: 'split', axis: 'x', ratio, first, second };
-    }
-  }
-
-  const sortedY = [...leafRects].sort((a, b) => a.rect.y - b.rect.y);
-  for (let i = 1; i < sortedY.length; i++) {
-    const topGroup = sortedY.slice(0, i);
-    const bottomGroup = sortedY.slice(i);
-    const maxTopY = Math.max(...topGroup.map((l) => l.rect.y + l.rect.h));
-    const minBottomY = Math.min(...bottomGroup.map((l) => l.rect.y));
-    if (maxTopY <= minBottomY) {
-      const first = treeFromLeafRects(topGroup);
-      const second = treeFromLeafRects(bottomGroup);
-      const topH = maxTopY - Math.min(...topGroup.map((l) => l.rect.y));
-      const totalH = Math.max(...bottomGroup.map((l) => l.rect.y + l.rect.h)) - Math.min(...topGroup.map((l) => l.rect.y));
-      const ratio = totalH > 0 ? topH / totalH : 0.5;
-      return { kind: 'split', axis: 'y', ratio, first, second };
-    }
-  }
-
-  const mid = Math.floor(leafRects.length / 2);
-  return {
-    kind: 'split',
-    axis: 'x',
-    ratio: 0.5,
-    first: treeFromLeafRects(leafRects.slice(0, mid)),
-    second: treeFromLeafRects(leafRects.slice(mid)),
-  };
-}
-
-/**
  * 纯数学主区窗格命中检测与候选树预览对齐
  *
- * 顾问加固 F4：命中 target/edge 后，先纯数学从候选树 remove source，再 project 计算 target 的最终实际矩形（并扣除 gap）；
- * 使半透明预览高亮 100% 等同于松手落地的真实尺寸。
+ * 顾问加固 F4 / R3：命中 target/edge 后，统一在 dropNode -> project 生成候选树后，校验候选树中每一个叶子的最终尺寸（w >= 120 且 h >= 60），
+ * 既杜绝误拒合法分屏（如 401px 舞台 A|B 移 A 到 B 右缘生成各 200px 的合法布局），又准确拦截过小窗格。
  */
 export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root = null, prevTarget = null }) {
   if (!stageRect ||
@@ -175,16 +126,15 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root =
       const edge = edgeAt(rect, x, y, prevEdge);
 
       if (edge) {
-        // 最小可用宽高门禁保护：当前目标窗格过小直接拒绝切分
-        if ((edge === 'left' || edge === 'right') && rect.w * 0.5 < MIN_PANE_W) {
-          return { type: 'center', targetUid: uid };
-        }
-        if ((edge === 'top' || edge === 'bottom') && rect.h * 0.5 < MIN_PANE_H) {
-          return { type: 'center', targetUid: uid };
-        }
+        // 顾问加固 R3：基于 dropNode 真实候选拓扑计算预览矩形并统一执行尺寸门禁
+        const effectiveRoot = root || (leafRects && leafRects.length === 2 ? {
+          kind: 'split',
+          axis: leafRects[0].rect.y === leafRects[1].rect.y ? 'x' : 'y',
+          ratio: 0.5,
+          first: { kind: 'leaf', uid: leafRects[0].uid },
+          second: { kind: 'leaf', uid: leafRects[1].uid },
+        } : null);
 
-        // 顾问加固 F4：基于 dropNode 真实候选拓扑计算预览矩形
-        const effectiveRoot = root || treeFromLeafRects(leafRects);
         let previewRect = null;
         if (effectiveRoot) {
           const candidateTree = dropNode(effectiveRoot, sourceUid, uid, edge);
@@ -192,14 +142,25 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root =
             const projected = project(candidateTree, stageRect, 1);
             previewRect = projected[sourceUid] || null;
 
-            // 检查候选树所有叶子的尺寸是否满足门禁
-            const allValid = Object.values(projected).every(
+            // 统一在真实候选树校验每一个叶子的最终尺寸（w >= 120 且 h >= 60），并确保无遗漏
+            const leaves = getLeaves(candidateTree);
+            const allLeavesPresent = leaves.every((leafUid) => !!projected[leafUid]);
+            const allValid = allLeavesPresent && Object.values(projected).every(
               (p) => p.w >= MIN_PANE_W && p.h >= MIN_PANE_H
             );
             if (!allValid) {
               return { type: 'center', targetUid: uid };
             }
           }
+        } else {
+          // 仅在完全没有拓扑树可用时（纯矩形隔离测试夹具），退化使用当前矩形折半推算
+          if ((edge === 'left' || edge === 'right') && rect.w * 0.5 < MIN_PANE_W) {
+            return { type: 'center', targetUid: uid };
+          }
+          if ((edge === 'top' || edge === 'bottom') && rect.h * 0.5 < MIN_PANE_H) {
+            return { type: 'center', targetUid: uid };
+          }
+          previewRect = computePreviewRect(rect, edge);
         }
 
         if (!previewRect) {
@@ -246,11 +207,7 @@ export function hitTestTabBar({ x, y, sourceUid, tabBarRect, tabRects }) {
     }
   }
 
-  let toIndex = targetTab.index;
-  const targetMid = targetTab.rect.x + targetTab.rect.w * 0.5;
-  if (x > targetMid && sourceTab.index < targetTab.index) {
-    toIndex = targetTab.index;
-  }
+  const toIndex = targetTab.index;
 
   return {
     type: 'tabbar',
@@ -312,6 +269,7 @@ export class TabDragController {
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onWindowBlur = this._onWindowBlur.bind(this);
     this._onWindowResize = this._onWindowResize.bind(this);
+    this._onScroll = this._onScroll.bind(this);
     this._onLostPointerCapture = this._onLostPointerCapture.bind(this);
     this._onVisibilityChange = this._onVisibilityChange.bind(this);
     this._onContextMenu = this._onContextMenu.bind(this);
@@ -362,6 +320,7 @@ export class TabDragController {
       win.addEventListener('keydown', this._onKeyDown);
       win.addEventListener('blur', this._onWindowBlur);
       win.addEventListener('resize', this._onWindowResize);
+      win.addEventListener('scroll', this._onScroll, { capture: true, passive: true });
       win.addEventListener('visibilitychange', this._onVisibilityChange);
       win.addEventListener('contextmenu', this._onContextMenu);
       win.addEventListener('lostpointercapture', this._onLostPointerCapture);
@@ -576,6 +535,12 @@ export class TabDragController {
       this.rafPending = false;
     }
 
+    // 顾问加固 R1：独立短按释放分支（未超容差且未超时），绝对不写 suppressClickUntil
+    if (this.state === 'pendingHold') {
+      this._endShortClick();
+      return;
+    }
+
     const wasDragging = this.state === 'dragging';
     const x = e.clientX;
     const y = e.clientY;
@@ -604,7 +569,7 @@ export class TabDragController {
       });
 
       if (tabHit && tabHit.fromIndex !== tabHit.toIndex) {
-        this.onReorderTabs && this.onReorderTabs(tabHit.fromIndex, tabHit.toIndex);
+        this.onReorderTabs && this.onReorderTabs(tabHit.fromIndex, tabHit.toIndex, this.startRevision);
       } else {
         const root = this.getRoot ? this.getRoot() : null;
         const paneHit = hitTestLeafPanes({
@@ -619,7 +584,7 @@ export class TabDragController {
 
         if (paneHit && paneHit.type === 'edge') {
           if (root && findLeaf(root, paneHit.targetUid)) {
-            this.onDropSplit && this.onDropSplit(this.sourceUid, paneHit.targetUid, paneHit.edge);
+            this.onDropSplit && this.onDropSplit(this.sourceUid, paneHit.targetUid, paneHit.edge, this.startRevision);
           }
         }
       }
@@ -628,7 +593,41 @@ export class TabDragController {
     this.cancel();
   }
 
+  _endShortClick() {
+    if (this.holdTimer) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+
+    this.state = 'idle';
+
+    const captureEl = this.captureEl;
+    const pid = this.pointerId;
+    this.pointerId = null;
+    this.captureEl = null;
+
+    if (captureEl && typeof captureEl.releasePointerCapture === 'function' && pid !== null) {
+      try { captureEl.releasePointerCapture(pid); } catch {}
+    }
+
+    this._cleanupListeners(captureEl);
+    this._resetTabTransforms();
+    this._hideOverlay();
+    this._hideGhost();
+
+    this.sourceUid = null;
+    this.sourceTitle = '';
+    this.lastHit = null;
+
+    this.cachedStageRect = null;
+    this.cachedTabBarRect = null;
+    this.cachedTabRects = [];
+    this.cachedLeafRects = [];
+    // 注意：绝对不设置 suppressClickUntil，放行原生 click 秒级切换 Tab！
+  }
+
   _onLostPointerCapture(e) {
+    if (this.state === 'idle') return;
     if (e.pointerId === this.pointerId || this.state === 'dragging') {
       this.cancel('lostpointercapture');
     }
@@ -637,6 +636,12 @@ export class TabDragController {
   _onWindowResize() {
     if (this.state === 'dragging' || this.state === 'pendingHold') {
       this.cancel('window-resize');
+    }
+  }
+
+  _onScroll() {
+    if (this.state === 'dragging' || this.state === 'pendingHold') {
+      this.cancel('scroll');
     }
   }
 
@@ -668,6 +673,25 @@ export class TabDragController {
     }
   }
 
+  _cleanupListeners(captureEl) {
+    const win = typeof window !== 'undefined' ? window : null;
+    if (win) {
+      win.removeEventListener('pointermove', this._onPointerMove);
+      win.removeEventListener('pointerup', this._onPointerUp);
+      win.removeEventListener('pointercancel', this._onPointerCancel);
+      win.removeEventListener('keydown', this._onKeyDown);
+      win.removeEventListener('blur', this._onWindowBlur);
+      win.removeEventListener('resize', this._onWindowResize);
+      win.removeEventListener('scroll', this._onScroll, { capture: true });
+      win.removeEventListener('visibilitychange', this._onVisibilityChange);
+      win.removeEventListener('contextmenu', this._onContextMenu);
+      win.removeEventListener('lostpointercapture', this._onLostPointerCapture);
+    }
+    if (captureEl && typeof captureEl.removeEventListener === 'function') {
+      try { captureEl.removeEventListener('lostpointercapture', this._onLostPointerCapture); } catch {}
+    }
+  }
+
   cancel(reason) {
     if (this.holdTimer) {
       clearTimeout(this.holdTimer);
@@ -681,23 +705,27 @@ export class TabDragController {
     }
 
     const wasDragging = this.state === 'dragging';
-    if (wasDragging || reason === 'tolerance-exceeded' || this.state === 'pendingHold') {
+    // 顾问加固 R1：仅真实拖拽中或超容差移动，才抑制随后的合成 click
+    if (wasDragging || reason === 'tolerance-exceeded') {
       this.suppressClickUntil = Math.max(this.suppressClickUntil, Date.now() + 250);
     }
 
     this.state = 'idle';
 
-    if (this.captureEl && typeof this.captureEl.releasePointerCapture === 'function' && this.pointerId !== null) {
-      try { this.captureEl.releasePointerCapture(this.pointerId); } catch {}
+    const captureEl = this.captureEl;
+    const pid = this.pointerId;
+    this.pointerId = null;
+    this.captureEl = null;
+
+    if (captureEl && typeof captureEl.releasePointerCapture === 'function' && pid !== null) {
+      try { captureEl.releasePointerCapture(pid); } catch {}
     }
 
+    this._cleanupListeners(captureEl);
     this._resetTabTransforms();
     this._hideOverlay();
     this._hideGhost();
 
-    this.pointerId = null;
-    const prevCaptureEl = this.captureEl;
-    this.captureEl = null;
     this.sourceUid = null;
     this.sourceTitle = '';
     this.lastHit = null;
@@ -706,22 +734,6 @@ export class TabDragController {
     this.cachedTabBarRect = null;
     this.cachedTabRects = [];
     this.cachedLeafRects = [];
-
-    const win = typeof window !== 'undefined' ? window : null;
-    if (win) {
-      win.removeEventListener('pointermove', this._onPointerMove);
-      win.removeEventListener('pointerup', this._onPointerUp);
-      win.removeEventListener('pointercancel', this._onPointerCancel);
-      win.removeEventListener('keydown', this._onKeyDown);
-      win.removeEventListener('blur', this._onWindowBlur);
-      win.removeEventListener('resize', this._onWindowResize);
-      win.removeEventListener('visibilitychange', this._onVisibilityChange);
-      win.removeEventListener('contextmenu', this._onContextMenu);
-      win.removeEventListener('lostpointercapture', this._onLostPointerCapture);
-    }
-    if (prevCaptureEl && typeof prevCaptureEl.removeEventListener === 'function') {
-      try { prevCaptureEl.removeEventListener('lostpointercapture', this._onLostPointerCapture); } catch {}
-    }
 
     if (wasDragging) {
       this.onStateChange('idle', null);

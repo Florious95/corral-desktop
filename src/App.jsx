@@ -34,6 +34,7 @@ import {
   closeRightTabs,
   dropNode,
   reorderTabs,
+  findLeaf,
 } from './lib/workspaceLayout.js';
 import { TabDragController } from './lib/tabDrag.js';
 import {
@@ -145,15 +146,40 @@ export default function App({ seedDevices } = {}) {
       getTabs: () => workspaceRef.current.tabs,
       getRoot: () => workspaceRef.current.root,
       getRevision: () => workspaceRevisionRef.current,
-      onDropSplit: (sourceUid, targetUid, edge) => {
-        setWorkspace((prev) => ({
-          ...prev,
-          activeUid: sourceUid,
-          root: dropNode(prev.root, sourceUid, targetUid, edge),
-        }));
+      onDropSplit: (sourceUid, targetUid, edge, startRevision) => {
+        setWorkspace((prev) => {
+          // 原子校验（顾问 R2）：
+          // 1. 版本一致性检查（若提供 startRevision，当前版本漂移则不更新）
+          if (startRevision !== undefined && workspaceRevisionRef.current !== startRevision) {
+            return prev;
+          }
+          // 2. 来源 Tab 必须仍然存在于当前工作区的 tabs 中
+          if (!prev?.tabs?.some((t) => t.uid === sourceUid)) {
+            return prev;
+          }
+          // 3. 目标 Leaf 必须仍然存在于当前 root 树中
+          if (!prev?.root || !findLeaf(prev.root, targetUid)) {
+            return prev;
+          }
+          const nextRoot = dropNode(prev.root, sourceUid, targetUid, edge);
+          if (!nextRoot) return prev;
+          return {
+            ...prev,
+            activeUid: sourceUid,
+            root: nextRoot,
+          };
+        });
       },
-      onReorderTabs: (fromIndex, toIndex) => {
-        setWorkspace((prev) => reorderTabs(prev, fromIndex, toIndex));
+      onReorderTabs: (fromIndex, toIndex, startRevision) => {
+        setWorkspace((prev) => {
+          if (startRevision !== undefined && workspaceRevisionRef.current !== startRevision) {
+            return prev;
+          }
+          if (!prev?.tabs || fromIndex < 0 || fromIndex >= prev.tabs.length || toIndex < 0 || toIndex >= prev.tabs.length) {
+            return prev;
+          }
+          return reorderTabs(prev, fromIndex, toIndex);
+        });
       },
       onStateChange: (state, info) => {
         setDraggingUid(state === 'dragging' ? info?.uid : null);

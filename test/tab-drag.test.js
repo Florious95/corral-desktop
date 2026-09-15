@@ -589,3 +589,101 @@ test('advisor probe R6: persistence strips unrecognized nested fields', () => {
   const restored = deserializeWorkspace(JSON.stringify(raw));
   assert.equal(JSON.parse(serializeWorkspace(restored)).root.unexpected, undefined);
 });
+
+test('advisor probe S2-1: ordinary short pointer click must remain eligible for Tab activation', () => {
+  const win = new EventTarget();
+  globalThis.window = win;
+  const capture = new EventTarget();
+  capture.setPointerCapture = () => {};
+  capture.releasePointerCapture = () => {};
+  const ctrl = new TabDragController({
+    getStageEl: () => null,
+    getTabBarEl: () => null,
+    getTabs: () => [{ uid: 'A' }, { uid: 'B' }],
+    getRoot: () => leafNode('B'),
+  });
+
+  try {
+    ctrl.start(
+      { button: 0, isPrimary: true, pointerId: 1, clientX: 40, clientY: 20, target: {}, currentTarget: capture },
+      { uid: 'A' },
+      'A'
+    );
+    assert.equal(ctrl.state, 'pendingHold');
+
+    // Release before timeout and without moving -> short click
+    ctrl._onPointerUp({ pointerId: 1, clientX: 40, clientY: 20 });
+    assert.equal(ctrl.state, 'idle');
+    const blocked = !!ctrl.suppressClickUntil && Date.now() < ctrl.suppressClickUntil;
+    assert.equal(blocked, false, 'Ordinary short click must NOT arm suppressClickUntil');
+  } finally {
+    ctrl.dispose();
+    delete globalThis.window;
+  }
+});
+
+test('advisor probe S2-2: scroll cancels active drag gesture', () => {
+  const win = new EventTarget();
+  globalThis.window = win;
+  const capture = new EventTarget();
+  capture.setPointerCapture = () => {};
+  capture.releasePointerCapture = () => {};
+  const ctrl = new TabDragController({
+    getStageEl: () => null,
+    getTabBarEl: () => null,
+    getTabs: () => [{ uid: 'A' }, { uid: 'B' }],
+    getRoot: () => leafNode('B'),
+  });
+
+  try {
+    ctrl.start(
+      { button: 0, isPrimary: true, pointerId: 1, clientX: 40, clientY: 20, target: {}, currentTarget: capture },
+      { uid: 'A' },
+      'A'
+    );
+    clearTimeout(ctrl.holdTimer);
+    ctrl.holdTimer = null;
+    ctrl.state = 'dragging';
+
+    // Scroll event on window (capture phase) cancels dragging
+    win.dispatchEvent(new Event('scroll'));
+    assert.equal(ctrl.state, 'idle');
+  } finally {
+    ctrl.dispose();
+    delete globalThis.window;
+  }
+});
+
+test('advisor probe S2-3: candidate tree size guard accepts valid final layouts and rejects sub-minimum layouts', () => {
+  const root = { kind: 'split', axis: 'x', ratio: 0.5, first: leafNode('A'), second: leafNode('B') };
+  const stageRect = { x: 0, y: 40, w: 401, h: 600 };
+  const layout = project(root, stageRect, 1);
+  const candidate = project(dropNode(root, 'A', 'B', 'right'), stageRect, 1);
+  assert.ok(Object.values(candidate).every((p) => p.w >= 120 && p.h >= 60));
+
+  // 1. Valid final candidate (401px stage, moving A to B right -> B and A each 200px) must be accepted as 'edge'
+  const hitValid = hitTestLeafPanes({
+    x: 390,
+    y: 340,
+    sourceUid: 'A',
+    stageRect,
+    root,
+    leafRects: Object.entries(layout).map(([uid, rect]) => ({ uid, rect })),
+  });
+  assert.equal(hitValid.type, 'edge');
+  assert.equal(hitValid.targetUid, 'B');
+  assert.equal(hitValid.edge, 'right');
+
+  // 2. Truly too small candidate: stage is 200px wide, split would result in ~99px panes (< 120px)
+  const tinyStage = { x: 0, y: 40, w: 200, h: 600 };
+  const tinyRoot = { kind: 'leaf', uid: 'B' };
+  const hitTooSmall = hitTestLeafPanes({
+    x: 190,
+    y: 340,
+    sourceUid: 'A',
+    stageRect: tinyStage,
+    root: tinyRoot,
+    leafRects: [{ uid: 'B', rect: { x: 0, y: 40, w: 200, h: 600 } }],
+  });
+  assert.equal(hitTooSmall.type, 'center', 'Sub-minimum pane candidate must be rejected from edge split');
+});
