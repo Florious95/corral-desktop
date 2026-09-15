@@ -22,7 +22,17 @@ export default function TitleBar({
   return (
     <header className={`tb tb-sidebar-header${fullscreen ? ' is-fullscreen' : ''}`} data-tauri-drag-region>
       <div className="tb-traffic-lights" aria-hidden="true" />
-      <div className="tb-drag" data-tauri-drag-region />
+      <div
+        className="tb-drag"
+        data-tauri-drag-region
+        onPointerDown={(e) => {
+          if (e.button === 0 && e.target === e.currentTarget) {
+            import('@tauri-apps/api/window')
+              .then((m) => m.getCurrentWindow().startDragging())
+              .catch(() => {});
+          }
+        }}
+      />
       {children}
       <button
         type="button"

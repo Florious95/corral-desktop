@@ -19,9 +19,10 @@ export const MIN_PANE_H = 60;
 export const OVERLAY_BASE_SIZE = 100; // 100x100 基础尺寸供 scale GPU 合成
 
 /**
- * 纯几何边缘判定（九宫格 25% 边缘吸附 + 极长/极宽矩形归一化滞回防抖）
+ * 纯几何边缘判定（全域覆盖无死角分屏 + 归一化四向 Voronoi 距离划分 + 滞回防抖）
  *
- * 顾问加固 F5：旧边超出 25% 切线立即丢弃，方向比较统一在归一化度量中进行。
+ * 彻底废除中心死区！全域任何位置必有且仅有确定的分屏落点：
+ * 左半区偏向左二分屏，右半区偏向右二分屏，上半区偏向上下分屏，下半区偏向下分屏。
  *
  * @param {{ x: number, y: number, w: number, h: number }} rect 视口绝对像素矩形
  * @param {number} x clientX
@@ -47,24 +48,14 @@ export function edgeAt(rect, x, y, prevEdge = null, hysteresisPx = HYSTERESIS_PX
     bottom: 1 - v,
   };
 
-  // 1. 严格筛选处于 25% 边缘带内的候选
-  const candidates = [];
+  // 全域覆盖：四边无死角候选，横向优先序保底对角线
   const order = ['left', 'right', 'top', 'bottom'];
-  for (const edge of order) {
-    const d = distMap[edge];
-    if (d <= 0.25) {
-      candidates.push({ edge, d });
-    }
-  }
-
-  // 若无任何边在 25% 范围内（即中心 50%×50% 区域），绝不保留旧边，直接返回 null
-  if (candidates.length === 0) return null;
+  const candidates = order.map((edge) => ({ edge, d: distMap[edge] }));
 
   candidates.sort((a, b) => a.d - b.d);
   const best = candidates[0];
 
-  // 2. 滞回防抖处理：
-  // 必须满足：prevEdge 必须依然处于候选列表中（仍在 25% 边缘内）！
+  // 滞回防抖处理：交界处施加像素级阈值，杜绝斜向移动时边缘高频抖动
   if (prevEdge && prevEdge !== best.edge) {
     const prevCandidate = candidates.find((c) => c.edge === prevEdge);
     if (prevCandidate) {
@@ -84,6 +75,9 @@ export function edgeAt(rect, x, y, prevEdge = null, hysteresisPx = HYSTERESIS_PX
  */
 export function computePreviewRect(rect, edge) {
   if (!rect || !edge) return { x: 0, y: 0, w: 0, h: 0 };
+  if (edge === 'full') {
+    return { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+  }
   const halfW = Math.floor(rect.w * 0.5);
   const halfH = Math.floor(rect.h * 0.5);
 
@@ -114,6 +108,16 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root =
     return null;
   }
 
+  // 舞台为空时：全域整屏落点预览
+  if (!leafRects || leafRects.length === 0) {
+    return {
+      type: 'edge',
+      targetUid: null,
+      edge: 'full',
+      previewRect: { x: stageRect.x, y: stageRect.y, w: stageRect.w, h: stageRect.h },
+    };
+  }
+
   for (const leaf of leafRects) {
     const { uid, rect } = leaf;
     if (x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h) {
@@ -123,7 +127,7 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root =
       }
 
       const prevEdge = (prevTarget && prevTarget.targetUid === uid) ? prevTarget.edge : null;
-      const edge = edgeAt(rect, x, y, prevEdge);
+      let edge = edgeAt(rect, x, y, prevEdge);
 
       if (edge) {
         // 顾问加固 R3：基于 dropNode 真实候选拓扑计算预览矩形并统一执行尺寸门禁
@@ -286,12 +290,13 @@ export class TabDragController {
     this.ghostEl = ghostEl;
   }
 
-  start(e, tab, title = '') {
+  start(e, tab, title = '', options = {}) {
     if (e.button !== 0) return;
     if (e.target.closest && e.target.closest('.tb-tab-close')) return;
 
     this.cancel();
 
+    this.instantDrag = !!(options?.instant || options?.instantDrag);
     this.pointerId = e.pointerId;
     this.sourceUid = tab.uid;
     this.sourceTitle = title || tab.uid;
@@ -344,14 +349,16 @@ export class TabDragController {
       } catch {}
     }
 
-    this.holdTimer = setTimeout(() => {
-      if (this.state === 'pendingHold') {
-        this.state = 'dragging';
-        this.onStateChange('dragging', { uid: this.sourceUid });
-        this._showGhost();
-        this._scheduleRaf();
-      }
-    }, HOLD_DELAY_MS);
+    if (!this.instantDrag) {
+      this.holdTimer = setTimeout(() => {
+        if (this.state === 'pendingHold') {
+          this.state = 'dragging';
+          this.onStateChange('dragging', { uid: this.sourceUid });
+          this._showGhost();
+          this._scheduleRaf();
+        }
+      }, HOLD_DELAY_MS);
+    }
 
     const win = typeof window !== 'undefined' ? window : null;
     if (win) {
@@ -428,9 +435,18 @@ export class TabDragController {
 
     if (this.state === 'pendingHold') {
       const dist = Math.hypot(this.lastX - this.startX, this.lastY - this.startY);
-      if (dist > TOLERANCE_PX) {
-        this.cancel('tolerance-exceeded');
-        return;
+      if (this.instantDrag) {
+        if (dist > 4) {
+          this.state = 'dragging';
+          this.onStateChange('dragging', { uid: this.sourceUid });
+          this._showGhost();
+          this._scheduleRaf();
+        }
+      } else {
+        if (dist > TOLERANCE_PX) {
+          this.cancel('tolerance-exceeded');
+          return;
+        }
       }
     } else if (this.state === 'dragging') {
       this._scheduleRaf();
@@ -652,7 +668,7 @@ export class TabDragController {
           });
 
           if (paneHit && paneHit.type === 'edge') {
-            if (root && findLeaf(root, paneHit.targetUid)) {
+            if (paneHit.edge === 'full' || (root && findLeaf(root, paneHit.targetUid))) {
               this.onDropSplit && this.onDropSplit(
                 this.sourceUid,
                 paneHit.targetUid,
@@ -691,6 +707,7 @@ export class TabDragController {
     this._hideOverlay();
     this._hideGhost();
 
+    this.instantDrag = false;
     this.sourceUid = null;
     this.sourceTitle = '';
     this.lastHit = null;
@@ -807,6 +824,7 @@ export class TabDragController {
     this._hideOverlay();
     this._hideGhost();
 
+    this.instantDrag = false;
     this.sourceUid = null;
     this.sourceTitle = '';
     this.lastHit = null;

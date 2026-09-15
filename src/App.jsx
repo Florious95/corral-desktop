@@ -161,8 +161,21 @@ export default function App({ seedDevices } = {}) {
           if (expectedRoot && prev?.root !== expectedRoot) {
             return prev;
           }
+          // 若当前舞台为空或目标为整屏落点，直接作为单叶子激活
+          if (!prev?.root || edge === 'full') {
+            let newTabs = prev?.tabs || [];
+            if (!newTabs.some((t) => t.uid === sourceUid)) {
+              newTabs = [...newTabs, { uid: sourceUid, pinned: false }];
+            }
+            return {
+              ...prev,
+              tabs: newTabs,
+              activeUid: sourceUid,
+              root: { kind: 'leaf', uid: sourceUid },
+            };
+          }
           // 3. 目标 Leaf 必须仍然存在于当前 root 树中
-          if (!prev?.root || !findLeaf(prev.root, targetUid)) {
+          if (!findLeaf(prev.root, targetUid)) {
             return prev;
           }
           // 4. 若来源不在 tabs 中（从侧栏长按拖入），自动追加 Tab
@@ -231,7 +244,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const handleAgentPointerDown = useCallback((e, ag) => {
-    dragCtrl.current?.start(e, { uid: ag.key }, ag.title);
+    dragCtrl.current?.start(e, { uid: ag.key }, ag.title, { instant: true });
   }, []);
 
   // 服务端删掉会话时的 190ms 退场动画：行先留着播动画，再卸载
@@ -402,6 +415,9 @@ export default function App({ seedDevices } = {}) {
 
   /* ——— 会话动作 ——— */
   const openAgent = useCallback((key) => {
+    if (dragCtrl.current?.suppressClickUntil && Date.now() < dragCtrl.current.suppressClickUntil) {
+      return;
+    }
     geomTrace('activate', { ref: key });
     setWorkspace((prev) => openSession(prev, key));
   }, []);
@@ -864,7 +880,17 @@ export default function App({ seedDevices } = {}) {
               onContextMenu={(e, tab) => openMenu(e, 'tab', tab.uid)}
               onPointerDown={handleTabPointerDown}
             />
-            <div className="tb-drag" data-tauri-drag-region />
+            <div
+              className="tb-drag"
+              data-tauri-drag-region
+              onPointerDown={(e) => {
+                if (e.button === 0 && e.target === e.currentTarget) {
+                  import('@tauri-apps/api/window')
+                    .then((m) => m.getCurrentWindow().startDragging())
+                    .catch(() => {});
+                }
+              }}
+            />
           </header>
 
           <div className="main-stage-container">

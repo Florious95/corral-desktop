@@ -22,28 +22,30 @@ import {
   deserializeWorkspace,
 } from '../src/lib/workspaceLayout.js';
 
-test('tabDrag: edgeAt 25% boundary and corner horizontal preference', () => {
+test('tabDrag: edgeAt omnipresent full-coverage and corner horizontal preference', () => {
   const rect = { x: 0, y: 0, w: 400, h: 400 };
 
-  // 1. Center 50%x50% (x: 100~300, y: 100~300) -> null (center no-op)
-  assert.equal(edgeAt(rect, 200, 200), null);
-  assert.equal(edgeAt(rect, 101, 101), null);
-  assert.equal(edgeAt(rect, 299, 299), null);
+  // 1. Omnipresent full-coverage: No dead zone!
+  // Left half -> 'left', Right half -> 'right', Upper part -> 'top', Lower part -> 'bottom'
+  assert.equal(edgeAt(rect, 150, 200), 'left');
+  assert.equal(edgeAt(rect, 250, 200), 'right');
+  assert.equal(edgeAt(rect, 200, 150), 'top');
+  assert.equal(edgeAt(rect, 200, 250), 'bottom');
+  assert.notEqual(edgeAt(rect, 200, 200), null);
 
-  // 2. Left 25% (x < 100)
+  // 2. Left (x < 100)
   assert.equal(edgeAt(rect, 50, 200), 'left');
 
-  // 3. Right 25% (x > 300)
+  // 3. Right (x > 300)
   assert.equal(edgeAt(rect, 350, 200), 'right');
 
-  // 4. Top 25% (y < 100)
+  // 4. Top (y < 100)
   assert.equal(edgeAt(rect, 200, 50), 'top');
 
-  // 5. Bottom 25% (y > 300)
+  // 5. Bottom (y > 300)
   assert.equal(edgeAt(rect, 200, 350), 'bottom');
 
   // 6. Corner exact diagonal equidistant (e.g. x=50, y=50 in a 400x400):
-  // distances: [['left', 50/400=0.125], ['right', 0.875], ['top', 0.125], ['bottom', 0.875]]
   // Fixed order gives horizontal ('left') precedence over 'top'
   assert.equal(edgeAt(rect, 50, 50), 'left');
 
@@ -124,9 +126,10 @@ test('tabDrag: hitTestLeafPanes edge suction, self rejection, and minimum size p
   assert.equal(selfHit.type, 'center');
   assert.equal(selfHit.targetUid, 'pane-1');
 
-  // 4. Center of pane-1 (x: 250, y: 300) -> center (no-op)
+  // 4. Omnipresent dropzone in center of pane-1 (x: 250, y: 300) -> edge 'top' (no dead zone)
   const centerHit = hitTestLeafPanes({ x: 250, y: 300, sourceUid: 'tab-x', stageRect, leafRects });
-  assert.equal(centerHit.type, 'center');
+  assert.equal(centerHit.type, 'edge');
+  assert.equal(centerHit.targetUid, 'pane-1');
 
   // 5. Minimum size protection: tiny pane cannot be split further
   const tinyLeaves = [
@@ -818,9 +821,9 @@ test('retina crisp overlay and UI alignment: direct pixel dimensions, no scale, 
   const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');
   assert.match(titleBarJsx, /tb-traffic-lights[\s\S]*?tb-drag[\s\S]*?tb-sidebar-toggle/);
 
-  // Verify tauri.conf.json centered traffic lights
+  // Verify tauri.conf.json centered traffic lights collinear with toggle button
   const tauriConf = await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8');
-  assert.match(tauriConf, /"trafficLightPosition":\s*\{\s*"x":\s*18,\s*"y":\s*13\s*\}/);
+  assert.match(tauriConf, /"trafficLightPosition":\s*\{\s*"x":\s*18,\s*"y":\s*18\s*\}/);
 
   ctrl.dispose();
 });
@@ -880,6 +883,59 @@ test('sidebar session drag-and-drop: dragging an unopened agent from sidebar spl
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
   assert.match(appJsx, /handleAgentPointerDown/);
   assert.match(appJsx, /onAgentPointerDown=\{handleAgentPointerDown\}/);
+
+  ctrl.dispose();
+});
+
+test('top window drag: -webkit-app-region drag/no-drag styles and native startDragging hook', async () => {
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+  assert.match(chromeCss, /\[data-tauri-drag-region\],\s*\.tb-drag\s*\{\s*-webkit-app-region:\s*drag;/);
+  assert.match(chromeCss, /button,\s*\.tb-tab,\s*\.tb-sidebar-toggle,\s*input,\s*select\s*\{\s*-webkit-app-region:\s*no-drag;/);
+
+  const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');
+  assert.match(titleBarJsx, /startDragging/);
+
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  assert.match(app, /startDragging/);
+});
+
+test('instant drag & omnipresent dropzone: dx > 4px instant drag and empty stage full preview', () => {
+  const stageRect = { x: 280, y: 38, w: 1000, h: 600 };
+  const ctrl = new TabDragController({
+    getStageEl: () => ({ getBoundingClientRect: () => ({ left: 280, top: 38, width: 1000, height: 600 }) }),
+    getTabBarEl: () => null,
+    getTabs: () => [],
+    getRoot: () => null,
+  });
+
+  const mockOverlay = { style: {} };
+  const mockGhost = { style: {} };
+  ctrl.mountOverlays(mockOverlay, mockGhost);
+
+  // 1. Instant drag mode from sidebar (instant: true)
+  ctrl.start(
+    { button: 0, pointerId: 1, clientX: 100, clientY: 200, target: {}, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } },
+    { uid: 'agent-instant' },
+    'Agent Instant',
+    { instant: true }
+  );
+  assert.equal(ctrl.holdTimer, null, 'Instant drag must not set a 180ms hold timer');
+  assert.equal(ctrl.state, 'pendingHold');
+
+  // 2. Minor movement (<= 4px) does not start drag
+  ctrl._onPointerMove({ pointerId: 1, clientX: 102, clientY: 202 });
+  assert.equal(ctrl.state, 'pendingHold');
+
+  // 3. Movement > 4px immediately triggers dragging without any delay
+  ctrl._onPointerMove({ pointerId: 1, clientX: 110, clientY: 200 });
+  assert.equal(ctrl.state, 'dragging');
+
+  // 4. Empty stage hit testing produces full-stage edge preview
+  const emptyHit = hitTestLeafPanes({ x: 500, y: 300, sourceUid: 'agent-instant', stageRect, leafRects: [] });
+  assert.ok(emptyHit);
+  assert.equal(emptyHit.type, 'edge');
+  assert.equal(emptyHit.edge, 'full');
+  assert.deepEqual(emptyHit.previewRect, stageRect);
 
   ctrl.dispose();
 });
