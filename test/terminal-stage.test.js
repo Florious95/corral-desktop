@@ -14,6 +14,7 @@ test('TabBar component matches UI-SPEC §4.1.1 and advisor requirements', async 
   assert.match(tabBarJsx, /className="tb-tab-close"/);
 
   // Status indicator lamps (working / idle / unknown)
+  assert.match(tabBarJsx, /const status = agent\?\.state \|\| agent\?\.status \|\| 'unknown';/);
   assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*background:\s*#22c55e;/);
   assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*tb-lamp-pulse/);
   assert.match(chromeCss, /\.tb-tab-lamp\.is-idle\s*\{[^}]*background:\s*#22c55e;/);
@@ -45,7 +46,7 @@ test('TerminalStage (SplitPanes) guarantees same-parent flattened absolute proje
   // Background resident pane retains geometry and receives visibility: hidden + inert + aria-hidden
   assert.match(splitPanesJsx, /visibility:\s*isVisible \? 'visible' : 'hidden'/);
   assert.match(splitPanesJsx, /pointerEvents:\s*isVisible \? 'auto' : 'none'/);
-  assert.match(splitPanesJsx, /inert=\{!isVisible \? '' : undefined\}/);
+  assert.match(splitPanesJsx, /inert=\{!isVisible\}/);
   assert.match(splitPanesJsx, /aria-hidden=\{!isVisible \? 'true' : undefined\}/);
 
   // Pane close button rendered when multiple visible panes exist
@@ -71,6 +72,9 @@ test('App wires TabBar into TitleBar and mounts TerminalStage with am.workspace.
   // Storage persistence with am.workspace.v1
   assert.match(appJsx, /loadWorkspaceFromStorage/);
   assert.match(appJsx, /saveWorkspaceToStorage\(workspace\)/);
+
+  // Level2 unsubscribe on 'all' or 'fav' (Bug 1 regression guard)
+  assert.match(appJsx, /if\s*\(selected === 'all' \|\| selected === 'fav'\)\s*\{\s*dm\.unsubscribeLevel2\(\);/);
 
   // Tab right-click menu and Pane right-click menu
   assert.match(appJsx, /menu\.kind === 'tab'/);

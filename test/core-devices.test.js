@@ -198,6 +198,11 @@ test('level2 fills title/status/provider and drives the client-side aggregate', 
 
     t.dm.unsubscribeLevel2(t.id);
     assert.equal(t.dm.space(spaceKey).aggregateState, 'unknown');
+
+    // unsubscribeLevel2 with no arguments clears level2 tracking for all devices
+    t.dm.subscribeLevel2(spaceKey);
+    t.dm.unsubscribeLevel2();
+    assert.equal(t.dm.space(spaceKey).aggregateState, 'unknown');
   } finally { await t.teardown(); }
 });
 

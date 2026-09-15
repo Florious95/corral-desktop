@@ -437,9 +437,22 @@ export class DeviceManager {
   }
 
   unsubscribeLevel2(deviceId) {
-    const client = this._clients.get(deviceId);
+    if (!deviceId) {
+      let any = false;
+      for (const [id, client] of this._clients) {
+        if (this._level2.has(id)) {
+          this._level2.delete(id);
+          client.unsubscribeLevel2();
+          any = true;
+        }
+      }
+      if (any) this._scheduleModel();
+      return any;
+    }
+    const id = String(deviceId).includes('::') ? deviceId.slice(0, deviceId.indexOf('::')) : deviceId;
+    const client = this._clients.get(id);
     if (!client) return false;
-    this._level2.delete(deviceId);
+    this._level2.delete(id);
     this._scheduleModel();
     return client.unsubscribeLevel2();
   }
