@@ -843,6 +843,7 @@ export default function App({ seedDevices } = {}) {
             onAgentMenu={handleAgentMenu}
             onOpenAgent={openAgent}
             onAgentPointerDown={handleAgentPointerDown}
+            activeUid={workspace.activeUid}
             deviceLabel={deviceLabel}
             anyDeviceOnline={anyDeviceOnline}
             onToggleDevices={() => setDevicesOpen((v) => !v)}

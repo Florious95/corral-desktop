@@ -174,7 +174,8 @@
 }
 .spaces-dot.is-working {
   background: var(--green);
-  animation: pulse 1.8s ease-out infinite;
+  box-shadow: 0 0 5px var(--green-ring);
+  animation: tb-lamp-pulse 2.4s ease-in-out infinite;
 }
 .spaces-dot.is-blocked {
   background: var(--amber);
@@ -245,10 +246,19 @@
   -webkit-user-drag: none;
 }
 .agents-row.is-open {
+  background-color: var(--fill-subtle);
+}
+.agents-row.is-active {
   background-color: var(--sel-bg);
 }
 .agents-row:hover {
-  background-color: var(--hover-5);
+  background-color: var(--hover-1);
+}
+.agents-row.is-active:hover {
+  background-color: var(--sel-bg);
+}
+.agents-row.is-open:hover:not(.is-active) {
+  background-color: var(--hover-2);
 }
 .agents-row-main {
   display: flex;
@@ -277,8 +287,9 @@
   gap: 6px;
   min-width: 0;
   margin-top: 3px;
-  font-size: var(--fs-11);
-  color: var(--text-muted);
+  font-size: var(--fs-115);
+  line-height: 15px;
+  color: var(--ink-700);
 }
 .agents-row-metatext {
   min-width: 0;
@@ -295,7 +306,8 @@
 }
 .agents-dot.is-working {
   background: var(--green);
-  animation: pulse 1.8s ease-out infinite;
+  box-shadow: 0 0 6px var(--green-ring);
+  animation: tb-lamp-pulse 2.4s ease-in-out infinite;
 }
 .agents-dot.is-blocked {
   background: var(--amber);

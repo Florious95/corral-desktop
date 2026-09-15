@@ -378,6 +378,13 @@ src/
   - **顶部长按拖窗双保险**：`TitleBar`、`TabBar`、`tb-session-header` 与所有空白留白区均挂载 `-webkit-app-region: drag` 与 `data-tauri-drag-region`；`triggerWindowDrag` 自动排除可交互控件（`button`、`.tb-tab`、输入框等），在任何非交互空白区域长按按住时均同步调用 `appWindow.startDragging()`，杜绝窗口卡顿无法移动；
   - **侧栏文件夹/工作区状态点展示**：每个工作区项（`FolderIcon`）根据内部所有会话状态动态派生；只要任一会话 `state === 'working'` 或 `status === 'working'`，无论该文件夹是否选中或折叠收起，其外层右侧均展示微动绿点；`TabBar` 顶部状态灯与之即时联动，消灭状态不同步；
   - **幽灵标签与重复标签彻底根除**：点击右侧终端窗格走纯粹的 `focusWorkspacePane`，仅更新当前激活工作台内部的 `activeUid`，绝不修改 `tabs` 结构；单会话全顶栏查重与 `openSession` 安全防穿透委派，彻底杜绝生成没有 root、没有内容、仅有标题的空壳幽灵 Tab！
+- **UI 与视觉审美精进裁定（2026-09-16 顾问审查收口）**：
+  - **激活 Tab 与未定义变量清除**：彻底消除未定义 CSS 变量（`--surface-2`、`--border-soft`、`--hover-6`）；激活 Tab 采用 `background: var(--bg); border-color: var(--border-input); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06);`；
+  - **信息层级与对比度**：未激活 Tab 默认文字提升为 `var(--ink-700)`，行高 `16px`；Agent 列表第二行 meta 小字提升为 `var(--ink-700)`，字号 `var(--fs-115)`，行高 `15px`；
+  - **侧栏 open 与 active 状态解耦**：已打开（open）项背景降为 `var(--fill-subtle)`，仅当前激活（active）项高亮使用 `var(--sel-bg)`，未选中项 hover 使用 `var(--hover-1)`；
+  - **分屏多窗格焦点覆盖环**：多窗格分屏时（`[data-multi-pane="true"]`），当前活跃窗格覆盖 1px `var(--input-focus)` 精准焦点轮廓环（`::after`）；
+  - **状态灯与微交互精修**：统一使用 `--green: #34c759`，2.4s ease-in-out 呼吸动效；TabBar idle 灯采用 `var(--icon-idle)` 实心灰；Pinned Tab 调整为 32px 舒适边距；关闭按钮热区扩大为 18×18px，新建按钮 26×26px，支持 `:focus-visible`；
+  - **克制通透毛玻璃**：拖拽预览候选框 `backdrop-filter: blur(4px); background: rgba(59,130,246,.08);`，让终端文字隐约可见。
 
 ### 4.2 `chrome/DevicesPopover.jsx`
 

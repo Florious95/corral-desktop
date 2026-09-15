@@ -61,6 +61,7 @@ export default function Sidebar({
   onAgentMenu,
   onOpenAgent,
   onAgentPointerDown,
+  activeUid = null,
   deviceLabel,
   anyDeviceOnline,
   onToggleDevices,
@@ -109,6 +110,7 @@ export default function Sidebar({
           <AgentsList
             agents={agents}
             openKeys={openKeys}
+            activeUid={activeUid}
             closing={closing}
             onOpen={onOpenAgent}
             onContextMenu={onAgentMenu}

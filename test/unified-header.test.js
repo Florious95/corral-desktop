@@ -134,3 +134,39 @@ test('triggerWindowDrag guarantees exactly-once dispatch and deduplicates bubble
   assert.equal(appJsx.includes('.getCurrentWindow().startDragging()'), false);
   assert.equal(tabBarJsx.includes('.getCurrentWindow().startDragging()'), false);
 });
+
+test('visual & aesthetic refinement (2026-09-16 advisor review closing)', async () => {
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+  const sidebarCss = await readFile(new URL('../src/components/sidebar/sidebar.css', import.meta.url), 'utf8');
+  const terminalCss = await readFile(new URL('../src/components/terminal/terminal.css', import.meta.url), 'utf8');
+  const agentsListJsx = await readFile(new URL('../src/components/sidebar/AgentsList.jsx', import.meta.url), 'utf8');
+  const splitPanesJsx = await readFile(new URL('../src/components/terminal/SplitPanes.jsx', import.meta.url), 'utf8');
+
+  // 1. 彻底消灭未定义 CSS 变量
+  assert.equal(chromeCss.includes('--surface-2'), false, 'Undefined --surface-2 must be eliminated');
+  assert.equal(chromeCss.includes('--border-soft'), false, 'Undefined --border-soft must be eliminated');
+  assert.equal(chromeCss.includes('--hover-6'), false, 'Undefined --hover-6 must be eliminated');
+  assert.equal(terminalCss.includes('--border-soft'), false, 'Undefined --border-soft must be eliminated');
+
+  // 2. 激活 Tab 使用背景 var(--bg) 与边框 var(--border-input)
+  assert.match(chromeCss, /\.tb-tab\.is-active\s*\{[^}]*background:\s*var\(--bg\);/);
+  assert.match(chromeCss, /\.tb-tab\.is-active\s*\{[^}]*border-color:\s*var\(--border-input\);/);
+
+  // 3. Inactive Tab 与 Agent meta 提升对比度
+  assert.match(chromeCss, /\.tb-tab\s*\{[^}]*color:\s*var\(--ink-700\);/);
+  assert.match(sidebarCss, /\.agents-row-meta\s*\{[^}]*color:\s*var\(--ink-700\);/);
+
+  // 4. 区分已打开（open）与当前选中活跃（active）
+  assert.match(agentsListJsx, /isActive=\{activeUid === ag\.key\}/);
+  assert.match(sidebarCss, /\.agents-row\.is-open\s*\{[^}]*background-color:\s*var\(--fill-subtle\);/);
+  assert.match(sidebarCss, /\.agents-row\.is-active\s*\{[^}]*background-color:\s*var\(--sel-bg\);/);
+
+  // 5. 分屏多窗格输入焦点覆盖环
+  assert.match(splitPanesJsx, /data-multi-pane=\{visibleUids\.length > 1/);
+  assert.match(terminalCss, /\[data-multi-pane="true"\] \.pane-host\.is-active::after/);
+
+  // 6. Pinned Tab 32px 与关闭/新建按钮热区
+  assert.match(chromeCss, /\.tb-tab-pinned\s*\{[^}]*width:\s*32px;/);
+  assert.match(chromeCss, /\.tb-tab-close\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;/);
+  assert.match(chromeCss, /\.tb-tab-add\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;/);
+});

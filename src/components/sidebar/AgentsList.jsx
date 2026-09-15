@@ -30,6 +30,7 @@ const sameAgentRow = (prev, next) => {
   const b = next.agent;
   return prev.top === next.top
     && prev.isOpen === next.isOpen
+    && prev.isActive === next.isActive
     && prev.isClosing === next.isClosing
     && prev.multiDevice === next.multiDevice
     && prev.onOpen === next.onOpen
@@ -46,11 +47,11 @@ const sameAgentRow = (prev, next) => {
 };
 
 const AgentRow = memo(function AgentRow({
-  agent: ag, top, isOpen, isClosing, onOpen, onContextMenu, multiDevice, onPointerDown,
+  agent: ag, top, isOpen, isActive = false, isClosing, onOpen, onContextMenu, multiDevice, onPointerDown,
 }) {
   return (
     <div
-      className={`agents-row${isOpen ? ' is-open' : ''}`}
+      className={`agents-row${isOpen ? ' is-open' : ''}${isActive ? ' is-active' : ''}`}
       style={{
         top,
         opacity: isClosing ? 0 : 1,
@@ -106,6 +107,7 @@ const AgentRow = memo(function AgentRow({
 export default function AgentsList({
   agents,
   openKeys,
+  activeUid = null,
   closing = {},
   onOpen,
   onContextMenu,
@@ -157,6 +159,7 @@ export default function AgentsList({
               agent={ag}
               top={tops.get(ag.key)}
               isOpen={openSet.has(ag.key)}
+              isActive={activeUid === ag.key}
               isClosing={!!closing[ag.key]}
               onOpen={onOpen}
               onContextMenu={onContextMenu}
