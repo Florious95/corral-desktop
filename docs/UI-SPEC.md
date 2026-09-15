@@ -264,17 +264,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 - 标题栏高 **38px**。（2026-08-22 用户裁定：顶部去界化，标题条收窄。原 46px 作废。）
 - **分列式架构与视觉对齐**（2026-09-16 用户最新裁定）：废除贯穿整个窗口顶部的全宽 Header，左侧菜单栏与右侧会话区由垂直分隔线彻底分离：
   - **左侧列（侧边栏区域）**：
-    - 顶部工具栏（TitleBar，高 38px）预留 **80px** 原生红绿灯安全留白，并在垂直方向上完美居中（y: 12）；
-    - 红绿灯右侧放置侧栏展开/收折切换按钮（SidebarToggle，`28×26px`，`<SidebarIcon size={16} strokeWidth={1.8}/>`，垂直居中）；
+    - 顶部工具栏（TitleBar，高 38px）预留 **80px** 原生红绿灯安全留白，并在垂直方向上与折叠按钮严格共线对齐（`trafficLightPosition: { "x": 18, "y": 18 }`）；
+    - 菜单缩进按钮（SidebarToggle，`28×26px`，`<SidebarIcon size={16} strokeWidth={1.8}/>`）位于左侧栏最右侧、紧靠垂直分割线左侧，垂直绝对居中；
+    - 中间区域为可拖动窗口区域（`.tb-drag`），具备 `-webkit-app-region: drag` 与 `startDragging()` 双重原生拖动保险；
+    - 侧栏会话支持即时拖动：按下鼠标位移 `dx/dy > 4px` 瞬间进入 dragging 状态（无 180ms 延迟），直接点、直接拖；
     - 下方排布工作区与会话列表（SpacesList、AgentsList）；
     - 右侧拥有贯穿整个视口全高的垂直分隔线（`border-right: 1px solid var(--border-strong)`）。
   - **右侧列（会话主舞台）**：
     - 顶部放置会话选项卡栏（`tb-session-header` 内挂载 TabBar，高 38px，位于垂直分隔线右侧，仅覆盖右侧会话区，绝不在左侧菜单栏上方！）；
-    - 下方是同父平铺常驻终端舞台（TerminalStage）；
+    - 顶栏空白处同样具备双重原生拖动保险（`-webkit-app-region: drag` 与 `startDragging()`）；
+    - 下方是同父平铺常驻终端舞台（TerminalStage），全域无死角分屏（彻底废除中心死区，四向 Voronoi 划分，任何坐标必有落点，拖拽会话在当前激活标签页内整合成多窗格分屏）；
   - **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开/折叠通过快捷键 Cmd+B 或顶栏侧栏切换按钮唤出；折叠时右侧会话顶栏自动适配红绿灯留白与展开按钮。
 - `tauri.conf.json` 保持 Overlay 模式：
   ```json
-  { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 12 } }
+  { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 18, "y": 18 } }
   ```
 - **Cmd+B**：本地切换侧栏折叠/展开（任何窗口状态）。⛔ 不发给远端 CLI。
 - 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。

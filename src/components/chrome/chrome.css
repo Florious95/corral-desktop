@@ -42,10 +42,12 @@
 .tb-sidebar-toggle {
   width: 28px;
   height: 26px;
+  margin: 0;
   border-radius: var(--r-6);
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   cursor: pointer;
   color: var(--icon-titlebar);
   background: none;
@@ -62,6 +64,19 @@
   outline: 2px solid var(--input-focus);
   outline-offset: 1px;
 }
+[data-tauri-drag-region],
+.tb-drag {
+  -webkit-app-region: drag;
+}
+
+button,
+.tb-tab,
+.tb-sidebar-toggle,
+input,
+select {
+  -webkit-app-region: no-drag;
+}
+
 .tb-drag {
   margin-left: auto;
   flex: 1;
