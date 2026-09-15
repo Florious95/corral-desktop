@@ -7,15 +7,14 @@ import {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test('collapsed chrome: no 131px column; no traffic-light gutter', async () => {
+test('collapsed chrome: no 131px column; no traffic-light gutter; no dead pill styles', async () => {
   const css = await readFile(new URL('../src/styles/app.css', import.meta.url), 'utf8');
   const chrome = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
   assert.match(css, /\.app-left\.is-collapsed\s*\{[^}]*width:\s*0/);
   assert.equal(css.includes('width: 131px'), false);
   assert.equal(css.includes('padding-top: 38px'), false);
-  assert.match(chrome, /border-radius:\s*999px/);
-  assert.match(chrome, /\.chrome-pill\.is-reveal/);
-  assert.match(chrome, /\.chrome-lamp\.r/);
+  assert.equal(chrome.includes('.chrome-pill'), false);
+  assert.equal(chrome.includes('.chrome-lamp'), false);
 });
 
 test('fullscreen hot zone sits below 62px system chrome inset', () => {
