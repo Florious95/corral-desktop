@@ -17,7 +17,7 @@
   outline-offset: 1px;
 }
 
-/* ---------- §4.1 一体化 TitleBar (2026-09-15 裁定) ---------- */
+/* ---------- §4.1 左侧列 Header (TitleBar, 2026-09-16 裁定) ---------- */
 .tb {
   height: 38px;
   flex: none;
@@ -25,9 +25,8 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px 0 0;
-  background: var(--titlebar-grad);
+  background: var(--sidebar-bg);
   border-bottom: 1px solid var(--border-strong);
-  box-shadow: var(--titlebar-inset);
   box-sizing: border-box;
   user-select: none;
   position: relative;
@@ -37,6 +36,8 @@
   width: 80px;
   height: 100%;
   flex: none;
+  display: flex;
+  align-items: center;
 }
 .tb-sidebar-toggle {
   width: 28px;
@@ -64,8 +65,28 @@
 .tb-drag {
   margin-left: auto;
   flex: 1;
-  min-width: 20px;
+  min-width: 10px;
   align-self: stretch;
+}
+
+/* ---------- §4.1.2 右侧会话区 Header (2026-09-16 裁定) ---------- */
+.tb-session-header {
+  height: 38px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 8px;
+  background: var(--titlebar-grad);
+  border-bottom: 1px solid var(--border-strong);
+  box-shadow: var(--titlebar-inset);
+  box-sizing: border-box;
+  user-select: none;
+  position: relative;
+  z-index: 10;
+}
+.tb-session-header.is-sidebar-collapsed {
+  padding-left: 0;
 }
 
 /* ---------- §4.1.1 TabBar (2026-09-15 裁定) ---------- */

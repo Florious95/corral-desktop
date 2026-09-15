@@ -259,19 +259,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 
 ---
 
-## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c` 与 2026-09-15 裁定）
+## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c` 与 2026-09-16 用户最新裁定）
 
 - 标题栏高 **38px**。（2026-08-22 用户裁定：顶部去界化，标题条收窄。原 46px 作废。）
-- **原生红绿灯恢复与一体化常驻 Header**（裁定 2026-09-15）：彻底废除悬浮胶囊 chrome 与 `ChromePill.jsx`。Rust 移除 `hide_native_traffic_lights`，恢复 macOS 原生交通灯呈现。顶栏横贯全宽、常驻窗口顶端，独立于侧栏；侧栏折叠只改变下层内容区，顶栏永远不被卸载。
-  - 左侧预留 **80px**（78~86px 安全范围）原生红绿灯安全留白，不放置任何可交互 HTML 按钮。
-  - 紧接着排布侧栏展开/收折切换按钮（SidebarToggle，`28×26px`，`<SidebarIcon size={16} strokeWidth={1.8}/>`）。
-  - 右侧空白区域设为 `data-tauri-drag-region` 支持窗口整体拖拽。
-  - 预留子组件插槽，为后续会话选项卡（TabBar）接入铺平道路。
+- **分列式架构与视觉对齐**（2026-09-16 用户最新裁定）：废除贯穿整个窗口顶部的全宽 Header，左侧菜单栏与右侧会话区由垂直分隔线彻底分离：
+  - **左侧列（侧边栏区域）**：
+    - 顶部工具栏（TitleBar，高 38px）预留 **80px** 原生红绿灯安全留白，并在垂直方向上完美居中（y: 12）；
+    - 红绿灯右侧放置侧栏展开/收折切换按钮（SidebarToggle，`28×26px`，`<SidebarIcon size={16} strokeWidth={1.8}/>`，垂直居中）；
+    - 下方排布工作区与会话列表（SpacesList、AgentsList）；
+    - 右侧拥有贯穿整个视口全高的垂直分隔线（`border-right: 1px solid var(--border-strong)`）。
+  - **右侧列（会话主舞台）**：
+    - 顶部放置会话选项卡栏（`tb-session-header` 内挂载 TabBar，高 38px，位于垂直分隔线右侧，仅覆盖右侧会话区，绝不在左侧菜单栏上方！）；
+    - 下方是同父平铺常驻终端舞台（TerminalStage）；
+  - **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开/折叠通过快捷键 Cmd+B 或顶栏侧栏切换按钮唤出；折叠时右侧会话顶栏自动适配红绿灯留白与展开按钮。
 - `tauri.conf.json` 保持 Overlay 模式：
   ```json
-  { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 13 } }
+  { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 12 } }
   ```
-- **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开/折叠通过一体化 Header 上的侧栏按钮或 Cmd+B 切换。
 - **Cmd+B**：本地切换侧栏折叠/展开（任何窗口状态）。⛔ 不发给远端 CLI。
 - 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。
 - 关闭 = 销毁窗口并退出进程（原生红钮 / Cmd+W 走 `close()`）。⛔ 不许 hide 后 Dock 残留。Quit = Cmd+Q。

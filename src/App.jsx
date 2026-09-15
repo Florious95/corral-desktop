@@ -4,7 +4,7 @@ import { DeviceManager } from './core/devices.js';
 import { isLocalUrl } from './core/local.js';
 import { geomTrace } from './term/geomTrace.js';
 import {
-  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon,
+  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon, SidebarIcon,
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
@@ -796,25 +796,13 @@ export default function App({ seedDevices } = {}) {
 
   return (
     <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
-      <TitleBar
-        fullscreen={nativeFullscreen}
-        sidebarCollapsed={collapsed}
-        onToggleSidebar={() => setCollapsed((v) => !v)}
-      >
-        <TabBar
-          tabs={workspace.tabs}
-          activeUid={workspace.activeUid}
-          visibleUids={visibleLeaves}
-          draggingUid={draggingUid}
-          agentsByUid={agentByKey}
-          onSelectTab={handleSelectTab}
-          onCloseTab={handleCloseTab}
-          onContextMenu={(e, tab) => openMenu(e, 'tab', tab.uid)}
-          onPointerDown={handleTabPointerDown}
-        />
-      </TitleBar>
       <div className="app-body">
         <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
+          <TitleBar
+            fullscreen={nativeFullscreen}
+            sidebarCollapsed={collapsed}
+            onToggleSidebar={() => setCollapsed((v) => !v)}
+          />
           <Sidebar
             collapsed={collapsed}
             spacesOpen={spacesOpen}
@@ -840,17 +828,46 @@ export default function App({ seedDevices } = {}) {
         </div>
 
         <main className="app-main">
-          {noDevices ? (
-            <div className="app-empty">
-              <div className="app-empty-icon"><TerminalIcon size={20} /></div>
-              <div className="app-empty-title">还没有添加设备</div>
-              <div className="app-empty-sub">连接一台运行 agentmirrord 的机器，开始镜像它的 Agent</div>
-              <button type="button" className="app-empty-btn" onClick={() => setAddDeviceOpen(true)}>
-                添加设备
-              </button>
-            </div>
-          ) : (
-            <>
+          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`} data-tauri-drag-region>
+            {collapsed && (
+              <>
+                <div className="tb-traffic-lights" aria-hidden="true" />
+                <button
+                  type="button"
+                  className="tb-btn tb-sidebar-toggle"
+                  title="展开侧栏"
+                  aria-label="展开侧栏"
+                  onClick={() => setCollapsed(false)}
+                >
+                  <SidebarIcon size={16} strokeWidth={1.8} />
+                </button>
+              </>
+            )}
+            <TabBar
+              tabs={workspace.tabs}
+              activeUid={workspace.activeUid}
+              visibleUids={visibleLeaves}
+              draggingUid={draggingUid}
+              agentsByUid={agentByKey}
+              onSelectTab={handleSelectTab}
+              onCloseTab={handleCloseTab}
+              onContextMenu={(e, tab) => openMenu(e, 'tab', tab.uid)}
+              onPointerDown={handleTabPointerDown}
+            />
+            <div className="tb-drag" data-tauri-drag-region />
+          </header>
+
+          <div className="main-stage-container">
+            {noDevices ? (
+              <div className="app-empty">
+                <div className="app-empty-icon"><TerminalIcon size={20} /></div>
+                <div className="app-empty-title">还没有添加设备</div>
+                <div className="app-empty-sub">连接一台运行 agentmirrord 的机器，开始镜像它的 Agent</div>
+                <button type="button" className="app-empty-btn" onClick={() => setAddDeviceOpen(true)}>
+                  添加设备
+                </button>
+              </div>
+            ) : (
               <SplitPanes
                 stageRef={stageRef}
                 root={workspace.root}
@@ -862,8 +879,8 @@ export default function App({ seedDevices } = {}) {
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
               />
-            </>
-          )}
+            )}
+          </div>
         </main>
       </div>
 
