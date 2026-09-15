@@ -58,7 +58,7 @@ export default function TabBar({
             const subtitle = agent ? `${agent.title} (${agent.deviceName})` : tab.uid;
             const isActive = tab.uid === activeUid;
             const isVisible = visibleUids.includes(tab.uid);
-            const status = agent?.status || 'unknown';
+            const status = agent?.state || agent?.status || 'unknown';
 
             return (
               <div
@@ -90,7 +90,7 @@ export default function TabBar({
           const subtitle = agent ? `${agent.title} (${agent.deviceName})` : tab.uid;
           const isActive = tab.uid === activeUid;
           const isVisible = visibleUids.includes(tab.uid);
-          const status = agent?.status || 'unknown';
+          const status = agent?.state || agent?.status || 'unknown';
 
           return (
             <div

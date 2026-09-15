@@ -273,8 +273,19 @@ export default function App({ seedDevices } = {}) {
 
   /* ——— level2：选中某个 Space 才订二级状态流（一台设备同时只能订一个 cwd） ——— */
   useEffect(() => {
-    if (selected === 'all' || selected === 'fav') return;
+    if (selected === 'all' || selected === 'fav') {
+      dm.unsubscribeLevel2();
+      return;
+    }
     dm.subscribeLevel2(selected);
+    return () => {
+      const sep = String(selected).indexOf('::');
+      if (sep >= 0) {
+        dm.unsubscribeLevel2(selected.slice(0, sep));
+      } else {
+        dm.unsubscribeLevel2();
+      }
+    };
   }, [dm, selected]);
 
   /* ——— 会话动作 ——— */
