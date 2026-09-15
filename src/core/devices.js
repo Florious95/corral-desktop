@@ -23,8 +23,8 @@ const MODEL_DEBOUNCE_MS = 100;
 
 /** Client-side workspace aggregate (§0.2): the server no longer computes it. */
 function aggregateState(sessions) {
-  if (sessions.some((s) => s.status === 'working')) return 'working';
-  if (sessions.some((s) => s.status === 'idle')) return 'idle';
+  if (sessions.some((s) => s.status === 'working' || s.state === 'working')) return 'working';
+  if (sessions.some((s) => s.status === 'idle' || s.state === 'idle')) return 'idle';
   return 'unknown';
 }
 

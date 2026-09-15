@@ -2,6 +2,29 @@ import React, { useMemo } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, PlusIcon } from '../../lib/icons.jsx';
 import { getLeaves } from '../../lib/workspaceLayout.js';
+import { triggerWindowDrag } from '../../lib/windowChrome.js';
+
+/**
+ * 计算标签页对应的实时运行状态（支持多分屏与单会话秒级联动）
+ */
+function getTabStatus(tab, leaves, agentsByUid, agent) {
+  const status = agent?.state || agent?.status || 'unknown';
+  const uids = leaves.length > 0 ? leaves : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
+  if (uids.length > 0) {
+    const hasWorking = uids.some((u) => {
+      const a = agentsByUid.get(u);
+      return a?.state === 'working' || a?.status === 'working';
+    });
+    if (hasWorking) return 'working';
+    const hasIdle = uids.some((u) => {
+      const a = agentsByUid.get(u);
+      return a?.state === 'idle' || a?.status === 'idle';
+    });
+    if (hasIdle) return 'idle';
+  }
+  if (status === 'working' || status === 'idle') return status;
+  return 'unknown';
+}
 
 /**
  * 会话状态指示灯
@@ -54,9 +77,15 @@ export default function TabBar({
   if (tabs.length === 0) return null;
 
   return (
-    <nav className="tb-tabbar" aria-label="会话标签页">
+    <nav
+      className="tb-tabbar"
+      data-tauri-drag-region
+      aria-label="会话标签页"
+      onPointerDown={triggerWindowDrag}
+      onMouseDown={triggerWindowDrag}
+    >
       {pinnedTabs.length > 0 && (
-        <div className="tb-tabs-pinned">
+        <div className="tb-tabs-pinned" data-tauri-drag-region>
           {pinnedTabs.map((tab, idx) => {
             const tabKey = tab.id || tab.uid;
             const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
@@ -67,21 +96,8 @@ export default function TabBar({
             const subtitle = agent ? `${title} (${agent.deviceName})` : title;
             const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
             const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
-
-            let tabStatus = 'unknown';
-            if (leaves.length > 0) {
-              const hasWorking = leaves.some((l) => {
-                const a = agentsByUid.get(l);
-                return (a?.state || a?.status) === 'working';
-              });
-              const hasIdle = leaves.some((l) => {
-                const a = agentsByUid.get(l);
-                return (a?.state || a?.status) === 'idle';
-              });
-              tabStatus = hasWorking ? 'working' : (hasIdle ? 'idle' : 'unknown');
-            }
             const status = agent?.state || agent?.status || 'unknown';
-            const finalStatus = leaves.length > 0 ? tabStatus : status;
+            const finalStatus = getTabStatus(tab, leaves, agentsByUid, agent);
 
             return (
               <div
@@ -109,7 +125,7 @@ export default function TabBar({
         </div>
       )}
 
-      <div className="tb-tabs-scroll">
+      <div className="tb-tabs-scroll" data-tauri-drag-region>
         {regularTabs.map((tab, idx) => {
           const tabKey = tab.id || tab.uid;
           const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
@@ -131,21 +147,8 @@ export default function TabBar({
           const subtitle = agent ? `${title} (${agent.deviceName})` : title;
           const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
           const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
-
-          let tabStatus = 'unknown';
-          if (leaves.length > 0) {
-            const hasWorking = leaves.some((l) => {
-              const a = agentsByUid.get(l);
-              return (a?.state || a?.status) === 'working';
-            });
-            const hasIdle = leaves.some((l) => {
-              const a = agentsByUid.get(l);
-              return (a?.state || a?.status) === 'idle';
-            });
-            tabStatus = hasWorking ? 'working' : (hasIdle ? 'idle' : 'unknown');
-          }
           const status = agent?.state || agent?.status || 'unknown';
-          const finalStatus = leaves.length > 0 ? tabStatus : status;
+          const finalStatus = getTabStatus(tab, leaves, agentsByUid, agent);
 
           return (
             <div

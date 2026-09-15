@@ -77,15 +77,25 @@ if (typeof window !== 'undefined') {
 }
 
 export function triggerWindowDrag(e) {
-  if (e.button === 0 && e.target === e.currentTarget) {
-    try {
-      if (appWindowInstance && typeof appWindowInstance.startDragging === 'function') {
-        appWindowInstance.startDragging();
-      } else {
-        import('@tauri-apps/api/window')
-          .then((m) => m.getCurrentWindow().startDragging())
-          .catch(() => {});
-      }
-    } catch {}
+  if (e.button !== 0) return;
+  // 排除按钮、输入框、Tab 标签页、关闭按钮、新建按钮等可交互元素
+  if (e.target && typeof e.target.closest === 'function') {
+    if (e.target.closest('button, input, select, textarea, [role="tab"], .tb-tab, .tb-tab-close, .tb-tab-add, .tb-btn, [data-no-drag]')) {
+      return;
+    }
   }
+  try {
+    if (appWindowInstance && typeof appWindowInstance.startDragging === 'function') {
+      appWindowInstance.startDragging();
+    } else {
+      import('@tauri-apps/api/window')
+        .then((m) => {
+          try {
+            appWindowInstance = m.getCurrentWindow();
+            appWindowInstance.startDragging();
+          } catch {}
+        })
+        .catch(() => {});
+    }
+  } catch {}
 }

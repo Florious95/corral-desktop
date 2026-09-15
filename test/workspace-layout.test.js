@@ -15,6 +15,7 @@ import {
   getAllWorkspaceSessions,
   smartOpenSession,
   closeWorkspacePane,
+  focusWorkspacePane,
   getLeaves,
   findLeaf,
   removeNode,
@@ -590,4 +591,40 @@ test('workspaceLayout: closeWorkspacePane persists to tabs[activeTab].root in v2
   assert.deepEqual(getLeaves(restored.root), ['col-2', 'col-3', 'col-4']);
   const restoredTab = restored.tabs.find((t) => t.id === restored.activeTabId);
   assert.deepEqual(getLeaves(restoredTab.root), ['col-2', 'col-3', 'col-4']);
+});
+
+test('workspaceLayout: focusWorkspacePane and ghost/duplicate tab elimination', () => {
+  // 1. 初始化多工作台，打开单会话 s1
+  let mw = createMultiWorkspace();
+  mw = smartOpenSession(mw, 's1');
+  assert.equal(mw.tabs.length, 1);
+  assert.equal(mw.activeUid, 's1');
+
+  // 2. 模拟快速点击右侧终端窗格：focusWorkspacePane 仅激活当前窗格，tabs.length 绝不增加，绝不生成幽灵 Tab
+  const prevTabsLen = mw.tabs.length;
+  mw = focusWorkspacePane(mw, 's1');
+  assert.equal(mw.tabs.length, prevTabsLen, 'Must not append any ghost tab');
+  assert.equal(mw.activeUid, 's1');
+
+  // 3. 构建多分屏 (s1 | s2)
+  mw = splitSessionInActiveTab(mw, 's1', 's2', 'right');
+  assert.equal(mw.tabs.length, 1);
+  assert.deepEqual(getLeaves(mw.root), ['s1', 's2']);
+  assert.equal(mw.activeUid, 's2');
+
+  // 4. 点击窗格 s1：focusWorkspacePane 切换焦点至 s1，tabs 结构完全保持不变
+  mw = focusWorkspacePane(mw, 's1');
+  assert.equal(mw.tabs.length, 1);
+  assert.equal(mw.activeUid, 's1');
+  assert.deepEqual(getLeaves(mw.root), ['s1', 's2']);
+
+  // 5. 再次点击同一焦点 s1：原状态直接返回（引用一致性）
+  const same = focusWorkspacePane(mw, 's1');
+  assert.strictEqual(same, mw);
+
+  // 6. 防穿透：在 v2 模式下即使外部误调 openSession，也会安全委派至 smartOpenSession，绝不产生扁平幽灵 Tab
+  let redirected = openSession(mw, 's3');
+  // s1|s2 是多分屏，smartOpenSession 刚性保护，直接返回原状态
+  assert.strictEqual(redirected, mw);
+  assert.equal(mw.tabs.some((t) => !t.root && !t.activeUid), false, 'Must never create empty ghost tab');
 });

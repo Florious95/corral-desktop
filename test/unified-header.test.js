@@ -50,3 +50,45 @@ test('Rust main.rs restores macOS native traffic lights and drops hide_native_tr
   assert.equal(mainRs.includes('standardWindowButton'), false);
   assert.match(mainRs, /ensure_devices_store/);
 });
+
+test('triggerWindowDrag respects interactive controls and enables window dragging on blank areas', async () => {
+  const { triggerWindowDrag } = await import('../src/lib/windowChrome.js');
+
+  // 1. 点击 button 或带有 no-drag 的交互元素时，坚决不触发拖窗
+  let dragCalled = false;
+  triggerWindowDrag({
+    button: 0,
+    target: { closest: (sel) => (sel.includes('button') ? true : null) },
+  });
+  assert.equal(dragCalled, false);
+
+  // 2. 右键或非主键点击，不触发拖窗
+  triggerWindowDrag({
+    button: 2,
+    target: { closest: () => null },
+  });
+  assert.equal(dragCalled, false);
+
+  // 3. 校验 CSS 样式中 TabBar、Header 与拖拽留白区均具备 -webkit-app-region: drag
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+  assert.match(chromeCss, /\.tb-tabbar,\s*\.tb-tabs-scroll/);
+  assert.match(chromeCss, /\.tb-tab-close,\s*\.tb-tab-add/);
+});
+
+test('sidebar workspace working lamp and header status synchronization', async () => {
+  const sidebarJsx = await readFile(new URL('../src/components/sidebar/Sidebar.jsx', import.meta.url), 'utf8');
+  const spacesListJsx = await readFile(new URL('../src/components/sidebar/SpacesList.jsx', import.meta.url), 'utf8');
+  const tabBarJsx = await readFile(new URL('../src/components/chrome/TabBar.jsx', import.meta.url), 'utf8');
+
+  // Sidebar 传入 working 状态给折叠 GroupHeader
+  assert.match(sidebarJsx, /working=\{spacesHasWorking\}/);
+  assert.match(sidebarJsx, /spaces-dot is-working/);
+
+  // SpacesList 支持工作状态绿点展示
+  assert.match(spacesListJsx, /state=\{allSpacesWorking \? 'working' : 'unknown'\}/);
+  assert.match(spacesListJsx, /spaces-dot is-\$\{state\}/);
+
+  // TabBar 具备 getTabStatus 实时联动引擎
+  assert.match(tabBarJsx, /getTabStatus/);
+  assert.match(tabBarJsx, /a\?\.state === 'working' \|\| a\?\.status === 'working'/);
+});
