@@ -9,6 +9,9 @@
   border-right: 0;
   display: flex;
   flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
   transition: width var(--d-sidebar) var(--ease);
 }
 .sidebar-inner {
@@ -229,9 +232,17 @@
   border-radius: var(--r-9);
   cursor: pointer;
   background-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
   transition: background-color var(--d-hover), opacity var(--d-row), transform var(--d-row),
     top var(--d-reorder) var(--ease);
   animation: rowIn var(--d-chevron) ease-out;
+}
+.agents-row * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
 }
 .agents-row.is-open {
   background-color: var(--sel-bg);

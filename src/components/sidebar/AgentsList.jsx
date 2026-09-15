@@ -56,6 +56,8 @@ const AgentRow = memo(function AgentRow({
         opacity: isClosing ? 0 : 1,
         transform: `scale(${isClosing ? 0.94 : 1})`,
       }}
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
       onClick={() => onOpen(ag.key)}
       onContextMenu={(e) => onContextMenu(e, ag.key)}
       onPointerDown={(e) => onPointerDown && onPointerDown(e, ag)}

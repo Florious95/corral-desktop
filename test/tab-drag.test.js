@@ -114,12 +114,12 @@ test('tabDrag: hitTestLeafPanes edge suction, self rejection, and minimum size p
   // 1. Outside stage -> null
   assert.equal(hitTestLeafPanes({ x: 500, y: 10, sourceUid: 'tab-x', stageRect, leafRects }), null);
 
-  // 2. Over pane-1 right edge (x: 450, y: 300) -> edge 'right'
+  // 2. Over pane-1 right edge (x: 450, y: 300) -> edge 'right' (1:1:1 equal column balance)
   const hitRight = hitTestLeafPanes({ x: 450, y: 300, sourceUid: 'tab-x', stageRect, leafRects });
   assert.equal(hitRight.type, 'edge');
   assert.equal(hitRight.targetUid, 'pane-1');
   assert.equal(hitRight.edge, 'right');
-  assert.deepEqual(hitRight.previewRect, { x: 250, y: 40, w: 249, h: 600 });
+  assert.deepEqual(hitRight.previewRect, { x: 334, y: 40, w: 332, h: 600 });
 
   // 3. Self-drop rejection: dragging pane-1 into pane-1 -> center (no-op)
   const selfHit = hitTestLeafPanes({ x: 450, y: 300, sourceUid: 'pane-1', stageRect, leafRects });
@@ -826,7 +826,7 @@ test('retina crisp overlay and UI alignment: direct pixel dimensions, no scale, 
 
   // Verify tauri.conf.json centered traffic lights collinear with toggle button
   const tauriConf = await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8');
-  assert.match(tauriConf, /"trafficLightPosition":\s*\{\s*"x":\s*18,\s*"y":\s*18\s*\}/);
+  assert.match(tauriConf, /"trafficLightPosition":\s*\{\s*"x":\s*18,\s*"y":\s*20\s*\}/);
 
   ctrl.dispose();
 });

@@ -66,3 +66,26 @@ export async function desktopWindowApi() {
     setFullscreen: (v) => w.setFullscreen(v),
   };
 }
+
+let appWindowInstance = null;
+if (typeof window !== 'undefined') {
+  import('@tauri-apps/api/window')
+    .then((m) => {
+      try { appWindowInstance = m.getCurrentWindow(); } catch {}
+    })
+    .catch(() => {});
+}
+
+export function triggerWindowDrag(e) {
+  if (e.button === 0 && e.target === e.currentTarget) {
+    try {
+      if (appWindowInstance && typeof appWindowInstance.startDragging === 'function') {
+        appWindowInstance.startDragging();
+      } else {
+        import('@tauri-apps/api/window')
+          .then((m) => m.getCurrentWindow().startDragging())
+          .catch(() => {});
+      }
+    } catch {}
+  }
+}

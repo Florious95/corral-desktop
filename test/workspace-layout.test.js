@@ -13,6 +13,7 @@ import {
   closeOtherWorkspaceTabs,
   closeRightWorkspaceTabs,
   getAllWorkspaceSessions,
+  smartOpenSession,
   getLeaves,
   findLeaf,
   removeNode,
@@ -458,4 +459,87 @@ test('workspaceLayout: multi-workspace v2 serialization and v1 backward compatib
   assert.equal(fromStorage.tabs.length, 1);
   assert.equal(fromStorage.activeUid, 'legacy-session');
   assert.deepEqual(getLeaves(fromStorage.root), ['legacy-session']);
+});
+
+test('workspaceLayout: equal columns 1:1:1 balancing eliminates 211 / 112 splits', () => {
+  // 1. 初始为两列 A | B (各 50%)
+  const twoCols = {
+    kind: 'split',
+    axis: 'x',
+    ratio: 0.5,
+    first: { kind: 'leaf', uid: 'A' },
+    second: { kind: 'leaf', uid: 'B' },
+  };
+
+  // 2. 拖拽 C 到 B 的右侧追加第 3 列 -> 必须均分 1:1:1（消灭 2:1:1 或 1:1:2）
+  const threeCols = dropNode(twoCols, 'C', 'B', 'right');
+  assert.deepEqual(getLeaves(threeCols), ['A', 'B', 'C']);
+
+  // 验证几何投影：在 902px 宽度舞台下，3 列宽度绝对等宽（各 300px）
+  const layout3 = project(threeCols, { x: 0, y: 0, w: 902, h: 600 }, 1);
+  assert.equal(layout3.A.w, 300, 'Column A must be exactly 300px in 1:1:1');
+  assert.equal(layout3.B.w, 300, 'Column B must be exactly 300px in 1:1:1');
+  assert.equal(layout3.C.w, 300, 'Column C must be exactly 300px in 1:1:1');
+
+  // 3. 继续追加第 4 列 D 到 C 的右侧 -> 4 列必须绝对均等 1:1:1:1（各 25%）
+  const fourCols = dropNode(threeCols, 'D', 'C', 'right');
+  assert.deepEqual(getLeaves(fourCols), ['A', 'B', 'C', 'D']);
+  const layout4 = project(fourCols, { x: 0, y: 0, w: 1003, h: 600 }, 1);
+  assert.equal(layout4.A.w, 250);
+  assert.equal(layout4.B.w, 250);
+  assert.equal(layout4.C.w, 250);
+  assert.equal(layout4.D.w, 250);
+
+  // 4. 将新列插在中间（例如在 A 和 B 之间插入 E）：同样全局保持均分
+  const insertedMid = dropNode(twoCols, 'E', 'A', 'right');
+  assert.deepEqual(getLeaves(insertedMid), ['A', 'E', 'B']);
+  const layoutMid = project(insertedMid, { x: 0, y: 0, w: 902, h: 600 }, 1);
+  assert.equal(layoutMid.A.w, 300);
+  assert.equal(layoutMid.E.w, 300);
+  assert.equal(layoutMid.B.w, 300);
+});
+
+test('workspaceLayout: smartOpenSession deduplication, split-pane protection, and pin handling', () => {
+  // 1. 创建多工作台：Tab 1 包含已分屏窗口 (s1 | s2)
+  let mw = createMultiWorkspace();
+  mw = openSessionInActiveTab(mw, 's1');
+  mw = splitSessionInActiveTab(mw, 's1', 's2', 'right');
+  assert.equal(getLeaves(mw.root).length, 2);
+
+  // 刚性规则：当处于多分屏窗口时，点击左侧任何会话坚决不生效，杜绝挤占替换！
+  const unchangedState = smartOpenSession(mw, 's3');
+  assert.equal(unchangedState, mw, 'Clicking session while in split-pane stage must be strict NO-OP');
+  assert.deepEqual(getLeaves(unchangedState.root), ['s1', 's2']);
+
+  // 2. 点击【+】新建空白工作台 Tab 2 并打开 s3
+  mw = createWorkspaceTab(mw);
+  mw = smartOpenSession(mw, 's3');
+  assert.equal(mw.tabs.length, 2);
+  assert.equal(mw.activeUid, 's3');
+  assert.deepEqual(getLeaves(mw.root), ['s3']);
+
+  // 3. 查重法则：当全顶栏已经存在展示 s3 的单会话 Tab 时，在其他单会话 Tab 点击 s3 必须直接切换过去！
+  mw = createWorkspaceTab(mw); // 新建 Tab 3
+  mw = smartOpenSession(mw, 's4'); // Tab 3 打开 s4
+  assert.equal(mw.activeTabId, mw.tabs[2].id);
+
+  // 在 Tab 3 点击已存在单会话 Tab 的 s3 -> 必须切换到 Tab 2，绝不把 Tab 3 替换掉产生两个 s3！
+  mw = smartOpenSession(mw, 's3');
+  assert.equal(mw.activeTabId, mw.tabs[1].id, 'Must switch to existing single-session Tab');
+  assert.equal(mw.tabs[2].activeUid, 's4', 'Tab 3 must not be replaced');
+
+  // 4. 当前为未 Pin 单会话 Tab：点击新会话原地替换
+  mw = smartOpenSession(mw, 's5');
+  assert.equal(mw.tabs.length, 3, 'Must NOT increase tab count');
+  assert.equal(mw.activeUid, 's5');
+  assert.equal(mw.tabs[1].activeUid, 's5');
+
+  // 5. 当前为已 Pin 单会话 Tab：点击新会话不可替换，自动新建工作台
+  const targetId = mw.tabs[1].id;
+  mw = pinWorkspaceTab(mw, targetId, true);
+  assert.equal(mw.tabs.find((t) => t.id === targetId)?.pinned, true);
+  mw = switchWorkspaceTab(mw, targetId);
+  mw = smartOpenSession(mw, 's6');
+  assert.equal(mw.tabs.length, 4, 'Pinned tab cannot be overwritten; creates new workspace tab');
+  assert.equal(mw.activeUid, 's6');
 });

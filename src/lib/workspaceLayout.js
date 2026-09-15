@@ -131,8 +131,43 @@ export function splitLeaf(node, targetUid, newUid, { axis = 'x', ratio = 0.5, in
 }
 
 /**
+ * 获取顶层竖列（水平排列的所有列）
+ * 若节点为 split 且 axis === 'x'，展开为列列表；非 x 轴切分的子树作为复合列
+ */
+export function getTopLevelColumns(node) {
+  if (!node) return [];
+  if (node.kind === 'leaf') return [node];
+  if (node.kind === 'split' && node.axis === 'x') {
+    return [...getTopLevelColumns(node.first), ...getTopLevelColumns(node.second)];
+  }
+  return [node];
+}
+
+/**
+ * 递归构建 1:1:1... 均等比例的竖列分屏二叉树
+ * @param {Array<Object>} columns
+ * @returns {Object|null}
+ */
+export function buildEqualRatioColumnsTree(columns) {
+  if (!columns || columns.length === 0) return null;
+  if (columns.length === 1) return columns[0];
+  const ratio = 1 / columns.length;
+  return {
+    kind: 'split',
+    axis: 'x',
+    ratio,
+    first: columns[0],
+    second: buildEqualRatioColumnsTree(columns.slice(1)),
+  };
+}
+
+/**
  * 拖放原子重排候选树（Drop 算子）
  * 校验 source != target → 移除 source → 按 target 再定位目标 → 插入新 split
+ *
+ * 竖列均分引擎升级（2026-09-16 用户最新指示）：
+ * 当在顶层横向分列（edge 为 'left' 或 'right'）追加新竖列时，
+ * 自动对所有并排竖列执行均分平衡（1:1:1 绝对等宽），彻底消灭 211 或 112 畸形比例！
  *
  * @param {Object|null} root
  * @param {string} sourceUid
@@ -144,6 +179,26 @@ export function dropNode(root, sourceUid, targetUid, edge = 'right') {
   if (!root || !sourceUid || !targetUid || sourceUid === targetUid) return root;
   const clean = removeNode(root, sourceUid);
   if (!clean || !findLeaf(clean, targetUid)) return root;
+
+  // 1. 横向分列（left / right）：执行均等分列平衡
+  if (edge === 'left' || edge === 'right') {
+    const columns = getTopLevelColumns(clean);
+    const targetColIdx = columns.findIndex((col) => findLeaf(col, targetUid));
+
+    if (targetColIdx !== -1) {
+      const targetCol = columns[targetColIdx];
+      // 目标列若为单叶子，直接作为独立竖列并排均分插入
+      if (targetCol.kind === 'leaf') {
+        const newLeaf = { kind: 'leaf', uid: sourceUid };
+        const insertIdx = edge === 'right' ? targetColIdx + 1 : targetColIdx;
+        const nextCols = [...columns];
+        nextCols.splice(insertIdx, 0, newLeaf);
+        return buildEqualRatioColumnsTree(nextCols);
+      }
+    }
+  }
+
+  // 2. 纵向分屏（top / bottom）或局部复合窗格内部切分：按原 splitLeaf 切分
   const axis = (edge === 'left' || edge === 'right') ? 'x' : 'y';
   const insertAfter = (edge === 'right' || edge === 'bottom');
   return splitLeaf(clean, targetUid, sourceUid, { axis, ratio: 0.5, insertAfter });
@@ -902,6 +957,76 @@ export function openSessionInActiveTab(state, sessionUid) {
   const updatedTab = { ...currentTab, root: newRoot, activeUid: sessionUid };
   const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
   return syncActiveTabFields({ ...state, tabs: updatedTabs });
+}
+
+/**
+ * 智能会话切换与查重决策引擎（UI-SPEC §4.1.3，用户最新最高指示）
+ *
+ * 1. 查重法则：全顶栏遍历所有 Tab，若已存在【单会话 Tab】其唯一会话正是 sessionUid：
+ *    -> 直接高亮切换聚焦到该 Tab，绝不替换当前 Tab，彻底杜绝单会话 Tab 重复！
+ * 2. 分屏窗口绝对保护：
+ *    若当前选中的 Tab 已经是【多分屏工作台】（可见窗格数 >= 2）：
+ *    -> 坚决不生效，直接 return state 原样返回！绝不挤占、绝不替换已有分屏中的任何窗格！
+ * 3. 单会话替换与 Pin 保护：
+ *    若当前 Tab 是未 Pin 的单会话窗口：
+ *    -> 在当前 Tab 内原地替换为 sessionUid；
+ *    若当前 Tab 已 Pin：
+ *    -> 已 Pin 不可被破坏替换，自动新建一个独立工作台承载 sessionUid。
+ *
+ * @param {Object} state 多工作台状态
+ * @param {string} sessionUid
+ * @returns {Object}
+ */
+export function smartOpenSession(state, sessionUid) {
+  if (!sessionUid || !state) return state;
+
+  const tabs = state.tabs || [];
+  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+  if (!currentTab) return state;
+
+  // 1. 查重法则：检查全顶栏是否已存在单会话 Tab 刚好展示 sessionUid
+  const existingSingleTab = tabs.find((t) => {
+    if (!t.root) {
+      return t.activeUid === sessionUid;
+    }
+    const leaves = getLeaves(t.root);
+    return leaves.length === 1 && leaves[0] === sessionUid;
+  });
+
+  if (existingSingleTab) {
+    // 直接切换到该已存在的单会话 Tab，避免产生重复 Tab
+    return switchWorkspaceTab(state, existingSingleTab.id || existingSingleTab.uid);
+  }
+
+  // 2. 刚性保护规则：若当前选中的 Tab 已经是多分屏窗口（>= 2 个窗格），点击左侧坚决不生效！
+  if (currentTab.root) {
+    const curLeaves = getLeaves(currentTab.root);
+    if (curLeaves.length >= 2) {
+      // 坚决禁止挤占、禁止替换分屏中的任何一个窗格！直接 0 操作原样返回！
+      return state;
+    }
+  }
+
+  // 3. 当前是单会话窗口：
+  // 若当前 Tab 已 Pin，不可被替换，新建一个工作台
+  if (currentTab.pinned) {
+    return createWorkspaceTab(state, {
+      root: { kind: 'leaf', uid: sessionUid },
+      activeUid: sessionUid,
+    });
+  }
+
+  // 当前 Tab 未 Pin：在当前 Tab 内替换为 sessionUid
+  const updatedTab = {
+    ...currentTab,
+    root: { kind: 'leaf', uid: sessionUid },
+    activeUid: sessionUid,
+  };
+  const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+  return syncActiveTabFields({
+    ...state,
+    tabs: updatedTabs,
+  });
 }
 
 /**
