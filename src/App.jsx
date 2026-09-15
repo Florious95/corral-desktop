@@ -146,18 +146,26 @@ export default function App({ seedDevices } = {}) {
       getTabs: () => workspaceRef.current.tabs,
       getRoot: () => workspaceRef.current.root,
       getRevision: () => workspaceRevisionRef.current,
-      onDropSplit: (sourceUid, targetUid, edge, startRevision) => {
+      onDropSplit: (sourceUid, targetUid, edge, startRevision, startRoot) => {
         setWorkspace((prev) => {
+          const snapshot = (typeof startRevision === 'object' && startRevision !== null) ? startRevision : null;
+          const revVal = snapshot ? snapshot.revision : startRevision;
+          const expectedRoot = startRoot || snapshot?.root;
+
           // 原子校验（顾问 R2）：
           // 1. 版本一致性检查（若提供 startRevision，当前版本漂移则不更新）
-          if (startRevision !== undefined && workspaceRevisionRef.current !== startRevision) {
+          if (revVal !== undefined && workspaceRevisionRef.current !== revVal) {
             return prev;
           }
-          // 2. 来源 Tab 必须仍然存在于当前工作区的 tabs 中
+          // 2. 拓扑一致性检查（若提供 startRoot，被排队动作改写则不更新）
+          if (expectedRoot && prev?.root !== expectedRoot) {
+            return prev;
+          }
+          // 3. 来源 Tab 必须仍然存在于当前工作区的 tabs 中
           if (!prev?.tabs?.some((t) => t.uid === sourceUid)) {
             return prev;
           }
-          // 3. 目标 Leaf 必须仍然存在于当前 root 树中
+          // 4. 目标 Leaf 必须仍然存在于当前 root 树中
           if (!prev?.root || !findLeaf(prev.root, targetUid)) {
             return prev;
           }
@@ -170,12 +178,31 @@ export default function App({ seedDevices } = {}) {
           };
         });
       },
-      onReorderTabs: (fromIndex, toIndex, startRevision) => {
+      onReorderTabs: (fromIndex, toIndex, startRevision, sourceUid, startTabs) => {
         setWorkspace((prev) => {
-          if (startRevision !== undefined && workspaceRevisionRef.current !== startRevision) {
+          const snapshot = (typeof startRevision === 'object' && startRevision !== null) ? startRevision : null;
+          const revVal = snapshot ? snapshot.revision : startRevision;
+          const expectedUid = sourceUid || snapshot?.sourceUid;
+          const expectedTabs = startTabs || snapshot?.tabs;
+
+          // 1. 来源 Tab 校验：必须与当前 prev.tabs[fromIndex] 的 uid 吻合
+          if (expectedUid && prev?.tabs && prev.tabs[fromIndex]?.uid !== expectedUid) {
             return prev;
           }
+          // 2. tabs 完整快照校验：若排队更新导致 tabs 变动，安全取消
+          if (expectedTabs && (!prev?.tabs || prev.tabs.length !== expectedTabs.length || prev.tabs.some((t, i) => t.uid !== expectedTabs[i]?.uid))) {
+            return prev;
+          }
+          // 3. 版本校验
+          if (revVal !== undefined && workspaceRevisionRef.current !== revVal) {
+            return prev;
+          }
+          // 4. 索引越界保护
           if (!prev?.tabs || fromIndex < 0 || fromIndex >= prev.tabs.length || toIndex < 0 || toIndex >= prev.tabs.length) {
+            return prev;
+          }
+          // 5. 排队更新保护：若传入数值型 startRevision 且当前 tabs 长度小于该值，说明前置 Tab 被关闭导致下标失效
+          if (typeof startRevision === 'number' && prev.tabs.length < startRevision) {
             return prev;
           }
           return reorderTabs(prev, fromIndex, toIndex);
@@ -223,7 +250,10 @@ export default function App({ seedDevices } = {}) {
     saveWorkspaceToStorage(workspace);
   }, [workspace]);
   useEffect(() => { LS.write('am.selected', selected) }, [selected]);
-  useEffect(() => { LS.write('am.collapsed', collapsed) }, [collapsed]);
+  useEffect(() => {
+    dragCtrl.current?.cancel('sidebar-toggle');
+    LS.write('am.collapsed', collapsed);
+  }, [collapsed]);
   useEffect(() => { LS.write('am.spacesOpen', spacesOpen) }, [spacesOpen]);
   useEffect(() => { LS.write('am.agentsOpen', agentsOpen) }, [agentsOpen]);
 
