@@ -82,7 +82,6 @@ export default function TabBar({
       data-tauri-drag-region
       aria-label="会话标签页"
       onPointerDown={triggerWindowDrag}
-      onMouseDown={triggerWindowDrag}
     >
       {pinnedTabs.length > 0 && (
         <div className="tb-tabs-pinned" data-tauri-drag-region>
