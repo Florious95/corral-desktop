@@ -13,6 +13,14 @@ import {
   MIN_PANE_W,
   MIN_PANE_H,
 } from '../src/lib/tabDrag.js';
+import {
+  dropNode,
+  project,
+  closeTab,
+  validateWorkspaceState,
+  serializeWorkspace,
+  deserializeWorkspace,
+} from '../src/lib/workspaceLayout.js';
 
 test('tabDrag: edgeAt 25% boundary and corner horizontal preference', () => {
   const rect = { x: 0, y: 0, w: 400, h: 400 };
@@ -109,7 +117,7 @@ test('tabDrag: hitTestLeafPanes edge suction, self rejection, and minimum size p
   assert.equal(hitRight.type, 'edge');
   assert.equal(hitRight.targetUid, 'pane-1');
   assert.equal(hitRight.edge, 'right');
-  assert.deepEqual(hitRight.previewRect, { x: 250, y: 40, w: 250, h: 600 });
+  assert.deepEqual(hitRight.previewRect, { x: 250, y: 40, w: 249, h: 600 });
 
   // 3. Self-drop rejection: dragging pane-1 into pane-1 -> center (no-op)
   const selfHit = hitTestLeafPanes({ x: 450, y: 300, sourceUid: 'pane-1', stageRect, leafRects });
@@ -225,6 +233,146 @@ test('tabDrag: TabDragController state machine and zero forced reflow in hot pat
     targetUid: 'pane-1',
     edge: 'top',
   });
+  // 顾问加固 1：suppressClickUntil 显式写入
+  assert.ok(controller.suppressClickUntil >= Date.now() + 200);
+
+  controller.dispose();
+});
+
+test('tabDrag: advisor hardening - suppressClick, lostpointercapture, window-resize, and revision guard', () => {
+  let revision = 1;
+  let dropped = null;
+  const controller = new TabDragController({
+    getStageEl: () => null,
+    getTabBarEl: () => null,
+    getTabs: () => [],
+    getRoot: () => null,
+    getRevision: () => revision,
+    onDropSplit: (source, target, edge) => { dropped = { source, target, edge }; },
+  });
+
+  const mockEl = { setPointerCapture: () => {}, releasePointerCapture: () => {}, addEventListener: () => {}, removeEventListener: () => {} };
+
+  // 1. Revision guard: if revision increments during drag, drop is safely cancelled
+  controller.start({ button: 0, pointerId: 1, clientX: 10, clientY: 10, target: {}, currentTarget: mockEl }, { uid: 't1' });
+  controller.state = 'dragging';
+  revision = 2; // Revision drifted asynchronously!
+  controller._onPointerUp({ pointerId: 1, clientX: 10, clientY: 10 });
+  assert.equal(dropped, null); // Stale drop blocked!
+  assert.equal(controller.state, 'idle');
+
+  // 2. Lostpointercapture event cancels dragging
+  controller.start({ button: 0, pointerId: 2, clientX: 10, clientY: 10, target: {}, currentTarget: mockEl }, { uid: 't1' });
+  controller.state = 'dragging';
+  controller._onLostPointerCapture({ pointerId: 2 });
+  assert.equal(controller.state, 'idle');
+
+  // 3. Window resize event cancels dragging
+  controller.start({ button: 0, pointerId: 3, clientX: 10, clientY: 10, target: {}, currentTarget: mockEl }, { uid: 't1' });
+  controller.state = 'dragging';
+  controller._onWindowResize();
+  assert.equal(controller.state, 'idle');
+
+  controller.dispose();
+});
+
+test('tabDrag: candidate tree preview accurately reflects post-remove-source topology', () => {
+  // Tree has pane A (left 50%) and pane B (right 50%)
+  const root = {
+    kind: 'split',
+    axis: 'x',
+    ratio: 0.5,
+    first: { kind: 'leaf', uid: 'pane-A' },
+    second: { kind: 'leaf', uid: 'pane-B' },
+  };
+
+  // When dragging pane-A (which is already visible on the stage):
+  // Candidate tree removes pane-A, so pane-B expands to full width!
+  const controller = new TabDragController({
+    getStageEl: () => ({
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 }),
+    }),
+    getTabBarEl: () => null,
+    getTabs: () => [{ uid: 'pane-A' }, { uid: 'pane-B' }],
+    getRoot: () => root,
+  });
+
+  const mockEl = { setPointerCapture: () => {}, releasePointerCapture: () => {} };
+  controller.start({ button: 0, pointerId: 1, clientX: 10, clientY: 10, target: {}, currentTarget: mockEl }, { uid: 'pane-A' });
+
+  // Cached leaf rect for pane-B must be full stage width (1000px), not old 500px!
+  const targetLeaf = controller.cachedLeafRects.find((l) => l.uid === 'pane-B');
+  assert.ok(targetLeaf);
+  assert.equal(targetLeaf.rect.w, 1000);
+  assert.equal(targetLeaf.rect.h, 600);
+
+  // And pane-A is NOT in cachedLeafRects (cannot self-drop)
+  assert.equal(controller.cachedLeafRects.some((l) => l.uid === 'pane-A'), false);
+
+  controller.dispose();
+});
+
+test('tabDrag: zero DOM layout reads in hot move and rAF path via instrumented getters', async () => {
+  let layoutReadsDuringContinuousDrag = 0;
+  let movePhaseActive = false;
+
+  const stageEl = {
+    getBoundingClientRect: () => {
+      if (movePhaseActive) layoutReadsDuringContinuousDrag++;
+      return { left: 0, top: 40, width: 1000, height: 600 };
+    },
+  };
+
+  const tabBarEl = {
+    getBoundingClientRect: () => {
+      if (movePhaseActive) layoutReadsDuringContinuousDrag++;
+      return { left: 80, top: 0, width: 600, height: 38 };
+    },
+    querySelectorAll: () => [],
+  };
+
+  const controller = new TabDragController({
+    getStageEl: () => stageEl,
+    getTabBarEl: () => tabBarEl,
+    getTabs: () => [{ uid: 'tab-1' }],
+    getRoot: () => ({ kind: 'leaf', uid: 'pane-1' }),
+  });
+
+  const mockOverlay = { style: {} };
+  const mockGhost = { style: {} };
+  controller.mountOverlays(mockOverlay, mockGhost);
+
+  const mockEl = { setPointerCapture: () => {}, releasePointerCapture: () => {} };
+  // Start drag (startup phase is allowed to measure once)
+  controller.start({ button: 0, pointerId: 1, clientX: 100, clientY: 20, target: {}, currentTarget: mockEl }, { uid: 'tab-1' }, 'Tab 1');
+  clearTimeout(controller.holdTimer);
+  controller.holdTimer = null;
+  controller.state = 'dragging';
+
+  // Activate continuous move phase
+  movePhaseActive = true;
+
+  // Simulate 100 continuous pointermove events and rAF processing
+  for (let i = 0; i < 100; i++) {
+    controller._onPointerMove({ pointerId: 1, clientX: 100 + (i % 50), clientY: 50 + (i % 50) });
+    controller._processFrame();
+  }
+
+  // Good state: must be exactly ZERO layout reads!
+  assert.equal(layoutReadsDuringContinuousDrag, 0, 'Hot move/rAF path must never trigger forced reflow');
+
+  // Mutation tooth (破坏齿验证): verify instrumented detector catches any injected layout read
+  const detectLeakedRead = (fn) => {
+    let leaked = 0;
+    const testStage = {
+      getBoundingClientRect: () => { leaked++; return { left: 0, top: 0, width: 100, height: 100 }; },
+    };
+    fn(testStage);
+    return leaked;
+  };
+
+  const leakedCount = detectLeakedRead((el) => el.getBoundingClientRect());
+  assert.equal(leakedCount, 1, 'Instrumented detector must catch leaked layout reads');
 
   controller.dispose();
 });
@@ -232,17 +380,140 @@ test('tabDrag: TabDragController state machine and zero forced reflow in hot pat
 test('tabDrag: zero DOM reads verification via source inspection', async () => {
   const tabDragJs = await readFile(new URL('../src/lib/tabDrag.js', import.meta.url), 'utf8');
 
-  // _onPointerMove must NOT call getBoundingClientRect or layout getters
-  const moveFn = tabDragJs.slice(tabDragJs.indexOf('_onPointerMove'), tabDragJs.indexOf('_scheduleRaf'));
-  assert.equal(moveFn.includes('getBoundingClientRect'), false);
-  assert.equal(moveFn.includes('offsetWidth'), false);
-  assert.equal(moveFn.includes('offsetHeight'), false);
-  assert.equal(moveFn.includes('getComputedStyle'), false);
+  // Find actual method definition: _onPointerMove(e)
+  const moveMethodMatch = tabDragJs.match(/_onPointerMove\s*\([^)]*\)\s*\{([\s\S]*?)\n\s*_scheduleRaf/);
+  assert.ok(moveMethodMatch, 'Must find _onPointerMove method body');
+  const moveBody = moveMethodMatch[1];
+  assert.equal(moveBody.includes('getBoundingClientRect'), false);
+  assert.equal(moveBody.includes('offsetWidth'), false);
+  assert.equal(moveBody.includes('offsetHeight'), false);
+  assert.equal(moveBody.includes('getComputedStyle'), false);
 
-  // _processFrame must NOT call getBoundingClientRect
-  const frameFn = tabDragJs.slice(tabDragJs.indexOf('_processFrame'), tabDragJs.indexOf('_updateTabReorderPreview'));
-  assert.equal(frameFn.includes('getBoundingClientRect'), false);
-  assert.equal(frameFn.includes('offsetWidth'), false);
-  assert.equal(frameFn.includes('offsetHeight'), false);
-  assert.equal(frameFn.includes('getComputedStyle'), false);
+  // Find actual method definition: _processFrame()
+  const frameMethodMatch = tabDragJs.match(/_processFrame\s*\([^)]*\)\s*\{([\s\S]*?)\n\s*_updateTabReorderPreview/);
+  assert.ok(frameMethodMatch, 'Must find _processFrame method body');
+  const frameBody = frameMethodMatch[1];
+  assert.equal(frameBody.includes('getBoundingClientRect'), false);
+  assert.equal(frameBody.includes('offsetWidth'), false);
+  assert.equal(frameBody.includes('offsetHeight'), false);
+  assert.equal(frameBody.includes('getComputedStyle'), false);
+});
+
+/* ---------- 顾问独立探针 R1~R6 回归门禁 ---------- */
+
+const leafNode = (uid) => ({ kind: 'leaf', uid });
+const testStage = { x: 0, y: 40, w: 1001, h: 600 };
+
+function createAdvisorFixture() {
+  const win = new EventTarget();
+  globalThis.window = win;
+  let state = {
+    version: 1,
+    tabs: [{ uid: 'dev::A', pinned: false }, { uid: 'dev::B', pinned: false }],
+    activeUid: 'dev::B',
+    root: leafNode('dev::B'),
+  };
+  let commits = 0;
+  const capture = new EventTarget();
+  capture.setPointerCapture = () => {};
+  capture.releasePointerCapture = () => {};
+  const ctrl = new TabDragController({
+    getStageEl: () => ({ getBoundingClientRect: () => ({ left: testStage.x, top: testStage.y, width: testStage.w, height: testStage.h }) }),
+    getTabBarEl: () => null,
+    getTabs: () => state.tabs,
+    getRoot: () => state.root,
+    onDropSplit: (sourceUid, targetUid, edge) => {
+      commits++;
+      state = { ...state, activeUid: sourceUid, root: dropNode(state.root, sourceUid, targetUid, edge) };
+    },
+  });
+  ctrl.start({ button: 0, pointerId: 1, clientX: 40, clientY: 20, target: {}, currentTarget: capture }, { uid: 'dev::A' }, 'A');
+  clearTimeout(ctrl.holdTimer);
+  ctrl.holdTimer = null;
+  ctrl.state = 'dragging';
+  return {
+    ctrl,
+    win,
+    capture,
+    get state() { return state; },
+    get commits() { return commits; },
+    closeSource() { state = closeTab(state, 'dev::A'); },
+    dispose() { ctrl.dispose(); delete globalThis.window; },
+  };
+}
+
+test('advisor probe R1: drag end must arm App click suppression', () => {
+  const f = createAdvisorFixture();
+  try {
+    f.ctrl._onPointerUp({ pointerId: 1, clientX: 500, clientY: 350 }); // center no drop
+    assert.ok(f.ctrl.suppressClickUntil > Date.now(), 'App guard is armed after center cancellation');
+  } finally {
+    f.dispose();
+  }
+});
+
+test('advisor probe R2: capture loss must end drag', () => {
+  const f = createAdvisorFixture();
+  try {
+    const ev = new Event('lostpointercapture');
+    Object.defineProperty(ev, 'pointerId', { value: 1 });
+    f.capture.dispatchEvent(ev);
+    f.win.dispatchEvent(new Event('lostpointercapture'));
+    assert.equal(f.ctrl.state, 'idle');
+  } finally {
+    f.dispose();
+  }
+});
+
+test('advisor probe R3a: resize invalidates cached geometry', () => {
+  const f = createAdvisorFixture();
+  try {
+    f.win.dispatchEvent(new Event('resize'));
+    assert.equal(f.ctrl.state, 'idle');
+  } finally {
+    f.dispose();
+  }
+});
+
+test('advisor probe R3b: closing source must not resurrect an unlisted leaf on release', () => {
+  const f = createAdvisorFixture();
+  try {
+    f.closeSource();
+    f.ctrl._onPointerUp({ pointerId: 1, clientX: 500, clientY: 50 });
+    assert.equal(validateWorkspaceState(f.state), true, 'drop inserts deleted source absent from tabs');
+    assert.equal(f.commits, 0);
+  } finally {
+    f.dispose();
+  }
+});
+
+test('advisor probe R4: moving visible source preview equals actual projected candidate', () => {
+  const root = { kind: 'split', axis: 'x', ratio: 0.5, first: leafNode('dev::A'), second: leafNode('dev::B') };
+  const layout = project(root, testStage, 1);
+  const hit = hitTestLeafPanes({
+    x: 750,
+    y: 50,
+    sourceUid: 'dev::A',
+    stageRect: testStage,
+    leafRects: Object.entries(layout).map(([uid, rect]) => ({ uid, rect })),
+  });
+  const actual = project(dropNode(root, 'dev::A', hit.targetUid, hit.edge), testStage, 1)['dev::A'];
+  assert.deepEqual(hit.previewRect, actual);
+});
+
+test('advisor probe R5: hysteresis cannot retain left outside its 25% band in tall pane', () => {
+  const r = { x: 0, y: 0, w: 100, h: 1000 };
+  assert.equal(edgeAt(r, 10, 500), 'left');
+  assert.equal(edgeAt(r, 30, 200, 'left'), 'top');
+});
+
+test('advisor probe R6: persistence strips unrecognized nested fields', () => {
+  const raw = {
+    version: 1,
+    tabs: [{ uid: 'dev::A', pinned: false }],
+    activeUid: 'dev::A',
+    root: { kind: 'leaf', uid: 'dev::A', unexpected: 'sentinel' },
+  };
+  const restored = deserializeWorkspace(JSON.stringify(raw));
+  assert.equal(JSON.parse(serializeWorkspace(restored)).root.unexpected, undefined);
 });

@@ -135,6 +135,7 @@ export default function App({ seedDevices } = {}) {
   const overlayRef = useRef(null);
   const ghostRef = useRef(null);
   const [draggingUid, setDraggingUid] = useState(null);
+  const workspaceRevisionRef = useRef(0);
 
   const dragCtrl = useRef(null);
   if (!dragCtrl.current) {
@@ -143,6 +144,7 @@ export default function App({ seedDevices } = {}) {
       getTabBarEl: () => document.querySelector('.tb-tabbar'),
       getTabs: () => workspaceRef.current.tabs,
       getRoot: () => workspaceRef.current.root,
+      getRevision: () => workspaceRevisionRef.current,
       onDropSplit: (sourceUid, targetUid, edge) => {
         setWorkspace((prev) => ({
           ...prev,
@@ -190,7 +192,10 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   useEffect(() => { LS.write('am.fav', favs) }, [favs]);
-  useEffect(() => { saveWorkspaceToStorage(workspace) }, [workspace]);
+  useEffect(() => {
+    workspaceRevisionRef.current += 1;
+    saveWorkspaceToStorage(workspace);
+  }, [workspace]);
   useEffect(() => { LS.write('am.selected', selected) }, [selected]);
   useEffect(() => { LS.write('am.collapsed', collapsed) }, [collapsed]);
   useEffect(() => { LS.write('am.spacesOpen', spacesOpen) }, [spacesOpen]);

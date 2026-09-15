@@ -537,7 +537,33 @@ export function validateWorkspaceState(raw) {
 }
 
 /**
- * 白名单序列化（不保存大对象、终端快照或 token）
+ * 递归白名单节点清洗（S1 继承加固：彻底剔除节点上的非法非白名单属性）
+ */
+export function sanitizeNode(node) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.kind === 'leaf') {
+    return {
+      kind: 'leaf',
+      uid: String(node.uid),
+    };
+  }
+  if (node.kind === 'split') {
+    const first = sanitizeNode(node.first);
+    const second = sanitizeNode(node.second);
+    if (!first || !second) return null;
+    return {
+      kind: 'split',
+      axis: node.axis === 'y' ? 'y' : 'x',
+      ratio: Number(node.ratio) || 0.5,
+      first,
+      second,
+    };
+  }
+  return null;
+}
+
+/**
+ * 白名单序列化（不保存大对象、终端快照或 token，递归白名单清洗）
  */
 export function serializeWorkspace(state) {
   if (!state || typeof state !== 'object') return null;
@@ -545,7 +571,7 @@ export function serializeWorkspace(state) {
     version: 1,
     tabs: (state.tabs || []).map((t) => ({ uid: String(t.uid), pinned: !!t.pinned })),
     activeUid: state.activeUid ? String(state.activeUid) : null,
-    root: state.root || null,
+    root: sanitizeNode(state.root),
   };
   return JSON.stringify(whitelist);
 }
@@ -558,7 +584,11 @@ export function deserializeWorkspace(jsonStr) {
   if (jsonStr.length > MAX_READ_BYTES) return null;
   try {
     const parsed = JSON.parse(jsonStr);
-    return validateWorkspaceState(parsed) ? parsed : null;
+    if (!validateWorkspaceState(parsed)) return null;
+    return {
+      ...parsed,
+      root: sanitizeNode(parsed.root),
+    };
   } catch {
     return null;
   }

@@ -1,15 +1,15 @@
 /**
- * Tab 拖拽调序与四向边缘分屏引擎（UI-SPEC §4.1.1 & §6.1，2026-09-15 顾问报告 §4, §5）
+ * Tab 拖拽调序与四向边缘分屏引擎（UI-SPEC §4.1.1 & §6.1，2026-09-15 顾问终审加固版）
  *
  * 核心指标：【拖拽体验流畅不卡顿】
- * 1. 手势状态机：pointerdown/move/up + setPointerCapture，长按阈值 180ms，容差 6px；
+ * 1. 手势状态机：Pointer Events + setPointerCapture，长按阈值 180ms，容差 6px；
  * 2. 零强制重排（Zero Forced Reflow）：pointerdown 预缓存坐标；pointermove 仅更新点并由单 rAF 调度，严禁在 move 中读取 DOM 布局；
  * 3. 几何判定与 Dropzone：落点在 Tab 栏触发平滑横向调序；落点在会话区触发 25% 四向边缘纯数学吸附，带 3px 滞回防抖；
  * 4. GPU 加速预览：DragOverlay 与 Ghost 使用 translate3d + scale + opacity，悬浮期间绝不修改真实 Split Tree 或终端；
  * 5. 原子 Drop 提交：仅在 pointerup 瞬间原子提交树拓扑变更；终端实例保持平铺绝对定位保活（零 Unmount）。
  */
 
-import { project } from './workspaceLayout.js';
+import { project, findLeaf, removeNode, dropNode } from './workspaceLayout.js';
 
 export const HOLD_DELAY_MS = 180;
 export const TOLERANCE_PX = 6;
@@ -19,7 +19,9 @@ export const MIN_PANE_H = 60;
 export const OVERLAY_BASE_SIZE = 100; // 100x100 基础尺寸供 scale GPU 合成
 
 /**
- * 纯几何边缘判定（九宫格 25% 边缘吸附 + 3px 滞回防抖）
+ * 纯几何边缘判定（九宫格 25% 边缘吸附 + 极长/极宽矩形归一化滞回防抖）
+ *
+ * 顾问加固 F5：旧边超出 25% 切线立即丢弃，方向比较统一在归一化度量中进行。
  *
  * @param {{ x: number, y: number, w: number, h: number }} rect 视口绝对像素矩形
  * @param {number} x clientX
@@ -38,38 +40,39 @@ export function edgeAt(rect, x, y, prevEdge = null, hysteresisPx = HYSTERESIS_PX
   const u = (x - rect.x) / rect.w;
   const v = (y - rect.y) / rect.h;
 
-  // 边缘 25% 切线判定
-  const distances = [
-    ['left', u],
-    ['right', 1 - u],
-    ['top', v],
-    ['bottom', 1 - v],
-  ];
+  const distMap = {
+    left: u,
+    right: 1 - u,
+    top: v,
+    bottom: 1 - v,
+  };
 
-  let best = null;
-  for (const [edge, d] of distances) {
-    if (d <= 0.25 && (!best || d < best.d)) {
-      best = { edge, d };
+  // 1. 严格筛选处于 25% 边缘带内的候选
+  const candidates = [];
+  const order = ['left', 'right', 'top', 'bottom'];
+  for (const edge of order) {
+    const d = distMap[edge];
+    if (d <= 0.25) {
+      candidates.push({ edge, d });
     }
   }
 
-  if (!best) return null; // 中心 50%x50% 无 drop 区域
+  // 若无任何边在 25% 范围内（即中心 50%×50% 区域），绝不保留旧边，直接返回 null
+  if (candidates.length === 0) return null;
 
-  // 滞回防抖：同目标内新边比旧边更近至少 hysteresisPx 才切换，避免对角线抖动
+  candidates.sort((a, b) => a.d - b.d);
+  const best = candidates[0];
+
+  // 2. 滞回防抖处理：
+  // 必须满足：prevEdge 必须依然处于候选列表中（仍在 25% 边缘内）！
   if (prevEdge && prevEdge !== best.edge) {
-    const pxOf = (e) => {
-      switch (e) {
-        case 'left': return x - rect.x;
-        case 'right': return rect.x + rect.w - x;
-        case 'top': return y - rect.y;
-        case 'bottom': return rect.y + rect.h - y;
-        default: return Infinity;
+    const prevCandidate = candidates.find((c) => c.edge === prevEdge);
+    if (prevCandidate) {
+      const axisLen = (prevEdge === 'left' || prevEdge === 'right') ? rect.w : rect.h;
+      const prevNormThreshold = prevCandidate.d - (hysteresisPx / axisLen);
+      if (best.d >= prevNormThreshold) {
+        return prevEdge;
       }
-    };
-    const prevPx = pxOf(prevEdge);
-    const bestPx = pxOf(best.edge);
-    if (bestPx > prevPx - hysteresisPx) {
-      return prevEdge;
     }
   }
 
@@ -78,10 +81,6 @@ export function edgeAt(rect, x, y, prevEdge = null, hysteresisPx = HYSTERESIS_PX
 
 /**
  * 根据边缘计算分屏预览矩形（半区投影）
- *
- * @param {{ x: number, y: number, w: number, h: number }} rect
- * @param {'left'|'right'|'top'|'bottom'} edge
- * @returns {{ x: number, y: number, w: number, h: number }}
  */
 export function computePreviewRect(rect, edge) {
   if (!rect || !edge) return { x: 0, y: 0, w: 0, h: 0 };
@@ -103,18 +102,61 @@ export function computePreviewRect(rect, edge) {
 }
 
 /**
- * 纯数学主区窗格命中检测
- *
- * @param {Object} params
- * @param {number} params.x clientX
- * @param {number} params.y clientY
- * @param {string} params.sourceUid 正在拖拽的会话 uid
- * @param {{ x: number, y: number, w: number, h: number }} params.stageRect 舞台视口矩形
- * @param {Array<{ uid: string, rect: { x: number, y: number, w: number, h: number } }>} params.leafRects 叶子视口矩形
- * @param {{ targetUid: string, edge: string }|null} [params.prevTarget=null] 上一帧命中
- * @returns {{ type: 'edge', targetUid: string, edge: string, previewRect: Object } | { type: 'center', targetUid: string } | null}
+ * 从叶子矩形集构建二叉拓扑树（供离线测试或缺失 root 时纯几何推导）
  */
-export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, prevTarget = null }) {
+export function treeFromLeafRects(leafRects) {
+  if (!leafRects || leafRects.length === 0) return null;
+  if (leafRects.length === 1) return { kind: 'leaf', uid: leafRects[0].uid };
+
+  const sortedX = [...leafRects].sort((a, b) => a.rect.x - b.rect.x);
+  for (let i = 1; i < sortedX.length; i++) {
+    const leftGroup = sortedX.slice(0, i);
+    const rightGroup = sortedX.slice(i);
+    const maxLeftX = Math.max(...leftGroup.map((l) => l.rect.x + l.rect.w));
+    const minRightX = Math.min(...rightGroup.map((l) => l.rect.x));
+    if (maxLeftX <= minRightX) {
+      const first = treeFromLeafRects(leftGroup);
+      const second = treeFromLeafRects(rightGroup);
+      const leftW = maxLeftX - Math.min(...leftGroup.map((l) => l.rect.x));
+      const totalW = Math.max(...rightGroup.map((l) => l.rect.x + l.rect.w)) - Math.min(...leftGroup.map((l) => l.rect.x));
+      const ratio = totalW > 0 ? leftW / totalW : 0.5;
+      return { kind: 'split', axis: 'x', ratio, first, second };
+    }
+  }
+
+  const sortedY = [...leafRects].sort((a, b) => a.rect.y - b.rect.y);
+  for (let i = 1; i < sortedY.length; i++) {
+    const topGroup = sortedY.slice(0, i);
+    const bottomGroup = sortedY.slice(i);
+    const maxTopY = Math.max(...topGroup.map((l) => l.rect.y + l.rect.h));
+    const minBottomY = Math.min(...bottomGroup.map((l) => l.rect.y));
+    if (maxTopY <= minBottomY) {
+      const first = treeFromLeafRects(topGroup);
+      const second = treeFromLeafRects(bottomGroup);
+      const topH = maxTopY - Math.min(...topGroup.map((l) => l.rect.y));
+      const totalH = Math.max(...bottomGroup.map((l) => l.rect.y + l.rect.h)) - Math.min(...topGroup.map((l) => l.rect.y));
+      const ratio = totalH > 0 ? topH / totalH : 0.5;
+      return { kind: 'split', axis: 'y', ratio, first, second };
+    }
+  }
+
+  const mid = Math.floor(leafRects.length / 2);
+  return {
+    kind: 'split',
+    axis: 'x',
+    ratio: 0.5,
+    first: treeFromLeafRects(leafRects.slice(0, mid)),
+    second: treeFromLeafRects(leafRects.slice(mid)),
+  };
+}
+
+/**
+ * 纯数学主区窗格命中检测与候选树预览对齐
+ *
+ * 顾问加固 F4：命中 target/edge 后，先纯数学从候选树 remove source，再 project 计算 target 的最终实际矩形（并扣除 gap）；
+ * 使半透明预览高亮 100% 等同于松手落地的真实尺寸。
+ */
+export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root = null, prevTarget = null }) {
   if (!stageRect ||
       x < stageRect.x || y < stageRect.y ||
       x >= stageRect.x + stageRect.w || y >= stageRect.y + stageRect.h) {
@@ -133,7 +175,7 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, prevTa
       const edge = edgeAt(rect, x, y, prevEdge);
 
       if (edge) {
-        // 最小可用宽高门禁保护
+        // 最小可用宽高门禁保护：当前目标窗格过小直接拒绝切分
         if ((edge === 'left' || edge === 'right') && rect.w * 0.5 < MIN_PANE_W) {
           return { type: 'center', targetUid: uid };
         }
@@ -141,7 +183,29 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, prevTa
           return { type: 'center', targetUid: uid };
         }
 
-        const previewRect = computePreviewRect(rect, edge);
+        // 顾问加固 F4：基于 dropNode 真实候选拓扑计算预览矩形
+        const effectiveRoot = root || treeFromLeafRects(leafRects);
+        let previewRect = null;
+        if (effectiveRoot) {
+          const candidateTree = dropNode(effectiveRoot, sourceUid, uid, edge);
+          if (candidateTree) {
+            const projected = project(candidateTree, stageRect, 1);
+            previewRect = projected[sourceUid] || null;
+
+            // 检查候选树所有叶子的尺寸是否满足门禁
+            const allValid = Object.values(projected).every(
+              (p) => p.w >= MIN_PANE_W && p.h >= MIN_PANE_H
+            );
+            if (!allValid) {
+              return { type: 'center', targetUid: uid };
+            }
+          }
+        }
+
+        if (!previewRect) {
+          previewRect = computePreviewRect(rect, edge);
+        }
+
         return {
           type: 'edge',
           targetUid: uid,
@@ -159,18 +223,9 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, prevTa
 
 /**
  * 纯数学 Tab 栏命中与重排位置计算
- *
- * @param {Object} params
- * @param {number} params.x clientX
- * @param {number} params.y clientY
- * @param {string} params.sourceUid
- * @param {{ x: number, y: number, w: number, h: number }} params.tabBarRect
- * @param {Array<{ uid: string, index: number, pinned: boolean, rect: { x: number, y: number, w: number, h: number } }>} params.tabRects
- * @returns {{ type: 'tabbar', fromIndex: number, toIndex: number } | null}
  */
 export function hitTestTabBar({ x, y, sourceUid, tabBarRect, tabRects }) {
   if (!tabBarRect || tabRects.length === 0) return null;
-  // 上下容差宽松 10px，便于在 Tab 栏附近平滑横移
   if (x < tabBarRect.x || x > tabBarRect.x + tabBarRect.w ||
       y < tabBarRect.y - 10 || y > tabBarRect.y + tabBarRect.h + 10) {
     return null;
@@ -179,7 +234,6 @@ export function hitTestTabBar({ x, y, sourceUid, tabBarRect, tabRects }) {
   const sourceTab = tabRects.find((t) => t.uid === sourceUid);
   if (!sourceTab) return null;
 
-  // 只能在同组（pinned 组内或 unpinned 组内）重排
   const sameGroup = tabRects.filter((t) => t.pinned === sourceTab.pinned);
   if (sameGroup.length <= 1) {
     return { type: 'tabbar', fromIndex: sourceTab.index, toIndex: sourceTab.index };
@@ -187,18 +241,14 @@ export function hitTestTabBar({ x, y, sourceUid, tabBarRect, tabRects }) {
 
   let targetTab = sameGroup[0];
   for (const t of sameGroup) {
-    const midX = t.rect.x + t.rect.w * 0.5;
     if (x >= t.rect.x) {
       targetTab = t;
     }
   }
 
-  // 找出最近的插槽索引
   let toIndex = targetTab.index;
   const targetMid = targetTab.rect.x + targetTab.rect.w * 0.5;
-  if (x > targetMid && sourceTab.index > targetTab.index) {
-    // 往右插
-  } else if (x > targetMid && sourceTab.index < targetTab.index) {
+  if (x > targetMid && sourceTab.index < targetTab.index) {
     toIndex = targetTab.index;
   }
 
@@ -211,7 +261,6 @@ export function hitTestTabBar({ x, y, sourceUid, tabBarRect, tabRects }) {
 
 /**
  * 创建高性能手势拖拽控制器
- * 严格遵照 Zero Forced Reflow：热路径严禁读取 DOM 布局，全部由单 rAF 消费最新点位驱动 GPU 预览。
  */
 export class TabDragController {
   constructor({
@@ -219,6 +268,7 @@ export class TabDragController {
     getTabBarEl,
     getTabs,
     getRoot,
+    getRevision,
     onDropSplit,
     onReorderTabs,
     onStateChange,
@@ -227,11 +277,11 @@ export class TabDragController {
     this.getTabBarEl = getTabBarEl;
     this.getTabs = getTabs;
     this.getRoot = getRoot;
+    this.getRevision = getRevision;
     this.onDropSplit = onDropSplit;
     this.onReorderTabs = onReorderTabs;
     this.onStateChange = onStateChange || (() => {});
 
-    // 状态机: 'idle' | 'pendingHold' | 'dragging'
     this.state = 'idle';
     this.pointerId = null;
     this.captureEl = null;
@@ -244,17 +294,15 @@ export class TabDragController {
     this.holdTimer = null;
     this.rafId = null;
     this.rafPending = false;
+    this.suppressClickUntil = 0;
+    this.startRevision = 0;
 
-    // 预缓存几何快照（只在 pointerdown 或 hold 触发瞬间读取一次）
     this.cachedStageRect = null;
     this.cachedTabBarRect = null;
     this.cachedTabRects = [];
     this.cachedLeafRects = [];
-
-    // 当前预览命中
     this.lastHit = null;
 
-    // DOM 引用（overlay 与 ghost）
     this.overlayEl = null;
     this.ghostEl = null;
 
@@ -263,23 +311,19 @@ export class TabDragController {
     this._onPointerCancel = this._onPointerCancel.bind(this);
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onWindowBlur = this._onWindowBlur.bind(this);
+    this._onWindowResize = this._onWindowResize.bind(this);
+    this._onLostPointerCapture = this._onLostPointerCapture.bind(this);
+    this._onVisibilityChange = this._onVisibilityChange.bind(this);
+    this._onContextMenu = this._onContextMenu.bind(this);
   }
 
-  /**
-   * 挂载全局预览 DOM 元素
-   */
   mountOverlays(overlayEl, ghostEl) {
     this.overlayEl = overlayEl;
     this.ghostEl = ghostEl;
   }
 
-  /**
-   * PointerDown 入口：由 Tab 项在 pointerdown 时调用
-   */
   start(e, tab, title = '') {
-    // 仅响应左键主按键
     if (e.button !== 0) return;
-    // 排除关闭按钮点击
     if (e.target.closest && e.target.closest('.tb-tab-close')) return;
 
     this.cancel();
@@ -293,16 +337,14 @@ export class TabDragController {
     this.lastY = e.clientY;
     this.state = 'pendingHold';
     this.captureEl = e.currentTarget;
+    this.startRevision = this.getRevision ? this.getRevision() : 0;
 
-    // 绑定捕获以保证来源元素位移时不丢帧
     if (this.captureEl && typeof this.captureEl.setPointerCapture === 'function') {
       try { this.captureEl.setPointerCapture(this.pointerId); } catch {}
     }
 
-    // 预缓存几何快照（在此只读阶段一次性读取，后续连续拖拽 0 读取）
     this._cacheGeometry();
 
-    // 启动 180ms 长按检测定时器
     this.holdTimer = setTimeout(() => {
       if (this.state === 'pendingHold') {
         this.state = 'dragging';
@@ -319,6 +361,13 @@ export class TabDragController {
       win.addEventListener('pointercancel', this._onPointerCancel);
       win.addEventListener('keydown', this._onKeyDown);
       win.addEventListener('blur', this._onWindowBlur);
+      win.addEventListener('resize', this._onWindowResize);
+      win.addEventListener('visibilitychange', this._onVisibilityChange);
+      win.addEventListener('contextmenu', this._onContextMenu);
+      win.addEventListener('lostpointercapture', this._onLostPointerCapture);
+    }
+    if (this.captureEl && typeof this.captureEl.addEventListener === 'function') {
+      this.captureEl.addEventListener('lostpointercapture', this._onLostPointerCapture);
     }
   }
 
@@ -330,19 +379,26 @@ export class TabDragController {
       const r = stageEl.getBoundingClientRect();
       this.cachedStageRect = { x: r.left, y: r.top, w: r.width, h: r.height };
 
-      // 结合纯函数 project 计算叶子矩形，不逐个读取 DOM
       const root = this.getRoot ? this.getRoot() : null;
       if (root) {
-        const localMap = project(root, { x: 0, y: 0, w: r.width, h: r.height }, 1);
-        this.cachedLeafRects = Object.entries(localMap).map(([uid, lr]) => ({
-          uid,
-          rect: {
-            x: r.left + lr.x,
-            y: r.top + lr.y,
-            w: lr.w,
-            h: lr.h,
-          },
-        }));
+        const cleanRoot = findLeaf(root, this.sourceUid)
+          ? removeNode(root, this.sourceUid)
+          : root;
+
+        if (cleanRoot) {
+          const localMap = project(cleanRoot, { x: 0, y: 0, w: r.width, h: r.height }, 1);
+          this.cachedLeafRects = Object.entries(localMap).map(([uid, lr]) => ({
+            uid,
+            rect: {
+              x: r.left + lr.x,
+              y: r.top + lr.y,
+              w: lr.w,
+              h: lr.h,
+            },
+          }));
+        } else {
+          this.cachedLeafRects = [];
+        }
       } else {
         this.cachedLeafRects = [];
       }
@@ -380,8 +436,7 @@ export class TabDragController {
     if (this.state === 'pendingHold') {
       const dist = Math.hypot(this.lastX - this.startX, this.lastY - this.startY);
       if (dist > TOLERANCE_PX) {
-        // 长按前超容差移动取消本次拖拽候选
-        this.cancel();
+        this.cancel('tolerance-exceeded');
         return;
       }
     } else if (this.state === 'dragging') {
@@ -399,22 +454,17 @@ export class TabDragController {
     });
   }
 
-  /**
-   * 单一 rAF 帧调度：纯数学几何判定 + GPU transform/opacity 预览
-   */
   _processFrame() {
     if (this.state !== 'dragging') return;
 
     const x = this.lastX;
     const y = this.lastY;
 
-    // 1. 更新 Ghost 坐标（硬件加速 translate3d）
     if (this.ghostEl) {
       this.ghostEl.style.transform = `translate3d(${x + 12}px, ${y + 12}px, 0)`;
       this.ghostEl.style.opacity = '1';
     }
 
-    // 2. 判定是否落在 TabBar 内（平滑调序预览）
     const tabHit = hitTestTabBar({
       x,
       y,
@@ -430,16 +480,16 @@ export class TabDragController {
       return;
     }
 
-    // 清理 Tab 栏可能应用的临时 transform
     this._resetTabTransforms();
 
-    // 3. 判定是否落在主区 TerminalStage 内（四向边缘分屏吸附）
+    const root = this.getRoot ? this.getRoot() : null;
     const paneHit = hitTestLeafPanes({
       x,
       y,
       sourceUid: this.sourceUid,
       stageRect: this.cachedStageRect,
       leafRects: this.cachedLeafRects,
+      root,
       prevTarget: this.lastHit?.type === 'edge' ? this.lastHit : null,
     });
 
@@ -449,7 +499,6 @@ export class TabDragController {
       return;
     }
 
-    // 其余区域（中心区域或窗口外）：隐藏 Dropzone
     this.lastHit = null;
     this._hideOverlay();
   }
@@ -528,7 +577,6 @@ export class TabDragController {
   _onPointerUp(e) {
     if (e.pointerId !== this.pointerId) return;
 
-    // 取消待消费的 rAF，以松手瞬间点位执行纯数学最终结算
     if (this.rafId) {
       const craf = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
       craf(this.rafId);
@@ -540,7 +588,20 @@ export class TabDragController {
     const y = e.clientY;
 
     if (wasDragging) {
-      // 1. 同步进行最终纯几何判定
+      this.suppressClickUntil = Date.now() + 250;
+
+      const currentRev = this.getRevision ? this.getRevision() : 0;
+      if (currentRev !== this.startRevision) {
+        this.cancel('stale-revision');
+        return;
+      }
+
+      const currentTabs = this.getTabs ? this.getTabs() : [];
+      if (!currentTabs.some((t) => t.uid === this.sourceUid)) {
+        this.cancel('source-closed');
+        return;
+      }
+
       const tabHit = hitTestTabBar({
         x,
         y,
@@ -552,17 +613,21 @@ export class TabDragController {
       if (tabHit && tabHit.fromIndex !== tabHit.toIndex) {
         this.onReorderTabs && this.onReorderTabs(tabHit.fromIndex, tabHit.toIndex);
       } else {
+        const root = this.getRoot ? this.getRoot() : null;
         const paneHit = hitTestLeafPanes({
           x,
           y,
           sourceUid: this.sourceUid,
           stageRect: this.cachedStageRect,
           leafRects: this.cachedLeafRects,
+          root,
           prevTarget: this.lastHit?.type === 'edge' ? this.lastHit : null,
         });
 
         if (paneHit && paneHit.type === 'edge') {
-          this.onDropSplit && this.onDropSplit(this.sourceUid, paneHit.targetUid, paneHit.edge);
+          if (root && findLeaf(root, paneHit.targetUid)) {
+            this.onDropSplit && this.onDropSplit(this.sourceUid, paneHit.targetUid, paneHit.edge);
+          }
         }
       }
     }
@@ -570,23 +635,47 @@ export class TabDragController {
     this.cancel();
   }
 
+  _onLostPointerCapture(e) {
+    if (e.pointerId === this.pointerId || this.state === 'dragging') {
+      this.cancel('lostpointercapture');
+    }
+  }
+
+  _onWindowResize() {
+    if (this.state === 'dragging' || this.state === 'pendingHold') {
+      this.cancel('window-resize');
+    }
+  }
+
   _onPointerCancel(e) {
     if (e.pointerId === this.pointerId) {
-      this.cancel();
+      this.cancel('pointercancel');
     }
   }
 
   _onKeyDown(e) {
     if (e.key === 'Escape') {
-      this.cancel();
+      this.cancel('escape');
     }
   }
 
   _onWindowBlur() {
-    this.cancel();
+    this.cancel('blur');
   }
 
-  cancel() {
+  _onVisibilityChange() {
+    if (this.state === 'dragging' || this.state === 'pendingHold') {
+      this.cancel('visibilitychange');
+    }
+  }
+
+  _onContextMenu() {
+    if (this.state === 'dragging' || this.state === 'pendingHold') {
+      this.cancel('contextmenu');
+    }
+  }
+
+  cancel(reason) {
     if (this.holdTimer) {
       clearTimeout(this.holdTimer);
       this.holdTimer = null;
@@ -598,6 +687,13 @@ export class TabDragController {
       this.rafPending = false;
     }
 
+    const wasDragging = this.state === 'dragging';
+    if (wasDragging || reason === 'tolerance-exceeded' || this.state === 'pendingHold') {
+      this.suppressClickUntil = Math.max(this.suppressClickUntil, Date.now() + 250);
+    }
+
+    this.state = 'idle';
+
     if (this.captureEl && typeof this.captureEl.releasePointerCapture === 'function' && this.pointerId !== null) {
       try { this.captureEl.releasePointerCapture(this.pointerId); } catch {}
     }
@@ -606,13 +702,17 @@ export class TabDragController {
     this._hideOverlay();
     this._hideGhost();
 
-    const wasDragging = this.state === 'dragging';
-    this.state = 'idle';
     this.pointerId = null;
+    const prevCaptureEl = this.captureEl;
     this.captureEl = null;
     this.sourceUid = null;
     this.sourceTitle = '';
     this.lastHit = null;
+
+    this.cachedStageRect = null;
+    this.cachedTabBarRect = null;
+    this.cachedTabRects = [];
+    this.cachedLeafRects = [];
 
     const win = typeof window !== 'undefined' ? window : null;
     if (win) {
@@ -621,6 +721,13 @@ export class TabDragController {
       win.removeEventListener('pointercancel', this._onPointerCancel);
       win.removeEventListener('keydown', this._onKeyDown);
       win.removeEventListener('blur', this._onWindowBlur);
+      win.removeEventListener('resize', this._onWindowResize);
+      win.removeEventListener('visibilitychange', this._onVisibilityChange);
+      win.removeEventListener('contextmenu', this._onContextMenu);
+      win.removeEventListener('lostpointercapture', this._onLostPointerCapture);
+    }
+    if (prevCaptureEl && typeof prevCaptureEl.removeEventListener === 'function') {
+      try { prevCaptureEl.removeEventListener('lostpointercapture', this._onLostPointerCapture); } catch {}
     }
 
     if (wasDragging) {
