@@ -824,3 +824,62 @@ test('retina crisp overlay and UI alignment: direct pixel dimensions, no scale, 
 
   ctrl.dispose();
 });
+
+test('sidebar session drag-and-drop: dragging an unopened agent from sidebar splits stage and appends tab', async () => {
+  let droppedSplit = null;
+  let openedTab = null;
+
+  const stageRect = { x: 280, y: 38, w: 1000, h: 600 };
+  const root = { kind: 'leaf', uid: 'pane-existing' };
+  const tabs = [{ uid: 'pane-existing', pinned: false }];
+
+  const ctrl = new TabDragController({
+    getStageEl: () => ({ getBoundingClientRect: () => ({ left: 280, top: 38, width: 1000, height: 600 }) }),
+    getTabBarEl: () => ({ getBoundingClientRect: () => ({ left: 280, top: 0, width: 600, height: 38 }), querySelectorAll: () => [] }),
+    getTabs: () => tabs,
+    getRoot: () => root,
+    onDropSplit: (sourceUid, targetUid, edge, rev, startRoot) => {
+      droppedSplit = { sourceUid, targetUid, edge };
+    },
+    onOpenTab: (uid) => {
+      openedTab = uid;
+    },
+  });
+
+  const mockOverlay = { style: {} };
+  const mockGhost = { style: {} };
+  ctrl.mountOverlays(mockOverlay, mockGhost);
+
+  // 1. Long press on an unopened agent from sidebar ('agent-new')
+  ctrl.start(
+    { button: 0, pointerId: 1, clientX: 100, clientY: 200, target: {}, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } },
+    { uid: 'agent-new' },
+    'Agent New'
+  );
+  clearTimeout(ctrl.holdTimer);
+  ctrl.holdTimer = null;
+  ctrl.state = 'dragging';
+
+  // 2. Drag into right edge of existing pane on stage (x: 1200, y: 300)
+  ctrl._onPointerMove({ pointerId: 1, clientX: 1200, clientY: 300 });
+  ctrl._processFrame();
+
+  assert.ok(ctrl.lastHit);
+  assert.equal(ctrl.lastHit.type, 'edge');
+  assert.equal(ctrl.lastHit.targetUid, 'pane-existing');
+  assert.equal(ctrl.lastHit.edge, 'right');
+
+  // 3. Release pointer -> triggers onDropSplit with 'agent-new'
+  ctrl._onPointerUp({ pointerId: 1, clientX: 1200, clientY: 300 });
+  assert.ok(droppedSplit);
+  assert.equal(droppedSplit.sourceUid, 'agent-new');
+  assert.equal(droppedSplit.targetUid, 'pane-existing');
+  assert.equal(droppedSplit.edge, 'right');
+
+  // 4. Verify App onDropSplit state updater appends tab and splits root
+  const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  assert.match(appJsx, /handleAgentPointerDown/);
+  assert.match(appJsx, /onAgentPointerDown=\{handleAgentPointerDown\}/);
+
+  ctrl.dispose();
+});

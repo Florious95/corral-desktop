@@ -228,6 +228,7 @@ export class TabDragController {
     getRevision,
     onDropSplit,
     onReorderTabs,
+    onOpenTab,
     onStateChange,
   }) {
     this.getStageEl = getStageEl;
@@ -237,6 +238,7 @@ export class TabDragController {
     this.getRevision = getRevision;
     this.onDropSplit = onDropSplit;
     this.onReorderTabs = onReorderTabs;
+    this.onOpenTab = onOpenTab;
     this.onStateChange = onStateChange || (() => {});
 
     this.state = 'idle';
@@ -608,7 +610,8 @@ export class TabDragController {
       }
 
       const currentTabs = this.getTabs ? this.getTabs() : [];
-      if (!currentTabs.some((t) => t.uid === this.sourceUid)) {
+      const wasInStartTabs = this.startTabs.some((t) => t.uid === this.sourceUid);
+      if (wasInStartTabs && !currentTabs.some((t) => t.uid === this.sourceUid)) {
         this.cancel('source-closed');
         return;
       }
@@ -630,26 +633,34 @@ export class TabDragController {
           this.startTabs
         );
       } else {
-        const root = this.getRoot ? this.getRoot() : null;
-        const paneHit = hitTestLeafPanes({
-          x,
-          y,
-          sourceUid: this.sourceUid,
-          stageRect: this.cachedStageRect,
-          leafRects: this.cachedLeafRects,
-          root,
-          prevTarget: this.lastHit?.type === 'edge' ? this.lastHit : null,
-        });
+        const inTabBar = this.cachedTabBarRect &&
+          x >= this.cachedTabBarRect.x && x <= this.cachedTabBarRect.x + this.cachedTabBarRect.w &&
+          y >= this.cachedTabBarRect.y - 10 && y <= this.cachedTabBarRect.y + this.cachedTabBarRect.h + 10;
 
-        if (paneHit && paneHit.type === 'edge') {
-          if (root && findLeaf(root, paneHit.targetUid)) {
-            this.onDropSplit && this.onDropSplit(
-              this.sourceUid,
-              paneHit.targetUid,
-              paneHit.edge,
-              { revision: this.startRevision, sourceUid: this.sourceUid, root: this.startRoot },
-              this.startRoot
-            );
+        if (inTabBar && !wasInStartTabs) {
+          this.onOpenTab && this.onOpenTab(this.sourceUid);
+        } else {
+          const root = this.getRoot ? this.getRoot() : null;
+          const paneHit = hitTestLeafPanes({
+            x,
+            y,
+            sourceUid: this.sourceUid,
+            stageRect: this.cachedStageRect,
+            leafRects: this.cachedLeafRects,
+            root,
+            prevTarget: this.lastHit?.type === 'edge' ? this.lastHit : null,
+          });
+
+          if (paneHit && paneHit.type === 'edge') {
+            if (root && findLeaf(root, paneHit.targetUid)) {
+              this.onDropSplit && this.onDropSplit(
+                this.sourceUid,
+                paneHit.targetUid,
+                paneHit.edge,
+                { revision: this.startRevision, sourceUid: this.sourceUid, root: this.startRoot },
+                this.startRoot
+              );
+            }
           }
         }
       }

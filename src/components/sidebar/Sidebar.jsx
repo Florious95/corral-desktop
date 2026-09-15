@@ -53,6 +53,7 @@ export default function Sidebar({
   onSpaceMenu,
   onAgentMenu,
   onOpenAgent,
+  onAgentPointerDown,
   deviceLabel,
   anyDeviceOnline,
   onToggleDevices,
@@ -101,6 +102,7 @@ export default function Sidebar({
             closing={closing}
             onOpen={onOpenAgent}
             onContextMenu={onAgentMenu}
+            onPointerDown={onAgentPointerDown}
             multiDevice={multiDevice}
           />
         ) : (
