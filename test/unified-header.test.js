@@ -20,7 +20,7 @@ test('TitleBar renders full-width header with 80px native traffic lights safe gu
   assert.match(chromeCss, /\.tb-sidebar-toggle\s*\{[^}]*height:\s*26px;/);
 });
 
-test('App structure isolates constant TitleBar above app-body and drops ChromePill', async () => {
+test('App structure implements split header layout per 2026-09-16 ruling and drops ChromePill', async () => {
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
   const appCss = await readFile(new URL('../src/styles/app.css', import.meta.url), 'utf8');
   const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
@@ -30,12 +30,16 @@ test('App structure isolates constant TitleBar above app-body and drops ChromePi
   assert.equal(chromeCss.includes('chrome-pill'), false);
   assert.equal(chromeCss.includes('chrome-lamp'), false);
 
-  // TitleBar is mounted directly at the root, before app-body
-  assert.match(appJsx, /<TitleBar[\s\S]*?<div className="app-body">/);
+  // Left column hosts TitleBar (traffic lights + toggle) above Sidebar
+  assert.match(appJsx, /<div className=\{`app-left[\s\S]*?<TitleBar[\s\S]*?<Sidebar/);
 
-  // App root is column flex to house full-width header + lower body
-  assert.match(appCss, /\.app-root\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);
+  // Right column hosts tb-session-header with TabBar
+  assert.match(appJsx, /<header className=\{`tb-session-header[\s\S]*?<TabBar/);
+
+  // App root and body layout structure
+  assert.match(appCss, /\.app-root\s*\{[^}]*display:\s*flex;/);
   assert.match(appCss, /\.app-body\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*row;/);
+  assert.match(appCss, /\.app-left\s*\{[^}]*border-right:\s*1px solid/);
 });
 
 test('Rust main.rs restores macOS native traffic lights and drops hide_native_traffic_lights', async () => {

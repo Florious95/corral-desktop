@@ -1,16 +1,17 @@
 import { SidebarIcon } from '../../lib/icons.jsx';
 
 /**
- * 全宽一体化常驻 Header（UI-SPEC §4.1，2026-09-15 裁定）
+ * 左侧列 Header（UI-SPEC §4.1，2026-09-16 用户最新裁定）
  *
  * 布局：
- * [原生红绿灯安全留白 80px] [侧栏折叠按钮] [子组件/Tabs插槽] [拖窗空白区 flex:1]
+ * [原生红绿灯安全留白 80px] [侧栏折叠按钮] [拖窗空白区 flex:1]
+ * 位于左侧列（侧边栏）顶部，与右侧会话区以垂直分隔线完全隔离；垂直居中对齐 macOS 原生红绿灯。
  *
  * @param {Object} props
  * @param {boolean} [props.sidebarCollapsed]
  * @param {() => void} [props.onToggleSidebar]
  * @param {boolean} [props.fullscreen]
- * @param {React.ReactNode} [props.children] 为后续 TabBar 预留
+ * @param {React.ReactNode} [props.children] 为侧栏顶部自定义插槽预留
  */
 export default function TitleBar({
   sidebarCollapsed = false,
@@ -19,13 +20,13 @@ export default function TitleBar({
   children = null,
 }) {
   return (
-    <header className={`tb${fullscreen ? ' is-fullscreen' : ''}`}>
+    <header className={`tb tb-sidebar-header${fullscreen ? ' is-fullscreen' : ''}`} data-tauri-drag-region>
       <div className="tb-traffic-lights" aria-hidden="true" />
       <button
         type="button"
         className="tb-btn tb-sidebar-toggle"
-        title="折叠/展开侧栏"
-        aria-label="折叠/展开侧栏"
+        title={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+        aria-label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
         aria-pressed={!!sidebarCollapsed}
         onClick={onToggleSidebar}
       >
