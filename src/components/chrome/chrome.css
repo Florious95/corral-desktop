@@ -17,22 +17,54 @@
   outline-offset: 1px;
 }
 
-/* ---------- §4.1 TitleBar ---------- */
+/* ---------- §4.1 一体化 TitleBar (2026-09-15 裁定) ---------- */
 .tb {
   height: 38px;
   flex: none;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 10px;
+  gap: 8px;
+  padding: 0 10px 0 0;
   background: var(--titlebar-grad);
-  /* 分隔线只在左侧条下沿，不横切终端 */
   border-bottom: 1px solid var(--border-strong);
   box-shadow: var(--titlebar-inset);
+  box-sizing: border-box;
+  user-select: none;
+  position: relative;
+  z-index: 10;
+}
+.tb-traffic-lights {
+  width: 80px;
+  height: 100%;
+  flex: none;
+}
+.tb-sidebar-toggle {
+  width: 28px;
+  height: 26px;
+  border-radius: var(--r-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--icon-titlebar);
+  background: none;
+  border: 0;
+  padding: 0;
+  flex: none;
+  transition: background var(--d-hover), color var(--d-hover);
+}
+.tb-sidebar-toggle:hover {
+  background: var(--hover-4);
+  color: var(--icon-strong);
+}
+.tb-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--input-focus);
+  outline-offset: 1px;
 }
 .tb-drag {
   margin-left: auto;
   flex: 1;
+  min-width: 20px;
   align-self: stretch;
 }
 

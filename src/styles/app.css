@@ -23,6 +23,15 @@ button { border: 0; background: none; padding: 0 }
   position: relative;
   height: 100%;
   display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 一体化 Header 下方的主体布局（侧栏 + 终端主区，2026-09-15 裁定） */
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
   flex-direction: row;
   overflow: hidden;
 }

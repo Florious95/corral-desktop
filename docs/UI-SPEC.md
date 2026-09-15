@@ -259,19 +259,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
 
 ---
 
-## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c`）
+## 2. 窗口 chrome（macOS，来自 Desktop Mockups `#1c` 与 2026-09-15 裁定）
 
 - 标题栏高 **38px**。（2026-08-22 用户裁定：顶部去界化，标题条收窄。原 46px 作废。）
-- **悬浮胶囊 chrome**（裁定 2026-08-22，用户确认 `mockup.html`）：系统 traffic lights **隐藏但仍保留 NSWindow 标准按钮**（⛔ 不许 `decorations: false`），自绘运动场形胶囊（`border-radius:999px`）。顺序：红关 / 黄最小化 / 绿切换全屏 / 分隔线 / 展开侧栏。**默认不可见**，鼠标进入左上热区（窗口 `top:0`；全屏 `top:62px` = 主屏菜单 30pt + overlay 32px，落在系统顶栏之下）才浮现；从热区移到胶囊不中断；移开 **160ms** 后隐藏。红钮 = **真关闭**（`window.close()`，进程退出，Dock 不留残留）。⛔ 不许 `prevent_close` + `hide()`。Cmd+W 关窗、Cmd+Q 退出。Cmd+B 本地折叠，⛔ 不进 CLI。
-- `tauri.conf.json` 仍为 Overlay（藏灯在 Rust `setHidden`，不改 decorations）：
+- **原生红绿灯恢复与一体化常驻 Header**（裁定 2026-09-15）：彻底废除悬浮胶囊 chrome 与 `ChromePill.jsx`。Rust 移除 `hide_native_traffic_lights`，恢复 macOS 原生交通灯呈现。顶栏横贯全宽、常驻窗口顶端，独立于侧栏；侧栏折叠只改变下层内容区，顶栏永远不被卸载。
+  - 左侧预留 **80px**（78~86px 安全范围）原生红绿灯安全留白，不放置任何可交互 HTML 按钮。
+  - 紧接着排布侧栏展开/收折切换按钮（SidebarToggle，`28×26px`，`<SidebarIcon size={16} strokeWidth={1.8}/>`）。
+  - 右侧空白区域设为 `data-tauri-drag-region` 支持窗口整体拖拽。
+  - 预留子组件插槽，为后续会话选项卡（TabBar）接入铺平道路。
+- `tauri.conf.json` 保持 Overlay 模式：
   ```json
   { "titleBarStyle": "Overlay", "hiddenTitle": true, "trafficLightPosition": { "x": 14, "y": 13 } }
   ```
-- **标题条只占左侧栏宽度**（2026-08-22 用户裁定：不通栏；右侧终端从窗口内容区顶边开始，上方无条、无线）。拖拽区只在这条上。⛔ 不要把 drag-region 铺到终端上。标题条不再为系统灯留 93px。
-- **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开钮只在胶囊里。折叠后终端顶到内容区顶边（系统灯已隐藏，不再 `padding-top:38px`）。
+- **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开/折叠通过一体化 Header 上的侧栏按钮或 Cmd+B 切换。
 - **Cmd+B**：本地切换侧栏折叠/展开（任何窗口状态）。⛔ 不发给远端 CLI。
 - 侧栏是独立一列 `height:100%; display:flex; flex-direction:column`；Agent 列表 `flex:1; min-height:0; overflow:auto`；All Devices 条是列的最后一个子元素，钉在窗口底部（不要 absolute）。
-- 关闭 = 销毁窗口并退出进程（红钮 / Cmd+W 走 `close()`）。⛔ 不许 hide 后 Dock 残留。Quit = Cmd+Q。
+- 关闭 = 销毁窗口并退出进程（原生红钮 / Cmd+W 走 `close()`）。⛔ 不许 hide 后 Dock 残留。Quit = Cmd+Q。
 
 ---
 
@@ -316,19 +319,22 @@ src/
 
 ```js
 /**
- * @param {boolean} sidebarCollapsed
- * @param {() => void} onToggleSidebar
+ * @param {boolean} [sidebarCollapsed]
+ * @param {() => void} [onToggleSidebar]
+ * @param {boolean} [fullscreen]
+ * @param {React.ReactNode} [children]  为后续 TabBar 预留
  */
 ```
-内部状态：无（纯展示）。标题条只占左侧栏宽度，不横切终端。（2026-08-22 用户裁定：顶部去界化，标题条收窄。）
+内部状态：无（纯展示）。全宽一体化常驻 Header（2026-09-15 裁定：全宽通栏，常驻顶端，独立于侧栏）。
 
 | 部件 | 规格 |
 |---|---|
-| 根 | `height:38px; flex:none; display:flex; align-items:center; gap:12px; padding:0 10px; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset)`，带 `data-tauri-drag-region`。只排在侧栏列顶，不延伸到主区。折叠/窗口钮改在悬浮胶囊。 |
-| 侧栏开关 | 排在**左侧条最右端**。`28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
-| 品牌名 | **不渲染**（2026-08-22 用户裁定：不要展示产品名）。 |
+| 根 | `height:38px; flex:none; display:flex; align-items:center; gap:8px; padding:0 10px 0 0; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset); box-sizing:border-box; user-select:none; position:relative; z-index:10`。横贯窗口全宽。 |
+| 原生灯留白 | 排在最左端。`<div class="tb-traffic-lights" aria-hidden="true"/>`，宽 `80px`（78~86px 原生红绿灯安全保护区），不渲染任何可交互按钮。 |
+| 侧栏开关 | 紧接原生灯留白。`<button class="tb-btn tb-sidebar-toggle" ...>`，`28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4); color:var(--icon-strong)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
+| 品牌名 | **不渲染**（不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
-| 拖动区 | 左侧条剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。**不要**把 drag-region 铺到终端上（否则无法选文本）。 |
+| 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
 
 ### 4.2 `chrome/DevicesPopover.jsx`
 
@@ -835,6 +841,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 17. **2026-08-23**：切列/改宽时本地 `term.resize` 与上报同一拍（120ms 落定）；未落定不 reflow 旧快照。
 18. **2026-08-23**：捕获宽度 == 渲染网格宽度为不变量；落定后 subscribe、改宽重订、错宽帧不画。
 19. **2026-08-23**：snapshot 重放对裸 LF 采用隐含 CR 语义；仅作用于 snapshot，delta 保持原始字节。
+20. **2026-09-15**：恢复 macOS 原生红绿灯，彻底废除浮动胶囊（ChromePill）；实现全宽一体化常驻 Header（TitleBar），预留 80px 原生灯留白区，侧栏开关迁入顶栏，独立于侧栏折叠。
 
 ## core 依赖边界（裁定 2026-09-12）
 
