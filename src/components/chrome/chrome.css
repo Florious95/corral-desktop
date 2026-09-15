@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 0;
+  padding: 0 8px 0 0;
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--border-strong);
   box-sizing: border-box;
@@ -173,14 +173,15 @@
 }
 .tb-tab-lamp.is-working {
   background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
   animation: tb-lamp-pulse 1.8s ease-in-out infinite;
 }
 .tb-tab-lamp.is-idle {
-  background: #22c55e;
+  background: rgba(255, 255, 255, 0.28);
 }
 .tb-tab-lamp.is-unknown {
   background: transparent;
-  border: 1.2px solid var(--text-faint);
+  border: 1px solid var(--text-faint);
 }
 @keyframes tb-lamp-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -220,24 +221,26 @@
   opacity: 0.4;
 }
 
-/* ---------- 拖拽预览与高亮层 (GPU 硬件加速，2026-09-15 裁定) ---------- */
+/* ---------- 拖拽预览与高亮层 (高清视网膜硬件加速，2026-09-16 裁定) ---------- */
 .dropzone-overlay {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100px;
-  height: 100px;
+  width: 0;
+  height: 0;
   transform-origin: 0 0;
-  background: rgba(59, 130, 246, 0.18);
-  border: 1.5px solid #3b82f6;
-  border-radius: var(--r-6);
-  box-shadow: 0 0 16px rgba(59, 130, 246, 0.25), inset 0 0 12px rgba(59, 130, 246, 0.15);
+  background: rgba(59, 130, 246, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(59, 130, 246, 0.85);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 32px rgba(59, 130, 246, 0.18);
   pointer-events: none;
   visibility: hidden;
   opacity: 0;
   z-index: 9999;
   box-sizing: border-box;
-  will-change: transform, opacity;
+  will-change: transform, width, height, opacity;
   transition: opacity 0.12s ease;
 }
 

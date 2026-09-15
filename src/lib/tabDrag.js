@@ -552,9 +552,9 @@ export class TabDragController {
 
   _showOverlay(rect) {
     if (!this.overlayEl || !rect) return;
-    const scaleX = rect.w / OVERLAY_BASE_SIZE;
-    const scaleY = rect.h / OVERLAY_BASE_SIZE;
-    this.overlayEl.style.transform = `translate3d(${rect.x}px, ${rect.y}px, 0) scale(${scaleX}, ${scaleY})`;
+    this.overlayEl.style.transform = `translate3d(${rect.x}px, ${rect.y}px, 0)`;
+    this.overlayEl.style.width = `${rect.w}px`;
+    this.overlayEl.style.height = `${rect.h}px`;
     this.overlayEl.style.opacity = '1';
     this.overlayEl.style.visibility = 'visible';
   }

@@ -790,3 +790,37 @@ test('tester regression F7: ResizeObserver initial notification with different s
     else delete globalThis.ResizeObserver;
   }
 });
+
+test('retina crisp overlay and UI alignment: direct pixel dimensions, no scale, centered traffic lights and right toggle', async () => {
+  const mockOverlay = { style: {} };
+  const ctrl = new TabDragController({
+    getStageEl: () => null,
+    getTabBarEl: () => null,
+    getTabs: () => [{ uid: 'A' }],
+    getRoot: () => ({ kind: 'leaf', uid: 'A' }),
+  });
+  ctrl.mountOverlays(mockOverlay, null);
+
+  // Directly verify _showOverlay sets exact physical dimensions
+  ctrl._showOverlay({ x: 280, y: 38, w: 600, h: 400 });
+  assert.equal(mockOverlay.style.transform, 'translate3d(280px, 38px, 0)');
+  assert.equal(mockOverlay.style.width, '600px');
+  assert.equal(mockOverlay.style.height, '400px');
+  assert.equal(mockOverlay.style.transform.includes('scale'), false, 'Must not use transform scale to stretch overlay');
+  assert.equal(mockOverlay.style.opacity, '1');
+
+  // Verify CSS styles for crisp Retina overlay
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+  assert.match(chromeCss, /border:\s*1\.5px solid rgba\(59,\s*130,\s*246,\s*0\.85\);/);
+  assert.match(chromeCss, /backdrop-filter:\s*blur\(8px\);/);
+
+  // Verify TitleBar right toggle placement (lights -> drag -> toggle)
+  const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');
+  assert.match(titleBarJsx, /tb-traffic-lights[\s\S]*?tb-drag[\s\S]*?tb-sidebar-toggle/);
+
+  // Verify tauri.conf.json centered traffic lights
+  const tauriConf = await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8');
+  assert.match(tauriConf, /"trafficLightPosition":\s*\{\s*"x":\s*18,\s*"y":\s*13\s*\}/);
+
+  ctrl.dispose();
+});
