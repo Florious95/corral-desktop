@@ -882,6 +882,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 19. **2026-08-23**：snapshot 重放对裸 LF 采用隐含 CR 语义；仅作用于 snapshot，delta 保持原始字节。
 20. **2026-09-15**：恢复 macOS 原生红绿灯，彻底废除浮动胶囊（ChromePill）；实现全宽一体化常驻 Header（TitleBar），预留 80px 原生灯留白区，侧栏开关迁入顶栏，独立于侧栏折叠。
 21. **2026-09-15 (PR B)**：全局 Tab 会话生命周期与同父平铺常驻分屏舞台（TerminalStage）。顶栏接入 TabBar（会话名 + 状态指示灯，Working 绿灯微动、Idle 静止、Unknown 灰空心；支持 Pin 紧凑锚定与关闭）；主区采用纯函数二叉分屏树（workspaceLayout.js）计算绝对几何，所有 TerminalPane 作为同一 DOM 父容器直接子节点投影定位，切分重排零 React Unmount、零 xterm 重建、零闪屏；采用 am.workspace.v1 本地白名单持久化。
+22. **2026-09-15 (PR C)**：Tab 长按平滑调序与四向边缘吸附分屏引擎（tabDrag.js）。采用 Pointer Events（pointerdown/move/up + setPointerCapture），长按阈值 180ms、容差 6px；Zero Forced Reflow：pointerdown 预缓存视口与几何坐标，pointermove 仅记录点位并由单 rAF 调度，热路径绝对严禁读取 DOM 布局；主区触发 25% 四向边缘吸附（带 3px 切换滞回防抖与中心 50%×50% no-drop 区域）；GPU 硬件加速预览（translate3d + scale + opacity，悬浮期间绝不触碰真实 DOM/树）；pointerup 瞬间原子提交树变更，保持终端同父平铺保活，零 Unmount，120ms 防抖收敛。
 
 ## core 依赖边界（裁定 2026-09-12）
 

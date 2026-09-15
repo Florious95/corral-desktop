@@ -32,7 +32,10 @@ import {
   pinTab,
   closeOtherTabs,
   closeRightTabs,
+  dropNode,
+  reorderTabs,
 } from './lib/workspaceLayout.js';
+import { TabDragController } from './lib/tabDrag.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
 } from './term/clipboard.js';
@@ -127,6 +130,45 @@ export default function App({ seedDevices } = {}) {
   const [pairingPayload, setPairingPayload] = useState(null);
   const [newAgentSpace, setNewAgentSpace] = useState(null);
   const [menu, setMenu] = useState(null); // { kind:'space'|'agent'|'tab'|'pane', id, x, y }
+
+  const stageRef = useRef(null);
+  const overlayRef = useRef(null);
+  const ghostRef = useRef(null);
+  const [draggingUid, setDraggingUid] = useState(null);
+
+  const dragCtrl = useRef(null);
+  if (!dragCtrl.current) {
+    dragCtrl.current = new TabDragController({
+      getStageEl: () => stageRef.current,
+      getTabBarEl: () => document.querySelector('.tb-tabbar'),
+      getTabs: () => workspaceRef.current.tabs,
+      getRoot: () => workspaceRef.current.root,
+      onDropSplit: (sourceUid, targetUid, edge) => {
+        setWorkspace((prev) => ({
+          ...prev,
+          activeUid: sourceUid,
+          root: dropNode(prev.root, sourceUid, targetUid, edge),
+        }));
+      },
+      onReorderTabs: (fromIndex, toIndex) => {
+        setWorkspace((prev) => reorderTabs(prev, fromIndex, toIndex));
+      },
+      onStateChange: (state, info) => {
+        setDraggingUid(state === 'dragging' ? info?.uid : null);
+      },
+    });
+  }
+
+  useEffect(() => {
+    if (dragCtrl.current && overlayRef.current && ghostRef.current) {
+      dragCtrl.current.mountOverlays(overlayRef.current, ghostRef.current);
+    }
+    return () => dragCtrl.current?.dispose();
+  }, []);
+
+  const handleTabPointerDown = useCallback((e, tab, title) => {
+    dragCtrl.current?.start(e, tab, title);
+  }, []);
 
   // 服务端删掉会话时的 190ms 退场动画：行先留着播动画，再卸载
   const [ghosts, setGhosts] = useState([]);
@@ -310,6 +352,9 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const handleSelectTab = useCallback((uid) => {
+    if (dragCtrl.current?.suppressClickUntil && Date.now() < dragCtrl.current.suppressClickUntil) {
+      return;
+    }
     setWorkspace((prev) => focusTab(prev, uid));
   }, []);
 
@@ -699,10 +744,12 @@ export default function App({ seedDevices } = {}) {
           tabs={workspace.tabs}
           activeUid={workspace.activeUid}
           visibleUids={visibleLeaves}
+          draggingUid={draggingUid}
           agentsByUid={agentByKey}
           onSelectTab={handleSelectTab}
           onCloseTab={handleCloseTab}
           onContextMenu={(e, tab) => openMenu(e, 'tab', tab.uid)}
+          onPointerDown={handleTabPointerDown}
         />
       </TitleBar>
       <div className="app-body">
@@ -744,6 +791,7 @@ export default function App({ seedDevices } = {}) {
           ) : (
             <>
               <SplitPanes
+                stageRef={stageRef}
                 root={workspace.root}
                 tabs={workspace.tabs}
                 activeUid={workspace.activeUid}
@@ -800,6 +848,10 @@ export default function App({ seedDevices } = {}) {
         }}
         onCancel={() => setNewAgentSpace(null)}
       />
+
+      {/* 拖拽 GPU 预览浮层与吸附高亮（全屏视口级） */}
+      <div ref={overlayRef} className="dropzone-overlay" aria-hidden="true" />
+      <div ref={ghostRef} className="tab-drag-ghost" aria-hidden="true" />
 
       <Toast message={toastMsg} onDone={() => setToastMsg(null)} />
     </div>
