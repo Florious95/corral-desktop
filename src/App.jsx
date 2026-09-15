@@ -8,7 +8,6 @@ import {
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
-import ChromePill from './components/chrome/ChromePill.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import PairingDialog from './components/chrome/PairingDialog.jsx';
@@ -560,38 +559,36 @@ export default function App({ seedDevices } = {}) {
 
   return (
     <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
-      <ChromePill
+      <TitleBar
         fullscreen={nativeFullscreen}
         sidebarCollapsed={collapsed}
         onToggleSidebar={() => setCollapsed((v) => !v)}
       />
-      <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
-        {collapsed ? null : (
-          <TitleBar />
-        )}
-        <Sidebar
-          collapsed={collapsed}
-          spacesOpen={spacesOpen}
-          onToggleSpaces={() => setSpacesOpen((v) => !v)}
-          agentsOpen={agentsOpen}
-          onToggleAgents={() => setAgentsOpen((v) => !v)}
-          selected={selected}
-          onSelect={setSelected}
-          spaces={spaces}
-          agents={visibleAgents}
-          allCount={allAgents.length}
-          favCount={favCount}
-          closing={closing}
-          openKeys={paneKeys}
-          onSpaceMenu={handleSpaceMenu}
-          onAgentMenu={handleAgentMenu}
-          onOpenAgent={openAgent}
-          deviceLabel={deviceLabel}
-          anyDeviceOnline={anyDeviceOnline}
-          onToggleDevices={() => setDevicesOpen((v) => !v)}
-          multiDevice={multiDevice}
-        />
-      </div>
+      <div className="app-body">
+        <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
+          <Sidebar
+            collapsed={collapsed}
+            spacesOpen={spacesOpen}
+            onToggleSpaces={() => setSpacesOpen((v) => !v)}
+            agentsOpen={agentsOpen}
+            onToggleAgents={() => setAgentsOpen((v) => !v)}
+            selected={selected}
+            onSelect={setSelected}
+            spaces={spaces}
+            agents={visibleAgents}
+            allCount={allAgents.length}
+            favCount={favCount}
+            closing={closing}
+            openKeys={paneKeys}
+            onSpaceMenu={handleSpaceMenu}
+            onAgentMenu={handleAgentMenu}
+            onOpenAgent={openAgent}
+            deviceLabel={deviceLabel}
+            anyDeviceOnline={anyDeviceOnline}
+            onToggleDevices={() => setDevicesOpen((v) => !v)}
+            multiDevice={multiDevice}
+          />
+        </div>
 
         <main className="app-main">
           {noDevices ? (
@@ -614,6 +611,7 @@ export default function App({ seedDevices } = {}) {
             </>
           )}
         </main>
+      </div>
 
       {devicesOpen && (
         <DevicesPopover

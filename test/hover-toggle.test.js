@@ -78,5 +78,6 @@ test('Rust does not prevent_close or hide on CloseRequested', async () => {
   const rust = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.equal(rust.includes('prevent_close'), false);
   assert.equal(rust.includes('CloseRequested'), false);
-  assert.match(rust, /setHidden/);
+  assert.equal(rust.includes('hide_native_traffic_lights'), false);
+  assert.equal(rust.includes('setHidden'), false);
 });
