@@ -127,7 +127,23 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root =
       }
 
       const prevEdge = (prevTarget && prevTarget.targetUid === uid) ? prevTarget.edge : null;
-      let edge = edgeAt(rect, x, y, prevEdge);
+
+      // 测试席与用户契约微调：
+      // 单会话场景（舞台当前仅 1 个可见 Leaf Pane）：中线划分，u < 0.5 一律为 left（左二分屏），u >= 0.5 一律为 right（右二分屏）
+      // 多窗格场景（舞台 >= 2 个 Leaf）：全域四向 Voronoi 判定（偏上/下为上下分，偏左/右为三列/左右分）
+      let edge;
+      if (leafRects.length === 1) {
+        const midX = rect.x + rect.w * 0.5;
+        if (prevEdge === 'left' && x < midX + HYSTERESIS_PX) {
+          edge = 'left';
+        } else if (prevEdge === 'right' && x >= midX - HYSTERESIS_PX) {
+          edge = 'right';
+        } else {
+          edge = (x - rect.x) / rect.w < 0.5 ? 'left' : 'right';
+        }
+      } else {
+        edge = edgeAt(rect, x, y, prevEdge);
+      }
 
       if (edge) {
         // 顾问加固 R3：基于 dropNode 真实候选拓扑计算预览矩形并统一执行尺寸门禁

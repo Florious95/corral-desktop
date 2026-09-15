@@ -225,10 +225,13 @@ test('tabDrag: TabDragController state machine and zero forced reflow in hot pat
   assert.equal(mockGhost.style.opacity, '1');
 
   // 7. PointerUp triggers drop
-  // Mock pointerup over pane-1 top edge: (x: 500, y: 60)
+  // Mock pointerup over pane-1 top edge in multi-pane: (x: 250, y: 60)
   controller.cachedStageRect = stageRect;
-  controller.cachedLeafRects = [{ uid: 'pane-1', rect: { x: 0, y: 40, w: 1000, h: 600 } }];
-  controller._onPointerUp({ pointerId: 1, clientX: 500, clientY: 60 });
+  controller.cachedLeafRects = [
+    { uid: 'pane-1', rect: { x: 0, y: 40, w: 500, h: 600 } },
+    { uid: 'pane-2', rect: { x: 500, y: 40, w: 500, h: 600 } },
+  ];
+  controller._onPointerUp({ pointerId: 1, clientX: 250, clientY: 60 });
 
   assert.equal(controller.state, 'idle');
   assert.deepEqual(dropped, {
@@ -938,4 +941,33 @@ test('instant drag & omnipresent dropzone: dx > 4px instant drag and empty stage
   assert.deepEqual(emptyHit.previewRect, stageRect);
 
   ctrl.dispose();
+});
+
+test('single session split contract: u < 0.5 is left and u >= 0.5 is right regardless of y', () => {
+  const stageRect = { x: 0, y: 0, w: 1000, h: 600 };
+  const singleLeaf = [{ uid: 'single-pane', rect: { x: 0, y: 0, w: 1000, h: 600 } }];
+
+  // 1. Left half top/middle/bottom all map to 'left'
+  const leftTop = hitTestLeafPanes({ x: 200, y: 50, sourceUid: 'new-agent', stageRect, leafRects: singleLeaf });
+  assert.equal(leftTop.edge, 'left');
+  const leftMid = hitTestLeafPanes({ x: 450, y: 300, sourceUid: 'new-agent', stageRect, leafRects: singleLeaf });
+  assert.equal(leftMid.edge, 'left');
+  const leftBot = hitTestLeafPanes({ x: 100, y: 550, sourceUid: 'new-agent', stageRect, leafRects: singleLeaf });
+  assert.equal(leftBot.edge, 'left');
+
+  // 2. Right half top/middle/bottom all map to 'right'
+  const rightTop = hitTestLeafPanes({ x: 800, y: 50, sourceUid: 'new-agent', stageRect, leafRects: singleLeaf });
+  assert.equal(rightTop.edge, 'right');
+  const rightMid = hitTestLeafPanes({ x: 550, y: 300, sourceUid: 'new-agent', stageRect, leafRects: singleLeaf });
+  assert.equal(rightMid.edge, 'right');
+  const rightBot = hitTestLeafPanes({ x: 900, y: 550, sourceUid: 'new-agent', stageRect, leafRects: singleLeaf });
+  assert.equal(rightBot.edge, 'right');
+
+  // 3. Multi-pane uses four-way Voronoi (e.g. left pane top maps to 'top')
+  const multiLeaves = [
+    { uid: 'pane-left', rect: { x: 0, y: 0, w: 500, h: 600 } },
+    { uid: 'pane-right', rect: { x: 500, y: 0, w: 500, h: 600 } },
+  ];
+  const multiTop = hitTestLeafPanes({ x: 250, y: 50, sourceUid: 'new-agent', stageRect, leafRects: multiLeaves });
+  assert.equal(multiTop.edge, 'top');
 });
