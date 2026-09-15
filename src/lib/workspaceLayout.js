@@ -398,6 +398,9 @@ export function closeTab(state, uid) {
  * 仅关闭当前分屏（保留在 Tab 列表中）
  */
 export function closePane(state, uid) {
+  if (state && state.version === 2) {
+    return closeWorkspacePane(state, uid);
+  }
   if (!uid || !findLeaf(state.root, uid)) return state;
 
   const newRoot = removeNode(state.root, uid);
@@ -413,6 +416,59 @@ export function closePane(state, uid) {
     activeUid: newActiveUid,
     root: newRoot,
   };
+}
+
+/**
+ * 检查节点是否为纯横向列排布二叉树
+ */
+export function isPureColumnsTree(node) {
+  if (!node) return false;
+  if (node.kind === 'leaf') return true;
+  if (node.kind === 'split') {
+    if (node.axis !== 'x') return false;
+    return isPureColumnsTree(node.first) && isPureColumnsTree(node.second);
+  }
+  return false;
+}
+
+/**
+ * 在当前激活工作台内部关闭指定分屏窗格（同步持久化到 tabs[activeTab].root）
+ */
+export function closeWorkspacePane(state, uid) {
+  if (!uid || !state) return state;
+
+  const tabs = state.tabs || [];
+  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+  if (!currentTab || !findLeaf(currentTab.root, uid)) return state;
+
+  // 1. 从当前 Tab 的 root 树中移除该 leaf
+  const newRoot = removeNode(currentTab.root, uid);
+  const remainingLeaves = getLeaves(newRoot);
+
+  // 2. 更新当前 Tab 的焦点
+  let newActiveUid = currentTab.activeUid;
+  if (currentTab.activeUid === uid || !remainingLeaves.includes(currentTab.activeUid)) {
+    newActiveUid = remainingLeaves[0] || null;
+  }
+
+  // 3. 若剩余窗格依然为全横向并排竖列，自动执行 1:1:1 均等平衡
+  let finalRoot = newRoot;
+  if (newRoot && isPureColumnsTree(newRoot) && remainingLeaves.length >= 2) {
+    finalRoot = buildEqualRatioColumnsTree(remainingLeaves.map((k) => ({ kind: 'leaf', uid: k })));
+  }
+
+  const updatedTab = {
+    ...currentTab,
+    root: finalRoot,
+    activeUid: newActiveUid,
+  };
+
+  const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+
+  return syncActiveTabFields({
+    ...state,
+    tabs: updatedTabs,
+  });
 }
 
 /**

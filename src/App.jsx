@@ -35,6 +35,7 @@ import {
   closeRightWorkspaceTabs,
   getAllWorkspaceSessions,
   smartOpenSession,
+  closeWorkspacePane,
   getLeaves,
   openSession,
   focusTab,
@@ -410,21 +411,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const closeAgent = useCallback((key) => {
-    setWorkspace((prev) => {
-      const curTab = (prev.tabs || []).find((t) => (t.id || t.uid) === prev.activeTabId) || (prev.tabs || [])[0];
-      if (!curTab) return prev;
-      const nextRoot = removeNode(curTab.root, key);
-      const nextLeaves = getLeaves(nextRoot);
-      const nextActive = nextLeaves.includes(curTab.activeUid) ? curTab.activeUid : (nextLeaves[0] || null);
-      const updatedTab = { ...curTab, root: nextRoot, activeUid: nextActive };
-      const updatedTabs = (prev.tabs || []).map((t) => ((t.id || t.uid) === (curTab.id || curTab.uid) ? updatedTab : t));
-      return {
-        ...prev,
-        tabs: updatedTabs,
-        root: nextRoot,
-        activeUid: nextActive,
-      };
-    });
+    setWorkspace((prev) => closeWorkspacePane(prev, key));
     shims.current.delete(key);
     pendingPasteRef.current.delete(key);
   }, []);
@@ -471,7 +458,7 @@ export default function App({ seedDevices } = {}) {
   }, [handleCreateTab]);
 
   const handleClosePane = useCallback((uid) => {
-    setWorkspace((prev) => closePane(prev, uid));
+    setWorkspace((prev) => closeWorkspacePane(prev, uid));
   }, []);
 
   const handleFocusPane = useCallback((uid) => {
