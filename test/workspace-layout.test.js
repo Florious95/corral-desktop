@@ -14,6 +14,7 @@ import {
   closeRightWorkspaceTabs,
   getAllWorkspaceSessions,
   smartOpenSession,
+  closeWorkspacePane,
   getLeaves,
   findLeaf,
   removeNode,
@@ -555,4 +556,38 @@ test('workspaceLayout: smartOpenSession deduplication, split-pane protection, an
   const protectedSplit = smartOpenSession(mw, 's3');
   assert.equal(protectedSplit.activeTabId, splitTab.id, 'Must stay on current split tab');
   assert.deepEqual(getLeaves(protectedSplit.root), ['s1', 's2'], 'Must not mutate split root');
+});
+
+test('workspaceLayout: closeWorkspacePane persists to tabs[activeTab].root in v2 and rebalances columns', () => {
+  // 1. 构建 4 列均分分屏
+  let mw = createMultiWorkspace();
+  mw = openSessionInActiveTab(mw, 'col-1');
+  mw = splitSessionInActiveTab(mw, 'col-1', 'col-2', 'right');
+  mw = splitSessionInActiveTab(mw, 'col-2', 'col-3', 'right');
+  mw = splitSessionInActiveTab(mw, 'col-3', 'col-4', 'right');
+
+  const curTab = mw.tabs.find((t) => t.id === mw.activeTabId);
+  assert.equal(getLeaves(curTab.root).length, 4);
+
+  // 2. 关闭第 1 列 col-1
+  mw = closeWorkspacePane(mw, 'col-1');
+
+  // 验证 DOM / top-level root 与 tabs[activeTab].root 同步更新
+  assert.deepEqual(getLeaves(mw.root), ['col-2', 'col-3', 'col-4']);
+  const updatedTab = mw.tabs.find((t) => t.id === mw.activeTabId);
+  assert.deepEqual(getLeaves(updatedTab.root), ['col-2', 'col-3', 'col-4'], 'tabs[activeTab].root must be synchronized');
+
+  // 验证均分重新平衡为 1:1:1
+  const layout = project(mw.root, { x: 0, y: 0, w: 902, h: 600 }, 1);
+  assert.equal(layout['col-2'].w, 300);
+  assert.equal(layout['col-3'].w, 300);
+  assert.equal(layout['col-4'].w, 300);
+
+  // 3. 验证 v2 本地持久化与反序列化后绝不复现被删除的列
+  const serialized = serializeWorkspace(mw);
+  assert.equal(serialized.includes('col-1'), false, 'Deleted pane must not exist in serialized v2');
+  const restored = deserializeWorkspace(serialized);
+  assert.deepEqual(getLeaves(restored.root), ['col-2', 'col-3', 'col-4']);
+  const restoredTab = restored.tabs.find((t) => t.id === restored.activeTabId);
+  assert.deepEqual(getLeaves(restoredTab.root), ['col-2', 'col-3', 'col-4']);
 });
