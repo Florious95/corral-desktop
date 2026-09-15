@@ -311,21 +311,31 @@ export class TabDragController {
 
     if (typeof ResizeObserver !== 'undefined') {
       try {
+        const stageEl = this.getStageEl ? this.getStageEl() : null;
+        const tabBarEl = this.getTabBarEl ? this.getTabBarEl() : null;
+
         this.resizeObserver = new ResizeObserver((entries) => {
           if (this.state === 'idle') return;
           for (const entry of entries) {
             const cr = entry.contentRect;
-            if (this.cachedStageRect && (Math.abs(cr.width - this.cachedStageRect.w) > 1 || Math.abs(cr.height - this.cachedStageRect.h) > 1)) {
+            let targetRect = null;
+            if (stageEl && entry.target === stageEl) {
+              targetRect = this.cachedStageRect;
+            } else if (tabBarEl && entry.target === tabBarEl) {
+              targetRect = this.cachedTabBarRect;
+            }
+
+            // 严格仅在目标容器尺寸发生实质漂移（diff > 2px）时才取消，忽略初始通知与无漂移正常重绘
+            if (targetRect && (Math.abs(cr.width - targetRect.w) > 2 || Math.abs(cr.height - targetRect.h) > 2)) {
               this.cancel('container-resize');
               return;
             }
           }
         });
-        const stageEl = this.getStageEl ? this.getStageEl() : null;
+
         if (stageEl && typeof stageEl.nodeType === 'number') {
           this.resizeObserver.observe(stageEl);
         }
-        const tabBarEl = this.getTabBarEl ? this.getTabBarEl() : null;
         if (tabBarEl && typeof tabBarEl.nodeType === 'number') {
           this.resizeObserver.observe(tabBarEl);
         }
@@ -440,7 +450,7 @@ export class TabDragController {
     const stageEl = this.getStageEl ? this.getStageEl() : null;
     if (stageEl && typeof stageEl.getBoundingClientRect === 'function') {
       const sr = stageEl.getBoundingClientRect();
-      if (this.cachedStageRect && (Math.abs(sr.width - this.cachedStageRect.w) > 1 || Math.abs(sr.height - this.cachedStageRect.h) > 1)) {
+      if (this.cachedStageRect && (Math.abs(sr.width - this.cachedStageRect.w) > 2 || Math.abs(sr.height - this.cachedStageRect.h) > 2)) {
         this.cancel('container-resize');
       }
     }
