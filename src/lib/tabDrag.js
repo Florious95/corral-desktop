@@ -260,6 +260,10 @@ export class TabDragController {
     this.cachedLeafRects = [];
     this.lastHit = null;
 
+    this.startTabs = [];
+    this.startRoot = null;
+    this.resizeObserver = null;
+
     this.overlayEl = null;
     this.ghostEl = null;
 
@@ -296,12 +300,37 @@ export class TabDragController {
     this.state = 'pendingHold';
     this.captureEl = e.currentTarget;
     this.startRevision = this.getRevision ? this.getRevision() : 0;
+    this.startTabs = this.getTabs ? this.getTabs() : [];
+    this.startRoot = this.getRoot ? this.getRoot() : null;
 
     if (this.captureEl && typeof this.captureEl.setPointerCapture === 'function') {
       try { this.captureEl.setPointerCapture(this.pointerId); } catch {}
     }
 
     this._cacheGeometry();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      try {
+        this.resizeObserver = new ResizeObserver((entries) => {
+          if (this.state === 'idle') return;
+          for (const entry of entries) {
+            const cr = entry.contentRect;
+            if (this.cachedStageRect && (Math.abs(cr.width - this.cachedStageRect.w) > 1 || Math.abs(cr.height - this.cachedStageRect.h) > 1)) {
+              this.cancel('container-resize');
+              return;
+            }
+          }
+        });
+        const stageEl = this.getStageEl ? this.getStageEl() : null;
+        if (stageEl && typeof stageEl.nodeType === 'number') {
+          this.resizeObserver.observe(stageEl);
+        }
+        const tabBarEl = this.getTabBarEl ? this.getTabBarEl() : null;
+        if (tabBarEl && typeof tabBarEl.nodeType === 'number') {
+          this.resizeObserver.observe(tabBarEl);
+        }
+      } catch {}
+    }
 
     this.holdTimer = setTimeout(() => {
       if (this.state === 'pendingHold') {
@@ -406,7 +435,21 @@ export class TabDragController {
     });
   }
 
+  _checkContainerResize() {
+    if (this.resizeObserver) return;
+    const stageEl = this.getStageEl ? this.getStageEl() : null;
+    if (stageEl && typeof stageEl.getBoundingClientRect === 'function') {
+      const sr = stageEl.getBoundingClientRect();
+      if (this.cachedStageRect && (Math.abs(sr.width - this.cachedStageRect.w) > 1 || Math.abs(sr.height - this.cachedStageRect.h) > 1)) {
+        this.cancel('container-resize');
+      }
+    }
+  }
+
   _processFrame() {
+    if (this.state !== 'dragging') return;
+
+    this._checkContainerResize();
     if (this.state !== 'dragging') return;
 
     const x = this.lastX;
@@ -569,7 +612,13 @@ export class TabDragController {
       });
 
       if (tabHit && tabHit.fromIndex !== tabHit.toIndex) {
-        this.onReorderTabs && this.onReorderTabs(tabHit.fromIndex, tabHit.toIndex, this.startRevision);
+        this.onReorderTabs && this.onReorderTabs(
+          tabHit.fromIndex,
+          tabHit.toIndex,
+          { revision: this.startRevision, sourceUid: this.sourceUid, tabs: this.startTabs },
+          this.sourceUid,
+          this.startTabs
+        );
       } else {
         const root = this.getRoot ? this.getRoot() : null;
         const paneHit = hitTestLeafPanes({
@@ -584,7 +633,13 @@ export class TabDragController {
 
         if (paneHit && paneHit.type === 'edge') {
           if (root && findLeaf(root, paneHit.targetUid)) {
-            this.onDropSplit && this.onDropSplit(this.sourceUid, paneHit.targetUid, paneHit.edge, this.startRevision);
+            this.onDropSplit && this.onDropSplit(
+              this.sourceUid,
+              paneHit.targetUid,
+              paneHit.edge,
+              { revision: this.startRevision, sourceUid: this.sourceUid, root: this.startRoot },
+              this.startRoot
+            );
           }
         }
       }
@@ -674,6 +729,11 @@ export class TabDragController {
   }
 
   _cleanupListeners(captureEl) {
+    if (this.resizeObserver) {
+      try { this.resizeObserver.disconnect(); } catch {}
+      this.resizeObserver = null;
+    }
+
     const win = typeof window !== 'undefined' ? window : null;
     if (win) {
       win.removeEventListener('pointermove', this._onPointerMove);

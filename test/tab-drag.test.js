@@ -385,6 +385,12 @@ test('tabDrag: three-pane C | (D | B) hit testing on middle pane D right edge tr
 });
 
 test('tabDrag: zero DOM layout reads in hot move and rAF path via instrumented getters', async () => {
+  const prevRO = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    observe() {}
+    disconnect() {}
+  };
+
   let layoutReadsDuringContinuousDrag = 0;
   let movePhaseActive = false;
 
@@ -447,6 +453,8 @@ test('tabDrag: zero DOM layout reads in hot move and rAF path via instrumented g
   assert.equal(leakedCount, 1, 'Instrumented detector must catch leaked layout reads');
 
   controller.dispose();
+  if (prevRO) globalThis.ResizeObserver = prevRO;
+  else delete globalThis.ResizeObserver;
 });
 
 test('tabDrag: zero DOM reads verification via source inspection', async () => {
@@ -686,4 +694,50 @@ test('advisor probe S2-3: candidate tree size guard accepts valid final layouts 
     leafRects: [{ uid: 'B', rect: { x: 0, y: 40, w: 200, h: 600 } }],
   });
   assert.equal(hitTooSmall.type, 'center', 'Sub-minimum pane candidate must be rejected from edge split');
+});
+
+test('advisor probe A1: queued state change must not reorder a different source at same revision ref', async () => {
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const match = app.match(/onReorderTabs: ([\s\S]*?),\n      onStateChange:/);
+  assert.ok(match, 'extract actual App callback');
+  const revisionRef = { current: 3 };
+  let pending;
+  const callback = new Function('setWorkspace', 'workspaceRevisionRef', 'reorderTabs', 'return (' + match[1] + ')')(
+    (updater) => { pending = updater; },
+    revisionRef,
+    (state, from, to) => {
+      const tabs = [...state.tabs];
+      const [moved] = tabs.splice(from, 1);
+      tabs.splice(to, 0, moved);
+      return { ...state, tabs };
+    }
+  );
+  const original = { version: 1, tabs: ['A', 'B', 'C'].map((uid) => ({ uid, pinned: false })), activeUid: 'B', root: { kind: 'leaf', uid: 'B' } };
+  callback(1, 0, 3);
+  const latest = closeTab(original, 'A');
+  const actual = pending(latest);
+  assert.deepEqual(actual.tabs, latest.tabs, 'stale numeric index must not move C in place of source B');
+});
+
+test('advisor probe A2: stage size change without window resize must invalidate pointerdown geometry', () => {
+  let width = 1000;
+  const ctrl = new TabDragController({
+    getStageEl: () => ({ getBoundingClientRect: () => ({ left: 280, top: 38, width, height: 600 }) }),
+    getTabBarEl: () => null,
+    getTabs: () => [{ uid: 'A' }, { uid: 'B' }],
+    getRoot: () => ({ kind: 'leaf', uid: 'B' }),
+  });
+  ctrl.start({ button: 0, pointerId: 1, clientX: 300, clientY: 10, target: {}, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } }, { uid: 'A' });
+  try {
+    clearTimeout(ctrl.holdTimer);
+    ctrl.holdTimer = null;
+    ctrl.state = 'dragging';
+    width = 1280; // Sidebar finishes collapsing
+    ctrl.lastX = 1200;
+    ctrl.lastY = 300;
+    ctrl._processFrame();
+    assert.ok(ctrl.state === 'idle' || ctrl.cachedStageRect.w === width, 'invalidation exists for stage-only geometry changes');
+  } finally {
+    ctrl.dispose();
+  }
 });
