@@ -381,24 +381,17 @@ export class TabDragController {
 
       const root = this.getRoot ? this.getRoot() : null;
       if (root) {
-        const cleanRoot = findLeaf(root, this.sourceUid)
-          ? removeNode(root, this.sourceUid)
-          : root;
-
-        if (cleanRoot) {
-          const localMap = project(cleanRoot, { x: 0, y: 0, w: r.width, h: r.height }, 1);
-          this.cachedLeafRects = Object.entries(localMap).map(([uid, lr]) => ({
-            uid,
-            rect: {
-              x: r.left + lr.x,
-              y: r.top + lr.y,
-              w: lr.w,
-              h: lr.h,
-            },
-          }));
-        } else {
-          this.cachedLeafRects = [];
-        }
+        // 物理碰撞检测：严格使用当前真实物理 root 的各个叶子矩形（真实屏幕 DOM 位置）进行悬停命中
+        const localMap = project(root, { x: 0, y: 0, w: r.width, h: r.height }, 1);
+        this.cachedLeafRects = Object.entries(localMap).map(([uid, lr]) => ({
+          uid,
+          rect: {
+            x: r.left + lr.x,
+            y: r.top + lr.y,
+            w: lr.w,
+            h: lr.h,
+          },
+        }));
       } else {
         this.cachedLeafRects = [];
       }

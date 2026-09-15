@@ -276,7 +276,7 @@ test('tabDrag: advisor hardening - suppressClick, lostpointercapture, window-res
   controller.dispose();
 });
 
-test('tabDrag: candidate tree preview accurately reflects post-remove-source topology', () => {
+test('tabDrag: physical hit testing uses real DOM coordinates and preview reflects post-removal expansion', () => {
   // Tree has pane A (left 50%) and pane B (right 50%)
   const root = {
     kind: 'split',
@@ -286,8 +286,6 @@ test('tabDrag: candidate tree preview accurately reflects post-remove-source top
     second: { kind: 'leaf', uid: 'pane-B' },
   };
 
-  // When dragging pane-A (which is already visible on the stage):
-  // Candidate tree removes pane-A, so pane-B expands to full width!
   const controller = new TabDragController({
     getStageEl: () => ({
       getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 }),
@@ -300,14 +298,88 @@ test('tabDrag: candidate tree preview accurately reflects post-remove-source top
   const mockEl = { setPointerCapture: () => {}, releasePointerCapture: () => {} };
   controller.start({ button: 0, pointerId: 1, clientX: 10, clientY: 10, target: {}, currentTarget: mockEl }, { uid: 'pane-A' });
 
-  // Cached leaf rect for pane-B must be full stage width (1000px), not old 500px!
+  // 1. Physical hit testing uses actual visible DOM coordinates on screen
   const targetLeaf = controller.cachedLeafRects.find((l) => l.uid === 'pane-B');
   assert.ok(targetLeaf);
-  assert.equal(targetLeaf.rect.w, 1000);
-  assert.equal(targetLeaf.rect.h, 600);
+  assert.equal(targetLeaf.rect.x, 500);
+  assert.equal(targetLeaf.rect.w, 500);
 
-  // And pane-A is NOT in cachedLeafRects (cannot self-drop)
-  assert.equal(controller.cachedLeafRects.some((l) => l.uid === 'pane-A'), false);
+  // 2. Pointing to pane-B's physical top edge (x: 750, y: 50) triggers edge 'top'
+  // and previewRect reflects the post-removal expansion to full width 1000px!
+  const hit = hitTestLeafPanes({
+    x: 750,
+    y: 50,
+    sourceUid: 'pane-A',
+    stageRect: { x: 0, y: 0, w: 1000, h: 600 },
+    leafRects: controller.cachedLeafRects,
+    root,
+  });
+
+  assert.ok(hit);
+  assert.equal(hit.type, 'edge');
+  assert.equal(hit.targetUid, 'pane-B');
+  assert.equal(hit.edge, 'top');
+  assert.equal(hit.previewRect.w, 1000);
+  assert.equal(hit.previewRect.h, 299);
+
+  controller.dispose();
+});
+
+test('tabDrag: three-pane C | (D | B) hit testing on middle pane D right edge triggers dropzone', () => {
+  // Three-pane layout: C | (D | B)
+  const root = {
+    kind: 'split',
+    axis: 'x',
+    ratio: 0.5,
+    first: { kind: 'leaf', uid: 'C' },
+    second: {
+      kind: 'split',
+      axis: 'x',
+      ratio: 0.5,
+      first: { kind: 'leaf', uid: 'D' },
+      second: { kind: 'leaf', uid: 'B' },
+    },
+  };
+
+  const stageRect = { x: 0, y: 40, w: 1000, h: 600 };
+  const controller = new TabDragController({
+    getStageEl: () => ({
+      getBoundingClientRect: () => ({ left: 0, top: 40, width: 1000, height: 600 }),
+    }),
+    getTabBarEl: () => null,
+    getTabs: () => [{ uid: 'C' }, { uid: 'D' }, { uid: 'B' }],
+    getRoot: () => root,
+  });
+
+  const mockEl = { setPointerCapture: () => {}, releasePointerCapture: () => {} };
+  controller.start({ button: 0, pointerId: 1, clientX: 10, clientY: 10, target: {}, currentTarget: mockEl }, { uid: 'C' });
+
+  // Physical positions:
+  // C: x=0..499
+  // D: x=500..749
+  // B: x=750..1000
+  const leafD = controller.cachedLeafRects.find((l) => l.uid === 'D');
+  assert.ok(leafD);
+  assert.equal(leafD.rect.x, 500);
+
+  // Dragging C to D's right 90% edge (x=730, y=300)
+  const hit = hitTestLeafPanes({
+    x: 730,
+    y: 300,
+    sourceUid: 'C',
+    stageRect,
+    leafRects: controller.cachedLeafRects,
+    root,
+  });
+
+  assert.ok(hit);
+  assert.equal(hit.type, 'edge');
+  assert.equal(hit.targetUid, 'D');
+  assert.equal(hit.edge, 'right');
+
+  // Preview rect is exactly what dropNode produces for C
+  const actual = project(dropNode(root, 'C', 'D', 'right'), stageRect, 1)['C'];
+  assert.deepEqual(hit.previewRect, actual);
 
   controller.dispose();
 });
