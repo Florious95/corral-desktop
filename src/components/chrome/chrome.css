@@ -68,6 +68,134 @@
   align-self: stretch;
 }
 
+/* ---------- §4.1.1 TabBar (2026-09-15 裁定) ---------- */
+.tb-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: calc(100% - 130px);
+  height: 28px;
+  user-select: none;
+}
+.tb-tabs-pinned {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.tb-tabs-scroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tb-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+.tb-tab {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  flex: none;
+  max-width: 160px;
+  min-width: 60px;
+  transition: background var(--d-hover), color var(--d-hover);
+}
+.tb-tab:hover {
+  background: var(--hover-4);
+  color: var(--text);
+}
+.tb-tab.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border-soft);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.tb-tab-pinned {
+  min-width: 28px;
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  gap: 3px;
+  position: relative;
+}
+.tb-tab-initial {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.tb-tab-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-tab-lamp {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  box-sizing: border-box;
+}
+.tb-tab-lamp.is-working {
+  background: #22c55e;
+  animation: tb-lamp-pulse 1.8s ease-in-out infinite;
+}
+.tb-tab-lamp.is-idle {
+  background: #22c55e;
+}
+.tb-tab-lamp.is-unknown {
+  background: transparent;
+  border: 1.2px solid var(--text-faint);
+}
+@keyframes tb-lamp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tb-tab-lamp.is-working {
+    animation: none;
+  }
+}
+.tb-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-4);
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0 -2px 0 0;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--d-hover), background var(--d-hover), color var(--d-hover);
+}
+.tb-tab:hover .tb-tab-close,
+.tb-tab.is-active .tb-tab-close {
+  opacity: 0.7;
+}
+.tb-tab-close:hover {
+  opacity: 1 !important;
+  background: var(--hover-6);
+  color: var(--text);
+}
+
 /* ---------- §4.5 ContextMenu ---------- */
 .cm-overlay {
   position: fixed;

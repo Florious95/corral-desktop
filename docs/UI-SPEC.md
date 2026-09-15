@@ -336,6 +336,32 @@ src/
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
 
+### 4.1.1 `chrome/TabBar.jsx`（2026-09-15 裁定）
+
+```js
+/**
+ * @param {Array<{ uid: string, pinned: boolean }>} tabs
+ * @param {string|null} activeUid
+ * @param {string[]} [visibleUids]
+ * @param {Map<string, Object>} agentsByUid
+ * @param {(uid: string) => void} onSelectTab
+ * @param {(uid: string) => void} onCloseTab
+ * @param {(e: React.MouseEvent, tab: Object) => void} onContextMenu
+ */
+```
+内部状态：无。挂载在 TitleBar 折叠按钮右侧、拖窗区左侧。
+
+- **布局**：`<nav class="tb-tabbar">`，`height:28px; display:flex; align-items:center; gap:6px; min-width:0; user-select:none`。
+- **钉选标签区**（`.tb-tabs-pinned`）：紧凑锚定最左侧，每个 pinned tab 固定宽 `28px`，居中渲染 Provider 图标或首字母 + 状态灯，带 title 悬浮说明与完整无障碍属性。右键支持取消钉选或关闭。
+- **普通标签区**（`.tb-tabs-scroll`）：横向自适应滚动，支持鼠标滚轮左右滑动。每个普通 Tab：
+  - 仅展示会话名称（`.tb-tab-name`，文本溢出省略号）+ 状态灯（`.tb-tab-lamp`）。
+  - **状态灯规格**：Working 状态为绿灯微动脉冲（`animation: tb-lamp-pulse`，尊重 prefers-reduced-motion）；Idle 状态为绿灯静止；Unknown 状态为灰色空心圆圈。⛔ 不改成琥珀色，不新增普通 Tab Provider/Pin 图标堆叠。
+  - Hover / Active 时显露右侧快速关闭按钮（`.tb-tab-close`，`<XIcon size={11} strokeWidth={2.2}/>`）。
+- **生命周期交互**：
+  - 侧栏或新打开会话自动追加至 Tab 列表并激活聚焦；
+  - 点击已可见 Tab 仅聚焦对应窗格；点击未在当前分屏显示的 Tab 替换当前激活窗格，被替换会话保留常驻后台；
+  - 右键菜单支持「钉选/取消钉选」、「关闭」、「关闭其他」、「关闭右侧所有」。
+
 ### 4.2 `chrome/DevicesPopover.jsx`
 
 ```js
@@ -580,25 +606,37 @@ src/
 
 ---
 
-## 6. 主区（分裂列）
+## 6. 主区（同父平铺终端舞台）
 
-### 6.1 `terminal/SplitPanes.jsx`
+### 6.1 `terminal/SplitPanes.jsx`（TerminalStage，2026-09-15 裁定）
 
 ```js
 /**
- * @param {Agent[]} panes                       按左→右顺序
- * @param {(key:string) => void} onClosePane
- * @param {(e:MouseEvent, key:string) => void} onPaneMenu
- * @param {(agent:Agent) => JSX.Element} renderPane
+ * @param {Object|null} root                     二叉分屏树 root（LeafNode | SplitNode）
+ * @param {Array<{uid: string, pinned: boolean}>} tabs 全局 Tab 列表
+ * @param {string|null} activeUid                当前焦点会话 uid
+ * @param {Map<string, Object>} agentByKey       会话数据映射表
+ * @param {(agent:Agent) => JSX.Element} renderPane 渲染终端内容
+ * @param {(uid:string) => void} onFocusPane     聚焦窗格
+ * @param {(e:MouseEvent, uid:string) => void} onPaneMenu 右键菜单
+ * @param {(uid:string) => void} onClosePane     关闭此分屏
  */
 ```
-内部状态：无。
+内部状态：DOM 视口尺寸监听（ResizeObserver）、常驻宿主列表 `residentUids`、最新几何记录 `lastRects`。
 
-- 容器：`flex:1; display:flex; min-height:0`。
-- **每列**：`flex:1; min-width:0; display:flex; flex-direction:column; border-left:1px solid var(--border); position:relative; animation:paneIn var(--d-sidebar) var(--ease)`；`:first-child { border-left:none }`（侧栏已有 border-right，避免双线——对设计稿的微调）。列宽严格 flex 均分，**不做拖拽调宽**。
-- **关闭钮**：`position:absolute; top:8px; right:8px; width:24px; height:24px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--text-faint); z-index:3; opacity:0; transition:opacity var(--d-hover)`；列 hover 或钮 `:focus-visible` → `opacity:1`；钮自身 hover → `background:var(--hover-4); color:var(--icon-strong)`；`title="关闭此列"`；`<XIcon size={12} strokeWidth={2}/>`。
-- `onContextMenu` 挂在列根上 → `onPaneMenu(e, key)`。
-- **空态**（`panes.length === 0`）：`flex:1; display:flex; align-items:center; justify-content:center`，文本居中 `font-size:var(--fs-13); color:var(--text-faint)`：第一行 `从左侧选择一个 Agent`，第二行 `<span style="font-size:var(--fs-115)">右键可分裂展示、收藏或关闭</span>`。
+- **同父平铺常驻体系**：
+  - 容器：`<div class="splitpanes terminal-stage">`，`position:relative; flex:1; min-height:0; min-width:0; overflow:hidden`。
+  - **核心保障**：所有的 `TerminalPane` 作为同一 DOM 父容器下的直接子组件，通过 `absolute` 定位投影（纯函数 `project(root, rect, gap=1)` 计算 `{x, y, w, h}`）；
+  - 无论分屏怎么切分、重排或前后台切换，React `key={uid}` 与组件在 DOM 树中的层级永远保持不变，**彻底杜绝组件 Unmount、零 xterm 重建、零闪屏**。
+- **后台常驻机制**：
+  - 已打开且未关闭的会话宿主常驻于 DOM 中，切换到后台时保留最后的非零尺寸矩形，施加 `visibility:hidden; pointer-events:none; inert; aria-hidden:true`；
+  - 重新切回可见时直接恢复 `visibility:visible`，仅在几何发生真实改变时触发 120ms 防抖的 xterm `fit()`。
+  - 仅在 Tab 明确关闭或服务端确认删除时，才真正卸载该组件并完整清理 xterm / 监听器 / 资源。
+- **窗格结构与关闭钮**：
+  - `.pane-host`：`position:absolute; box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden; border-left:1px solid var(--border); border-top:1px solid var(--border)`。
+  - 处于多窗格分屏状态时（`visibleUids.length > 1`），窗格右上角悬浮显露关闭此分屏按钮（`.pane-close-btn`，`<XIcon size={12} strokeWidth={2.2}/>`）。
+- **空态**（`visibleUids.length === 0`）：
+  - 绝对定位覆盖层 `.splitpanes-empty`，居中提示：第一行 `从左侧选择一个 Agent`，第二行 `<span style="font-size:var(--fs-115)">点击打开、或右键在右侧分屏展示</span>`。
 
 ### 6.2 `terminal/TerminalPane.jsx`
 
@@ -796,6 +834,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 | `CloseRightIcon` | `<line x1=19 y1=4 x2=19 y2=20/><path d="M5 12h10m0 0-4-4m4 4-4 4"/>` | 1.9 |
 | `TerminalIcon` | `<polyline points="4 17 10 11 4 5"/><line x1=12 y1=19 x2=20 y2=19/>` | 1.8 |
 | `ArrowUpIcon` | `<path d="M12 19V5m0 0-6 6m6-6 6 6"/>` | 2 |
+| `PinIcon` | `<line x1=12 y1=17 x2=12 y2=22/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.77V5h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v5.77a2 2 0 0 1-1.11 1.79l-1.78.89A2 2 0 0 0 5 15.24Z"/>` | 1.9 |
 
 菜单里的图标统一 `size=14, strokeWidth=1.9, stroke="currentColor"`（跟随菜单项 `color`）。
 
@@ -842,6 +881,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 18. **2026-08-23**：捕获宽度 == 渲染网格宽度为不变量；落定后 subscribe、改宽重订、错宽帧不画。
 19. **2026-08-23**：snapshot 重放对裸 LF 采用隐含 CR 语义；仅作用于 snapshot，delta 保持原始字节。
 20. **2026-09-15**：恢复 macOS 原生红绿灯，彻底废除浮动胶囊（ChromePill）；实现全宽一体化常驻 Header（TitleBar），预留 80px 原生灯留白区，侧栏开关迁入顶栏，独立于侧栏折叠。
+21. **2026-09-15 (PR B)**：全局 Tab 会话生命周期与同父平铺常驻分屏舞台（TerminalStage）。顶栏接入 TabBar（会话名 + 状态指示灯，Working 绿灯微动、Idle 静止、Unknown 灰空心；支持 Pin 紧凑锚定与关闭）；主区采用纯函数二叉分屏树（workspaceLayout.js）计算绝对几何，所有 TerminalPane 作为同一 DOM 父容器直接子节点投影定位，切分重排零 React Unmount、零 xterm 重建、零闪屏；采用 am.workspace.v1 本地白名单持久化。
 
 ## core 依赖边界（裁定 2026-09-12）
 

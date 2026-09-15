@@ -1,0 +1,79 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+test('TabBar component matches UI-SPEC §4.1.1 and advisor requirements', async () => {
+  const tabBarJsx = await readFile(new URL('../src/components/chrome/TabBar.jsx', import.meta.url), 'utf8');
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+
+  // TabBar structure
+  assert.match(tabBarJsx, /className="tb-tabbar"/);
+  assert.match(tabBarJsx, /className="tb-tabs-pinned"/);
+  assert.match(tabBarJsx, /className="tb-tabs-scroll"/);
+  assert.match(tabBarJsx, /tb-tab-lamp/);
+  assert.match(tabBarJsx, /className="tb-tab-close"/);
+
+  // Status indicator lamps (working / idle / unknown)
+  assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*background:\s*#22c55e;/);
+  assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*tb-lamp-pulse/);
+  assert.match(chromeCss, /\.tb-tab-lamp\.is-idle\s*\{[^}]*background:\s*#22c55e;/);
+  assert.match(chromeCss, /\.tb-tab-lamp\.is-unknown\s*\{[^}]*border:\s*1\.2px solid/);
+
+  // prefers-reduced-motion protection
+  assert.match(chromeCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*none;/);
+
+  // Pinned tab compact style (28px)
+  assert.match(chromeCss, /\.tb-tab-pinned\s*\{[^}]*width:\s*28px;/);
+});
+
+test('TerminalStage (SplitPanes) guarantees same-parent flattened absolute projection', async () => {
+  const splitPanesJsx = await readFile(new URL('../src/components/terminal/SplitPanes.jsx', import.meta.url), 'utf8');
+  const terminalCss = await readFile(new URL('../src/components/terminal/terminal.css', import.meta.url), 'utf8');
+
+  // Same-parent single DOM container
+  assert.match(splitPanesJsx, /className="splitpanes terminal-stage"/);
+  assert.match(splitPanesJsx, /key=\{uid\}/);
+  assert.match(splitPanesJsx, /className=\{`pane-host\$\{isVisible \? '' : ' is-hidden'\}/);
+
+  // Absolute positioning projection with left/top/width/height
+  assert.match(splitPanesJsx, /position:\s*'absolute'/);
+  assert.match(splitPanesJsx, /left:\s*`\$\{currentRect\.x\}px`/);
+  assert.match(splitPanesJsx, /top:\s*`\$\{currentRect\.y\}px`/);
+  assert.match(splitPanesJsx, /width:\s*`\$\{currentRect\.w\}px`/);
+  assert.match(splitPanesJsx, /height:\s*`\$\{currentRect\.h\}px`/);
+
+  // Background resident pane retains geometry and receives visibility: hidden + inert + aria-hidden
+  assert.match(splitPanesJsx, /visibility:\s*isVisible \? 'visible' : 'hidden'/);
+  assert.match(splitPanesJsx, /pointerEvents:\s*isVisible \? 'auto' : 'none'/);
+  assert.match(splitPanesJsx, /inert=\{!isVisible \? '' : undefined\}/);
+  assert.match(splitPanesJsx, /aria-hidden=\{!isVisible \? 'true' : undefined\}/);
+
+  // Pane close button rendered when multiple visible panes exist
+  assert.match(splitPanesJsx, /isVisible && visibleUids\.length > 1/);
+  assert.match(splitPanesJsx, /className="pane-close-btn"/);
+
+  // CSS rules for terminal-stage and pane-host
+  assert.match(terminalCss, /\.terminal-stage\s*\{[^}]*position:\s*relative;/);
+  assert.match(terminalCss, /\.pane-host\s*\{[^}]*position:\s*absolute;/);
+  assert.match(terminalCss, /\.pane-host\.is-hidden\s*\{[^}]*visibility:\s*hidden;/);
+  assert.match(terminalCss, /\.pane-close-btn\s*\{/);
+});
+
+test('App wires TabBar into TitleBar and mounts TerminalStage with am.workspace.v1', async () => {
+  const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+
+  // TitleBar hosts TabBar
+  assert.match(appJsx, /<TitleBar[\s\S]*?<TabBar[\s\S]*?<\/TitleBar>/);
+
+  // SplitPanes receives root, tabs, activeUid
+  assert.match(appJsx, /<SplitPanes[\s\S]*?root=\{workspace\.root\}[\s\S]*?tabs=\{workspace\.tabs\}[\s\S]*?activeUid=\{workspace\.activeUid\}/);
+
+  // Storage persistence with am.workspace.v1
+  assert.match(appJsx, /loadWorkspaceFromStorage/);
+  assert.match(appJsx, /saveWorkspaceToStorage\(workspace\)/);
+
+  // Tab right-click menu and Pane right-click menu
+  assert.match(appJsx, /menu\.kind === 'tab'/);
+  assert.match(appJsx, /key: 'split-right'/);
+  assert.match(appJsx, /key: 'split-down'/);
+});
