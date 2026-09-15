@@ -34,6 +34,7 @@ import {
   closeOtherWorkspaceTabs,
   closeRightWorkspaceTabs,
   getAllWorkspaceSessions,
+  smartOpenSession,
   getLeaves,
   openSession,
   focusTab,
@@ -48,6 +49,7 @@ import {
   findLeaf,
   removeNode,
 } from './lib/workspaceLayout.js';
+import { triggerWindowDrag } from './lib/windowChrome.js';
 import { TabDragController } from './lib/tabDrag.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
@@ -399,11 +401,7 @@ export default function App({ seedDevices } = {}) {
       return;
     }
     geomTrace('activate', { ref: key });
-    setWorkspace((prev) => openSessionInActiveTab(prev, key));
-  }, []);
-
-  const splitAgent = useCallback((key) => {
-    setWorkspace((prev) => splitSessionInActiveTab(prev, prev.activeUid, key, 'right'));
+    setWorkspace((prev) => smartOpenSession(prev, key));
   }, []);
 
   const toggleFav = useCallback((agent) => {
@@ -693,13 +691,6 @@ export default function App({ seedDevices } = {}) {
       const inTabs = workspace.tabs.some((t) => t.uid === agent.key);
       return [
         {
-          key: 'split',
-          label: '分裂展示',
-          icon: icon(SplitIcon),
-          color: 'var(--text)',
-          onClick: () => { closeMenu(); splitAgent(agent.key); },
-        },
-        {
           key: 'fav',
           label: agent.fav ? '取消收藏' : '收藏',
           icon: agent.fav
@@ -817,7 +808,6 @@ export default function App({ seedDevices } = {}) {
     workspace,
     visibleLeaves,
     closeMenu,
-    splitAgent,
     toggleFav,
     closeAgent,
     handlePinTab,
@@ -896,12 +886,14 @@ export default function App({ seedDevices } = {}) {
               className="tb-drag"
               data-tauri-drag-region
               onPointerDown={(e) => {
+                triggerWindowDrag(e);
                 if (e.button === 0 && e.target === e.currentTarget) {
                   import('@tauri-apps/api/window')
                     .then((m) => m.getCurrentWindow().startDragging())
                     .catch(() => {});
                 }
               }}
+              onMouseDown={triggerWindowDrag}
             />
           </header>
 

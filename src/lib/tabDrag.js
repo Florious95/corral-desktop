@@ -312,6 +312,11 @@ export class TabDragController {
 
     this.cancel();
 
+    // 彻底消灭蓝底选中文本污染：清除可能存在的系统残留选区
+    if (typeof window !== 'undefined' && window.getSelection) {
+      try { window.getSelection()?.removeAllRanges(); } catch {}
+    }
+
     this.instantDrag = !!(options?.instant || options?.instantDrag);
     this.pointerId = e.pointerId;
     this.sourceUid = tab.uid;
@@ -453,6 +458,9 @@ export class TabDragController {
       const dist = Math.hypot(this.lastX - this.startX, this.lastY - this.startY);
       if (this.instantDrag) {
         if (dist > 4) {
+          if (typeof window !== 'undefined' && window.getSelection) {
+            try { window.getSelection()?.removeAllRanges(); } catch {}
+          }
           this.state = 'dragging';
           this.onStateChange('dragging', { uid: this.sourceUid });
           this._showGhost();
@@ -465,6 +473,9 @@ export class TabDragController {
         }
       }
     } else if (this.state === 'dragging') {
+      if (typeof window !== 'undefined' && window.getSelection) {
+        try { window.getSelection()?.removeAllRanges(); } catch {}
+      }
       this._scheduleRaf();
     }
   }

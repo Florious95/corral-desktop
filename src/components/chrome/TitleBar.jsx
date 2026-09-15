@@ -1,4 +1,5 @@
 import { SidebarIcon } from '../../lib/icons.jsx';
+import { triggerWindowDrag } from '../../lib/windowChrome.js';
 
 /**
  * 左侧列 Header（UI-SPEC §4.1，2026-09-16 用户最新裁定）
@@ -26,12 +27,14 @@ export default function TitleBar({
         className="tb-drag"
         data-tauri-drag-region
         onPointerDown={(e) => {
+          triggerWindowDrag(e);
           if (e.button === 0 && e.target === e.currentTarget) {
             import('@tauri-apps/api/window')
               .then((m) => m.getCurrentWindow().startDragging())
               .catch(() => {});
           }
         }}
+        onMouseDown={triggerWindowDrag}
       />
       {children}
       <button
