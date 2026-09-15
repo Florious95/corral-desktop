@@ -11,18 +11,19 @@ const LOCAL_AUTH_PLACEHOLDER = 'agentmirror-local-anonymous';
 export class Client extends CoreClient {
   constructor(opts = {}) {
     const local = isLocalUrl(opts.url);
-    // The pinned core requires a non-empty token at construction time. Local
-    // loopback is the one trusted exception: use a private placeholder only
-    // to satisfy that invariant, then skip auth entirely and clear it again.
-    // A token on loopback is intentionally ignored; physical local trust is
-    // unconditional, while non-loopback still fails closed in core.
-    const anonymous = local;
+    const hasToken = typeof opts.token === 'string' && opts.token.length > 0;
+    // The pinned core requires a non-empty token at construction time. Keep
+    // the zero-config loopback compatibility path on a private placeholder,
+    // but never discard a configured token: the real local daemon requires an
+    // auth frame before it accepts list or session requests.
+    const anonymous = local && !hasToken;
     super(anonymous ? { ...opts, token: LOCAL_AUTH_PLACEHOLDER } : opts);
     this.anonymous = anonymous;
     if (anonymous) {
       this.token = '';
-      // Keep Client.prototype identical to the pinned core. Only local
-      // instances replace the open callback, so remote auth stays upstream.
+      // Keep Client.prototype identical to the pinned core. Only tokenless
+      // local instances replace the open callback; authenticated local and
+      // remote instances use the upstream auth lifecycle unchanged.
       this.handleOpen = () => {
         if (this.state === CoreClientState.STOPPED) {
           this.closeWs();

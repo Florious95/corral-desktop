@@ -480,7 +480,6 @@ export class DeviceManager {
     const client = new Client({
       url: d.url,
       token,
-      anonymous: local,
       wsFactory: this.wsFactory,
       backoff: this.backoff,
       onStateChange: (s) => this._onState(deviceId, s),
