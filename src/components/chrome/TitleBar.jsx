@@ -22,6 +22,8 @@ export default function TitleBar({
   return (
     <header className={`tb tb-sidebar-header${fullscreen ? ' is-fullscreen' : ''}`} data-tauri-drag-region>
       <div className="tb-traffic-lights" aria-hidden="true" />
+      <div className="tb-drag" data-tauri-drag-region />
+      {children}
       <button
         type="button"
         className="tb-btn tb-sidebar-toggle"
@@ -32,8 +34,6 @@ export default function TitleBar({
       >
         <SidebarIcon size={16} strokeWidth={1.8} />
       </button>
-      {children}
-      <div className="tb-drag" data-tauri-drag-region />
     </header>
   );
 }
