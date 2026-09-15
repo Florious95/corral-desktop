@@ -31,8 +31,10 @@ export default function SplitPanes({
   onPaneMenu,
   onClosePane,
   panes = [],
+  stageRef: externalStageRef,
 }) {
-  const stageRef = useRef(null);
+  const localStageRef = useRef(null);
+  const stageRef = externalStageRef || localStageRef;
   const [rect, setRect] = useState(() => ({ x: 0, y: 0, w: 0, h: 0 }));
 
   useEffect(() => {
@@ -105,7 +107,7 @@ export default function SplitPanes({
   const isEmpty = visibleUids.length === 0;
 
   return (
-    <div className="splitpanes terminal-stage" ref={stageRef}>
+    <div className="splitpanes terminal-stage" ref={stageRef} data-stage="terminal-stage">
       {isEmpty && (
         <div className="splitpanes-empty">
           <div>
@@ -130,6 +132,7 @@ export default function SplitPanes({
         return (
           <div
             key={uid}
+            data-pane-uid={uid}
             className={`pane-host${isVisible ? '' : ' is-hidden'}${isActive ? ' is-active' : ''}`}
             style={{
               position: 'absolute',

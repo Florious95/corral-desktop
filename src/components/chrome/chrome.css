@@ -195,6 +195,55 @@
   background: var(--hover-6);
   color: var(--text);
 }
+.tb-tab.is-dragging-source {
+  opacity: 0.4;
+}
+
+/* ---------- 拖拽预览与高亮层 (GPU 硬件加速，2026-09-15 裁定) ---------- */
+.dropzone-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100px;
+  height: 100px;
+  transform-origin: 0 0;
+  background: rgba(59, 130, 246, 0.18);
+  border: 1.5px solid #3b82f6;
+  border-radius: var(--r-6);
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.25), inset 0 0 12px rgba(59, 130, 246, 0.15);
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  z-index: 9999;
+  box-sizing: border-box;
+  will-change: transform, opacity;
+  transition: opacity 0.12s ease;
+}
+
+.tab-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  z-index: 10000;
+  transform-origin: 0 0;
+  box-sizing: border-box;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
 
 /* ---------- §4.5 ContextMenu ---------- */
 .cm-overlay {

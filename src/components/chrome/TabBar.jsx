@@ -31,10 +31,12 @@ export default function TabBar({
   tabs = [],
   activeUid = null,
   visibleUids = [],
+  draggingUid = null,
   agentsByUid = new Map(),
   onSelectTab,
   onCloseTab,
   onContextMenu,
+  onPointerDown,
 }) {
   const { pinnedTabs, regularTabs } = useMemo(() => {
     const pinned = [];
@@ -58,18 +60,22 @@ export default function TabBar({
             const subtitle = agent ? `${agent.title} (${agent.deviceName})` : tab.uid;
             const isActive = tab.uid === activeUid;
             const isVisible = visibleUids.includes(tab.uid);
+            const isDragging = tab.uid === draggingUid;
             const status = agent?.state || agent?.status || 'unknown';
 
             return (
               <div
                 key={tab.uid}
-                className={`tb-tab tb-tab-pinned${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}`}
+                data-tab-uid={tab.uid}
+                data-pinned="true"
+                className={`tb-tab tb-tab-pinned${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
                 title={subtitle}
                 aria-label={subtitle}
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => onSelectTab && onSelectTab(tab.uid)}
                 onContextMenu={(e) => onContextMenu && onContextMenu(e, tab)}
+                onPointerDown={(e) => onPointerDown && onPointerDown(e, tab, title)}
               >
                 {agent?.provider ? (
                   <ProviderIcon provider={agent.provider} size={15} />
@@ -90,17 +96,21 @@ export default function TabBar({
           const subtitle = agent ? `${agent.title} (${agent.deviceName})` : tab.uid;
           const isActive = tab.uid === activeUid;
           const isVisible = visibleUids.includes(tab.uid);
+          const isDragging = tab.uid === draggingUid;
           const status = agent?.state || agent?.status || 'unknown';
 
           return (
             <div
               key={tab.uid}
-              className={`tb-tab${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}`}
+              data-tab-uid={tab.uid}
+              data-pinned="false"
+              className={`tb-tab${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
               title={subtitle}
               role="tab"
               aria-selected={isActive}
               onClick={() => onSelectTab && onSelectTab(tab.uid)}
               onContextMenu={(e) => onContextMenu && onContextMenu(e, tab)}
+              onPointerDown={(e) => onPointerDown && onPointerDown(e, tab, title)}
             >
               <StatusLamp status={status} />
               <span className="tb-tab-name">{title}</span>
