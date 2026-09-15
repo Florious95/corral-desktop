@@ -161,18 +161,20 @@ export default function App({ seedDevices } = {}) {
           if (expectedRoot && prev?.root !== expectedRoot) {
             return prev;
           }
-          // 3. 来源 Tab 必须仍然存在于当前工作区的 tabs 中
-          if (!prev?.tabs?.some((t) => t.uid === sourceUid)) {
-            return prev;
-          }
-          // 4. 目标 Leaf 必须仍然存在于当前 root 树中
+          // 3. 目标 Leaf 必须仍然存在于当前 root 树中
           if (!prev?.root || !findLeaf(prev.root, targetUid)) {
             return prev;
+          }
+          // 4. 若来源不在 tabs 中（从侧栏长按拖入），自动追加 Tab
+          let newTabs = prev.tabs || [];
+          if (!newTabs.some((t) => t.uid === sourceUid)) {
+            newTabs = [...newTabs, { uid: sourceUid, pinned: false }];
           }
           const nextRoot = dropNode(prev.root, sourceUid, targetUid, edge);
           if (!nextRoot) return prev;
           return {
             ...prev,
+            tabs: newTabs,
             activeUid: sourceUid,
             root: nextRoot,
           };
@@ -211,6 +213,9 @@ export default function App({ seedDevices } = {}) {
       onStateChange: (state, info) => {
         setDraggingUid(state === 'dragging' ? info?.uid : null);
       },
+      onOpenTab: (uid) => {
+        setWorkspace((prev) => openSession(prev, uid));
+      },
     });
   }
 
@@ -223,6 +228,10 @@ export default function App({ seedDevices } = {}) {
 
   const handleTabPointerDown = useCallback((e, tab, title) => {
     dragCtrl.current?.start(e, tab, title);
+  }, []);
+
+  const handleAgentPointerDown = useCallback((e, ag) => {
+    dragCtrl.current?.start(e, { uid: ag.key }, ag.title);
   }, []);
 
   // 服务端删掉会话时的 190ms 退场动画：行先留着播动画，再卸载
@@ -820,6 +829,7 @@ export default function App({ seedDevices } = {}) {
             onSpaceMenu={handleSpaceMenu}
             onAgentMenu={handleAgentMenu}
             onOpenAgent={openAgent}
+            onAgentPointerDown={handleAgentPointerDown}
             deviceLabel={deviceLabel}
             anyDeviceOnline={anyDeviceOnline}
             onToggleDevices={() => setDevicesOpen((v) => !v)}

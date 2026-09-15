@@ -34,6 +34,7 @@ const sameAgentRow = (prev, next) => {
     && prev.multiDevice === next.multiDevice
     && prev.onOpen === next.onOpen
     && prev.onContextMenu === next.onContextMenu
+    && prev.onPointerDown === next.onPointerDown
     && a.key === b.key
     && a.title === b.title
     && a.provider === b.provider
@@ -45,7 +46,7 @@ const sameAgentRow = (prev, next) => {
 };
 
 const AgentRow = memo(function AgentRow({
-  agent: ag, top, isOpen, isClosing, onOpen, onContextMenu, multiDevice,
+  agent: ag, top, isOpen, isClosing, onOpen, onContextMenu, multiDevice, onPointerDown,
 }) {
   return (
     <div
@@ -57,6 +58,7 @@ const AgentRow = memo(function AgentRow({
       }}
       onClick={() => onOpen(ag.key)}
       onContextMenu={(e) => onContextMenu(e, ag.key)}
+      onPointerDown={(e) => onPointerDown && onPointerDown(e, ag)}
     >
       <div className="agents-row-main">
         <ProviderIcon
@@ -106,6 +108,7 @@ export default function AgentsList({
   onOpen,
   onContextMenu,
   multiDevice,
+  onPointerDown,
   emptyHint = '会话由主机发现后会出现在这里',
   emptyTitle = '这个空间还没有 Agent',
 }) {
@@ -156,6 +159,7 @@ export default function AgentsList({
               onOpen={onOpen}
               onContextMenu={onContextMenu}
               multiDevice={multiDevice}
+              onPointerDown={onPointerDown}
             />
           ))}
         </div>
