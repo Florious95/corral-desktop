@@ -5,7 +5,8 @@
  * 纯函数计算几何坐标，增删节点时兄弟节点自动吸收提升。
  */
 
-const STORAGE_KEY = 'am.workspace.v1';
+export const STORAGE_KEY = 'am.workspace.v1';
+export const MULTI_WORKSPACE_STORAGE_KEY = 'am.workspace.v2';
 const MAX_READ_BYTES = 256 * 1024; // 256 KiB
 const MAX_NODES = 512;
 const MAX_DEPTH = 128;
@@ -461,6 +462,9 @@ export function closeRightTabs(state, uid) {
  * 拖拽重排 Tab 顺序
  */
 export function reorderTabs(state, fromIndex, toIndex) {
+  if (state.version === 2) {
+    return reorderWorkspaceTabs(state, fromIndex, toIndex);
+  }
   const tabs = [...(state.tabs || [])];
   if (fromIndex < 0 || fromIndex >= tabs.length || toIndex < 0 || toIndex >= tabs.length || fromIndex === toIndex) {
     return state;
@@ -506,6 +510,25 @@ function validateNode(node, depth = 0, nodeCount = { count: 0 }) {
  */
 export function validateWorkspaceState(raw) {
   if (!raw || typeof raw !== 'object') return false;
+
+  // v2 多工作台模式校验
+  if (raw.version === 2) {
+    if (!Array.isArray(raw.tabs) || raw.tabs.length === 0) return false;
+    const tabIds = new Set();
+    for (const t of raw.tabs) {
+      const id = t.id || t.uid;
+      if (typeof id !== 'string' || !id || tabIds.has(id)) return false;
+      tabIds.add(id);
+      if (t.root !== null && t.root !== undefined) {
+        const nodeCount = { count: 0 };
+        if (!validateNode(t.root, 0, nodeCount)) return false;
+      }
+    }
+    if (raw.activeTabId && !tabIds.has(raw.activeTabId)) return false;
+    return true;
+  }
+
+  // v1 单工作区模式校验
   if (raw.version !== 1) return false;
   if (!Array.isArray(raw.tabs)) return false;
 
@@ -567,6 +590,23 @@ export function sanitizeNode(node) {
  */
 export function serializeWorkspace(state) {
   if (!state || typeof state !== 'object') return null;
+
+  if (state.version === 2) {
+    const whitelist = {
+      version: 2,
+      activeTabId: String(state.activeTabId || (state.tabs && state.tabs[0]?.id) || 'tab-1'),
+      tabs: (state.tabs || []).map((t, idx) => ({
+        id: String(t.id || t.uid || `tab-${idx + 1}`),
+        uid: String(t.uid || t.id || `tab-${idx + 1}`),
+        name: String(t.name || ''),
+        pinned: !!t.pinned,
+        activeUid: t.activeUid ? String(t.activeUid) : null,
+        root: sanitizeNode(t.root),
+      })),
+    };
+    return JSON.stringify(whitelist);
+  }
+
   const whitelist = {
     version: 1,
     tabs: (state.tabs || []).map((t) => ({ uid: String(t.uid), pinned: !!t.pinned })),
@@ -585,6 +625,12 @@ export function deserializeWorkspace(jsonStr) {
   try {
     const parsed = JSON.parse(jsonStr);
     if (!validateWorkspaceState(parsed)) return null;
+    if (parsed.version === 2) {
+      return createMultiWorkspace({
+        tabs: parsed.tabs,
+        activeTabId: parsed.activeTabId,
+      });
+    }
     return {
       ...parsed,
       root: sanitizeNode(parsed.root),
@@ -631,16 +677,34 @@ export function migrateLegacyPanes(paneKeys, activeKey) {
 }
 
 /**
- * 从 Storage 恢复工作区（优先读 am.workspace.v1，无新键时平滑迁移旧键）
+ * 从 Storage 恢复工作区（优先读 am.workspace.v2，无新键时平滑迁移旧键）
  */
 export function loadWorkspaceFromStorage(storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
-  if (!storage) return createInitialWorkspace();
+  if (!storage) return createMultiWorkspace();
+
+  try {
+    const rawV2 = storage.getItem(MULTI_WORKSPACE_STORAGE_KEY);
+    if (rawV2) {
+      const state = deserializeWorkspace(rawV2);
+      if (state) return state;
+    }
+  } catch {
+    // 降级
+  }
 
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (raw) {
       const state = deserializeWorkspace(raw);
-      if (state) return state;
+      if (state) {
+        if (state.version === 1) {
+          return createMultiWorkspace({
+            tabs: [{ id: 'tab-1', uid: 'tab-1', name: '', root: state.root, activeUid: state.activeUid, pinned: false }],
+            activeTabId: 'tab-1',
+          });
+        }
+        return state;
+      }
     }
   } catch {
     // 忽略异常，降级到迁移或默认
@@ -655,15 +719,19 @@ export function loadWorkspaceFromStorage(storage = (typeof localStorage !== 'und
       const oldActive = oldActiveRaw ? JSON.parse(oldActiveRaw) : null;
       const migrated = migrateLegacyPanes(oldPanes, oldActive);
       if (validateWorkspaceState(migrated)) {
-        saveWorkspaceToStorage(migrated, storage);
-        return migrated;
+        const multi = createMultiWorkspace({
+          tabs: [{ id: 'tab-1', uid: 'tab-1', name: '', root: migrated.root, activeUid: migrated.activeUid, pinned: false }],
+          activeTabId: 'tab-1',
+        });
+        saveWorkspaceToStorage(multi, storage);
+        return multi;
       }
     }
   } catch {
     // 忽略
   }
 
-  return createInitialWorkspace();
+  return createMultiWorkspace();
 }
 
 /**
@@ -674,9 +742,277 @@ export function saveWorkspaceToStorage(state, storage = (typeof localStorage !==
   try {
     const serialized = serializeWorkspace(state);
     if (serialized) {
+      if (state.version === 2) {
+        storage.setItem(MULTI_WORKSPACE_STORAGE_KEY, serialized);
+      }
       storage.setItem(STORAGE_KEY, serialized);
     }
   } catch {
     // 隐私模式或配额满时静默忽略
   }
+}
+
+/* ——— 多工作台标签页核心引擎（UI-SPEC §4.1.3，2026-09-16 用户最新最高指示） ——— */
+
+/**
+ * 辅助同步当前选中的 Tab 专属的 root 与 activeUid
+ */
+function syncActiveTabFields(state) {
+  const tabs = state.tabs || [];
+  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+  return {
+    ...state,
+    activeTabId: currentTab ? (currentTab.id || currentTab.uid) : null,
+    activeUid: currentTab ? currentTab.activeUid : null,
+    root: currentTab ? currentTab.root : null,
+  };
+}
+
+/**
+ * 创建多工作台初始状态
+ */
+export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
+  const initialTab = {
+    id: 'tab-1',
+    uid: 'tab-1',
+    name: '',
+    root: null,
+    activeUid: null,
+    pinned: false,
+  };
+
+  const tabList = Array.isArray(tabs) && tabs.length > 0
+    ? tabs.map((t, idx) => ({
+        id: String(t.id || t.uid || `tab-${idx + 1}`),
+        uid: String(t.uid || t.id || `tab-${idx + 1}`),
+        name: String(t.name || ''),
+        root: t.root ? sanitizeNode(t.root) : null,
+        activeUid: t.activeUid ? String(t.activeUid) : null,
+        pinned: !!t.pinned,
+      }))
+    : [initialTab];
+
+  const currentTabId = activeTabId && tabList.some((t) => (t.id || t.uid) === activeTabId)
+    ? activeTabId
+    : (tabList[0].id || tabList[0].uid);
+
+  return syncActiveTabFields({
+    version: 2,
+    activeTabId: currentTabId,
+    tabs: tabList,
+  });
+}
+
+/**
+ * 点击【+】新建空白工作台标签页
+ */
+export function createWorkspaceTab(state, { id = null, name = '', root = null, activeUid = null, pinned = false } = {}) {
+  const tabId = id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const newTab = {
+    id: tabId,
+    uid: tabId,
+    name: name || '',
+    root: root ? sanitizeNode(root) : null,
+    activeUid: activeUid ? String(activeUid) : null,
+    pinned: !!pinned,
+  };
+
+  const newTabs = [...(state.tabs || []), newTab];
+  return syncActiveTabFields({
+    ...state,
+    activeTabId: newTab.id,
+    tabs: newTabs,
+  });
+}
+
+/**
+ * 切换选中的工作台标签页
+ */
+export function switchWorkspaceTab(state, tabId) {
+  if (!tabId || state.activeTabId === tabId) return state;
+  const target = (state.tabs || []).find((t) => (t.id || t.uid) === tabId);
+  if (!target) return state;
+  return syncActiveTabFields({
+    ...state,
+    activeTabId: target.id || target.uid,
+  });
+}
+
+/**
+ * 关闭指定工作台标签页
+ */
+export function closeWorkspaceTab(state, tabId) {
+  if (!tabId) return state;
+  const oldTabs = state.tabs || [];
+  const tabIdx = oldTabs.findIndex((t) => (t.id || t.uid) === tabId);
+  if (tabIdx === -1) return state;
+
+  const newTabs = oldTabs.filter((t) => (t.id || t.uid) !== tabId);
+  // 若全部关闭，自动重置为一个初始空白工作台
+  if (newTabs.length === 0) {
+    return createMultiWorkspace();
+  }
+
+  let nextActiveId = state.activeTabId;
+  if (state.activeTabId === tabId) {
+    const fallbackIdx = Math.min(tabIdx, newTabs.length - 1);
+    nextActiveId = newTabs[fallbackIdx].id || newTabs[fallbackIdx].uid;
+  }
+
+  return syncActiveTabFields({
+    ...state,
+    activeTabId: nextActiveId,
+    tabs: newTabs,
+  });
+}
+
+/**
+ * 在当前激活的工作台内部打开会话（替换当前聚焦窗格，绝对不新增 Tab）
+ */
+export function openSessionInActiveTab(state, sessionUid) {
+  if (!sessionUid) return state;
+
+  const tabs = state.tabs || [];
+  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+  if (!currentTab) return state;
+
+  // 1. 若已经在当前工作台的树中：仅聚焦
+  if (findLeaf(currentTab.root, sessionUid)) {
+    const updatedTab = { ...currentTab, activeUid: sessionUid };
+    const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+    return syncActiveTabFields({ ...state, tabs: updatedTabs });
+  }
+
+  // 2. 若当前工作台为空：创建根叶子
+  if (!currentTab.root) {
+    const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid };
+    const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+    return syncActiveTabFields({ ...state, tabs: updatedTabs });
+  }
+
+  // 3. 替换当前焦点窗格（或第一个窗格）
+  const targetLeaf = currentTab.activeUid && findLeaf(currentTab.root, currentTab.activeUid)
+    ? currentTab.activeUid
+    : getLeaves(currentTab.root)[0];
+
+  const newRoot = targetLeaf
+    ? replaceLeaf(currentTab.root, targetLeaf, sessionUid)
+    : { kind: 'leaf', uid: sessionUid };
+
+  const updatedTab = { ...currentTab, root: newRoot, activeUid: sessionUid };
+  const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+  return syncActiveTabFields({ ...state, tabs: updatedTabs });
+}
+
+/**
+ * 在当前激活的工作台内部进行分屏（绝对不新增 Tab）
+ */
+export function splitSessionInActiveTab(state, targetUid, sessionUid, edge = 'right') {
+  if (!sessionUid) return state;
+
+  const tabs = state.tabs || [];
+  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+  if (!currentTab) return state;
+
+  if (!currentTab.root || edge === 'full') {
+    const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid };
+    const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+    return syncActiveTabFields({ ...state, tabs: updatedTabs });
+  }
+
+  const effectiveTarget = targetUid && findLeaf(currentTab.root, targetUid)
+    ? targetUid
+    : (currentTab.activeUid && findLeaf(currentTab.root, currentTab.activeUid) ? currentTab.activeUid : getLeaves(currentTab.root)[0]);
+
+  if (!effectiveTarget) return state;
+
+  const nextRoot = dropNode(currentTab.root, sessionUid, effectiveTarget, edge);
+  if (!nextRoot) return state;
+
+  const updatedTab = { ...currentTab, root: nextRoot, activeUid: sessionUid };
+  const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+  return syncActiveTabFields({ ...state, tabs: updatedTabs });
+}
+
+/**
+ * 固定 / 取消固定工作台标签页
+ */
+export function pinWorkspaceTab(state, tabId, pinned = true) {
+  const tabs = state.tabs || [];
+  const tab = tabs.find((t) => (t.id || t.uid) === tabId);
+  if (!tab || !!tab.pinned === !!pinned) return state;
+
+  const unpinned = tabs.filter((t) => (t.id || t.uid) !== tabId && !t.pinned);
+  const pinnedList = tabs.filter((t) => (t.id || t.uid) !== tabId && t.pinned);
+
+  let newTabs;
+  if (pinned) {
+    newTabs = [...pinnedList, { ...tab, pinned: true }, ...unpinned];
+  } else {
+    newTabs = [...pinnedList, { ...tab, pinned: false }, ...unpinned];
+  }
+
+  return syncActiveTabFields({ ...state, tabs: newTabs });
+}
+
+/**
+ * 调序工作台标签页（遵守 pinned 前缀不变量）
+ */
+export function reorderWorkspaceTabs(state, fromIndex, toIndex) {
+  const tabs = [...(state.tabs || [])];
+  if (fromIndex < 0 || fromIndex >= tabs.length || toIndex < 0 || toIndex >= tabs.length) return state;
+
+  const moving = tabs[fromIndex];
+  const target = tabs[toIndex];
+  if (moving.pinned !== target.pinned) return state;
+
+  tabs.splice(fromIndex, 1);
+  tabs.splice(toIndex, 0, moving);
+
+  return syncActiveTabFields({ ...state, tabs });
+}
+
+/**
+ * 关闭其他工作台标签页（保留固定标签页）
+ */
+export function closeOtherWorkspaceTabs(state, tabId) {
+  const tabs = state.tabs || [];
+  const keep = tabs.filter((t) => (t.id || t.uid) === tabId || t.pinned);
+  return syncActiveTabFields({
+    ...state,
+    activeTabId: tabId,
+    tabs: keep,
+  });
+}
+
+/**
+ * 关闭右侧工作台标签页（保留固定标签页）
+ */
+export function closeRightWorkspaceTabs(state, tabId) {
+  const tabs = state.tabs || [];
+  const idx = tabs.findIndex((t) => (t.id || t.uid) === tabId);
+  if (idx === -1) return state;
+
+  const keep = tabs.filter((t, i) => i <= idx || t.pinned);
+  return syncActiveTabFields({
+    ...state,
+    tabs: keep,
+  });
+}
+
+/**
+ * 获取所有工作台中所有正在展示的会话集合（用于侧栏开态指示）
+ */
+export function getAllWorkspaceSessions(state) {
+  const set = new Set();
+  for (const tab of state.tabs || []) {
+    if (tab.root) {
+      for (const uid of getLeaves(tab.root)) {
+        set.add(uid);
+      }
+    } else if (tab.activeUid) {
+      set.add(tab.activeUid);
+    }
+  }
+  return Array.from(set);
 }

@@ -343,31 +343,37 @@ src/
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
 
-### 4.1.1 `chrome/TabBar.jsx`（2026-09-15 裁定）
+### 4.1.1 `chrome/TabBar.jsx`（2026-09-16 用户多工作台最新裁定）
 
 ```js
 /**
- * @param {Array<{ uid: string, pinned: boolean }>} tabs
+ * @param {Array<{ id: string, uid: string, name?: string, root: Object|null, activeUid: string|null, pinned: boolean }>} tabs
+ * @param {string|null} activeTabId
  * @param {string|null} activeUid
  * @param {string[]} [visibleUids]
  * @param {Map<string, Object>} agentsByUid
- * @param {(uid: string) => void} onSelectTab
- * @param {(uid: string) => void} onCloseTab
+ * @param {(tabId: string) => void} onSelectTab
+ * @param {(tabId: string) => void} onCloseTab
+ * @param {() => void} onCreateTab
  * @param {(e: React.MouseEvent, tab: Object) => void} onContextMenu
  */
 ```
-内部状态：无。挂载在 TitleBar 折叠按钮右侧、拖窗区左侧。
+内部状态：无。挂载在右侧会话顶栏（`tb-session-header`）内部，位于垂直分隔线右侧。
 
 - **布局**：`<nav class="tb-tabbar">`，`height:28px; display:flex; align-items:center; gap:6px; min-width:0; user-select:none`。
-- **钉选标签区**（`.tb-tabs-pinned`）：紧凑锚定最左侧，每个 pinned tab 固定宽 `28px`，居中渲染 Provider 图标或首字母 + 状态灯，带 title 悬浮说明与完整无障碍属性。右键支持取消钉选或关闭。
+- **核心模型变革（Tab = 独立工作台 Workspace，而非单个零散会话）**：
+  - **单工作台默认**：选项卡栏默认只有一个初始标签页（展示当前活跃会话名称或“工作区 1”），杜绝在侧栏点击会话产生大量零碎 Tab 的膨胀问题；
+  - **新建加号按钮**（`.tb-tab-add`）：TabBar 标签列表最右侧常驻一个精致的【+】加号新建按钮，支持快捷键 `Cmd+T` 快速新建；
+  - **当前工作台内部切换与分屏**：当用户选中当前工作台时，在左侧栏点击任何会话，**只在当前激活工作台内部打开/替换聚焦窗格**，绝对不会在 TabBar 新增 Tab；拖拽分屏也只在当前工作台内组装网格；
+  - **【+】号独立工作台隔离**：点击【+】号时新建一个独立的空白工作台标签页并切换聚焦；在该工作台内的点击与分屏完全不影响其他工作台已有的会话和多分屏状态；在不同 Tab 间切换即在多个独立分屏工作台之间秒级无缝切换；
+- **钉选标签区**（`.tb-tabs-pinned`）：紧凑锚定最左侧，每个 pinned tab 固定宽 `28px`，居中渲染 Provider 图标或首字母 + 状态灯，带 title 悬浮说明与完整无障碍属性。右键支持取消固定或关闭。
 - **普通标签区**（`.tb-tabs-scroll`）：横向自适应滚动，支持鼠标滚轮左右滑动。每个普通 Tab：
-  - 仅展示会话名称（`.tb-tab-name`，文本溢出省略号）+ 状态灯（`.tb-tab-lamp`）。
-  - **状态灯规格**：Working 状态为绿灯微动脉冲（`animation: tb-lamp-pulse`，尊重 prefers-reduced-motion）；Idle 状态为绿灯静止；Unknown 状态为灰色空心圆圈。⛔ 不改成琥珀色，不新增普通 Tab Provider/Pin 图标堆叠。
+  - 动态展示当前活跃会话名称（多窗格时标出窗格数如 `Session (2)`）+ 状态灯（`.tb-tab-lamp`）。
+  - **状态灯规格**：Working 状态为绿灯微动脉冲（`animation: tb-lamp-pulse`，尊重 prefers-reduced-motion）；Idle 状态为温和中性灰小点；Unknown 状态为灰色空心圆圈。
   - Hover / Active 时显露右侧快速关闭按钮（`.tb-tab-close`，`<XIcon size={11} strokeWidth={2.2}/>`）。
 - **生命周期交互**：
-  - 侧栏或新打开会话自动追加至 Tab 列表并激活聚焦；
-  - 点击已可见 Tab 仅聚焦对应窗格；点击未在当前分屏显示的 Tab 替换当前激活窗格，被替换会话保留常驻后台；
-  - 右键菜单支持「钉选/取消钉选」、「关闭」、「关闭其他」、「关闭右侧所有」。
+  - 点击已可见 Tab 切换工作台并展示该工作台专属分屏树；
+  - 右键菜单支持「固定/取消固定」、「关闭工作台」、「关闭其他工作台」、「关闭右侧所有工作台」。
 
 ### 4.2 `chrome/DevicesPopover.jsx`
 

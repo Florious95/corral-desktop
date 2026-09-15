@@ -2,6 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createInitialWorkspace,
+  createMultiWorkspace,
+  createWorkspaceTab,
+  switchWorkspaceTab,
+  closeWorkspaceTab,
+  openSessionInActiveTab,
+  splitSessionInActiveTab,
+  pinWorkspaceTab,
+  reorderWorkspaceTabs,
+  closeOtherWorkspaceTabs,
+  closeRightWorkspaceTabs,
+  getAllWorkspaceSessions,
   getLeaves,
   findLeaf,
   removeNode,
@@ -22,6 +33,8 @@ import {
   serializeWorkspace,
   deserializeWorkspace,
   migrateLegacyPanes,
+  loadWorkspaceFromStorage,
+  saveWorkspaceToStorage,
 } from '../src/lib/workspaceLayout.js';
 
 test('workspaceLayout: createInitialWorkspace returns default version 1 state', () => {
@@ -347,4 +360,102 @@ test('workspaceLayout: migrateLegacyPanes creates 1/n ratio equal-width tree', (
   assert.equal(layout.a.w, 300);
   assert.equal(layout.b.w, 300);
   assert.equal(layout.c.w, 300);
+});
+
+test('workspaceLayout: multi-workspace tabs with plus button lifecycle and isolation', () => {
+  // 1. 默认初始状态：只有 1 个初始 Tab
+  let mw = createMultiWorkspace();
+  assert.equal(mw.version, 2);
+  assert.equal(mw.tabs.length, 1);
+  assert.equal(mw.tabs[0].root, null);
+  assert.equal(mw.tabs[0].activeUid, null);
+
+  // 2. 核心变革：在 Tab 1 中点击会话，仅在 Tab 1 内部打开，Tab 数量绝不增加！
+  mw = openSessionInActiveTab(mw, 'agent-1');
+  assert.equal(mw.tabs.length, 1, 'Clicking session must NOT add a new tab to TabBar');
+  assert.equal(mw.activeUid, 'agent-1');
+  assert.deepEqual(getLeaves(mw.root), ['agent-1']);
+
+  // 再次点击另一个会话：在 Tab 1 内部替换当前窗格，Tab 数量仍为 1
+  mw = openSessionInActiveTab(mw, 'agent-2');
+  assert.equal(mw.tabs.length, 1, 'Switching session must NOT add a new tab to TabBar');
+  assert.equal(mw.activeUid, 'agent-2');
+  assert.deepEqual(getLeaves(mw.root), ['agent-2']);
+
+  // 3. 在 Tab 1 内部向右分屏：Tab 1 组装多分屏网格，Tab 数量仍为 1
+  mw = splitSessionInActiveTab(mw, 'agent-2', 'agent-3', 'right');
+  assert.equal(mw.tabs.length, 1, 'Splitting session must NOT add a new tab to TabBar');
+  assert.deepEqual(getLeaves(mw.root), ['agent-2', 'agent-3']);
+
+  // 4. 点击【+】加号新建工作台：新建 Tab 2 并自动聚焦，Tab 2 初始为空白
+  mw = createWorkspaceTab(mw);
+  assert.equal(mw.tabs.length, 2, 'Clicking plus button creates a new tab');
+  assert.equal(mw.activeTabId, mw.tabs[1].id);
+  assert.equal(mw.root, null, 'New tab starts blank');
+  assert.equal(mw.activeUid, null);
+
+  // 5. 在 Tab 2 中点击会话：仅在 Tab 2 中打开，完全不影响 Tab 1！
+  mw = openSessionInActiveTab(mw, 'agent-4');
+  assert.equal(mw.tabs.length, 2);
+  assert.equal(mw.activeUid, 'agent-4');
+  assert.deepEqual(getLeaves(mw.root), ['agent-4']);
+
+  // 6. 切换回 Tab 1：Tab 1 的分屏状态（agent-2 | agent-3）完好无损秒级恢复！
+  mw = switchWorkspaceTab(mw, mw.tabs[0].id);
+  assert.equal(mw.activeTabId, mw.tabs[0].id);
+  assert.deepEqual(getLeaves(mw.root), ['agent-2', 'agent-3'], 'Tab 1 split panes preserved completely');
+
+  // 7. 切到 Tab 2：Tab 2 的会话（agent-4）完好无损！
+  mw = switchWorkspaceTab(mw, mw.tabs[1].id);
+  assert.equal(mw.activeTabId, mw.tabs[1].id);
+  assert.deepEqual(getLeaves(mw.root), ['agent-4']);
+
+  // 8. 关闭 Tab 2：关闭后自动激活 Tab 1
+  mw = closeWorkspaceTab(mw, mw.tabs[1].id);
+  assert.equal(mw.tabs.length, 1);
+  assert.equal(mw.activeTabId, mw.tabs[0].id);
+  assert.deepEqual(getLeaves(mw.root), ['agent-2', 'agent-3']);
+
+  // 9. 关闭最后一个 Tab：自动重置为一个初始空白 Tab（tabs 永不为空）
+  mw = closeWorkspaceTab(mw, mw.tabs[0].id);
+  assert.equal(mw.tabs.length, 1);
+  assert.equal(mw.root, null);
+});
+
+test('workspaceLayout: multi-workspace v2 serialization and v1 backward compatibility', () => {
+  // 1. v2 序列化与反序列化
+  let mw = createMultiWorkspace();
+  mw = openSessionInActiveTab(mw, 'a1');
+  mw = createWorkspaceTab(mw, { name: '自定义工作台' });
+  mw = openSessionInActiveTab(mw, 'a2');
+
+  const serialized = serializeWorkspace(mw);
+  assert.match(serialized, /"version":2/);
+  assert.match(serialized, /自定义工作台/);
+
+  const restored = deserializeWorkspace(serialized);
+  assert.equal(restored.version, 2);
+  assert.equal(restored.tabs.length, 2);
+  assert.equal(validateWorkspaceState(restored), true);
+
+  // 2. v1 向后兼容：deserializeWorkspace 保持 v1 结构，loadWorkspaceFromStorage 自动升级为 v2 多工作台并在 Tab 1 承载
+  const v1Json = JSON.stringify({
+    version: 1,
+    tabs: [{ uid: 'legacy-session', pinned: false }],
+    activeUid: 'legacy-session',
+    root: { kind: 'leaf', uid: 'legacy-session' },
+  });
+  const fromV1 = deserializeWorkspace(v1Json);
+  assert.equal(fromV1.version, 1);
+  assert.equal(fromV1.activeUid, 'legacy-session');
+
+  const mockStorage = {
+    getItem: (k) => (k === 'am.workspace.v1' ? v1Json : null),
+    setItem: () => {},
+  };
+  const fromStorage = loadWorkspaceFromStorage(mockStorage);
+  assert.equal(fromStorage.version, 2);
+  assert.equal(fromStorage.tabs.length, 1);
+  assert.equal(fromStorage.activeUid, 'legacy-session');
+  assert.deepEqual(getLeaves(fromStorage.root), ['legacy-session']);
 });

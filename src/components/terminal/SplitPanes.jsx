@@ -82,7 +82,11 @@ export default function SplitPanes({
   useEffect(() => {
     const validTabs = new Set(
       (tabs && tabs.length > 0)
-        ? tabs.map((t) => t.uid)
+        ? tabs.flatMap((t) => {
+            if (t.root) return getLeaves(t.root);
+            if (t.activeUid) return [t.activeUid];
+            return [t.uid];
+          })
         : (panes && panes.length > 0 ? panes.map((p) => p.key) : visibleUids)
     );
 
