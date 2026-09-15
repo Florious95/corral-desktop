@@ -36,6 +36,7 @@ import {
   getAllWorkspaceSessions,
   smartOpenSession,
   closeWorkspacePane,
+  focusWorkspacePane,
   getLeaves,
   openSession,
   focusTab,
@@ -272,16 +273,23 @@ export default function App({ seedDevices } = {}) {
   const checkedCount = devices.filter((d) => d.checked).length;
   const multiDevice = checkedCount > 1;
 
-  const spaces = useMemo(() => workspaces.map((w) => ({
-    key: w.spaceKey,
-    deviceId: w.deviceId,
-    deviceName: w.deviceName,
-    deviceLocal: !!localById.get(w.deviceId),
-    cwd: w.cwd,
-    name: w.label,
-    count: w.sessionCount,
-    state: w.aggregateState || 'unknown',
-  })), [workspaces, localById]);
+  const spaces = useMemo(() => workspaces.map((w) => {
+    const sessions = w.sessions || [];
+    const hasWorking = sessions.some((s) => s.state === 'working' || s.status === 'working');
+    const hasIdle = sessions.some((s) => s.state === 'idle' || s.status === 'idle');
+    const state = hasWorking ? 'working' : (hasIdle ? 'idle' : (w.aggregateState || 'unknown'));
+
+    return {
+      key: w.spaceKey,
+      deviceId: w.deviceId,
+      deviceName: w.deviceName,
+      deviceLocal: !!localById.get(w.deviceId),
+      cwd: w.cwd,
+      name: w.label,
+      count: w.sessionCount,
+      state,
+    };
+  }), [workspaces, localById]);
 
   const favSet = useMemo(() => new Set(favs), [favs]);
 
@@ -290,6 +298,7 @@ export default function App({ seedDevices } = {}) {
     for (const w of workspaces) {
       for (const s of w.sessions || []) {
         const title = s.name || '';
+        const curStatus = s.state || s.status || 'unknown';
         out.push({
           key: s.uid,
           ref: s.ref,
@@ -302,7 +311,8 @@ export default function App({ seedDevices } = {}) {
           // DeviceManager already projects the authoritative DTO provider;
           // do not let the display title override it in the UI layer.
           provider: s.provider,
-          state: s.status || 'unknown',
+          state: curStatus,
+          status: curStatus,
           fav: favSet.has(`${w.spaceKey}::${title}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
         });
       }
@@ -462,7 +472,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const handleFocusPane = useCallback((uid) => {
-    setWorkspace((prev) => focusTab(prev, uid));
+    setWorkspace((prev) => focusWorkspacePane(prev, uid));
   }, []);
 
   /* ——— 每个分裂列拿一个 Client 形状的薄 shim（按 uid 路由到 DeviceManager） ——— */
@@ -841,7 +851,18 @@ export default function App({ seedDevices } = {}) {
         </div>
 
         <main className="app-main">
-          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`} data-tauri-drag-region>
+          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`}
+            data-tauri-drag-region
+            onPointerDown={(e) => {
+              triggerWindowDrag(e);
+              if (e.button === 0 && (!e.target.closest || !e.target.closest('button, .tb-tab, .tb-tab-close, .tb-btn, [data-no-drag]'))) {
+                import('@tauri-apps/api/window')
+                  .then((m) => m.getCurrentWindow().startDragging())
+                  .catch(() => {});
+              }
+            }}
+            onMouseDown={triggerWindowDrag}
+          >
             {collapsed && (
               <>
                 <div className="tb-traffic-lights" aria-hidden="true" />
@@ -874,7 +895,7 @@ export default function App({ seedDevices } = {}) {
               data-tauri-drag-region
               onPointerDown={(e) => {
                 triggerWindowDrag(e);
-                if (e.button === 0 && e.target === e.currentTarget) {
+                if (e.button === 0) {
                   import('@tauri-apps/api/window')
                     .then((m) => m.getCurrentWindow().startDragging())
                     .catch(() => {});

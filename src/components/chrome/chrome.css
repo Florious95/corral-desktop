@@ -77,6 +77,21 @@ select {
   -webkit-app-region: no-drag;
 }
 
+.tb-sidebar-header,
+.tb-session-header,
+.tb-tabbar,
+.tb-tabs-scroll,
+.tb-traffic-lights {
+  -webkit-app-region: drag;
+}
+
+.tb-tab-close,
+.tb-tab-add,
+.tb-btn,
+[data-no-drag] {
+  -webkit-app-region: no-drag;
+}
+
 .tb-drag {
   margin-left: auto;
   flex: 1;

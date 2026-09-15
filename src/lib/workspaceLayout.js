@@ -261,10 +261,15 @@ export function project(node, rect, gap = 1) {
  * 4. 若未在树中显示，替换当前 activeUid 所在叶子（若 activeUid 不在树中，替换第一个叶子）
  */
 export function openSession(state, uid, { pin = false } = {}) {
-  if (!uid) return state;
+  if (!uid || !state) return state;
+
+  // v2 多工作台模式下：绝对不许直接往 tabs 追加扁平对象，统一走 smartOpenSession 安全流转
+  if (state.version === 2 || state.activeTabId) {
+    return smartOpenSession(state, uid);
+  }
 
   let newTabs = state.tabs || [];
-  const existingTab = newTabs.find((t) => t.uid === uid);
+  const existingTab = newTabs.find((t) => (t.id || t.uid) === uid || t.activeUid === uid);
   if (!existingTab) {
     if (pin) {
       const pinnedIdx = newTabs.filter((t) => t.pinned).length;
@@ -315,9 +320,46 @@ export function openSession(state, uid, { pin = false } = {}) {
 }
 
 /**
- * 点击已存在的 Tab 标签
+ * 聚焦当前激活工作台内部的某个分屏窗格（绝不增删或修改任何 Tab 结构，彻底杜绝幽灵 Tab 与重复 Tab）
+ */
+export function focusWorkspacePane(state, uid) {
+  if (!uid || !state) return state;
+
+  // 多工作台模式 (v2 / activeTabId)
+  if (state.tabs && (state.version === 2 || state.activeTabId)) {
+    const tabs = state.tabs || [];
+    const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+    if (!currentTab) return state;
+
+    // 若已经就是当前聚焦的会话，严格 0 操作直接返回原引用
+    if (currentTab.activeUid === uid && state.activeUid === uid) {
+      return state;
+    }
+
+    // 更新当前工作台的 activeUid，保持其 root 和 pinned 属性绝对不变，严禁对 tabs 产生增删！
+    const updatedTab = { ...currentTab, activeUid: uid };
+    const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+    return syncActiveTabFields({
+      ...state,
+      tabs: updatedTabs,
+    });
+  }
+
+  // 单工作台模式 (v1)
+  if (state.root && findLeaf(state.root, uid)) {
+    return { ...state, activeUid: uid };
+  }
+  return openSession(state, uid);
+}
+
+/**
+ * 聚焦已存在的会话 / 标签页
  */
 export function focusTab(state, uid) {
+  if (!uid || !state) return state;
+  if (state.version === 2 || state.activeTabId) {
+    return focusWorkspacePane(state, uid);
+  }
   return openSession(state, uid);
 }
 
@@ -893,14 +935,22 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
   };
 
   const tabList = Array.isArray(tabs) && tabs.length > 0
-    ? tabs.map((t, idx) => ({
-        id: String(t.id || t.uid || `tab-${idx + 1}`),
-        uid: String(t.uid || t.id || `tab-${idx + 1}`),
-        name: String(t.name || ''),
-        root: t.root ? sanitizeNode(t.root) : null,
-        activeUid: t.activeUid ? String(t.activeUid) : null,
-        pinned: !!t.pinned,
-      }))
+    ? tabs
+        .filter((t) => t && (t.id || t.uid))
+        .map((t, idx) => {
+          const tabId = String(t.id || t.uid || `tab-${idx + 1}`);
+          const effectiveUid = t.activeUid || (t.uid && !t.uid.startsWith('tab-') ? t.uid : null);
+          const sanitizedRoot = t.root ? sanitizeNode(t.root) : (effectiveUid ? { kind: 'leaf', uid: effectiveUid } : null);
+          const activeUid = effectiveUid || (sanitizedRoot ? getLeaves(sanitizedRoot)[0] : null);
+          return {
+            id: tabId,
+            uid: tabId,
+            name: String(t.name || ''),
+            root: sanitizedRoot,
+            activeUid: activeUid ? String(activeUid) : null,
+            pinned: !!t.pinned,
+          };
+        })
     : [initialTab];
 
   const currentTabId = activeTabId && tabList.some((t) => (t.id || t.uid) === activeTabId)
@@ -1051,11 +1101,12 @@ export function smartOpenSession(state, sessionUid) {
 
   // 2. 查重法则：检查全顶栏是否已存在单会话 Tab 刚好展示 sessionUid
   const existingSingleTab = tabs.find((t) => {
-    if (!t.root) {
-      return t.activeUid === sessionUid;
+    if (!t) return false;
+    if (t.root) {
+      const leaves = getLeaves(t.root);
+      return leaves.length === 1 && leaves[0] === sessionUid;
     }
-    const leaves = getLeaves(t.root);
-    return leaves.length === 1 && leaves[0] === sessionUid;
+    return t.activeUid === sessionUid || t.uid === sessionUid;
   });
 
   if (existingSingleTab) {
@@ -1064,6 +1115,12 @@ export function smartOpenSession(state, sessionUid) {
   }
 
   // 3. 当前是单会话窗口：
+  // 若当前 Tab 已经正好是 sessionUid，直接返回原状态，避免无意义重建
+  const currentLeaves = currentTab.root ? getLeaves(currentTab.root) : (currentTab.activeUid ? [currentTab.activeUid] : []);
+  if (currentLeaves.length === 1 && currentLeaves[0] === sessionUid && currentTab.activeUid === sessionUid) {
+    return state;
+  }
+
   // 若当前 Tab 已 Pin，不可被替换，新建一个工作台
   if (currentTab.pinned) {
     return createWorkspaceTab(state, {

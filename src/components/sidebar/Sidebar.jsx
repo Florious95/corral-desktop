@@ -4,13 +4,20 @@ import AgentsList from './AgentsList.jsx';
 import { SearchIcon, ChevronDown, LayersIcon, GearIcon } from '../../lib/icons.jsx';
 import './sidebar.css';
 
-function GroupHeader({ open, onToggle, children }) {
+function GroupHeader({ open, onToggle, working = false, children }) {
   return (
     <span className="sidebar-group-btn" onClick={onToggle}>
       <span className="sidebar-chevron" style={{ transform: `rotate(${open ? 0 : -90}deg)` }}>
         <ChevronDown size={11} strokeWidth={2.2} />
       </span>
       <span className="sidebar-group-label">{children}</span>
+      {working && !open && (
+        <span
+          className="spaces-row-state spaces-dot is-working"
+          style={{ marginLeft: 'auto', marginRight: 6 }}
+          aria-label="有会话正在运行"
+        />
+      )}
     </span>
   );
 }
@@ -65,6 +72,9 @@ export default function Sidebar({
   const agentsTitle =
     selected === 'fav' ? '收藏的 Agents' : spaceName ? `${spaceName} 的 Agents` : 'Agents';
 
+  const spacesHasWorking = spaces.some((s) => s.state === 'working');
+  const agentsHasWorking = agents.some((a) => a.state === 'working' || a.status === 'working');
+
   return (
     <aside className="sidebar" style={{ width: collapsed ? 0 : 280 }}>
       <div className="sidebar-inner">
@@ -74,7 +84,7 @@ export default function Sidebar({
         </div>
 
         <div className="sidebar-group-head sidebar-group-head-spaces">
-          <GroupHeader open={spacesOpen} onToggle={onToggleSpaces}>
+          <GroupHeader open={spacesOpen} onToggle={onToggleSpaces} working={spacesHasWorking}>
             Spaces
           </GroupHeader>
         </div>
@@ -91,7 +101,7 @@ export default function Sidebar({
         ) : null}
 
         <div className="sidebar-group-head sidebar-group-head-agents">
-          <GroupHeader open={agentsOpen} onToggle={onToggleAgents}>
+          <GroupHeader open={agentsOpen} onToggle={onToggleAgents} working={agentsHasWorking}>
             {agentsTitle}
           </GroupHeader>
         </div>

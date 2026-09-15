@@ -374,6 +374,10 @@ src/
 - **生命周期交互**：
   - 点击已可见 Tab 切换工作台并展示该工作台专属分屏树；
   - 右键菜单支持「固定/取消固定」、「关闭工作台」、「关闭其他工作台」、「关闭右侧所有工作台」。
+- **顶栏拖窗与幽灵标签/工作状态根除裁定（2026-09-17 裁定）**：
+  - **顶部长按拖窗双保险**：`TitleBar`、`TabBar`、`tb-session-header` 与所有空白留白区均挂载 `-webkit-app-region: drag` 与 `data-tauri-drag-region`；`triggerWindowDrag` 自动排除可交互控件（`button`、`.tb-tab`、输入框等），在任何非交互空白区域长按按住时均同步调用 `appWindow.startDragging()`，杜绝窗口卡顿无法移动；
+  - **侧栏文件夹/工作区状态点展示**：每个工作区项（`FolderIcon`）根据内部所有会话状态动态派生；只要任一会话 `state === 'working'` 或 `status === 'working'`，无论该文件夹是否选中或折叠收起，其外层右侧均展示微动绿点；`TabBar` 顶部状态灯与之即时联动，消灭状态不同步；
+  - **幽灵标签与重复标签彻底根除**：点击右侧终端窗格走纯粹的 `focusWorkspacePane`，仅更新当前激活工作台内部的 `activeUid`，绝不修改 `tabs` 结构；单会话全顶栏查重与 `openSession` 安全防穿透委派，彻底杜绝生成没有 root、没有内容、仅有标题的空壳幽灵 Tab！
 
 ### 4.2 `chrome/DevicesPopover.jsx`
 

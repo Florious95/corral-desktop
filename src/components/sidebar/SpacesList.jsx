@@ -53,6 +53,8 @@ export default function SpacesList({
   onContextMenu,
   multiDevice,
 }) {
+  const allSpacesWorking = spaces.some((sp) => sp.state === 'working');
+
   return (
     <div className="spaces-list">
       <SpaceRow
@@ -60,6 +62,7 @@ export default function SpacesList({
         name="All Spaces"
         count={allCount}
         selected={selected === 'all'}
+        state={allSpacesWorking ? 'working' : 'unknown'}
         onClick={() => onSelect('all')}
         onContextMenu={(e) => e.preventDefault()}
       />
