@@ -190,3 +190,13 @@ export function ArrowUpIcon(p) {
     </Ico>
   );
 }
+
+export function PinIcon(p) {
+  return (
+    <Ico strokeWidth={1.9} {...p}>
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.77V5h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v5.77a2 2 0 0 1-1.11 1.79l-1.78.89A2 2 0 0 0 5 15.24Z" />
+    </Ico>
+  );
+}
+

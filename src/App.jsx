@@ -4,10 +4,11 @@ import { DeviceManager } from './core/devices.js';
 import { isLocalUrl } from './core/local.js';
 import { geomTrace } from './term/geomTrace.js';
 import {
-  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon,
+  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon,
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
+import TabBar from './components/chrome/TabBar.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import PairingDialog from './components/chrome/PairingDialog.jsx';
@@ -19,6 +20,19 @@ import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from '.
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
 import TerminalPane from './components/terminal/TerminalPane.jsx';
+import {
+  loadWorkspaceFromStorage,
+  saveWorkspaceToStorage,
+  getLeaves,
+  openSession,
+  focusTab,
+  splitSession,
+  closeTab,
+  closePane,
+  pinTab,
+  closeOtherTabs,
+  closeRightTabs,
+} from './lib/workspaceLayout.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
 } from './term/clipboard.js';
@@ -90,11 +104,17 @@ export default function App({ seedDevices } = {}) {
 
   /* ——— UI 本地态 ——— */
   const [favs, setFavs] = useState(() => LS.read('am.fav', []));
-  const [paneKeys, setPaneKeys] = useState(() => LS.read('am.panes', []));
-  const paneKeysRef = useRef([]);
+  const [workspace, setWorkspace] = useState(() => loadWorkspaceFromStorage());
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
+
+  const activeKey = workspace.activeUid;
+  const visibleLeaves = useMemo(() => getLeaves(workspace.root), [workspace.root]);
+  const visibleLeavesRef = useRef(visibleLeaves);
+  visibleLeavesRef.current = visibleLeaves;
+
   const liveAgentKeysRef = useRef(new Set());
   const pendingPasteRef = useRef(new Map());
-  const [activeKey, setActiveKey] = useState(() => LS.read('am.activePane', null));
   const [selected, setSelected] = useState(() => LS.read('am.selected', 'all'));
   const [collapsed, setCollapsed] = useState(() => LS.read('am.collapsed', false));
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
@@ -106,7 +126,7 @@ export default function App({ seedDevices } = {}) {
   const [pairingOpen, setPairingOpen] = useState(false);
   const [pairingPayload, setPairingPayload] = useState(null);
   const [newAgentSpace, setNewAgentSpace] = useState(null);
-  const [menu, setMenu] = useState(null); // { kind:'space'|'agent'|'pane', id, x, y }
+  const [menu, setMenu] = useState(null); // { kind:'space'|'agent'|'tab'|'pane', id, x, y }
 
   // 服务端删掉会话时的 190ms 退场动画：行先留着播动画，再卸载
   const [ghosts, setGhosts] = useState([]);
@@ -128,8 +148,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   useEffect(() => { LS.write('am.fav', favs) }, [favs]);
-  useEffect(() => { LS.write('am.panes', paneKeys) }, [paneKeys]);
-  useEffect(() => { LS.write('am.activePane', activeKey) }, [activeKey]);
+  useEffect(() => { saveWorkspaceToStorage(workspace) }, [workspace]);
   useEffect(() => { LS.write('am.selected', selected) }, [selected]);
   useEffect(() => { LS.write('am.collapsed', collapsed) }, [collapsed]);
   useEffect(() => { LS.write('am.spacesOpen', spacesOpen) }, [spacesOpen]);
@@ -185,7 +204,6 @@ export default function App({ seedDevices } = {}) {
 
   const agentByKey = useMemo(() => new Map(allAgents.map((a) => [a.key, a])), [allAgents]);
   const favCount = useMemo(() => allAgents.reduce((count, agent) => count + (agent.fav ? 1 : 0), 0), [allAgents]);
-  paneKeysRef.current = paneKeys;
   liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
 
   // 服务端删会话 → 标记 closing → CLOSE_MS 后真正卸载并剔出分裂列
@@ -207,7 +225,9 @@ export default function App({ seedDevices } = {}) {
         ghostTimers.current.delete(a.key);
         setGhosts((g) => g.filter((x) => x.key !== a.key));
         setClosing((c) => { const next = { ...c }; delete next[a.key]; return next });
-        setPaneKeys((p) => p.filter((k) => k !== a.key));
+        setWorkspace((prev) => closeTab(prev, a.key));
+        shims.current.delete(a.key);
+        pendingPasteRef.current.delete(a.key);
       }, CLOSE_MS));
     }
   }, [allAgents]);
@@ -223,11 +243,12 @@ export default function App({ seedDevices } = {}) {
   ], [allAgents, ghosts, agentByKey, matchSelected]);
 
   const panes = useMemo(
-    () => paneKeys.map((k) => agentByKey.get(k)).filter(Boolean),
-    [paneKeys, agentByKey],
+    () => visibleLeaves.map((k) => agentByKey.get(k)).filter(Boolean),
+    [visibleLeaves, agentByKey],
   );
 
   const activeAgent = (activeKey && agentByKey.get(activeKey)) || panes[0] || null;
+  const openKeys = useMemo(() => workspace.tabs.map((t) => t.uid), [workspace.tabs]);
 
   /* ——— 设备派生 ——— */
   const popoverDevices = useMemo(() => devices.map((d) => ({
@@ -258,15 +279,12 @@ export default function App({ seedDevices } = {}) {
 
   /* ——— 会话动作 ——— */
   const openAgent = useCallback((key) => {
-    // 已在列里：只聚焦（U-06）。未打开：单列替换（C-053，左键不是追加）。
     geomTrace('activate', { ref: key });
-    setPaneKeys((p) => (p.includes(key) ? p : [key]));
-    setActiveKey(key);
+    setWorkspace((prev) => openSession(prev, key));
   }, []);
 
   const splitAgent = useCallback((key) => {
-    setPaneKeys((p) => (p.includes(key) ? p : [...p, key]));
-    setActiveKey(key);
+    setWorkspace((prev) => splitSession(prev, prev.activeUid, key, { axis: 'x', ratio: 0.5 }));
   }, []);
 
   const toggleFav = useCallback((agent) => {
@@ -275,7 +293,39 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const closeAgent = useCallback((key) => {
-    setPaneKeys((p) => p.filter((k) => k !== key)); // 协议 v1 无 kill session：只关本地列
+    setWorkspace((prev) => closeTab(prev, key));
+    shims.current.delete(key);
+    pendingPasteRef.current.delete(key);
+  }, []);
+
+  const handleSelectTab = useCallback((uid) => {
+    setWorkspace((prev) => focusTab(prev, uid));
+  }, []);
+
+  const handleCloseTab = useCallback((uid) => {
+    setWorkspace((prev) => closeTab(prev, uid));
+    shims.current.delete(uid);
+    pendingPasteRef.current.delete(uid);
+  }, []);
+
+  const handlePinTab = useCallback((uid, pinned) => {
+    setWorkspace((prev) => pinTab(prev, uid, pinned));
+  }, []);
+
+  const handleCloseOtherTabs = useCallback((uid) => {
+    setWorkspace((prev) => closeOtherTabs(prev, uid));
+  }, []);
+
+  const handleCloseRightTabs = useCallback((uid) => {
+    setWorkspace((prev) => closeRightTabs(prev, uid));
+  }, []);
+
+  const handleClosePane = useCallback((uid) => {
+    setWorkspace((prev) => closePane(prev, uid));
+  }, []);
+
+  const handleFocusPane = useCallback((uid) => {
+    setWorkspace((prev) => focusTab(prev, uid));
   }, []);
 
   /* ——— 每个分裂列拿一个 Client 形状的薄 shim（按 uid 路由到 DeviceManager） ——— */
@@ -329,7 +379,7 @@ export default function App({ seedDevices } = {}) {
   }, [dm, uidReady]);
 
   const paneCanSend = useCallback((uid) => (
-    paneKeysRef.current.includes(uid)
+    visibleLeavesRef.current.includes(uid)
       && liveAgentKeysRef.current.has(uid)
       && uidReady(uid)
   ), [uidReady]);
@@ -488,14 +538,14 @@ export default function App({ seedDevices } = {}) {
     if (menu.kind === 'agent') {
       const agent = agentByKey.get(menu.id);
       if (!agent) return [];
-      const inPanes = paneKeys.includes(agent.key);
+      const inTabs = workspace.tabs.some((t) => t.uid === agent.key);
       return [
         {
           key: 'split',
           label: '分裂展示',
           icon: icon(SplitIcon),
           color: 'var(--text)',
-          onClick: () => { closeMenu(); splitAgent(agent.key) },
+          onClick: () => { closeMenu(); splitAgent(agent.key); },
         },
         {
           key: 'fav',
@@ -504,7 +554,7 @@ export default function App({ seedDevices } = {}) {
             ? <StarIcon size={14} fill="currentColor" />
             : icon(StarOutline),
           color: agent.fav ? 'var(--amber-deep)' : 'var(--text)',
-          onClick: () => { closeMenu(); toggleFav(agent) },
+          onClick: () => { closeMenu(); toggleFav(agent); },
         },
         {
           key: 'close',
@@ -512,48 +562,118 @@ export default function App({ seedDevices } = {}) {
           icon: icon(XIcon, { strokeWidth: 2 }),
           color: 'var(--danger)',
           separator: true,
-          disabled: !inPanes,
-          onClick: () => { closeMenu(); closeAgent(agent.key) },
+          disabled: !inTabs,
+          onClick: () => { closeMenu(); closeAgent(agent.key); },
+        },
+      ];
+    }
+
+    if (menu.kind === 'tab') {
+      const tab = workspace.tabs.find((t) => t.uid === menu.id);
+      const isPinned = !!tab?.pinned;
+      const tabIdx = workspace.tabs.findIndex((t) => t.uid === menu.id);
+      const unpinnedCount = workspace.tabs.filter((t) => !t.pinned).length;
+
+      return [
+        {
+          key: 'pin',
+          label: isPinned ? '取消钉选' : '钉选到最左',
+          icon: icon(PinIcon),
+          color: 'var(--text)',
+          onClick: () => { closeMenu(); handlePinTab(menu.id, !isPinned); },
+        },
+        {
+          key: 'close-tab',
+          label: '关闭',
+          icon: icon(XIcon, { strokeWidth: 2 }),
+          color: 'var(--danger)',
+          separator: true,
+          onClick: () => { closeMenu(); handleCloseTab(menu.id); },
+        },
+        {
+          key: 'close-others',
+          label: '关闭其他',
+          icon: icon(XIcon, { strokeWidth: 2 }),
+          color: 'var(--text)',
+          disabled: unpinnedCount <= 1 || isPinned,
+          onClick: () => { closeMenu(); handleCloseOtherTabs(menu.id); },
+        },
+        {
+          key: 'close-right',
+          label: '关闭右侧所有',
+          icon: icon(CloseRightIcon),
+          color: 'var(--text)',
+          disabled: tabIdx < 0 || tabIdx >= workspace.tabs.length - 1,
+          onClick: () => { closeMenu(); handleCloseRightTabs(menu.id); },
         },
       ];
     }
 
     // pane
-    const idx = paneKeys.indexOf(menu.id);
+    const agent = agentByKey.get(menu.id);
+    const unvisibleTabs = workspace.tabs.filter((t) => !visibleLeaves.includes(t.uid));
     return [
       {
-        key: 'close-this',
-        label: '关闭',
+        key: 'split-right',
+        label: '向右分屏',
+        icon: icon(SplitIcon),
+        color: 'var(--text)',
+        disabled: unvisibleTabs.length === 0,
+        onClick: () => {
+          closeMenu();
+          if (unvisibleTabs.length > 0) {
+            setWorkspace((prev) => splitSession(prev, menu.id, unvisibleTabs[0].uid, { axis: 'x', ratio: 0.5 }));
+          }
+        },
+      },
+      {
+        key: 'split-down',
+        label: '向下分屏',
+        icon: icon(SplitIcon),
+        color: 'var(--text)',
+        disabled: unvisibleTabs.length === 0,
+        onClick: () => {
+          closeMenu();
+          if (unvisibleTabs.length > 0) {
+            setWorkspace((prev) => splitSession(prev, menu.id, unvisibleTabs[0].uid, { axis: 'y', ratio: 0.5 }));
+          }
+        },
+      },
+      {
+        key: 'fav',
+        label: agent?.fav ? '取消收藏' : '收藏',
+        icon: agent?.fav
+          ? <StarIcon size={14} fill="currentColor" />
+          : icon(StarOutline),
+        color: agent?.fav ? 'var(--amber-deep)' : 'var(--text)',
+        onClick: () => { if (agent) { closeMenu(); toggleFav(agent); } },
+      },
+      {
+        key: 'close-pane',
+        label: '关闭此分屏',
         icon: icon(XIcon, { strokeWidth: 2 }),
         color: 'var(--danger)',
-        onClick: () => { closeMenu(); closeAgent(menu.id) },
-      },
-      {
-        key: 'close-left',
-        label: '关闭左侧所有',
-        icon: icon(CloseLeftIcon),
-        color: 'var(--text)',
-        disabled: idx <= 0,
-        onClick: () => { closeMenu(); if (idx > 0) setPaneKeys((p) => p.slice(idx)) },
-      },
-      {
-        key: 'close-right',
-        label: '关闭右侧所有',
-        icon: icon(CloseRightIcon),
-        color: 'var(--text)',
-        disabled: idx < 0 || idx >= paneKeys.length - 1,
-        onClick: () => { closeMenu(); if (idx >= 0) setPaneKeys((p) => p.slice(0, idx + 1)) },
-      },
-      {
-        key: 'close-others',
-        label: '关闭其他',
-        icon: icon(XIcon, { strokeWidth: 2 }),
-        color: 'var(--text)',
-        disabled: paneKeys.length <= 1,
-        onClick: () => { closeMenu(); setPaneKeys([menu.id]); setActiveKey(menu.id) },
+        separator: true,
+        disabled: visibleLeaves.length <= 1,
+        onClick: () => { closeMenu(); handleClosePane(menu.id); },
       },
     ];
-  }, [menu, spaces, agentByKey, paneKeys, closeMenu, splitAgent, toggleFav, closeAgent]);
+  }, [
+    menu,
+    spaces,
+    agentByKey,
+    workspace,
+    visibleLeaves,
+    closeMenu,
+    splitAgent,
+    toggleFav,
+    closeAgent,
+    handlePinTab,
+    handleCloseTab,
+    handleCloseOtherTabs,
+    handleCloseRightTabs,
+    handleClosePane,
+  ]);
 
   const noDevices = devices.length === 0;
 
@@ -563,7 +683,17 @@ export default function App({ seedDevices } = {}) {
         fullscreen={nativeFullscreen}
         sidebarCollapsed={collapsed}
         onToggleSidebar={() => setCollapsed((v) => !v)}
-      />
+      >
+        <TabBar
+          tabs={workspace.tabs}
+          activeUid={workspace.activeUid}
+          visibleUids={visibleLeaves}
+          agentsByUid={agentByKey}
+          onSelectTab={handleSelectTab}
+          onCloseTab={handleCloseTab}
+          onContextMenu={(e, tab) => openMenu(e, 'tab', tab.uid)}
+        />
+      </TitleBar>
       <div className="app-body">
         <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
           <Sidebar
@@ -579,7 +709,7 @@ export default function App({ seedDevices } = {}) {
             allCount={allAgents.length}
             favCount={favCount}
             closing={closing}
-            openKeys={paneKeys}
+            openKeys={openKeys}
             onSpaceMenu={handleSpaceMenu}
             onAgentMenu={handleAgentMenu}
             onOpenAgent={openAgent}
@@ -603,8 +733,12 @@ export default function App({ seedDevices } = {}) {
           ) : (
             <>
               <SplitPanes
-                panes={panes}
-                onFocusPane={setActiveKey}
+                root={workspace.root}
+                tabs={workspace.tabs}
+                activeUid={workspace.activeUid}
+                agentByKey={agentByKey}
+                onFocusPane={handleFocusPane}
+                onClosePane={handleClosePane}
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
               />

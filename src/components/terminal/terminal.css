@@ -1,11 +1,64 @@
 /* 终端区（SplitPanes / TerminalPane）。token 名见 UI-SPEC §1。 */
 
-/* ——— SplitPanes（UI-SPEC §6.1） ——— */
+/* ——— SplitPanes & TerminalStage（UI-SPEC §6.1，2026-09-15 裁定） ——— */
 
-.splitpanes {
+.splitpanes,
+.terminal-stage {
   flex: 1;
   display: flex;
   min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.pane-host {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.pane-host.is-active {
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+
+.pane-host.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pane-close-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-faint);
+  z-index: 5;
+  opacity: 0;
+  transition: opacity var(--d-hover), background var(--d-hover), color var(--d-hover);
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.pane-host:hover .pane-close-btn,
+.pane-close-btn:focus-visible {
+  opacity: 1;
+}
+
+.pane-close-btn:hover {
+  background: var(--hover-4);
+  color: var(--icon-strong);
 }
 
 .splitpanes-col {
@@ -22,13 +75,15 @@
 .splitpanes-col:first-child { border-left: none }
 
 .splitpanes-empty {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   font-size: var(--fs-13);
   color: var(--text-faint);
+  pointer-events: none;
 }
 
 .splitpanes-empty-sub { font-size: var(--fs-115) }
