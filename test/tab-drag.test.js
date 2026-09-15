@@ -741,3 +741,52 @@ test('advisor probe A2: stage size change without window resize must invalidate 
     ctrl.dispose();
   }
 });
+
+test('tester regression F7: ResizeObserver initial notification with different stage and tabbar sizes must not cancel gesture', () => {
+  let roCallback = null;
+  const prevRO = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(cb) {
+      roCallback = cb;
+    }
+    observe() {}
+    disconnect() {}
+  };
+
+  const stageEl = { nodeType: 1, getBoundingClientRect: () => ({ left: 280, top: 38, width: 1160, height: 719 }) };
+  const tabBarEl = { nodeType: 1, getBoundingClientRect: () => ({ left: 80, top: 0, width: 60, height: 28 }), querySelectorAll: () => [] };
+
+  const ctrl = new TabDragController({
+    getStageEl: () => stageEl,
+    getTabBarEl: () => tabBarEl,
+    getTabs: () => [{ uid: 'A' }],
+    getRoot: () => ({ kind: 'leaf', uid: 'A' }),
+  });
+
+  try {
+    ctrl.start(
+      { button: 0, pointerId: 1, clientX: 100, clientY: 10, target: {}, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } },
+      { uid: 'A' }
+    );
+    assert.equal(ctrl.state, 'pendingHold');
+
+    // Browser dispatches initial ResizeObserver notification for both elements
+    roCallback([
+      { target: stageEl, contentRect: { width: 1160, height: 719 } },
+      { target: tabBarEl, contentRect: { width: 60, height: 28 } },
+    ]);
+
+    // Must NOT be cancelled by initial notifications!
+    assert.equal(ctrl.state, 'pendingHold', 'Initial ResizeObserver entries must not cancel gesture');
+
+    // True drift on stage (> 2px) cancels
+    roCallback([
+      { target: stageEl, contentRect: { width: 1440, height: 719 } },
+    ]);
+    assert.equal(ctrl.state, 'idle', 'Substantial drift on stage must cancel gesture');
+  } finally {
+    ctrl.dispose();
+    if (prevRO) globalThis.ResizeObserver = prevRO;
+    else delete globalThis.ResizeObserver;
+  }
+});
