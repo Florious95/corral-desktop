@@ -23,9 +23,12 @@ test('TitleBar renders full-width header with 80px native traffic lights safe gu
 test('App structure isolates constant TitleBar above app-body and drops ChromePill', async () => {
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
   const appCss = await readFile(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
 
-  // ChromePill completely removed from App.jsx
+  // ChromePill completely removed from App.jsx and chrome.css
   assert.equal(appJsx.includes('ChromePill'), false);
+  assert.equal(chromeCss.includes('chrome-pill'), false);
+  assert.equal(chromeCss.includes('chrome-lamp'), false);
 
   // TitleBar is mounted directly at the root, before app-body
   assert.match(appJsx, /<TitleBar[\s\S]*?<div className="app-body">/);
