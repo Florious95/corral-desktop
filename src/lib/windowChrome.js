@@ -76,26 +76,65 @@ if (typeof window !== 'undefined') {
     .catch(() => {});
 }
 
+// 记录上一次拖窗触发时间戳，防 100ms 内微任务/事件冒泡重复触发
+let lastDragTimestamp = 0;
+
+export function resetDragThrottleForTest() {
+  lastDragTimestamp = 0;
+}
+
+/**
+ * 窗口拖动唯一真相源入口（UI-SPEC §4.1 / 测试席 exactly-once 契约）
+ *
+ * 核心契约：
+ * 1. 严格过滤非主键左键（button !== 0）；
+ * 2. 严格排除可交互控件（button, input, select, textarea, [role="tab"], .tb-tab, .tb-tab-close 等）；
+ * 3. 严格防重复派发（e._amDragHandled 守卫 + e.stopPropagation() + 100ms 去抖时间窗）；
+ * 4. 无论由 pointerdown 还是 mousedown 触发，单次物理按下保证 exactly-once 派发 startDragging()。
+ */
 export function triggerWindowDrag(e) {
-  if (e.button !== 0) return;
+  if (!e || e.button !== 0) return false;
+  if (e._amDragHandled) return false;
+
+  // 100ms 内同一物理手势不重复触发
+  const now = Date.now();
+  if (now - lastDragTimestamp < 100) {
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    return false;
+  }
+
   // 排除按钮、输入框、Tab 标签页、关闭按钮、新建按钮等可交互元素
   if (e.target && typeof e.target.closest === 'function') {
     if (e.target.closest('button, input, select, textarea, [role="tab"], .tb-tab, .tb-tab-close, .tb-tab-add, .tb-btn, [data-no-drag]')) {
-      return;
+      return false;
     }
   }
+
+  // 标记事件已被消费并阻止冒泡至父层容器
+  e._amDragHandled = true;
+  lastDragTimestamp = now;
+  if (typeof e.stopPropagation === 'function') {
+    e.stopPropagation();
+  }
+
   try {
     if (appWindowInstance && typeof appWindowInstance.startDragging === 'function') {
       appWindowInstance.startDragging();
-    } else {
-      import('@tauri-apps/api/window')
-        .then((m) => {
-          try {
-            appWindowInstance = m.getCurrentWindow();
-            appWindowInstance.startDragging();
-          } catch {}
-        })
-        .catch(() => {});
+      return true;
     }
-  } catch {}
+    // 兜底尚未异步加载完成的情况
+    import('@tauri-apps/api/window')
+      .then((m) => {
+        try {
+          appWindowInstance = m.getCurrentWindow();
+          if (appWindowInstance && typeof appWindowInstance.startDragging === 'function') {
+            appWindowInstance.startDragging();
+          }
+        } catch {}
+      })
+      .catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
 }

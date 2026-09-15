@@ -92,3 +92,45 @@ test('sidebar workspace working lamp and header status synchronization', async (
   assert.match(tabBarJsx, /getTabStatus/);
   assert.match(tabBarJsx, /a\?\.state === 'working' \|\| a\?\.status === 'working'/);
 });
+
+test('triggerWindowDrag guarantees exactly-once dispatch and deduplicates bubble/burst events', async () => {
+  const { triggerWindowDrag, resetDragThrottleForTest } = await import('../src/lib/windowChrome.js');
+  resetDragThrottleForTest();
+
+  let stopCount = 0;
+  const mockEvt = {
+    button: 0,
+    target: { closest: () => null },
+    stopPropagation: () => { stopCount++; },
+  };
+
+  // 第一次调用：成功分发，标记 _amDragHandled 为 true，并调用 stopPropagation
+  const first = triggerWindowDrag(mockEvt);
+  assert.equal(first, true);
+  assert.equal(mockEvt._amDragHandled, true);
+  assert.equal(stopCount, 1);
+
+  // 同一事件冒泡至父元素再次调用：被 _amDragHandled 立即拦截，返回 false
+  const second = triggerWindowDrag(mockEvt);
+  assert.equal(second, false);
+  assert.equal(stopCount, 1);
+
+  // 100ms 内微秒级抛出的另一个事件对象（如同一手势派发的 mousedown）：被时间戳节流拦截
+  const burstEvt = {
+    button: 0,
+    target: { closest: () => null },
+    stopPropagation: () => { stopCount++; },
+  };
+  const third = triggerWindowDrag(burstEvt);
+  assert.equal(third, false);
+  assert.equal(stopCount, 2);
+
+  // 校验组件源码：TitleBar.jsx、TabBar.jsx、App.jsx 均无内联 getCurrentWindow().startDragging()
+  const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');
+  const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const tabBarJsx = await readFile(new URL('../src/components/chrome/TabBar.jsx', import.meta.url), 'utf8');
+
+  assert.equal(titleBarJsx.includes('.getCurrentWindow().startDragging()'), false);
+  assert.equal(appJsx.includes('.getCurrentWindow().startDragging()'), false);
+  assert.equal(tabBarJsx.includes('.getCurrentWindow().startDragging()'), false);
+});

@@ -853,15 +853,7 @@ export default function App({ seedDevices } = {}) {
         <main className="app-main">
           <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`}
             data-tauri-drag-region
-            onPointerDown={(e) => {
-              triggerWindowDrag(e);
-              if (e.button === 0 && (!e.target.closest || !e.target.closest('button, .tb-tab, .tb-tab-close, .tb-btn, [data-no-drag]'))) {
-                import('@tauri-apps/api/window')
-                  .then((m) => m.getCurrentWindow().startDragging())
-                  .catch(() => {});
-              }
-            }}
-            onMouseDown={triggerWindowDrag}
+            onPointerDown={triggerWindowDrag}
           >
             {collapsed && (
               <>
@@ -890,18 +882,11 @@ export default function App({ seedDevices } = {}) {
               onContextMenu={(e, tab) => openMenu(e, 'tab', tab.id || tab.uid)}
               onPointerDown={handleTabPointerDown}
             />
+            {/* 顶部长按拖窗统一收敛至 triggerWindowDrag（底层调用 startDragging，严禁在此内联重复触发） */}
             <div
               className="tb-drag"
               data-tauri-drag-region
-              onPointerDown={(e) => {
-                triggerWindowDrag(e);
-                if (e.button === 0) {
-                  import('@tauri-apps/api/window')
-                    .then((m) => m.getCurrentWindow().startDragging())
-                    .catch(() => {});
-                }
-              }}
-              onMouseDown={triggerWindowDrag}
+              onPointerDown={triggerWindowDrag}
             />
           </header>
 
