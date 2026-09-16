@@ -317,21 +317,24 @@ export const nativeCapabilities = {
   },
 
   upload: {
-    async uploadHttp({ url, token, filename, mime, bytes, bytesBase64, deviceId } = {}) {
+    async uploadHttp({ url, token, filename, mime, bytes, body, bytesBase64, deviceId } = {}) {
       if (testEngineOverride?.upload?.uploadHttp) {
-        return testEngineOverride.upload.uploadHttp({ url, token, filename, mime, bytes, bytesBase64, deviceId });
+        return testEngineOverride.upload.uploadHttp({ url, token, filename, mime, bytes, body, bytesBase64, deviceId });
       }
       const safeFilename = filename || 'image';
       const safeMime = mime || 'application/octet-stream';
 
-      let dataBytes = bytes;
+      let dataBytes = bytes || body;
       if (!dataBytes && bytesBase64) {
         dataBytes = base64ToUint8Array(bytesBase64);
       }
-      if (!dataBytes || dataBytes.length === 0) {
+      if (!dataBytes) {
         throw new Error('invalid_file: empty upload bytes');
       }
       const u8 = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes);
+      if (u8.length === 0) {
+        throw new Error('invalid_file: empty upload bytes');
+      }
 
       const env = detectNativeEnvironment();
       if (env === 'swift') {

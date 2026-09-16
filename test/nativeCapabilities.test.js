@@ -223,3 +223,66 @@ test('setNativeEngineForTests allows comprehensive mocking for testing and fallb
   resetNativeEngineForTests();
   assert.equal(nativeCapabilities.environment, 'mock');
 });
+
+test('uploadHttp rejects when bytes/body is missing or empty', async () => {
+  resetNativeEngineForTests();
+  await assert.rejects(
+    nativeCapabilities.upload.uploadHttp({ url: 'http://localhost/upload' }),
+    /invalid_file: empty upload bytes/,
+  );
+  await assert.rejects(
+    nativeCapabilities.upload.uploadHttp({ url: 'http://localhost/upload', bytes: new Uint8Array(0) }),
+    /invalid_file: empty upload bytes/,
+  );
+  await assert.rejects(
+    nativeCapabilities.upload.uploadHttp({ url: 'http://localhost/upload', body: [] }),
+    /invalid_file: empty upload bytes/,
+  );
+});
+
+test('uploadHttp accepts body alias and correctly uploads via Web fetch fallback', async () => {
+  resetNativeEngineForTests();
+  const originalFetch = globalThis.fetch;
+  let fetchCall = null;
+
+  globalThis.fetch = async (url, options) => {
+    fetchCall = { url, options };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ path: '/server/stored/avatar.png' }),
+    };
+  };
+
+  // Test body alias with byte array
+  const pathWithBody = await nativeCapabilities.upload.uploadHttp({
+    url: 'http://127.0.0.1:9900/upload',
+    token: 'auth-token-1',
+    filename: 'avatar.png',
+    mime: 'image/png',
+    body: [137, 80, 78, 71],
+  });
+
+  assert.equal(pathWithBody, '/server/stored/avatar.png');
+  assert.equal(fetchCall.url, 'http://127.0.0.1:9900/upload');
+  assert.equal(fetchCall.options.headers.Authorization, 'Bearer auth-token-1');
+  assert.ok(fetchCall.options.body instanceof FormData);
+
+  // Test Web fetch error handling
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({ error: 'Unauthorized' }),
+  });
+
+  await assert.rejects(
+    nativeCapabilities.upload.uploadHttp({
+      url: 'http://127.0.0.1:9900/upload',
+      bytes: new Uint8Array([1, 2, 3]),
+    }),
+    /HTTP 401/,
+  );
+
+  globalThis.fetch = originalFetch;
+});
+
