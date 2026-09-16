@@ -95,8 +95,13 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
             if method != "bootstrap" && (Self.serviceMethods.contains(method) || method == "surface.update") {
                 guard request["epoch"] as? String == epoch else { throw ShellError.staleGeometry }
             }
-            guard try JSONSerialization.data(withJSONObject: request).count <= 1_048_576,
-                  !seen.contains(id),
+            let maxPayloadSize = (method == "upload" || method == "upload.http")
+                ? 15_728_640
+                : 1_048_576
+            guard try JSONSerialization.data(withJSONObject: request).count <= maxPayloadSize else {
+                throw ShellError.tooLarge
+            }
+            guard !seen.contains(id),
                   pending.count < 64,
                   method == "window.startDragging" || Self.windowMethods.contains(method) || Self.serviceMethods.contains(method) else {
                 throw ShellError.invalidRequest
