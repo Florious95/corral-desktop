@@ -110,6 +110,8 @@ test('nativeCapabilities.surface.update dispatches RPC in Swift environment with
             calls.push(envelope);
             if (envelope.method === 'bootstrap') {
               return {
+                v: 1,
+                id: envelope.id,
                 ok: true,
                 result: {
                   epoch: 'test-epoch-999',
@@ -118,7 +120,7 @@ test('nativeCapabilities.surface.update dispatches RPC in Swift environment with
               };
             }
             if (envelope.method === 'surface.update') {
-              return { ok: true, result: { applied: true } };
+              return { v: 1, id: envelope.id, epoch: 'test-epoch-999', ok: true, result: { applied: true } };
             }
             return { ok: false, error: 'unknown' };
           },

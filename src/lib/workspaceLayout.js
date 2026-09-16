@@ -887,6 +887,8 @@ export function loadWorkspaceFromStorage(storage = (typeof localStorage !== 'und
   return createMultiWorkspace();
 }
 
+import { backupUiSnapshot } from '../core/store.js';
+
 /**
  * 持久化到 Storage
  */
@@ -899,6 +901,7 @@ export function saveWorkspaceToStorage(state, storage = (typeof localStorage !==
         storage.setItem(MULTI_WORKSPACE_STORAGE_KEY, serialized);
       }
       storage.setItem(STORAGE_KEY, serialized);
+      try { backupUiSnapshot(storage); } catch (_) {}
     }
   } catch {
     // 隐私模式或配额满时静默忽略

@@ -73,6 +73,10 @@ if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
   window.addEventListener('agentmirror:native', (e) => {
     const detail = e?.detail;
     if (detail) {
+      // OPEN-3: 若当前已完成 bootstrap 握手并持有合法 currentEpoch，且收到的事件 epoch 不匹配，视为过期丢弃
+      if (currentEpoch && detail.epoch && detail.epoch !== currentEpoch) {
+        return;
+      }
       if (detail.epoch) currentEpoch = detail.epoch;
       if (detail.event === 'window.state' && detail.payload) {
         currentWindowState = detail.payload;
@@ -131,30 +135,35 @@ async function rawCallSwiftRPC(method, params = {}, { sendEpoch = false } = {}) 
     // Modern WKScriptMessageHandlerWithReply returns a Promise
     if (res && typeof res.then === 'function') {
       const reply = await res;
-      if (reply && typeof reply === 'object') {
-        // OPEN-3: 严格校验 reply.id 与 req.id
-        if (reply.id && reply.id !== id) {
-          const err = new Error('invalid_response: reply id mismatch');
-          err.code = 'invalid_response';
-          throw err;
-        }
-        // OPEN-3: 严格校验 reply.epoch 与 currentEpoch
-        if (method !== 'bootstrap' && currentEpoch && reply.epoch && reply.epoch !== currentEpoch) {
-          const err = new Error('stale_geometry: epoch mismatch');
-          err.code = 'stale_geometry';
-          throw err;
-        }
-
-        if (reply.ok === false) {
-          const code = reply.error?.code || 'unknown';
-          const msg = reply.error?.message || reply.error?.code || 'RPC failed';
-          const err = new Error(msg);
-          err.code = code;
-          throw err;
-        }
-        return reply.result !== undefined ? reply.result : reply;
+      // OPEN-3: 严格校验 reply.id 与 req.id
+      if (reply && reply.id && reply.id !== id) {
+        const err = new Error('invalid_response: reply id mismatch');
+        err.code = 'invalid_response';
+        throw err;
       }
-      return reply;
+
+      // OPEN-3: 严格校验 reply envelope（v === 1, id 存在且精确匹配）
+      if (!reply || typeof reply !== 'object' || reply.v !== 1 || typeof reply.id !== 'string') {
+        const err = new Error('invalid_response: missing or invalid reply envelope');
+        err.code = 'invalid_response';
+        throw err;
+      }
+
+      // OPEN-3: 严格校验 reply.epoch 与 currentEpoch
+      if (method !== 'bootstrap' && currentEpoch && reply.epoch && reply.epoch !== currentEpoch) {
+        const err = new Error('stale_geometry: epoch mismatch');
+        err.code = 'stale_geometry';
+        throw err;
+      }
+
+      if (reply.ok === false) {
+        const code = reply.error?.code || 'unknown';
+        const msg = reply.error?.message || reply.error?.code || 'RPC failed';
+        const err = new Error(msg);
+        err.code = code;
+        throw err;
+      }
+      return reply.result !== undefined ? reply.result : reply;
     }
   } catch (e) {
     // If postMessage threw synchronously, propagate directly
@@ -659,6 +668,31 @@ export const nativeCapabilities = {
         return callSwiftRPC('surface.update', payload);
       }
       return { ok: true };
+    },
+  },
+
+  migration: {
+    async loadUI() {
+      if (testEngineOverride?.migration?.loadUI) return testEngineOverride.migration.loadUI();
+      const env = detectNativeEnvironment();
+      if (env === 'swift') {
+        const res = await callSwiftRPC('migration.loadUI', {});
+        return res || null;
+      }
+      return null;
+    },
+
+    async saveUI(snapshot) {
+      if (testEngineOverride?.migration?.saveUI) return testEngineOverride.migration.saveUI(snapshot);
+      const env = detectNativeEnvironment();
+      if (env === 'swift') {
+        if (!snapshot || typeof snapshot !== 'object') {
+          throw new Error('migration.saveUI: snapshot must be an object');
+        }
+        await callSwiftRPC('migration.saveUI', { snapshot });
+        return true;
+      }
+      return false;
     },
   },
 };

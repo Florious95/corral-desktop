@@ -85,9 +85,10 @@ test('Swift RPC dispatch performs bootstrap, attaches epoch, and calls canonical
           native: {
             postMessage: async (envelope) => {
               calls.push(envelope);
+              const base = { v: 1, id: envelope.id, epoch: 'swift-epoch-001', ok: true };
               if (envelope.method === 'bootstrap') {
                 return {
-                  ok: true,
+                  ...base,
                   result: {
                     epoch: 'swift-epoch-001',
                     window: { geometryGeneration: 1 },
@@ -95,14 +96,14 @@ test('Swift RPC dispatch performs bootstrap, attaches epoch, and calls canonical
                 };
               }
               if (envelope.method === 'window.minimize') {
-                return { ok: true, result: null };
+                return { ...base, result: null };
               }
               if (envelope.method === 'clipboard.readText') {
-                return { ok: true, result: 'pasted text from swift' };
+                return { ...base, result: 'pasted text from swift' };
               }
               if (envelope.method === 'clipboard.image') {
                 return {
-                  ok: true,
+                  ...base,
                   result: {
                     name: 'screen.png',
                     mime: 'image/png',
@@ -111,18 +112,18 @@ test('Swift RPC dispatch performs bootstrap, attaches epoch, and calls canonical
                 };
               }
               if (envelope.method === 'clipboard.files') {
-                return { ok: true, result: ['/tmp/one.txt'] };
+                return { ...base, result: ['/tmp/one.txt'] };
               }
               if (envelope.method === 'upload') {
-                return { ok: true, result: '/tmp/uploaded.png' };
+                return { ...base, result: '/tmp/uploaded.png' };
               }
               if (envelope.method === 'devices.load') {
-                return { ok: true, result: [{ id: 'swift-dev', name: 'Swift Device' }] };
+                return { ...base, result: [{ id: 'swift-dev', name: 'Swift Device' }] };
               }
               if (envelope.method === 'devices.save') {
-                return { ok: true, result: { saved: true } };
+                return { ...base, result: { saved: true } };
               }
-              return { ok: false, error: { message: `Unknown method ${envelope.method}` } };
+              return { v: 1, id: envelope.id, epoch: 'swift-epoch-001', ok: false, error: { message: `Unknown method ${envelope.method}` } };
             },
           },
         },
@@ -520,6 +521,8 @@ test('surface.update with phase: "disarm" strictly sends only 3 fields: phase, g
               calls.push(envelope);
               if (envelope.method === 'bootstrap') {
                 return {
+                  v: 1,
+                  id: envelope.id,
                   ok: true,
                   result: {
                     epoch: 'disarm-epoch-888',
@@ -528,7 +531,7 @@ test('surface.update with phase: "disarm" strictly sends only 3 fields: phase, g
                 };
               }
               if (envelope.method === 'surface.update') {
-                return { ok: true, result: { disarmed: true } };
+                return { v: 1, id: envelope.id, epoch: 'disarm-epoch-888', ok: true, result: { disarmed: true } };
               }
               return { ok: false, error: 'unknown' };
             },
@@ -578,6 +581,7 @@ test('OPEN-3: rawCallSwiftRPC rejects with invalid_response when reply.id mismat
             postMessage: async (envelope) => {
               if (envelope.method === 'bootstrap') {
                 return {
+                  v: 1,
                   id: 'tampered-mismatch-id',
                   ok: true,
                   epoch: 'boot-epoch-1',
@@ -615,6 +619,7 @@ test('OPEN-3: rawCallSwiftRPC rejects with stale_geometry when reply.epoch misma
             postMessage: async (envelope) => {
               if (envelope.method === 'bootstrap') {
                 return {
+                  v: 1,
                   id: envelope.id,
                   ok: true,
                   epoch: 'current-valid-epoch',
@@ -622,6 +627,7 @@ test('OPEN-3: rawCallSwiftRPC rejects with stale_geometry when reply.epoch misma
               }
               if (envelope.method === 'window.minimize') {
                 return {
+                  v: 1,
                   id: envelope.id,
                   epoch: 'stale-old-epoch-from-past-life',
                   ok: true,
