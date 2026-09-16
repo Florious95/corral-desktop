@@ -188,10 +188,37 @@ export function createSurfaceGeometryWatcher({
     }
   }
 
-  const onWinResize = () => onLayoutChange();
-  const onWindowState = () => {
-    lastGeomJson = '';
+  let lastViewportWidth = typeof window !== 'undefined' ? Math.round(window.innerWidth || 0) : -1;
+  let lastViewportHeight = typeof window !== 'undefined' ? Math.round(window.innerHeight || 0) : -1;
+
+  const onWinResize = () => {
+    if (isDisposed) return;
+    if (typeof window !== 'undefined') {
+      const w = Math.round(window.innerWidth || 0);
+      const h = Math.round(window.innerHeight || 0);
+      if (w === lastViewportWidth && h === lastViewportHeight) return;
+      lastViewportWidth = w;
+      lastViewportHeight = h;
+    }
     onLayoutChange();
+  };
+
+  const onWindowState = (e) => {
+    if (isDisposed) return;
+    // P0: 严禁在此无脑清空 lastGeomJson 并无脑调用 onLayoutChange() (disarmImmediate)，彻底切断死循环！
+    // 仅当 Native 广播的视口尺寸确实发生改变时，才进行防抖调度 schedule()
+    const payload = e?.detail;
+    const vp = payload?.viewportCSS;
+    if (vp && typeof vp.width === 'number' && typeof vp.height === 'number') {
+      const w = Math.round(vp.width);
+      const h = Math.round(vp.height);
+      if (w !== lastViewportWidth || h !== lastViewportHeight) {
+        lastViewportWidth = w;
+        lastViewportHeight = h;
+        lastGeomJson = '';
+        schedule();
+      }
+    }
   };
 
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
