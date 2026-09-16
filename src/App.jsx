@@ -16,6 +16,7 @@ import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
 import { watchFullscreen } from './lib/fullscreen.js';
+import { createSurfaceGeometryWatcher } from './lib/surfaceGeometry.js';
 import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from './term/inputAckGate.js';
 import Sidebar from './components/sidebar/Sidebar.jsx';
 import SplitPanes from './components/terminal/SplitPanes.jsx';
@@ -248,6 +249,20 @@ export default function App({ seedDevices } = {}) {
     watchFullscreen(setNativeFullscreen).then((u) => { off = u; });
     return () => { if (typeof off === 'function') off(); };
   }, []);
+
+  const surfaceWatcherRef = useRef(null);
+  useEffect(() => {
+    const watcher = createSurfaceGeometryWatcher();
+    surfaceWatcherRef.current = watcher;
+    return () => {
+      watcher.dispose();
+      surfaceWatcherRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    surfaceWatcherRef.current?.schedule();
+  }, [collapsed, workspace.tabs, nativeFullscreen]);
 
   useEffect(() => { LS.write('am.fav', favs) }, [favs]);
   useEffect(() => {
