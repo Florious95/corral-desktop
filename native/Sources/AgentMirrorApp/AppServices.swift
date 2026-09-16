@@ -1,3 +1,4 @@
+import Foundation
 import Services
 import Shell
 
@@ -18,14 +19,17 @@ public final class AppServices: ShellServiceHandling {
         "clipboard.image", "clipboard.readImage",
         "clipboard.files", "clipboard.readFiles",
         "upload", "upload.http",
+        "migration.loadUI", "migration.saveUI",
     ]
     private let implementation: DefaultShellServices
+    private let uiSnapshotStore: UISnapshotStore
 
     public init(
         namespace: KeychainNamespace = .currentApp,
         deviceStore: DeviceStore? = nil,
         uploadService: UploadService = .shared,
-        clipboardService: ClipboardService? = nil
+        clipboardService: ClipboardService? = nil,
+        uiSnapshotStore: UISnapshotStore? = nil
     ) {
         self.namespace = namespace
         let store = deviceStore ?? (namespace == .currentApp
@@ -37,9 +41,35 @@ public final class AppServices: ShellServiceHandling {
             uploadService: uploadService,
             clipboardService: clipboardService ?? ClipboardService.shared
         )
+        self.uiSnapshotStore = uiSnapshotStore ?? UISnapshotStore()
     }
 
     public func handle(method: String, params: [String: Any]) async throws -> Any {
-        try await implementation.handle(method: method, params: params)
+        switch method {
+        case "migration.loadUI":
+            guard params.isEmpty else { throw ShellError.invalidRequest }
+            return uiSnapshotStore.load() ?? NSNull()
+        case "migration.saveUI":
+            let snapshot: Any
+            if let wrapped = params["snapshot"] {
+                guard params.count == 1 else { throw ShellError.invalidRequest }
+                snapshot = wrapped
+            } else {
+                guard !params.isEmpty else { throw ShellError.invalidRequest }
+                snapshot = params
+            }
+            do {
+                try uiSnapshotStore.save(snapshot)
+                return true
+            } catch let error as UISnapshotError {
+                switch error {
+                case .tooLarge: throw ShellError.tooLarge
+                case .io: throw ShellError.storageFailed
+                case .invalidSnapshot, .sensitiveField: throw ShellError.invalidRequest
+                }
+            }
+        default:
+            return try await implementation.handle(method: method, params: params)
+        }
     }
 }
