@@ -915,3 +915,13 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 Enter 继续生效；
 不新增 Finder 路径、provider 图标或快捷键策略；xterm 有意输入的原始 bytes 已按 §6.3 接入。初始化与离线构建约束见 CLIENT-CONTRACT §1。
 本次 Node/构建证据与真实测试 `.app` 证据分开，不能相互替代。
+
+## Window (Swift Shell)
+
+裁定日期：2026-09-16。方案 A 的 N1 提供 AppKit 窗口、WKWebView 本地静态资源容器与原生同步拖窗接缝；本段记录研发候选，不表示 Swift 壳已交付或玻璃验收通过。
+
+- Native 仅根据预报告的 chrome 空白矩形，在自身窗口的当前 `mouseDown` 同步调用 AppKit `performDrag(with:)`；按钮、Tab、关闭区、输入、终端与弹层优先排除。Swift 禁止 `window.startDragging` 异步 RPC。
+- resize、跨屏、全屏、reload/dispose 时清空可拖矩形。单向 `surface.update` 仍不能保证同尺寸 DOM 变更期间零误触；正式接缝须补 Native geometry generation 与布局前 disarm 屏障，或限定到永久无控件的原生预留空白带。不得在未握手或几何失效时默认整页可拖。
+- React 保留 Tab 和业务交互。N1 的系统标题栏是装配起点，最终标题栏/安全留白须在 F2/I1 与既有布局同候选验收，不擅自改变 header 几何。
+- `GlassChrome` 在 N1 是材质槽占位；N2 才接 macOS 26 公共 NSGlassEffectView。终端/canvas 保持实底；减少透明度或提高对比度时采用实底与清晰边界。WK 背景实际穿透未通过交付面验证前，不声明玻璃效果已完成。
+- bundle 页面限定 `agentmirror://app/index.html`，只对可信主 frame 暴露 `native` handler；服务由 I1 注入，未配置返回不可用。页面重载换代并取消 pending。资源 MIME/状态/Range 与完整跨代门禁属于尚待接棒补齐项，不得据本层 fixture 绿发布。
