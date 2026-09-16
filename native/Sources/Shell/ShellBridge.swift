@@ -20,6 +20,35 @@ public protocol ShellServiceHandling: AnyObject {
     func handle(method: String, params: [String: Any]) async throws -> Any
 }
 
+struct WindowStateSnapshot: Equatable, Sendable {
+    let fullscreen: Bool
+    let minimized: Bool
+    let geometryGeneration: Int
+}
+
+struct WindowStateDeduper: Sendable {
+    private var previous: WindowStateSnapshot?
+
+    mutating func reset() { previous = nil }
+
+    mutating func shouldEmit(_ next: WindowStateSnapshot) -> Bool {
+        guard previous != next else { return false }
+        previous = next
+        return true
+    }
+}
+
+private extension WindowStateSnapshot {
+    init?(windowState: [String: Any]) {
+        guard let fullscreen = windowState["fullscreen"] as? Bool,
+              let minimized = windowState["minimized"] as? Bool,
+              let geometryGeneration = windowState["geometryGeneration"] as? Int else {
+            return nil
+        }
+        self.init(fullscreen: fullscreen, minimized: minimized, geometryGeneration: geometryGeneration)
+    }
+}
+
 @MainActor
 public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     weak var owner: MainWindowController?
@@ -30,6 +59,7 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var pending: [String: (Task<Void, Never>, @MainActor @Sendable (Any?, String?) -> Void)] = [:]
     private var ready = false
     private var sequence = 0
+    private var stateDeduper = WindowStateDeduper()
 
     static let windowMethods: Set<String> = [
         "bootstrap", "window.getState", "window.isFullscreen", "window.setFullscreen",
@@ -54,6 +84,7 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         seenOrder.removeAll()
         ready = false
         sequence = 0
+        stateDeduper.reset()
     }
 
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
@@ -148,6 +179,9 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "bootstrap":
             guard params.isEmpty else { throw ShellError.invalidRequest }
             ready = true
+            if let state = WindowStateSnapshot(windowState: owner.windowState) {
+                _ = stateDeduper.shouldEmit(state)
+            }
             return ["v": 1, "epoch": epoch, "runtime": "swift",
                     "methods": Array(Self.windowMethods.union((services?.availableMethods ?? []).intersection(Self.serviceMethods))).sorted(),
                     "window": owner.windowState,
@@ -182,7 +216,9 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     func emitWindowState() {
-        guard ready, let owner, owner.acceptsMessages else { return }
+        guard ready, let owner, owner.acceptsMessages,
+              let state = WindowStateSnapshot(windowState: owner.windowState),
+              stateDeduper.shouldEmit(state) else { return }
         sequence += 1
         let event: [String: Any] = ["v": 1, "epoch": epoch, "event": "window.state",
                                     "seq": sequence, "payload": owner.windowState]

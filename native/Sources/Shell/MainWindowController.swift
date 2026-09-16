@@ -110,8 +110,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
                                              backingScale: window.backingScaleFactor)
         } catch {
             // A malformed or stale report must not retain a clickable old hit map.
+            // Do not emit window.state here: the frontend's geometry watcher would
+            // answer that event with another surface.update and recurse forever.
             dragSurface.geometry.invalidate()
-            bridge.emitWindowState()
             throw error
         }
         return ["revision": dragSurface.geometry.revision,

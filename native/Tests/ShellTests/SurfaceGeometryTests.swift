@@ -60,6 +60,18 @@ final class SurfaceGeometryTests: XCTestCase {
                                            backingScale: 2, flipped: true))
     }
 
+    func testStateDeduperSuppressesIdenticalWindowState() {
+        var deduper = WindowStateDeduper()
+        let initial = WindowStateSnapshot(fullscreen: false, minimized: false, geometryGeneration: 4)
+        XCTAssertTrue(deduper.shouldEmit(initial))
+        XCTAssertFalse(deduper.shouldEmit(initial))
+        XCTAssertTrue(deduper.shouldEmit(WindowStateSnapshot(fullscreen: true, minimized: false, geometryGeneration: 4)))
+        XCTAssertTrue(deduper.shouldEmit(WindowStateSnapshot(fullscreen: true, minimized: false, geometryGeneration: 5)))
+        XCTAssertFalse(deduper.shouldEmit(WindowStateSnapshot(fullscreen: true, minimized: false, geometryGeneration: 5)))
+        deduper.reset()
+        XCTAssertTrue(deduper.shouldEmit(initial))
+    }
+
     func testResetAdvancesGenerationWhenRevisionRestarts() throws {
         var geometry = SurfaceGeometry()
         try geometry.update(arm(0, 7), bounds: bounds, backingScale: 2)
