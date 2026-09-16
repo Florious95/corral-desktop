@@ -108,9 +108,14 @@ export function createSurfaceGeometryWatcher({
 
   const disarmImmediate = () => {
     if (isDisposed) return;
+    // OPEN-2: 清空去重缓存，确保 disarm 后相同几何可以重新触发 arm
+    lastGeomJson = '';
     // OPEN-2: 布局变动前立即向 Native 下发 disarm，报废旧的拖拽区域
     try {
-      onUpdate({ phase: 'disarm' });
+      const p = onUpdate({ phase: 'disarm' });
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {});
+      }
     } catch (_) {
       // 容错忽略
     }
@@ -196,6 +201,7 @@ export function createSurfaceGeometryWatcher({
       // OPEN-3: 销毁前先发出最后一次 disarm，确保原生外壳清理在途点击区
       disarmImmediate();
       isDisposed = true;
+      lastGeomJson = '';
       if (timer) {
         clearTimeout(timer);
         timer = null;

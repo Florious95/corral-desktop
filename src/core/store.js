@@ -50,6 +50,24 @@ function readJson(storage, key) {
   }
 }
 
+export function backupUiSnapshot(storage) {
+  if (isNativeDesktop() && storage && typeof storage.length === 'number') {
+    try {
+      const snapshot = {};
+      for (let i = 0; i < storage.length; i++) {
+        const k = storage.key(i);
+        if (k && (k.startsWith(PREFIX) || k.startsWith('am.'))) {
+          const v = storage.getItem(k);
+          if (typeof v === 'string') snapshot[k] = v;
+        }
+      }
+      if (Object.keys(snapshot).length > 0) {
+        nativeCapabilities.migration.saveUI(snapshot).catch(() => {});
+      }
+    } catch (_) {}
+  }
+}
+
 function writeJson(storage, key, value) {
   const serialized = JSON.stringify(value);
   try {
@@ -59,6 +77,7 @@ function writeJson(storage, key, value) {
   }
   try {
     storage?.setItem(key, serialized);
+    backupUiSnapshot(storage);
     return true;
   } catch {
     return false; // quota / private mode / no storage: state stays in memory
