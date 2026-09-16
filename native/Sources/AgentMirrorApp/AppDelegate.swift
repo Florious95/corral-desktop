@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -47,6 +48,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
+    }
+
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "AgentMirror")
+        let aboutItem = NSMenuItem(title: "About AgentMirror",
+                                   action: Selector(("orderFrontStandardAboutPanel:")),
+                                   keyEquivalent: "")
+        aboutItem.target = NSApp
+        appMenu.addItem(aboutItem)
+        appMenu.addItem(.separator())
+        let quitItem = NSMenuItem(title: "Quit AgentMirror",
+                                  action: Selector(("terminate:")),
+                                  keyEquivalent: "q")
+        quitItem.target = NSApp
+        appMenu.addItem(quitItem)
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        func addEditItem(_ title: String, selector: String, keyEquivalent: String,
+                         modifiers: NSEvent.ModifierFlags = [.command]) {
+            let item = NSMenuItem(title: title, action: Selector((selector)), keyEquivalent: keyEquivalent)
+            item.keyEquivalentModifierMask = modifiers
+            editMenu.addItem(item)
+        }
+        addEditItem("Undo", selector: "undo:", keyEquivalent: "z")
+        addEditItem("Redo", selector: "redo:", keyEquivalent: "z", modifiers: [.command, .shift])
+        addEditItem("Cut", selector: "cut:", keyEquivalent: "x")
+        addEditItem("Copy", selector: "copy:", keyEquivalent: "c")
+        addEditItem("Paste", selector: "paste:", keyEquivalent: "v")
+        addEditItem("Select All", selector: "selectAll:", keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func migrationDevices() async throws {

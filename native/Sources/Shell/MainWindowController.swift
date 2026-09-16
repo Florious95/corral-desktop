@@ -48,6 +48,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
             view.autoresizingMask = [.width, .height]
             root.addSubview(view)
         }
+        keepTitlebarControlsAboveContent(root)
         alignTrafficLights()
         reload()
     }
@@ -142,16 +143,30 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     public func windowDidMiniaturize(_ notification: Notification) { geometryChanged() }
     public func windowDidDeminiaturize(_ notification: Notification) { geometryChanged() }
 
+    private func keepTitlebarControlsAboveContent(_ contentView: NSView) {
+        guard let frameView = contentView.superview,
+              let closeButton = window?.standardWindowButton(.closeButton) else { return }
+
+        var ancestor = closeButton.superview
+        while let candidate = ancestor, candidate.superview !== frameView {
+            ancestor = candidate.superview
+        }
+        guard let titlebarContainer = ancestor,
+              titlebarContainer.superview === frameView,
+              titlebarContainer !== contentView else { return }
+        frameView.addSubview(contentView, positioned: .below, relativeTo: titlebarContainer)
+        frameView.addSubview(titlebarContainer, positioned: .above, relativeTo: contentView)
+    }
+
     private func alignTrafficLights() {
-        guard let window, let contentView = window.contentView else { return }
+        guard let window else { return }
         let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-        let targetCenterY = contentView.frame.maxY - 19.0
-        for btnType in buttons {
-            if let button = window.standardWindowButton(btnType) {
-                var frame = button.frame
-                frame.origin.y = round(targetCenterY - frame.height / 2.0)
-                button.setFrameOrigin(frame.origin)
-            }
+        for buttonType in buttons {
+            guard let button = window.standardWindowButton(buttonType),
+                  let titlebarView = button.superview else { continue }
+            let frame = TrafficLightLayout.alignedFrame(buttonFrame: button.frame,
+                                                         in: titlebarView.bounds)
+            button.setFrameOrigin(frame.origin)
         }
     }
 
