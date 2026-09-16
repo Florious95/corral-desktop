@@ -21,7 +21,7 @@ public protocol ShellServiceHandling: AnyObject {
 }
 
 @MainActor
-final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
+public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     weak var owner: MainWindowController?
     let services: (any ShellServiceHandling)?
     private(set) var epoch = UUID().uuidString
@@ -56,7 +56,7 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         sequence = 0
     }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
+    public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard message.frameInfo.isMainFrame,
               LocalContent.isEntry(message.frameInfo.request.url),

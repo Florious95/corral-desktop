@@ -12,7 +12,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AgentMirrorApp",
-            dependencies: ["Services"],
+            dependencies: ["Services", "Shell"],
             path: "Sources/AgentMirrorApp"
         ),
         .target(name: "Services", path: "Sources/Services"),

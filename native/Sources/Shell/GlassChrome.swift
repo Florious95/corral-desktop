@@ -78,13 +78,13 @@ public final class GlassChrome: NSView {
 }
 
 @MainActor
-final class DragSurfaceView: NSView {
+public final class DragSurfaceView: NSView {
     var geometry = SurfaceGeometry()
 
-    override var isFlipped: Bool { true }
-    override var mouseDownCanMoveWindow: Bool { false }
+    public override var isFlipped: Bool { true }
+    public override var mouseDownCanMoveWindow: Bool { false }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
+    public override func hitTest(_ point: NSPoint) -> NSView? {
         guard let window,
               geometry.isDraggable(point, bounds: bounds,
                                    backingScale: window.backingScaleFactor,
@@ -92,7 +92,7 @@ final class DragSurfaceView: NSView {
         return self
     }
 
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         guard event.type == .leftMouseDown,
               let window,
               event.window === window,
@@ -104,12 +104,12 @@ final class DragSurfaceView: NSView {
         window.performDrag(with: event)
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
+    public override func setFrameSize(_ newSize: NSSize) {
         if frame.size != newSize { geometry.invalidate() }
         super.setFrameSize(newSize)
     }
 
-    override func viewDidChangeBackingProperties() {
+    public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         geometry.invalidate()
     }
