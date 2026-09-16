@@ -111,6 +111,50 @@ test('lifecycle: connect → auth → ready → auto list', () => {
   assert.equal(client.session('s1').name, 'claude');
 });
 
+test('agent lifecycle requests use req ids and route typed results through onFrame', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  openAndAuth(client, ws);
+
+  const createReq = client.createAgent({
+    workspace: '/proj/a', anchor_ref: '/tmp/tmux.sock\x1f%1', provider: 'codex', name: 'new task', bypass: true,
+  });
+  const closeReq = client.closeSession('/tmp/tmux.sock\x1f%2');
+  assert.ok(createReq > 0 && closeReq > createReq);
+  assert.deepEqual(decodeControl(ws.sent[2]).payload, {
+    req_id: createReq,
+    workspace: '/proj/a',
+    anchor_ref: '/tmp/tmux.sock\x1f%1',
+    provider: 'codex',
+    name: 'new task',
+    bypass: true,
+  });
+  assert.deepEqual(decodeControl(ws.sent[3]).payload, {
+    req_id: closeReq,
+    ref: '/tmp/tmux.sock\x1f%2',
+  });
+
+  ws._text(JSON.stringify({ v: 1, type: 'create_agent_result', payload: {
+    req_id: createReq, ok: true, ref: '/tmp/tmux.sock\x1f%3', name: 'new task', naming: 'tmux',
+  } }));
+  ws._text(JSON.stringify({ v: 1, type: 'close_session_result', payload: { req_id: closeReq, ok: true } }));
+  assert.deepEqual(events.onFrame.slice(-2), ['create_agent_result', 'close_session_result']);
+});
+
+test('auth_ack exposes dynamic launcher capability payload to onFrame', () => {
+  const { client, sockets, events } = makeClient();
+  client.connect();
+  const ws = sockets[0];
+  ws._open();
+  ws._text(JSON.stringify({ v: 1, type: 'auth_ack', payload: {
+    ok: true,
+    agent_launchers: [{ provider: 'pi', display_name: 'Pi Coding Agent', supports_bypass: false, naming: 'tmux' }],
+  } }));
+  assert.equal(events.onFrame.at(-1), 'auth_ack');
+  assert.equal(client.isReady, true);
+});
+
 test('list_delta: continuous seq applies incrementally', () => {
   const { client, sockets } = makeClient();
   client.connect();

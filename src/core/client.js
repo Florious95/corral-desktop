@@ -94,6 +94,24 @@ export class Client extends CoreClient {
   scrollWheel(ref, delta) { return this.sendControl('scroll_wheel', { ref, delta }); }
   attachPreview(ref, path) { return this.sendControl('attach_preview', { ref, path }); }
 
+  /** Request one child Agent; the result is delivered through onFrame. */
+  createAgent({ workspace, anchor_ref, provider, name, bypass = false }) {
+    if (!this.isReady) return null;
+    const reqId = this.nextReqId++;
+    if (!this.sendControl('create_agent', {
+      req_id: reqId, workspace, anchor_ref, provider, name, bypass,
+    })) return null;
+    return reqId;
+  }
+
+  /** Terminate exactly one pane; the result is delivered through onFrame. */
+  closeSession(ref) {
+    if (!this.isReady) return null;
+    const reqId = this.nextReqId++;
+    if (!this.sendControl('close_session', { req_id: reqId, ref })) return null;
+    return reqId;
+  }
+
   inputAttachment(ref, path, text = '') {
     if (typeof path !== 'string' || !path.startsWith('/')) {
       this.onLocalError('invalid_field', 'attachment path must be absolute');

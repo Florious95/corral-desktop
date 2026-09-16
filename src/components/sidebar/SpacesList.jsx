@@ -1,5 +1,5 @@
 // Spaces 列表（UI-SPEC §5.2）。虚拟行 All Spaces / 收藏 置顶，其后是真实 workspace 行。
-import { FolderIcon, GridIcon, StarIcon, CheckIcon } from '../../lib/icons.jsx';
+import { FolderIcon, GridIcon, StarIcon, CheckIcon, PlusIcon } from '../../lib/icons.jsx';
 
 /** 聚合状态点：idle / unknown 不渲染，保持行干净 */
 function SpaceState({ state }) {
@@ -16,7 +16,7 @@ function SpaceState({ state }) {
   return null;
 }
 
-function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onClick, onContextMenu }) {
+function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onClick, onContextMenu, onNewAgent }) {
   return (
     <div
       className={`spaces-row${selected ? ' is-selected' : ''}`}
@@ -25,6 +25,17 @@ function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onCli
     >
       {icon}
       <span className="spaces-row-name">{name}</span>
+      {onNewAgent ? (
+        <button
+          type="button"
+          className="chr-btn-reset spaces-row-add"
+          aria-label={`在 ${name} 中新建 Agent`}
+          title="新建 Agent"
+          onClick={(e) => { e.stopPropagation(); onNewAgent(); }}
+        >
+          <PlusIcon size={13} strokeWidth={2} />
+        </button>
+      ) : null}
       <SpaceState state={state} />
       {badge ? (
         <span className={`spaces-badge${badgeLocal ? ' is-local' : ''}`}>{badge}</span>
@@ -42,6 +53,7 @@ function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onCli
  * @param {string} props.selected                       'all' | 'fav' | Space.key
  * @param {(key:string) => void} props.onSelect
  * @param {(e:MouseEvent, key:string) => void} props.onContextMenu
+ * @param {(spaceKey:string) => void} [props.onNewAgent]
  * @param {boolean} props.multiDevice
  */
 export default function SpacesList({
@@ -51,6 +63,7 @@ export default function SpacesList({
   selected,
   onSelect,
   onContextMenu,
+  onNewAgent,
   multiDevice,
 }) {
   const allSpacesWorking = spaces.some((sp) => sp.state === 'working');
@@ -86,6 +99,7 @@ export default function SpacesList({
           badgeLocal={sp.deviceLocal}
           onClick={() => onSelect(sp.key)}
           onContextMenu={(e) => onContextMenu(e, sp.key)}
+          onNewAgent={onNewAgent ? () => onNewAgent(sp.key) : undefined}
         />
       ))}
     </div>

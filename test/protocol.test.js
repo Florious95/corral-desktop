@@ -30,6 +30,38 @@ test('encode: auth rejects empty token', () => {
   assert.throws(() => encodeControl('auth', { token: '' }), (e) => e instanceof ProtocolError && e.code === 'invalid_field');
 });
 
+test('encode: create_agent preserves the server lifecycle field order', () => {
+  const parsed = JSON.parse(encodeControl('create_agent', {
+    req_id: 101,
+    workspace: '/proj/a',
+    anchor_ref: '/tmp/tmux.sock\x1f%1',
+    provider: 'codex',
+    name: 'new task',
+    bypass: true,
+  }));
+  assert.deepEqual(parsed, {
+    v: 1,
+    type: 'create_agent',
+    payload: {
+      req_id: 101,
+      workspace: '/proj/a',
+      anchor_ref: '/tmp/tmux.sock\x1f%1',
+      provider: 'codex',
+      name: 'new task',
+      bypass: true,
+    },
+  });
+});
+
+test('encode: close_session addresses the opaque ref, never the desktop uid', () => {
+  const parsed = JSON.parse(encodeControl('close_session', { req_id: 102, ref: '/tmp/tmux.sock\x1f%1' }));
+  assert.deepEqual(parsed, {
+    v: 1,
+    type: 'close_session',
+    payload: { req_id: 102, ref: '/tmp/tmux.sock\x1f%1' },
+  });
+});
+
 test('encode: input text variant matches golden field order', () => {
   const parsed = JSON.parse(encodeControl('input', { req_id: 9, ref: 's1', text: '/model opus' }));
   assert.deepEqual(parsed, { v: 1, type: 'input', payload: { req_id: 9, ref: 's1', text: '/model opus' } });
@@ -65,6 +97,25 @@ test('encode: input with unknown key is rejected (closed set)', () => {
 test('encode: bare-enter input (empty text) omits the text field', () => {
   const parsed = JSON.parse(encodeControl('input', { req_id: 3, ref: 's1', text: '' }));
   assert.deepEqual(parsed.payload, { req_id: 3, ref: 's1' });
+});
+
+test('decode: auth_ack retains dynamic agent launcher capabilities', () => {
+  const decoded = decodeControl(JSON.stringify({ v: 1, type: 'auth_ack', payload: {
+    ok: true,
+    agent_launchers: [{ provider: 'pi', display_name: 'Pi Coding Agent', supports_bypass: false, naming: 'tmux' }],
+  } }));
+  assert.deepEqual(decoded.payload.agent_launchers, [{
+    provider: 'pi', display_name: 'Pi Coding Agent', supports_bypass: false, naming: 'tmux',
+  }]);
+});
+
+test('decode: lifecycle results reject malformed or mismatched payloads', () => {
+  assert.throws(() => decodeControl(JSON.stringify({ v: 1, type: 'create_agent_result', payload: {
+    req_id: 1, ok: true, ref: '/tmp/sock\x1f%2', name: 'x', naming: 'tmux', reason: 'launch_failed',
+  } })), (e) => e instanceof ProtocolError && e.code === 'invalid_field');
+  assert.throws(() => decodeControl(JSON.stringify({ v: 1, type: 'close_session', payload: {
+    req_id: 1, ref: '',
+  } })), (e) => e instanceof ProtocolError && e.code === 'invalid_field');
 });
 
 test('decode: every golden control-frame fixture round-trips through validate', () => {

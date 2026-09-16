@@ -96,6 +96,8 @@ export class DeviceManager {
    * @param {(devices:Object[])=>void} [opts.onDeviceChange]
    * @param {(e:{deviceId:string,uid:string,frame:Object})=>void} [opts.onBinary]
    * @param {(e:{deviceId:string,reqId:number,ok:boolean,reason:string|null})=>void} [opts.onInputResult]
+   * @param {(e:{deviceId:string,kind:string,reqId:number,payload:Object})=>void} [opts.onLifecycleResult]
+   * @param {(deviceId:string)=>void} [opts.onCapabilityChange]
    * @param {(e:{deviceId:string,code:string,message:string})=>void} [opts.onError]
    */
   constructor(opts = {}) {
@@ -110,6 +112,8 @@ export class DeviceManager {
     this.onDeviceChange = opts.onDeviceChange || (() => {});
     this.onBinary = opts.onBinary || (() => {});
     this.onInputResult = opts.onInputResult || (() => {});
+    this.onLifecycleResult = opts.onLifecycleResult || (() => {});
+    this.onCapabilityChange = opts.onCapabilityChange || (() => {});
     this.onError = opts.onError || (() => {});
 
     // No checkedDevices key yet (first run / older data) → everything is checked.
@@ -129,6 +133,7 @@ export class DeviceManager {
     this._clients = new Map();   // deviceId -> Client
     this._status = new Map();    // deviceId -> { state, lastError }
     this._level2 = new Map();    // deviceId -> { cwd, seq, sessions: Map<ref, {...}>, lastSeen }
+    this._launchers = new Map(); // deviceId -> auth_ack.agent_launchers
     this._connected = false;
     this._modelTimer = null;
   }
@@ -192,6 +197,7 @@ export class DeviceManager {
     this._devices.splice(i, 1);
     this._status.delete(id);
     this._level2.delete(id);
+    this._launchers.delete(id);
     const checkedIds = this._devices.filter((x) => x.checked).map((x) => x.id);
     this._persistDevices(false);
     store.forgetDevice(id, this.storage, checkedIds);
@@ -336,6 +342,11 @@ export class DeviceManager {
     return undefined;
   }
 
+  /** Return only launchers advertised by this authenticated device. */
+  getAgentLaunchers(deviceId) {
+    return (this._launchers.get(deviceId) || []).map((launcher) => ({ ...launcher }));
+  }
+
   // ---- session actions (routed by uid) ----
 
   subscribe(uid, rows, cols, reason = 'user') {
@@ -372,6 +383,22 @@ export class DeviceManager {
   attachPreview(uid, path) {
     const t = this._route(uid);
     return t ? t.client.attachPreview(t.ref, path) : false;
+  }
+
+  /** Request a new Agent on the exact device/workspace/anchor selected by UI. */
+  createAgent({ deviceId, workspace, anchorRef, provider, name, bypass = false }) {
+    const client = this._clients.get(deviceId);
+    const reqId = client?.createAgent({
+      workspace, anchor_ref: anchorRef, provider, name, bypass,
+    });
+    return reqId === null || reqId === undefined ? null : { deviceId, reqId };
+  }
+
+  /** Request termination of exactly one uid; wire addressing stays bare ref. */
+  closeSession(uid) {
+    const t = this._route(uid);
+    const reqId = t?.client.closeSession(t.ref);
+    return reqId === null || reqId === undefined ? null : { deviceId: t.deviceId, reqId };
   }
 
   /** Shared Ctrl+V / file-picker chain: upload once, then leave a preview. */
@@ -495,6 +522,7 @@ export class DeviceManager {
       },
     });
     this._clients.set(deviceId, client);
+    this._launchers.set(deviceId, []);
     this._status.set(deviceId, { state: ClientState.STOPPED, lastError: null });
     client.connect();
   }
@@ -505,6 +533,7 @@ export class DeviceManager {
     c.disconnect();
     this._clients.delete(deviceId);
     this._level2.delete(deviceId);
+    this._launchers.delete(deviceId);
   }
 
   _onState(deviceId, state) {
@@ -513,6 +542,10 @@ export class DeviceManager {
     const lvl = this._level2.get(deviceId);
     if (lvl && state === ClientState.READY) lvl.seq = null;
     const ok = state === ClientState.READY;
+    if (!ok && (this._launchers.get(deviceId)?.length || 0) > 0) {
+      this._launchers.set(deviceId, []);
+      this.onCapabilityChange(deviceId);
+    }
     this._setStatus(deviceId, { state, lastError: ok ? null : undefined, authRejected: ok ? false : undefined });
     this._scheduleModel();
   }
@@ -520,6 +553,9 @@ export class DeviceManager {
   _onFrame(deviceId, type, payload) {
     switch (type) {
       case 'auth_ack':
+        this._launchers.set(deviceId, payload.ok === true && Array.isArray(payload.agent_launchers)
+          ? payload.agent_launchers : []);
+        this.onCapabilityChange(deviceId);
         if (payload.ok !== true) {
           const message = 'token 无效或已过期';
           this._setStatus(deviceId, { lastError: message, authRejected: true });
@@ -529,6 +565,12 @@ export class DeviceManager {
       case 'listing':
       case 'list_delta':
         this._scheduleModel();
+        return;
+      case 'create_agent_result':
+        this.onLifecycleResult({ deviceId, kind: type, reqId: payload.req_id, payload });
+        return;
+      case 'close_session_result':
+        this.onLifecycleResult({ deviceId, kind: type, reqId: payload.req_id, payload });
         return;
       case 'level2_frame':
       case 'level2_heartbeat': {

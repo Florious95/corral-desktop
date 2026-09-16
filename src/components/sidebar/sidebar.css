@@ -161,6 +161,27 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.spaces-row-add {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-4);
+  color: var(--icon);
+  opacity: 0;
+  transition: opacity var(--d-hover), background var(--d-hover), color var(--d-hover);
+}
+.spaces-row:hover .spaces-row-add,
+.spaces-row.is-selected .spaces-row-add,
+.spaces-row-add:focus-visible {
+  opacity: 1;
+}
+.spaces-row-add:hover {
+  background: var(--hover-5);
+  color: var(--icon-strong);
+}
 .spaces-row-state {
   display: inline-flex;
   align-items: center;
@@ -273,6 +294,29 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.agents-row-close {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-4);
+  color: var(--danger);
+  opacity: 0;
+  transition: opacity var(--d-hover), background var(--d-hover);
+}
+.agents-row:hover .agents-row-close,
+.agents-row-close:focus-visible {
+  opacity: 1;
+}
+.agents-row-close:hover {
+  background: var(--hover-5);
+}
+.agents-row-close:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 .agents-row-marks {
   margin-left: auto;
