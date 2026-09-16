@@ -76,19 +76,18 @@ if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
   window.__nativeEventListenerRegistered = true;
   window.addEventListener('agentmirror:native', (e) => {
     const detail = e?.detail;
-    if (detail) {
-      // OPEN-3: 若当前已完成 bootstrap 握手并持有合法 currentEpoch，且收到的事件 epoch 不匹配，视为过期丢弃
-      if (currentEpoch && detail.epoch && detail.epoch !== currentEpoch) {
-        return;
-      }
-      // OPEN-3: 校验 seq 单调递增，丢弃乱序回滚事件
-      if (typeof detail.seq === 'number') {
-        if (detail.seq < lastEventSeq) {
-          return;
-        }
-        lastEventSeq = detail.seq;
-      }
-      if (detail.epoch) currentEpoch = detail.epoch;
+    if (detail && typeof detail === 'object') {
+      // 1. Version check: only v1 supported
+      if (detail.v !== 1) return;
+      // 2. Epoch check: must have valid epoch matching current
+      if (typeof detail.epoch !== 'string' || !detail.epoch) return;
+      if (currentEpoch && detail.epoch !== currentEpoch) return;
+      // 3. Sequence check: must be strictly monotonic (no duplicates, no backwards)
+      if (typeof detail.seq !== 'number' || detail.seq <= lastEventSeq) return;
+
+      lastEventSeq = detail.seq;
+      if (!currentEpoch) currentEpoch = detail.epoch;
+
       if (detail.event === 'window.state' && detail.payload) {
         currentWindowState = detail.payload;
         if (typeof detail.payload.geometryGeneration === 'number') {
@@ -729,10 +728,14 @@ export const nativeCapabilities = {
       if (env === 'tauri') {
         try {
           const { load } = await import('@tauri-apps/plugin-store');
-          const s = await load('ui-snapshot.json', { autoSave: false });
+          const s = await load('ui-snapshot-v1.json', { autoSave: false });
+          await s.set('version', 1);
           await s.set('values', cleanSnapshot);
           await s.save();
-        } catch (_) {}
+          return true;
+        } catch (_) {
+          return false;
+        }
       }
       return false;
     },

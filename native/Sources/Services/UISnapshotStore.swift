@@ -108,12 +108,24 @@ public final class UISnapshotStore: @unchecked Sendable {
     /// Invalid, missing, non-0600, symlinked, or oversized snapshots fail
     /// closed as nil. The returned value is the whitelisted values map.
     public func load() -> [String: Any]? {
-        guard Self.isPrivateRegularFile(fileURL.path) else { return nil }
+        let targetURL: URL
+        if Self.isPrivateRegularFile(fileURL.path) {
+            targetURL = fileURL
+        } else {
+            let legacyURL = fileURL.deletingLastPathComponent().appendingPathComponent("ui-snapshot.json")
+            guard Self.isPrivateRegularFile(legacyURL.path) else { return nil }
+            targetURL = legacyURL
+        }
         do {
-            let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+            let data = try Data(contentsOf: targetURL, options: [.mappedIfSafe])
             guard data.count <= Self.maxBytes,
-                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  Set(object.keys) == ["version", "values"],
+                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            if Set(object.keys) == ["values"], let values = object["values"] {
+                return try Self.normalizedValues(values)
+            }
+            guard Set(object.keys) == ["version", "values"],
                   let version = object["version"] as? NSNumber,
                   CFGetTypeID(version) != CFBooleanGetTypeID(),
                   version.intValue == 1,
