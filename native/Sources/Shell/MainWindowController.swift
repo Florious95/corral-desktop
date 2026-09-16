@@ -15,19 +15,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     public var onLoadFinished: (() -> Void)?
 
     public init(distURL: URL, services: (any ShellServiceHandling)? = nil,
-                websiteDataStore: WKWebsiteDataStore = .default()) throws {
+                websiteDataStore: WKWebsiteDataStore? = nil) throws {
         let content = try LocalContent(distURL: distURL)
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = websiteDataStore
+        config.websiteDataStore = websiteDataStore ?? WKWebsiteDataStore.default()
         config.setURLSchemeHandler(LocalSchemeHandler(content: content), forURLScheme: "agentmirror")
-        bridge = ShellBridge(services: services)
+        bridge = ShellBridge(services: services ?? DefaultShellServices.shared)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")
         webView = WKWebView(frame: .zero, configuration: config)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "AgentMirror"
-        window.minSize = NSSize(width: 640, height: 400)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.minSize = NSSize(width: 1100, height: 700)
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = false
         super.init(window: window)

@@ -101,6 +101,8 @@ public final class URLSessionUploadClient: URLSessionClient, @unchecked Sendable
 }
 
 public struct UploadService: Sendable {
+    public static let shared = UploadService()
+
     private let client: any URLSessionClient
 
     public init(client: any URLSessionClient = URLSessionUploadClient()) {

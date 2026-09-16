@@ -51,7 +51,7 @@ public actor DeviceMigration {
     private let reader: any LegacyDevicesFileReader
 
     public init(
-        namespace: KeychainNamespace = .production,
+        namespace: KeychainNamespace = .currentApp,
         keychain: any KeychainClient = SystemKeychain(),
         reader: any LegacyDevicesFileReader = FileManagerDevicesFileReader()
     ) {

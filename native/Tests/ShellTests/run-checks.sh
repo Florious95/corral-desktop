@@ -11,7 +11,8 @@ printf '%s' 'must not serve' > "$out/outside.html"
 ln -sfn ../outside.html "$out/fixture/escape.html"
 xcrun swiftc -swift-version 6 -D SHELL_STANDALONE_TEST_RUNNER \
   -module-cache-path "$out/module-cache" \
-  native/Sources/Shell/*.swift native/Tests/ShellTests/ShellChecks.swift \
+  native/Sources/Services/*.swift native/Sources/Shell/*.swift \
+  native/Tests/ShellTests/ShellChecks.swift \
   -o "$out/ShellChecks" > "$out/compile.log" 2>&1
 set +e
 "$out/ShellChecks" "$out/fixture" > "$out/checks.log" 2>&1
