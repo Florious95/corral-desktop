@@ -87,10 +87,20 @@ if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
 
 function ensureSwiftCallback() {
   if (typeof window !== 'undefined' && !window.__nativeCallback) {
-    window.__nativeCallback = (id, result, error) => {
+    window.__nativeCallback = (id, result, error, meta) => {
       const p = pendingRpc.get(id);
-      if (!p) return;
+      if (!p) return; // id 不匹配或已被处理直接作废丢弃
       pendingRpc.delete(id);
+
+      // OPEN-3: 严格校验 epoch 匹配
+      const replyEpoch = meta?.epoch || (result && typeof result === 'object' ? result.epoch : null);
+      if (p.method !== 'bootstrap' && currentEpoch && replyEpoch && replyEpoch !== currentEpoch) {
+        const err = new Error('stale_geometry: epoch mismatch');
+        err.code = 'stale_geometry';
+        p.reject(err);
+        return;
+      }
+
       if (error) {
         const err = new Error(typeof error === 'string' ? error : error?.message || 'RPC failed');
         if (error?.code) err.code = error.code;
@@ -122,6 +132,19 @@ async function rawCallSwiftRPC(method, params = {}, { sendEpoch = false } = {}) 
     if (res && typeof res.then === 'function') {
       const reply = await res;
       if (reply && typeof reply === 'object') {
+        // OPEN-3: 严格校验 reply.id 与 req.id
+        if (reply.id && reply.id !== id) {
+          const err = new Error('invalid_response: reply id mismatch');
+          err.code = 'invalid_response';
+          throw err;
+        }
+        // OPEN-3: 严格校验 reply.epoch 与 currentEpoch
+        if (method !== 'bootstrap' && currentEpoch && reply.epoch && reply.epoch !== currentEpoch) {
+          const err = new Error('stale_geometry: epoch mismatch');
+          err.code = 'stale_geometry';
+          throw err;
+        }
+
         if (reply.ok === false) {
           const code = reply.error?.code || 'unknown';
           const msg = reply.error?.message || reply.error?.code || 'RPC failed';
@@ -147,6 +170,8 @@ async function rawCallSwiftRPC(method, params = {}, { sendEpoch = false } = {}) 
       reject(err);
     }, 15000);
     pendingRpc.set(id, {
+      method,
+      reqEpoch: currentEpoch,
       resolve: (val) => { clearTimeout(timeoutId); resolve(val); },
       reject: (err) => { clearTimeout(timeoutId); reject(err); },
     });
