@@ -158,7 +158,7 @@ export const nativeCapabilities = {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         return getCurrentWindow().close();
       }
-      if (typeof window !== 'undefined' && typeof window.close === 'function') {
+      if (typeof window !== 'undefined' && window.opener && typeof window.close === 'function') {
         window.close();
       }
     },
@@ -188,6 +188,10 @@ export const nativeCapabilities = {
         return w.setFullscreen(!fs);
       }
       if (typeof document !== 'undefined') {
+        // 若浏览器支持 userActivation 且未被用户手势激活，直接安全返回 false，避免触发 Chrome 控制台警告
+        if (typeof navigator !== 'undefined' && navigator.userActivation && !navigator.userActivation.isActive) {
+          return false;
+        }
         try {
           if (!document.fullscreenElement) {
             await document.documentElement?.requestFullscreen?.();
@@ -226,6 +230,10 @@ export const nativeCapabilities = {
         return getCurrentWindow().setFullscreen(Boolean(flag));
       }
       if (typeof document !== 'undefined') {
+        // 若要进入全屏，且浏览器支持 userActivation 但当前未激活手势，直接安全返回 false，避免触发 Chrome 控制台警告
+        if (flag && typeof navigator !== 'undefined' && navigator.userActivation && !navigator.userActivation.isActive) {
+          return false;
+        }
         try {
           if (flag && !document.fullscreenElement) {
             await document.documentElement?.requestFullscreen?.();

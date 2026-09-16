@@ -325,4 +325,77 @@ test('toggleFullscreen and setFullscreen safely catch DOM fullscreen rejections 
   }
 });
 
+test('window.close in Web mode respects window.opener guard to eliminate Chrome console warnings', async () => {
+  resetNativeEngineForTests();
+  const originalWindow = globalThis.window;
+  let closeCalled = false;
+
+  // Case 1: No opener -> close is not invoked
+  globalThis.window = {
+    opener: null,
+    close: () => { closeCalled = true; },
+  };
+
+  await nativeCapabilities.window.close();
+  assert.equal(closeCalled, false);
+
+  // Case 2: Opener present -> close is invoked
+  globalThis.window.opener = {};
+  await nativeCapabilities.window.close();
+  assert.equal(closeCalled, true);
+
+  if (originalWindow !== undefined) {
+    globalThis.window = originalWindow;
+  } else {
+    delete globalThis.window;
+  }
+});
+
+test('fullscreen methods check navigator.userActivation.isActive to prevent browser warning before requestFullscreen', async () => {
+  resetNativeEngineForTests();
+  const originalDocument = globalThis.document;
+  const originalNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+  let requestCalled = false;
+  globalThis.document = {
+    fullscreenElement: null,
+    documentElement: {
+      requestFullscreen: async () => {
+        requestCalled = true;
+      },
+    },
+  };
+
+  // When userActivation.isActive is false:
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { userActivation: { isActive: false } },
+    configurable: true,
+    writable: true,
+  });
+
+  const toggleRes = await nativeCapabilities.window.toggleFullscreen();
+  assert.equal(toggleRes, false);
+  assert.equal(requestCalled, false, 'requestFullscreen should not be called when userActivation is inactive');
+
+  const setRes = await nativeCapabilities.window.setFullscreen(true);
+  assert.equal(setRes, false);
+  assert.equal(requestCalled, false, 'requestFullscreen should not be called when userActivation is inactive');
+
+  // When userActivation.isActive is true:
+  navigator.userActivation.isActive = true;
+  const activeToggleRes = await nativeCapabilities.window.toggleFullscreen();
+  assert.equal(activeToggleRes, true);
+  assert.equal(requestCalled, true);
+
+  if (originalDocument !== undefined) globalThis.document = originalDocument;
+  else delete globalThis.document;
+
+  if (originalNavigatorDesc) {
+    Object.defineProperty(globalThis, 'navigator', originalNavigatorDesc);
+  } else {
+    delete globalThis.navigator;
+  }
+});
+
+
 
