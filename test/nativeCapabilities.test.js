@@ -566,6 +566,89 @@ test('surface.update with phase: "disarm" strictly sends only 3 fields: phase, g
   }
 });
 
+test('OPEN-3: rawCallSwiftRPC rejects with invalid_response when reply.id mismatches', async () => {
+  resetNativeEngineForTests();
+  const originalWindow = globalThis.window;
+
+  try {
+    globalThis.window = {
+      webkit: {
+        messageHandlers: {
+          native: {
+            postMessage: async (envelope) => {
+              if (envelope.method === 'bootstrap') {
+                return {
+                  id: 'tampered-mismatch-id',
+                  ok: true,
+                  epoch: 'boot-epoch-1',
+                };
+              }
+              return { ok: true };
+            },
+          },
+        },
+      },
+    };
+
+    assert.equal(nativeCapabilities.environment, 'swift');
+
+    await assert.rejects(
+      nativeCapabilities.window.minimize(),
+      /invalid_response: reply id mismatch/,
+    );
+  } finally {
+    if (originalWindow !== undefined) globalThis.window = originalWindow;
+    else delete globalThis.window;
+    resetNativeEngineForTests();
+  }
+});
+
+test('OPEN-3: rawCallSwiftRPC rejects with stale_geometry when reply.epoch mismatches currentEpoch', async () => {
+  resetNativeEngineForTests();
+  const originalWindow = globalThis.window;
+
+  try {
+    globalThis.window = {
+      webkit: {
+        messageHandlers: {
+          native: {
+            postMessage: async (envelope) => {
+              if (envelope.method === 'bootstrap') {
+                return {
+                  id: envelope.id,
+                  ok: true,
+                  epoch: 'current-valid-epoch',
+                };
+              }
+              if (envelope.method === 'window.minimize') {
+                return {
+                  id: envelope.id,
+                  epoch: 'stale-old-epoch-from-past-life',
+                  ok: true,
+                  result: null,
+                };
+              }
+              return { ok: true };
+            },
+          },
+        },
+      },
+    };
+
+    assert.equal(nativeCapabilities.environment, 'swift');
+
+    await assert.rejects(
+      nativeCapabilities.window.minimize(),
+      /stale_geometry: epoch mismatch/,
+    );
+  } finally {
+    if (originalWindow !== undefined) globalThis.window = originalWindow;
+    else delete globalThis.window;
+    resetNativeEngineForTests();
+  }
+});
+
+
 
 
 
