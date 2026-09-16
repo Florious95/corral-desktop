@@ -645,7 +645,7 @@ test('OPEN-3: rawCallSwiftRPC rejects with stale_geometry when reply.epoch misma
 
     await assert.rejects(
       nativeCapabilities.window.minimize(),
-      /stale_geometry: epoch mismatch/,
+      /stale_geometry: missing or mismatched reply epoch/,
     );
   } finally {
     if (originalWindow !== undefined) globalThis.window = originalWindow;

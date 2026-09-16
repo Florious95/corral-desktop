@@ -105,9 +105,11 @@ export function createSurfaceGeometryWatcher({
   let lastGeomJson = '';
   let inFlight = false;
   let scheduledAgain = false;
+  let currentDisarmSeq = 0;
 
   const disarmImmediate = () => {
     if (isDisposed) return;
+    currentDisarmSeq++;
     // OPEN-2: 清空去重缓存，确保 disarm 后相同几何可以重新触发 arm
     lastGeomJson = '';
     // OPEN-2: 布局变动前立即向 Native 下发 disarm，报废旧的拖拽区域
@@ -131,10 +133,11 @@ export function createSurfaceGeometryWatcher({
     if (json === lastGeomJson) return; // 几何未变化跳过
 
     inFlight = true;
+    const runDisarmSeq = currentDisarmSeq;
     try {
       await onUpdate(geom);
-      if (!isDisposed) {
-        // 关键：仅在成功上报 ACK 后才记录 lastGeomJson 去重缓存
+      // 关键：仅在成功上报 ACK 且在途期间未发生过 disarm 时才记录去重缓存
+      if (!isDisposed && currentDisarmSeq === runDisarmSeq) {
         lastGeomJson = json;
       }
     } catch (_) {

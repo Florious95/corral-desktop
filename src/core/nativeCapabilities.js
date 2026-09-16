@@ -51,12 +51,15 @@ let currentWindowState = null;
 let surfaceRevision = 0;
 let bootstrapPromise = null;
 
+let lastEventSeq = -1;
+
 export function getSwiftState() {
   return {
     epoch: currentEpoch,
     geometryGeneration: currentGeneration,
     surfaceRevision,
     windowState: currentWindowState,
+    lastEventSeq,
   };
 }
 
@@ -66,6 +69,7 @@ export function resetSwiftStateForTests() {
   currentWindowState = null;
   surfaceRevision = 0;
   bootstrapPromise = null;
+  lastEventSeq = -1;
 }
 
 if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
@@ -76,6 +80,13 @@ if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
       // OPEN-3: 若当前已完成 bootstrap 握手并持有合法 currentEpoch，且收到的事件 epoch 不匹配，视为过期丢弃
       if (currentEpoch && detail.epoch && detail.epoch !== currentEpoch) {
         return;
+      }
+      // OPEN-3: 校验 seq 单调递增，丢弃乱序回滚事件
+      if (typeof detail.seq === 'number') {
+        if (detail.seq < lastEventSeq) {
+          return;
+        }
+        lastEventSeq = detail.seq;
       }
       if (detail.epoch) currentEpoch = detail.epoch;
       if (detail.event === 'window.state' && detail.payload) {
@@ -150,10 +161,12 @@ async function rawCallSwiftRPC(method, params = {}, { sendEpoch = false } = {}) 
       }
 
       // OPEN-3: 严格校验 reply.epoch 与 currentEpoch
-      if (method !== 'bootstrap' && currentEpoch && reply.epoch && reply.epoch !== currentEpoch) {
-        const err = new Error('stale_geometry: epoch mismatch');
-        err.code = 'stale_geometry';
-        throw err;
+      if (method !== 'bootstrap' && currentEpoch) {
+        if (!reply.epoch || reply.epoch !== currentEpoch) {
+          const err = new Error('stale_geometry: missing or mismatched reply epoch');
+          err.code = 'stale_geometry';
+          throw err;
+        }
       }
 
       if (reply.ok === false) {
@@ -252,6 +265,29 @@ export function resetNativeEngineForTests() {
   currentWindowState = null;
   surfaceRevision = 0;
   bootstrapPromise = null;
+}
+
+export const UI_SNAPSHOT_ALLOWED_KEYS = new Set([
+  'am.workspace.v2',
+  'am.workspace.v1',
+  'am.panes',
+  'am.activePane',
+  'am.fav',
+  'am.selected',
+  'am.collapsed',
+  'am.spacesOpen',
+  'am.agentsOpen',
+]);
+
+export function filterUiSnapshot(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const clean = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (UI_SNAPSHOT_ALLOWED_KEYS.has(k) && typeof v === 'string') {
+      clean[k] = v;
+    }
+  }
+  return clean;
 }
 
 /**
@@ -684,13 +720,19 @@ export const nativeCapabilities = {
 
     async saveUI(snapshot) {
       if (testEngineOverride?.migration?.saveUI) return testEngineOverride.migration.saveUI(snapshot);
+      const cleanSnapshot = filterUiSnapshot(snapshot);
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        if (!snapshot || typeof snapshot !== 'object') {
-          throw new Error('migration.saveUI: snapshot must be an object');
-        }
-        await callSwiftRPC('migration.saveUI', { snapshot });
+        await callSwiftRPC('migration.saveUI', { snapshot: cleanSnapshot });
         return true;
+      }
+      if (env === 'tauri') {
+        try {
+          const { load } = await import('@tauri-apps/plugin-store');
+          const s = await load('ui-snapshot.json', { autoSave: false });
+          await s.set('values', cleanSnapshot);
+          await s.save();
+        } catch (_) {}
       }
       return false;
     },
