@@ -77,7 +77,7 @@ struct ShellChecks {
         for _ in 0..<100 where !finished { try await Task.sleep(for: .milliseconds(100)) }
         expect(finished && controller.acceptsMessages, "real WK local scheme loads")
         let loaded = try await javascript("document.body.dataset.moduleReady === 'yes'", in: controller.webView) as? Bool
-        expect(loaded == true, "real WK module executes")
+        expect(loaded == true, "real WK custom-scheme entry executes")
         // JS owns only test calls; no synthetic system input or user data.
         _ = try await javascript("window.callNative = async (method, params={}, epoch) => window.webkit.messageHandlers.native.postMessage({v:1,id:crypto.randomUUID(),method,params,...(epoch ? {epoch}: {})}); window.callNative('bootstrap').then(x => window.boot = x); void 0", in: controller.webView)
         try await Task.sleep(for: .milliseconds(300))
