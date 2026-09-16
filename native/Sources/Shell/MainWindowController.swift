@@ -48,6 +48,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
             view.autoresizingMask = [.width, .height]
             root.addSubview(view)
         }
+        alignTrafficLights()
         reload()
     }
 
@@ -111,17 +112,27 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
                                              backingScale: window.backingScaleFactor)
         } catch {
             // A malformed or stale report must not retain a clickable old hit map.
+            // Do not emit window.state here: the frontend's geometry watcher would
+            // answer that event with another surface.update and recurse forever.
             dragSurface.geometry.invalidate()
-            bridge.emitWindowState()
             throw error
         }
         return ["revision": dragSurface.geometry.revision,
                 "geometryGeneration": dragSurface.geometry.geometryGeneration]
     }
 
-    public func windowDidResize(_ notification: Notification) { geometryChanged() }
-    public func windowDidChangeScreen(_ notification: Notification) { geometryChanged() }
-    public func windowDidChangeBackingProperties(_ notification: Notification) { geometryChanged() }
+    public func windowDidResize(_ notification: Notification) {
+        alignTrafficLights()
+        geometryChanged()
+    }
+    public func windowDidChangeScreen(_ notification: Notification) {
+        alignTrafficLights()
+        geometryChanged()
+    }
+    public func windowDidChangeBackingProperties(_ notification: Notification) {
+        alignTrafficLights()
+        geometryChanged()
+    }
     public func windowWillEnterFullScreen(_ notification: Notification) { fullscreenTarget = true; geometryChanged() }
     public func windowWillExitFullScreen(_ notification: Notification) { fullscreenTarget = false; geometryChanged() }
     public func windowDidEnterFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged() }
@@ -130,6 +141,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     public func windowDidFailToExitFullScreen(_ window: NSWindow) { fullscreenTarget = nil; geometryChanged() }
     public func windowDidMiniaturize(_ notification: Notification) { geometryChanged() }
     public func windowDidDeminiaturize(_ notification: Notification) { geometryChanged() }
+
+    private func alignTrafficLights() {
+        guard let window, let contentView = window.contentView else { return }
+        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let targetCenterY = contentView.frame.maxY - 19.0
+        for btnType in buttons {
+            if let button = window.standardWindowButton(btnType) {
+                var frame = button.frame
+                frame.origin.y = round(targetCenterY - frame.height / 2.0)
+                button.setFrameOrigin(frame.origin)
+            }
+        }
+    }
 
     private func geometryChanged() {
         dragSurface.geometry.invalidate()
