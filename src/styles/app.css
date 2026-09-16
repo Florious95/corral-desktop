@@ -76,6 +76,7 @@ button { border: 0; background: none; padding: 0 }
   position: relative;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
 }
 
 /* ——— 无设备引导卡片 ——— */
