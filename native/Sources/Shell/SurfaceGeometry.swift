@@ -39,9 +39,11 @@ public struct SurfaceGeometry {
     }
 
     public mutating func update(_ params: [String: Any], bounds: CGRect, backingScale: CGFloat) throws {
-        guard let phase = params["phase"] as? String,
-              let incomingGeneration = try? integer(params["geometryGeneration"]),
-              incomingGeneration == geometryGeneration else {
+        guard let phase = params["phase"] as? String else {
+            throw ShellError.invalidRequest
+        }
+        let incomingGeneration = try integer(params["geometryGeneration"])
+        guard incomingGeneration == geometryGeneration else {
             throw ShellError.staleGeometry
         }
         guard let incomingRevision = try? integer(params["revision"]),

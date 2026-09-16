@@ -87,10 +87,10 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
             if method != "bootstrap" && (Self.serviceMethods.contains(method) || method == "surface.update") {
                 guard request["epoch"] as? String == epoch else { throw ShellError.staleGeometry }
             }
-            guard JSONSerialization.data(withJSONObject: request).count <= 1_048_576,
+            guard try JSONSerialization.data(withJSONObject: request).count <= 1_048_576,
                   !seen.contains(id),
                   pending.count < 64,
-                  Self.windowMethods.contains(method) || Self.serviceMethods.contains(method) else {
+                  method == "window.startDragging" || Self.windowMethods.contains(method) || Self.serviceMethods.contains(method) else {
                 throw ShellError.invalidRequest
             }
             remember(id)
@@ -186,7 +186,9 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         sequence += 1
         let event: [String: Any] = ["v": 1, "epoch": epoch, "event": "window.state",
                                     "seq": sequence, "payload": owner.windowState]
-        Task { @MainActor [weak owner] in
+        let eventEpoch = epoch
+        Task { @MainActor [weak self, weak owner] in
+            guard let self, self.epoch == eventEpoch, owner?.acceptsMessages == true else { return }
             _ = try? await owner?.webView.callAsyncJavaScript(
                 "window.dispatchEvent(new CustomEvent('agentmirror:native', {detail: event}))",
                 arguments: ["event": event], in: nil, contentWorld: .page

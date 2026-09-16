@@ -49,7 +49,7 @@ public final class GlassChrome: NSView {
             container.spacing = 0
             container.autoresizingMask = [.width, .height]
             glass.autoresizingMask = [.width, .height]
-            container.addSubview(glass)
+            container.contentView = glass
             addSubview(container)
             glassContainer = container
             glassView = glass
@@ -65,6 +65,13 @@ public final class GlassChrome: NSView {
         glassContainer?.isHidden = !usesSystemGlass || usesOpaqueFallback
         solidFallback.isHidden = !usesOpaqueFallback
         solidFallback.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        solidFallback.layer?.borderColor = NSColor.separatorColor.cgColor
+        solidFallback.layer?.borderWidth = usesOpaqueFallback ? 1 : 0
+    }
+
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        accessibilityChanged()
     }
 
     public override func hitTest(_ point: NSPoint) -> NSView? { nil }

@@ -11,7 +11,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() {
         makeWindow = {
             guard let resourceURL = Bundle.main.resourceURL else { throw ShellError.unavailable }
-            let distURL = resourceURL.appendingPathComponent("dist", isDirectory: true)
+            let candidates = [
+                resourceURL.appendingPathComponent("dist", isDirectory: true),
+                resourceURL.appendingPathComponent("web", isDirectory: true),
+            ]
+            guard let distURL = candidates.first(where: {
+                FileManager.default.fileExists(atPath: $0.appendingPathComponent("index.html").path)
+            }) else { throw ShellError.unavailable }
             return try MainWindowController(distURL: distURL)
         }
         super.init()

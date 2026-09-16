@@ -32,8 +32,14 @@ struct ShellChecks {
         func rectangle(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> [String: Double] {
             ["x": x, "y": y, "width": w, "height": h]
         }
-        let params: [String: Any] = ["revision": 1, "viewportCSS": ["width": 800, "height": 600], "devicePixelRatio": 2,
-            "dragRects": [rectangle(0, 0, 800, 40)], "exclusionRects": [rectangle(40, 0, 120, 40)], "chromeRect": rectangle(0, 0, 800, 40)]
+        func report(_ generation: Int, _ revision: Int) -> [String: Any] {
+            ["phase": "arm", "geometryGeneration": generation, "revision": revision,
+             "viewportCSS": ["width": 800, "height": 600], "devicePixelRatio": 2,
+             "dragRects": [rectangle(0, 0, 800, 40)],
+             "exclusionRects": [rectangle(40, 0, 120, 40)],
+             "chromeRect": rectangle(0, 0, 800, 40)]
+        }
+        var params = report(0, 1)
         var geometry = SurfaceGeometry()
         expect(!geometry.isDraggable(.zero, bounds: bounds, backingScale: 2, flipped: true), "uninitialized rejects")
         try geometry.update(params, bounds: bounds, backingScale: 2)
@@ -51,6 +57,7 @@ struct ShellChecks {
         geometry.invalidate()
         expect(!geometry.isDraggable(CGPoint(x: 20, y: 20), bounds: bounds, backingScale: 2, flipped: true), "explicit invalidation")
         geometry.reset()
+        params = report(geometry.geometryGeneration, 1)
         try geometry.update(params, bounds: bounds, backingScale: 2)
         expect(geometry.revision == 1, "new page resets revision")
         let fixture = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)

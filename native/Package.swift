@@ -25,7 +25,8 @@ let package = Package(
         .testTarget(
             name: "ShellTests",
             dependencies: ["Shell"],
-            path: "Tests/ShellTests"
+            path: "Tests/ShellTests",
+            exclude: ["run-checks.sh"]
         ),
     ]
 )

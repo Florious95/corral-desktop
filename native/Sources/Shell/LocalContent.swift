@@ -100,13 +100,16 @@ public struct LocalContent {
     }
 
     private func canonicalPath(for url: URL) -> String? {
-        guard validOrigin(url), !url.path.contains("\0") else { return nil }
-        guard let decoded = url.percentEncodedPath.removingPercentEncoding,
+        guard validOrigin(url), !url.path.contains("\0"),
+              let urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let decoded = urlComponents.percentEncodedPath.removingPercentEncoding,
               decoded.hasPrefix("/"), !decoded.contains("\0") else { return nil }
         let components = decoded.split(separator: "/", omittingEmptySubsequences: false)
-        guard !components.isEmpty,
-              !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return nil }
-        return "/" + components.joined(separator: "/")
+        guard components.first == "",
+              components.dropFirst().allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            return nil
+        }
+        return "/" + components.dropFirst().joined(separator: "/")
     }
 
     private static func makeManifest(root: URL) -> [String: URL] {
@@ -147,7 +150,7 @@ public struct LocalContent {
         case "woff": return ("font/woff", nil)
         case "woff2": return ("font/woff2", nil)
         case "ttf": return ("font/ttf", nil)
-        case "svg": return ("image/svg+xml", nil)
+        case "svg": return ("image/svg+xml", "utf-8")
         case "png": return ("image/png", nil)
         case "jpg", "jpeg": return ("image/jpeg", nil)
         case "webp": return ("image/webp", nil)
@@ -167,7 +170,8 @@ public struct LocalContent {
         let spec = value.dropFirst(6).trimmingCharacters(in: .whitespaces)
         if spec.contains(",") { return .multi }
         let parts = spec.split(separator: "-", omittingEmptySubsequences: false)
-        guard parts.count == 2, size > 0 else { return .unsatisfiable }
+        guard size > 0 else { return .unsatisfiable }
+        guard parts.count == 2 else { return .malformed }
         let left = parts[0].trimmingCharacters(in: .whitespaces)
         let right = parts[1].trimmingCharacters(in: .whitespaces)
         guard !left.isEmpty || !right.isEmpty else { return .malformed }
@@ -176,9 +180,11 @@ public struct LocalContent {
             let length = min(suffix, size)
             return .single(size - length, size - 1)
         }
-        guard let start = Int64(left), start >= 0, start < size else { return .unsatisfiable }
+        guard let start = Int64(left), start >= 0 else { return .malformed }
+        guard start < size else { return .unsatisfiable }
         if right.isEmpty { return .single(start, size - 1) }
-        guard let requestedEnd = Int64(right), requestedEnd >= start else { return .unsatisfiable }
+        guard let requestedEnd = Int64(right) else { return .malformed }
+        guard requestedEnd >= start else { return .unsatisfiable }
         return .single(start, min(requestedEnd, size - 1))
     }
 }
@@ -202,12 +208,28 @@ struct LocalResponsePlan {
 /// Streams immutable bundled resources through the custom agentmirror origin.
 @MainActor
 final class LocalSchemeHandler: NSObject, WKURLSchemeHandler {
+    private static let maximumActiveTransfers = 64
     private let content: LocalContent
     private var transfers: [ObjectIdentifier: Transfer] = [:]
 
     init(content: LocalContent) { self.content = content }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+        guard transfers.count < Self.maximumActiveTransfers else {
+            let response = HTTPURLResponse(
+                url: urlSchemeTask.request.url ?? LocalContent.entryURL,
+                statusCode: 429,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Length": "0"]
+            )
+            if let response {
+                urlSchemeTask.didReceive(response)
+                urlSchemeTask.didFinish()
+            } else {
+                urlSchemeTask.didFailWithError(ShellError.unavailable)
+            }
+            return
+        }
         let plan = content.responsePlan(for: urlSchemeTask.request)
         let transfer = Transfer(owner: self, task: urlSchemeTask, plan: plan)
         transfers[ObjectIdentifier(urlSchemeTask)] = transfer
@@ -268,7 +290,9 @@ final class LocalSchemeHandler: NSObject, WKURLSchemeHandler {
                     while remaining > 0 {
                         try Task.checkCancellation()
                         let amount = Int(min(remaining, 64 * 1024))
-                        guard let data = try handle.read(upToCount: amount), !data.isEmpty else { break }
+                        guard let data = try handle.read(upToCount: amount), !data.isEmpty else {
+                            throw ShellError.unavailable
+                        }
                         remaining -= UInt64(data.count)
                         await self?.deliver(data)
                     }

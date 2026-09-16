@@ -54,6 +54,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
             "fullscreen": isFullscreen,
             "minimized": window?.isMiniaturized ?? false,
             "geometryGeneration": geometryGeneration,
+            "viewportCSS": ["width": dragSurface.bounds.width, "height": dragSurface.bounds.height],
+            "devicePixelRatio": window?.backingScaleFactor ?? 1,
             "safeArea": ["top": 0, "left": 0, "right": 0, "bottom": 0],
         ]
     }
@@ -104,6 +106,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         } catch {
             // A malformed or stale report must not retain a clickable old hit map.
             dragSurface.geometry.invalidate()
+            bridge.emitWindowState()
             throw error
         }
         return ["revision": dragSurface.geometry.revision,
