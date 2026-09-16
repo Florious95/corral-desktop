@@ -25,6 +25,19 @@ export function createInitialWorkspace({ tabs = [], activeUid = null, root = nul
 }
 
 /**
+ * 判断标签页是否为空白标签页
+ * 空白标签页：尚未绑定会话、没有 root 终端树的占位工作台
+ * @param {Object|null} tab
+ * @returns {boolean}
+ */
+export function isBlankTab(tab) {
+  if (!tab) return false;
+  if (tab.isBlank === true) return true;
+  if (tab.isBlank === false) return false;
+  return !tab.root && (!tab.activeUid || String(tab.activeUid).startsWith('tab-'));
+}
+
+/**
  * 遍历获取树中的所有叶子 uid（按先序/中序遍历）
  * @param {Object|null} node
  * @returns {string[]}
@@ -499,10 +512,12 @@ export function closeWorkspacePane(state, uid) {
     finalRoot = buildEqualRatioColumnsTree(remainingLeaves.map((k) => ({ kind: 'leaf', uid: k })));
   }
 
+  const isNowBlank = !finalRoot && !newActiveUid;
   const updatedTab = {
     ...currentTab,
     root: finalRoot,
     activeUid: newActiveUid,
+    isBlank: isNowBlank,
   };
 
   const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
@@ -753,6 +768,7 @@ export function serializeWorkspace(state) {
         uid: String(t.uid || t.id || `tab-${idx + 1}`),
         name: String(t.name || ''),
         pinned: !!t.pinned,
+        isBlank: isBlankTab(t),
         activeUid: t.activeUid ? String(t.activeUid) : null,
         root: sanitizeNode(t.root),
       })),
@@ -935,6 +951,7 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
     root: null,
     activeUid: null,
     pinned: false,
+    isBlank: true,
   };
 
   const tabList = Array.isArray(tabs) && tabs.length > 0
@@ -945,6 +962,8 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
           const effectiveUid = t.activeUid || (t.uid && !t.uid.startsWith('tab-') ? t.uid : null);
           const sanitizedRoot = t.root ? sanitizeNode(t.root) : (effectiveUid ? { kind: 'leaf', uid: effectiveUid } : null);
           const activeUid = effectiveUid || (sanitizedRoot ? getLeaves(sanitizedRoot)[0] : null);
+          const hasSession = !!(sanitizedRoot || activeUid);
+          const isBlank = t.isBlank !== undefined ? !!t.isBlank : !hasSession;
           return {
             id: tabId,
             uid: tabId,
@@ -952,6 +971,7 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
             root: sanitizedRoot,
             activeUid: activeUid ? String(activeUid) : null,
             pinned: !!t.pinned,
+            isBlank,
           };
         })
     : [initialTab];
@@ -970,8 +990,10 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
 /**
  * 点击【+】新建空白工作台标签页
  */
-export function createWorkspaceTab(state, { id = null, name = '', root = null, activeUid = null, pinned = false } = {}) {
+export function createWorkspaceTab(state, { id = null, name = '', root = null, activeUid = null, pinned = false, isBlank = undefined } = {}) {
   const tabId = id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const hasSession = !!(root || (activeUid && !String(activeUid).startsWith('tab-')));
+  const computedIsBlank = isBlank !== undefined ? !!isBlank : !hasSession;
   const newTab = {
     id: tabId,
     uid: tabId,
@@ -979,6 +1001,7 @@ export function createWorkspaceTab(state, { id = null, name = '', root = null, a
     root: root ? sanitizeNode(root) : null,
     activeUid: activeUid ? String(activeUid) : null,
     pinned: !!pinned,
+    isBlank: computedIsBlank,
   };
 
   const newTabs = [...(state.tabs || []), newTab];
@@ -1042,14 +1065,14 @@ export function openSessionInActiveTab(state, sessionUid) {
 
   // 1. 若已经在当前工作台的树中：仅聚焦
   if (findLeaf(currentTab.root, sessionUid)) {
-    const updatedTab = { ...currentTab, activeUid: sessionUid };
+    const updatedTab = { ...currentTab, activeUid: sessionUid, isBlank: false };
     const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
     return syncActiveTabFields({ ...state, tabs: updatedTabs });
   }
 
   // 2. 若当前工作台为空：创建根叶子
   if (!currentTab.root) {
-    const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid };
+    const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid, isBlank: false };
     const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
     return syncActiveTabFields({ ...state, tabs: updatedTabs });
   }
@@ -1063,24 +1086,23 @@ export function openSessionInActiveTab(state, sessionUid) {
     ? replaceLeaf(currentTab.root, targetLeaf, sessionUid)
     : { kind: 'leaf', uid: sessionUid };
 
-  const updatedTab = { ...currentTab, root: newRoot, activeUid: sessionUid };
+  const updatedTab = { ...currentTab, root: newRoot, activeUid: sessionUid, isBlank: false };
   const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
   return syncActiveTabFields({ ...state, tabs: updatedTabs });
 }
 
 /**
- * 智能会话切换与查重决策引擎（UI-SPEC §4.1.3，用户最新最高指示）
+ * 智能会话切换与空白选项卡接纳引擎（2026-09-16 用户最高指示与状态机重构）
  *
- * 1. 查重法则：全顶栏遍历所有 Tab，若已存在【单会话 Tab】其唯一会话正是 sessionUid：
- *    -> 直接高亮切换聚焦到该 Tab，绝不替换当前 Tab，彻底杜绝单会话 Tab 重复！
- * 2. 分屏窗口绝对保护：
- *    若当前选中的 Tab 已经是【多分屏工作台】（可见窗格数 >= 2）：
- *    -> 坚决不生效，直接 return state 原样返回！绝不挤占、绝不替换已有分屏中的任何窗格！
- * 3. 单会话替换与 Pin 保护：
- *    若当前 Tab 是未 Pin 的单会话窗口：
- *    -> 在当前 Tab 内原地替换为 sessionUid；
- *    若当前 Tab 已 Pin：
- *    -> 已 Pin 不可被破坏替换，自动新建一个独立工作台承载 sessionUid。
+ * 核心法则：
+ * 1. 空白选项卡接纳与固定：
+ *    - 用户点击顶部 `+` 新建空白选项卡后（或初始空白），当前激活 Tab 处于 `isBlankTab(currentTab) === true`；
+ *    - 此时点击左侧会话 `sessionUid`，将其绑定并固定到当前空白选项卡上，`isBlank` 转为 `false`，生成根叶子窗格并聚焦；
+ * 2. 非空白选项卡绝对不挤占（坚决稳如泰山）：
+ *    - 若当前激活 Tab 已经绑定了会话（`isBlankTab(currentTab) === false`）：
+ *      - 若当前 Tab 内已经包含 `sessionUid`（如多分屏窗格中已存在）：仅在当前 Tab 内部聚焦该窗格；
+ *      - 若当前 Tab 尚未包含该 `sessionUid`：绝对不修改、不覆盖、不挤占任何选项卡！不新建 Tab，不切换 Tab，直接原样返回 state！
+ *      - 确保用户连续快速点左侧列表时，上方的所有选项卡稳如泰山！
  *
  * @param {Object} state 多工作台状态
  * @param {string} sessionUid
@@ -1093,56 +1115,35 @@ export function smartOpenSession(state, sessionUid) {
   const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
   if (!currentTab) return state;
 
-  // 1. 刚性保护规则（最高优先级最前）：若当前选中的 Tab 已经是多分屏窗口（>= 2 个窗格），点击左侧坚决不生效！
-  // 严格直接 return 原状态，绝对零操作，不切 Tab、不改树、不挤占任何已有分屏！
-  if (currentTab.root) {
-    const curLeaves = getLeaves(currentTab.root);
-    if (curLeaves.length >= 2) {
-      return state;
-    }
-  }
-
-  // 2. 查重法则：检查全顶栏是否已存在单会话 Tab 刚好展示 sessionUid
-  const existingSingleTab = tabs.find((t) => {
-    if (!t) return false;
-    if (t.root) {
-      const leaves = getLeaves(t.root);
-      return leaves.length === 1 && leaves[0] === sessionUid;
-    }
-    return t.activeUid === sessionUid || t.uid === sessionUid;
-  });
-
-  if (existingSingleTab) {
-    // 直接切换到该已存在的单会话 Tab，避免产生重复 Tab
-    return switchWorkspaceTab(state, existingSingleTab.id || existingSingleTab.uid);
-  }
-
-  // 3. 当前是单会话窗口：
-  // 若当前 Tab 已经正好是 sessionUid，直接返回原状态，避免无意义重建
-  const currentLeaves = currentTab.root ? getLeaves(currentTab.root) : (currentTab.activeUid ? [currentTab.activeUid] : []);
-  if (currentLeaves.length === 1 && currentLeaves[0] === sessionUid && currentTab.activeUid === sessionUid) {
-    return state;
-  }
-
-  // 若当前 Tab 已 Pin，不可被替换，新建一个工作台
-  if (currentTab.pinned) {
-    return createWorkspaceTab(state, {
+  // 1. 若当前激活的 Tab 是空白卡：将 sessionUid 填入并绑定固定到当前空白卡中
+  if (isBlankTab(currentTab)) {
+    const updatedTab = {
+      ...currentTab,
       root: { kind: 'leaf', uid: sessionUid },
       activeUid: sessionUid,
+      isBlank: false,
+    };
+    const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+    return syncActiveTabFields({
+      ...state,
+      tabs: updatedTabs,
     });
   }
 
-  // 当前 Tab 未 Pin：在当前 Tab 内替换为 sessionUid
-  const updatedTab = {
-    ...currentTab,
-    root: { kind: 'leaf', uid: sessionUid },
-    activeUid: sessionUid,
-  };
-  const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-  return syncActiveTabFields({
-    ...state,
-    tabs: updatedTabs,
-  });
+  // 2. 当前激活 Tab 已绑定会话（非空白卡）：
+  // 若当前 Tab 内的二叉分屏树中已经包含了该 sessionUid（多分屏）：聚焦当前 Tab 内的对应窗格
+  if (currentTab.root && findLeaf(currentTab.root, sessionUid)) {
+    if (currentTab.activeUid !== sessionUid) {
+      const updatedTab = { ...currentTab, activeUid: sessionUid, isBlank: false };
+      const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
+      return syncActiveTabFields({ ...state, tabs: updatedTabs });
+    }
+    return state;
+  }
+
+  // 3. 用户核心诉求：当前 Tab 已有会话，且未包含该 sessionUid：
+  // 坚决不挤占、不修改当前选项卡，不新建选项卡，不切换选项卡！上方所有 Tab 稳如泰山！
+  return state;
 }
 
 /**
