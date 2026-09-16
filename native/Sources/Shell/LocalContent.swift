@@ -55,32 +55,24 @@ public struct LocalContent {
         } catch {
             return .error(statusCode: 404)
         }
-        guard values.isRegularFile == true, let rawSize = values.fileSize.map(Int64.init), rawSize >= 0 else {
+        guard values.isRegularFile == true, let size = values.fileSize.map(Int64.init), size >= 0 else {
             return .error(statusCode: 404)
         }
-        guard rawSize <= Self.maximumFileSize else {
+        guard size <= Self.maximumFileSize else {
             return .error(statusCode: 413)
         }
-
-        // WebKit does not execute an external ES module loaded from a custom
-        // WKURLSchemeHandler origin. Vite's single bundled entry has no static
-        // imports, so serve that entry as a classic script while retaining the
-        // agentmirror:// origin for bridge and asset isolation. Dynamic imports
-        // remain available for optional browser/Tauri paths.
-        let body = path == "/index.html" ? Self.classicEntryBody(file) : nil
-        let size = Int64(body?.count ?? Int(rawSize))
-        guard size <= Self.maximumFileSize else { return .error(statusCode: 413) }
 
         let mime = Self.mimeType(for: file.pathExtension)
         var headers = [
             "Content-Type": mime.type,
             "Content-Length": String(size),
             "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
             "X-Content-Type-Options": "nosniff",
         ]
         if let encoding = mime.encoding { headers["Content-Type"] = "\(mime.type); charset=\(encoding)" }
         guard let rangeHeader = Self.header(named: "Range", in: request) else {
-            return LocalResponsePlan(statusCode: 200, headers: headers, file: file, body: body,
+            return LocalResponsePlan(statusCode: 200, headers: headers, file: file,
                                      range: size == 0 ? nil : 0..<size, bodyAllowed: method == "GET")
         }
 
@@ -88,7 +80,7 @@ public struct LocalContent {
         case .multi:
             // Multipart ranges are deliberately not implemented. Returning a
             // complete 200 response is the frozen, non-multipart policy.
-            return LocalResponsePlan(statusCode: 200, headers: headers, file: file, body: body,
+            return LocalResponsePlan(statusCode: 200, headers: headers, file: file,
                                      range: size == 0 ? nil : 0..<size, bodyAllowed: method == "GET")
         case .malformed:
             return .error(statusCode: 400)
@@ -98,19 +90,9 @@ public struct LocalContent {
             let length = end - start + 1
             headers["Content-Length"] = String(length)
             headers["Content-Range"] = "bytes \(start)-\(end)/\(size)"
-            return LocalResponsePlan(statusCode: 206, headers: headers, file: file, body: body,
+            return LocalResponsePlan(statusCode: 206, headers: headers, file: file,
                                      range: start..<end + 1, bodyAllowed: method == "GET")
         }
-    }
-
-    private static func classicEntryBody(_ file: URL) -> Data? {
-        guard let source = try? String(contentsOf: file, encoding: .utf8) else { return nil }
-        var classic = source
-        classic = classic.replacingOccurrences(of: "<script type=\"module\" crossorigin", with: "<script defer")
-        classic = classic.replacingOccurrences(of: "<script type=\"module\"", with: "<script defer")
-        classic = classic.replacingOccurrences(of: " crossorigin", with: "")
-        guard classic != source else { return nil }
-        return Data(classic.utf8)
     }
 
     private func validOrigin(_ url: URL) -> Bool {
@@ -213,7 +195,6 @@ struct LocalResponsePlan {
     let statusCode: Int
     let headers: [String: String]
     let file: URL?
-    let body: Data?
     let range: Range<Int64>?
     let bodyAllowed: Bool
 
@@ -222,7 +203,7 @@ struct LocalResponsePlan {
         merged["Content-Length"] = "0"
         merged["X-Content-Type-Options"] = "nosniff"
         return LocalResponsePlan(statusCode: statusCode, headers: merged,
-                                 file: nil, body: nil, range: nil, bodyAllowed: false)
+                                 file: nil, range: nil, bodyAllowed: false)
     }
 }
 
@@ -298,20 +279,6 @@ final class LocalSchemeHandler: NSObject, WKURLSchemeHandler {
             task.didReceive(response)
             guard plan.bodyAllowed, let range = plan.range, !range.isEmpty else {
                 finish()
-                return
-            }
-            if let body = plan.body {
-                readTask = Task { @MainActor [weak self, body] in
-                    guard let self, !Task.isCancelled, self.isActive else { return }
-                    let start = Int(range.lowerBound)
-                    let end = Int(range.upperBound)
-                    guard start >= 0, end <= body.count, start < end else {
-                        self.fail()
-                        return
-                    }
-                    self.deliver(body.subdata(in: start..<end))
-                    self.finish()
-                }
                 return
             }
             guard let file = plan.file else { fail(); return }
