@@ -1,5 +1,7 @@
+import { nativeCapabilities } from '../core/nativeCapabilities.js';
+
 /**
- * Native macOS fullscreen (Tauri Overlay) is not document.fullscreenElement.
+ * Native macOS fullscreen (Tauri Overlay or Swift AppKit) is not document.fullscreenElement.
  * Also treat "inner size fills the display" as fullscreen — some zoom-fill
  * states leave isFullscreen() false while still covering the screen.
  */
@@ -13,6 +15,18 @@ export function fillsDisplay() {
 export async function watchFullscreen(onChange) {
   if (typeof window === 'undefined') return () => {};
   const emit = (fs) => onChange(!!(fs || fillsDisplay()));
+  if (nativeCapabilities.environment === 'swift') {
+    const apply = async () => {
+      let fs = false;
+      try { fs = await nativeCapabilities.window.isFullscreen(); } catch { fs = false; }
+      emit(fs);
+    };
+    await apply();
+    window.addEventListener('resize', apply);
+    return () => {
+      window.removeEventListener('resize', apply);
+    };
+  }
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const w = getCurrentWindow();

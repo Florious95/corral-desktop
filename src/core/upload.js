@@ -1,5 +1,7 @@
 /* Shared image upload boundary. Web tests may inject fetch/invoke; the .app
- * path uses the Tauri command so the WebView never opens the daemon socket. */
+ * path uses nativeCapabilities so the WebView never opens the daemon socket. */
+
+import { nativeCapabilities } from './nativeCapabilities.js';
 
 export class UploadError extends Error {
   constructor(code, message, status = 0) {
@@ -60,8 +62,25 @@ export async function uploadImage({ url, token, name, mime, bytes, nativeInvoke,
   const contentType = typeof mime === 'string' && mime.startsWith('image/') ? mime : 'application/octet-stream';
 
   let invokeFn = nativeInvoke;
-  if (!invokeFn && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-    ({ invoke: invokeFn } = await import('@tauri-apps/api/core'));
+  if (!invokeFn && nativeCapabilities.environment !== 'mock') {
+    try {
+      const path = await nativeCapabilities.upload.uploadHttp({
+        url: endpoint,
+        token,
+        filename,
+        mime: contentType,
+        bytes: data,
+      });
+      return checkPath(path);
+    } catch (e) {
+      if (e instanceof UploadError) throw e;
+      const message = String(e?.message || e || '上传失败');
+      if (/401|unauthorized|token/i.test(message)) throw new UploadError('unauthorized', '上传认证失败', 401);
+      if (/connect|network|timeout|refused|unreachable/i.test(message)) {
+        throw new UploadError('unreachable', '无法连接 daemon');
+      }
+      throw new UploadError('upload_failed', '上传失败');
+    }
   }
   if (invokeFn) {
     try {
