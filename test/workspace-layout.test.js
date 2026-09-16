@@ -502,64 +502,81 @@ test('workspaceLayout: equal columns 1:1:1 balancing eliminates 211 / 112 splits
   assert.equal(layoutMid.B.w, 300);
 });
 
-test('workspaceLayout: smartOpenSession blank-tab adoption and non-blank isolation', () => {
+test('workspaceLayout: three iron laws - dedup jump, preview slot, blank-tab commit', () => {
   // 1. 初始创建多工作台：包含一个空白 Tab 1
   let mw = createMultiWorkspace();
   assert.equal(mw.tabs.length, 1);
   assert.equal(isBlankTab(mw.tabs[0]), true);
 
-  // 2. 当前激活 Tab 为空白卡：点击左侧会话 s1 -> 填入并固定到 Tab 1
+  // 2. 第三铁律：当前激活 Tab 为空白卡，点击未打开会话 s1 -> 成功固化入驻到 Tab 1，转为常驻 Tab
   mw = smartOpenSession(mw, 's1');
   assert.equal(mw.tabs.length, 1);
   assert.equal(mw.activeUid, 's1');
   assert.deepEqual(getLeaves(mw.root), ['s1']);
   assert.equal(isBlankTab(mw.tabs[0]), false);
+  assert.equal(mw.previewUid, null);
 
-  // 3. 用户核心诉求一：当前激活 Tab 已经绑定了会话（非空白）！
-  // 连续快速点击其他会话 s2, s3, s4 -> 绝对不修改、不挤占任何选项卡！上方所有 Tab 稳如泰山！
-  const stateBefore = mw;
+  // 3. 第二铁律：当前激活 Tab 已绑定会话（非空白）！
+  // 用户在左侧点击未打开的会话 s2：
+  // -> 激活【虚空接纳槽（previewUid: 's2'）】：右侧主工作区立刻呈现 s2 终端供操作！
+  // -> 但上方已固化的 TabBar 绝不被修改、绝不被替换，绝对不增加常驻 Tab 挤占位置！
   mw = smartOpenSession(mw, 's2');
-  assert.strictEqual(mw, stateBefore, 'Clicking s2 must not alter non-blank tab');
-  mw = smartOpenSession(mw, 's3');
-  assert.strictEqual(mw, stateBefore, 'Clicking s3 must not alter non-blank tab');
-  assert.equal(mw.tabs.length, 1);
-  assert.equal(mw.activeUid, 's1');
+  assert.equal(mw.tabs.length, 1, 'TabBar must NOT append a permanent tab');
+  assert.equal(mw.tabs[0].activeUid, 's1', 'Tab 1 bound session must remain untouched');
+  assert.deepEqual(getLeaves(mw.tabs[0].root), ['s1'], 'Tab 1 root must remain s1');
+  assert.equal(mw.previewUid, 's2', 'Must enter scratch/preview slot');
+  assert.equal(mw.activeUid, 's2', 'Active pane must show s2 in workspace');
+  assert.deepEqual(getLeaves(mw.root), ['s2'], 'Stage must project s2 terminal');
 
-  // 4. 用户核心诉求二：用户只有点击【+】新增选项卡，并且该选项卡为空白时，点击会话才会固定到该空白选项卡！
-  mw = createWorkspaceTab(mw); // 新增空白 Tab 2
+  // 4. 连续快速点击未打开会话 s3：虚空槽即时切换至 s3，TabBar 依然稳如泰山！
+  mw = smartOpenSession(mw, 's3');
+  assert.equal(mw.tabs.length, 1, 'TabBar count remains 1');
+  assert.equal(mw.previewUid, 's3');
+  assert.equal(mw.activeUid, 's3');
+  assert.deepEqual(getLeaves(mw.root), ['s3']);
+
+  // 5. 第一铁律：全局唯一性与自动导航跳转！
+  // 此时在虚空预览槽（正在预览 s3）点击已经在 Tab 1 中打开过的 s1：
+  // -> 必须立刻清空虚空槽，自动跳转回 Tab 1，并将焦点定位至 s1 窗格！
+  mw = smartOpenSession(mw, 's1');
+  assert.equal(mw.activeTabId, mw.tabs[0].id, 'Must navigate back to Tab 1');
+  assert.equal(mw.previewUid, null, 'Preview slot cleared');
+  assert.equal(mw.activeUid, 's1', 'Focus restored to s1');
+  assert.deepEqual(getLeaves(mw.root), ['s1']);
+
+  // 6. 第三铁律：用户点击【+】显式新增空白选项卡 Tab 2！
+  mw = createWorkspaceTab(mw);
   assert.equal(mw.tabs.length, 2);
   assert.equal(mw.activeTabId, mw.tabs[1].id);
   assert.equal(isBlankTab(mw.tabs[1]), true);
+  assert.equal(mw.previewUid, null);
 
-  // 此时在空白 Tab 2 点击左侧会话 s2 -> 成功接纳并固定到 Tab 2
+  // 此时在当前空白 Tab 2 上点击未打开过的 s2：
+  // -> 成功【固化入驻】到 Tab 2，Tab 2 转为非空白常驻 Tab！
   mw = smartOpenSession(mw, 's2');
-  assert.equal(mw.tabs.length, 2);
+  assert.equal(mw.tabs.length, 2, 'Tab 2 is now committed');
   assert.equal(mw.activeTabId, mw.tabs[1].id);
   assert.equal(mw.activeUid, 's2');
-  assert.deepEqual(getLeaves(mw.root), ['s2']);
+  assert.deepEqual(getLeaves(mw.tabs[1].root), ['s2']);
   assert.equal(isBlankTab(mw.tabs[1]), false);
+  assert.equal(mw.previewUid, null);
 
-  // 5. 绑定后 Tab 2 变成非空白：再次点击 s3，不会挤占 Tab 2，也不会新建 Tab
-  const stateTab2 = mw;
-  mw = smartOpenSession(mw, 's3');
-  assert.strictEqual(mw, stateTab2, 'Tab 2 is now bound; clicking s3 must be strict NO-OP');
-
-  // 6. 分屏情况下的内部焦点切换 vs 不挤占保护：
-  // 在 Tab 2 内部进行多分屏 (s2 | s3)
+  // 7. 在 Tab 2 内部进行多分屏 (s2 | s3)
   mw = splitSessionInActiveTab(mw, 's2', 's3', 'right');
   assert.deepEqual(getLeaves(mw.root), ['s2', 's3']);
   assert.equal(mw.activeUid, 's3');
 
-  // 点击已经在当前 Tab 内部存在的 s2：仅在当前 Tab 内部切换焦点至 s2，不改变 Tab
-  mw = smartOpenSession(mw, 's2');
-  assert.equal(mw.activeTabId, mw.tabs[1].id);
-  assert.equal(mw.activeUid, 's2');
-  assert.deepEqual(getLeaves(mw.root), ['s2', 's3']);
+  // 8. 第一铁律在多分屏下的验证：
+  // 切换回 Tab 1 (仅含 s1)，此时点击多分屏中的 s3：
+  // -> 必须自动跨 Tab 导航跳转到 Tab 2，并聚焦到 s3 窗格！绝不重复打开！
+  mw = switchWorkspaceTab(mw, mw.tabs[0].id);
+  assert.equal(mw.activeTabId, mw.tabs[0].id);
+  assert.equal(mw.activeUid, 's1');
 
-  // 点击当前 Tab 内部不存在的 s4：多分屏绝对保护，坚决不挤占任何窗格，直接返回原状态
-  const stateSplit = mw;
-  mw = smartOpenSession(mw, 's4');
-  assert.strictEqual(mw, stateSplit, 'Clicking s4 while in split must not mutate split root');
+  mw = smartOpenSession(mw, 's3');
+  assert.equal(mw.activeTabId, mw.tabs[1].id, 'Must navigate across tabs to Tab 2 where s3 lives');
+  assert.equal(mw.activeUid, 's3', 'Must focus the s3 pane inside Tab 2 split tree');
+  assert.deepEqual(getLeaves(mw.root), ['s2', 's3']);
 });
 
 test('workspaceLayout: closing all panes in a tab restores isBlank status', () => {
@@ -642,7 +659,8 @@ test('workspaceLayout: focusWorkspacePane and ghost/duplicate tab elimination', 
 
   // 6. 防穿透：在 v2 模式下即使外部误调 openSession，也会安全委派至 smartOpenSession，绝不产生扁平幽灵 Tab
   let redirected = openSession(mw, 's3');
-  // s1|s2 是多分屏，smartOpenSession 刚性保护，直接返回原状态
-  assert.strictEqual(redirected, mw);
-  assert.equal(mw.tabs.some((t) => !t.root && !t.activeUid), false, 'Must never create empty ghost tab');
+  assert.equal(redirected.tabs.length, mw.tabs.length, 'TabBar must NOT append a permanent tab');
+  assert.equal(redirected.previewUid, 's3', 'Unopened session opens in preview slot');
+  assert.deepEqual(getLeaves(redirected.tabs[0].root), ['s1', 's2'], 'Tab 1 split tree remains intact');
+  assert.equal(redirected.tabs.some((t) => !t.root && !t.activeUid), false, 'Must never create empty ghost tab');
 });

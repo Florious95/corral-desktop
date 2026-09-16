@@ -932,8 +932,20 @@ export function saveWorkspaceToStorage(state, storage = (typeof localStorage !==
 function syncActiveTabFields(state) {
   const tabs = state.tabs || [];
   const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+
+  // 若处于虚空接纳槽（previewUid 存在），右侧即时映射该预览会话，上方的 tabs 稳如泰山
+  if (state.previewUid) {
+    return {
+      ...state,
+      activeTabId: currentTab ? (currentTab.id || currentTab.uid) : null,
+      activeUid: state.previewUid,
+      root: { kind: 'leaf', uid: state.previewUid },
+    };
+  }
+
   return {
     ...state,
+    previewUid: null,
     activeTabId: currentTab ? (currentTab.id || currentTab.uid) : null,
     activeUid: currentTab ? currentTab.activeUid : null,
     root: currentTab ? currentTab.root : null,
@@ -982,6 +994,7 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
 
   return syncActiveTabFields({
     version: 2,
+    previewUid: null,
     activeTabId: currentTabId,
     tabs: tabList,
   });
@@ -1007,6 +1020,7 @@ export function createWorkspaceTab(state, { id = null, name = '', root = null, a
   const newTabs = [...(state.tabs || []), newTab];
   return syncActiveTabFields({
     ...state,
+    previewUid: null,
     activeTabId: newTab.id,
     tabs: newTabs,
   });
@@ -1016,11 +1030,12 @@ export function createWorkspaceTab(state, { id = null, name = '', root = null, a
  * 切换选中的工作台标签页
  */
 export function switchWorkspaceTab(state, tabId) {
-  if (!tabId || state.activeTabId === tabId) return state;
+  if (!tabId) return state;
   const target = (state.tabs || []).find((t) => (t.id || t.uid) === tabId);
   if (!target) return state;
   return syncActiveTabFields({
     ...state,
+    previewUid: null,
     activeTabId: target.id || target.uid,
   });
 }
@@ -1048,6 +1063,7 @@ export function closeWorkspaceTab(state, tabId) {
 
   return syncActiveTabFields({
     ...state,
+    previewUid: null,
     activeTabId: nextActiveId,
     tabs: newTabs,
   });
@@ -1067,14 +1083,14 @@ export function openSessionInActiveTab(state, sessionUid) {
   if (findLeaf(currentTab.root, sessionUid)) {
     const updatedTab = { ...currentTab, activeUid: sessionUid, isBlank: false };
     const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-    return syncActiveTabFields({ ...state, tabs: updatedTabs });
+    return syncActiveTabFields({ ...state, previewUid: null, tabs: updatedTabs });
   }
 
   // 2. 若当前工作台为空：创建根叶子
   if (!currentTab.root) {
     const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid, isBlank: false };
     const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-    return syncActiveTabFields({ ...state, tabs: updatedTabs });
+    return syncActiveTabFields({ ...state, previewUid: null, tabs: updatedTabs });
   }
 
   // 3. 替换当前焦点窗格（或第一个窗格）
@@ -1088,21 +1104,22 @@ export function openSessionInActiveTab(state, sessionUid) {
 
   const updatedTab = { ...currentTab, root: newRoot, activeUid: sessionUid, isBlank: false };
   const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-  return syncActiveTabFields({ ...state, tabs: updatedTabs });
+  return syncActiveTabFields({ ...state, previewUid: null, tabs: updatedTabs });
 }
 
 /**
- * 智能会话切换与空白选项卡接纳引擎（2026-09-16 用户最高指示与状态机重构）
+ * 智能会话切换与虚空接纳槽引擎（三大铁律权威实现）
  *
- * 核心法则：
- * 1. 空白选项卡接纳与固定：
- *    - 用户点击顶部 `+` 新建空白选项卡后（或初始空白），当前激活 Tab 处于 `isBlankTab(currentTab) === true`；
- *    - 此时点击左侧会话 `sessionUid`，将其绑定并固定到当前空白选项卡上，`isBlank` 转为 `false`，生成根叶子窗格并聚焦；
- * 2. 非空白选项卡绝对不挤占（坚决稳如泰山）：
- *    - 若当前激活 Tab 已经绑定了会话（`isBlankTab(currentTab) === false`）：
- *      - 若当前 Tab 内已经包含 `sessionUid`（如多分屏窗格中已存在）：仅在当前 Tab 内部聚焦该窗格；
- *      - 若当前 Tab 尚未包含该 `sessionUid`：绝对不修改、不覆盖、不挤占任何选项卡！不新建 Tab，不切换 Tab，直接原样返回 state！
- *      - 确保用户连续快速点左侧列表时，上方的所有选项卡稳如泰山！
+ * 1. 第一铁律：全局唯一性与自动导航跳转（单实例与去重）
+ *    - 无论用户当前处于哪个 Tab（包括空白卡、普通卡、分屏卡），只要点击的会话已在某个 Tab 中打开：
+ *      -> 立即跳转到该 Tab 并聚焦该窗格！绝不重复打开，绝不无反应。
+ * 2. 第三铁律：显式空白卡是唯一的固化槽（Commit / Pin）
+ *    - 只有用户主动点击 `+` 新增了空白选项卡（且当前处于该空白卡）时：
+ *      -> 点击左侧未打开过的会话，该会话才正式【固化入驻】该选项卡，转为常驻 Tab。
+ * 3. 第二铁律：虚空接纳槽与右侧即时预览（快速浏览、不改 TabBar）
+ *    - 当前处于非空白 Tab，用户点击未打开过的会话：
+ *      -> 绝不修改、替换当前已固化的 Tab，TabBar 也绝不增加新 Tab 挤占位置！
+ *      -> 激活【虚空预览槽（previewUid）】：右侧工作区立刻呈现该会话供操作，上方 TabBar 纹丝不动！
  *
  * @param {Object} state 多工作台状态
  * @param {string} sessionUid
@@ -1112,11 +1129,31 @@ export function smartOpenSession(state, sessionUid) {
   if (!sessionUid || !state) return state;
 
   const tabs = state.tabs || [];
-  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
-  if (!currentTab) return state;
 
-  // 1. 若当前激活的 Tab 是空白卡：将 sessionUid 填入并绑定固定到当前空白卡中
-  if (isBlankTab(currentTab)) {
+  // -------------------------------------------------------------
+  // 第一铁律：全局唯一性与自动导航跳转（单实例去重与定位）
+  // -------------------------------------------------------------
+  // 遍历所有 Tab，检查该 sessionUid 是否已经在某个 Tab（包括单会话或多分屏）中打开
+  const targetTab = tabs.find((t) => {
+    if (!t) return false;
+    if (t.root && findLeaf(t.root, sessionUid)) return true;
+    return !t.root && t.activeUid === sessionUid;
+  });
+
+  if (targetTab) {
+    // 立即清空虚空槽，切换到该 Tab，并聚焦该窗格
+    const switched = switchWorkspaceTab({ ...state, previewUid: null }, targetTab.id || targetTab.uid);
+    return focusWorkspacePane(switched, sessionUid);
+  }
+
+  // -------------------------------------------------------------
+  // 该 sessionUid 尚未在任何 Tab 中打开
+  // -------------------------------------------------------------
+  const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
+
+  // 第三铁律：显式空白卡是唯一的固化槽（Commit / Pin）
+  // 只有当前激活的 Tab 是空白卡时，该会话才正式固化入驻成为常驻 Tab
+  if (currentTab && isBlankTab(currentTab)) {
     const updatedTab = {
       ...currentTab,
       root: { kind: 'leaf', uid: sessionUid },
@@ -1126,24 +1163,17 @@ export function smartOpenSession(state, sessionUid) {
     const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
     return syncActiveTabFields({
       ...state,
+      previewUid: null,
       tabs: updatedTabs,
     });
   }
 
-  // 2. 当前激活 Tab 已绑定会话（非空白卡）：
-  // 若当前 Tab 内的二叉分屏树中已经包含了该 sessionUid（多分屏）：聚焦当前 Tab 内的对应窗格
-  if (currentTab.root && findLeaf(currentTab.root, sessionUid)) {
-    if (currentTab.activeUid !== sessionUid) {
-      const updatedTab = { ...currentTab, activeUid: sessionUid, isBlank: false };
-      const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-      return syncActiveTabFields({ ...state, tabs: updatedTabs });
-    }
-    return state;
-  }
-
-  // 3. 用户核心诉求：当前 Tab 已有会话，且未包含该 sessionUid：
-  // 坚决不挤占、不修改当前选项卡，不新建选项卡，不切换选项卡！上方所有 Tab 稳如泰山！
-  return state;
+  // 第二铁律：虚空接纳槽与右侧即时预览（快速浏览、不改 TabBar）
+  // 当前处于非空白 Tab，点击未打开会话：右侧立刻展示终端供操作，顶栏 TabBar 纹丝不动！
+  return syncActiveTabFields({
+    ...state,
+    previewUid: sessionUid,
+  });
 }
 
 /**
@@ -1156,24 +1186,26 @@ export function splitSessionInActiveTab(state, targetUid, sessionUid, edge = 'ri
   const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
   if (!currentTab) return state;
 
-  if (!currentTab.root || edge === 'full') {
-    const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid };
+  const baseRoot = currentTab.root || (state.previewUid ? { kind: 'leaf', uid: state.previewUid } : null);
+
+  if (!baseRoot || edge === 'full') {
+    const updatedTab = { ...currentTab, root: { kind: 'leaf', uid: sessionUid }, activeUid: sessionUid, isBlank: false };
     const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-    return syncActiveTabFields({ ...state, tabs: updatedTabs });
+    return syncActiveTabFields({ ...state, previewUid: null, tabs: updatedTabs });
   }
 
-  const effectiveTarget = targetUid && findLeaf(currentTab.root, targetUid)
+  const effectiveTarget = targetUid && findLeaf(baseRoot, targetUid)
     ? targetUid
-    : (currentTab.activeUid && findLeaf(currentTab.root, currentTab.activeUid) ? currentTab.activeUid : getLeaves(currentTab.root)[0]);
+    : (currentTab.activeUid && findLeaf(baseRoot, currentTab.activeUid) ? currentTab.activeUid : getLeaves(baseRoot)[0]);
 
   if (!effectiveTarget) return state;
 
-  const nextRoot = dropNode(currentTab.root, sessionUid, effectiveTarget, edge);
+  const nextRoot = dropNode(baseRoot, sessionUid, effectiveTarget, edge);
   if (!nextRoot) return state;
 
-  const updatedTab = { ...currentTab, root: nextRoot, activeUid: sessionUid };
+  const updatedTab = { ...currentTab, root: nextRoot, activeUid: sessionUid, isBlank: false };
   const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
-  return syncActiveTabFields({ ...state, tabs: updatedTabs });
+  return syncActiveTabFields({ ...state, previewUid: null, tabs: updatedTabs });
 }
 
 /**
@@ -1255,6 +1287,9 @@ export function getAllWorkspaceSessions(state) {
     } else if (tab.activeUid) {
       set.add(tab.activeUid);
     }
+  }
+  if (state?.previewUid) {
+    set.add(state.previewUid);
   }
   return Array.from(set);
 }
