@@ -45,6 +45,46 @@ export function base64ToUint8Array(base64) {
 let rpcSeq = 0;
 const pendingRpc = new Map();
 
+let currentEpoch = null;
+let currentGeneration = 0;
+let currentWindowState = null;
+let surfaceRevision = 0;
+let bootstrapPromise = null;
+
+export function getSwiftState() {
+  return {
+    epoch: currentEpoch,
+    geometryGeneration: currentGeneration,
+    surfaceRevision,
+    windowState: currentWindowState,
+  };
+}
+
+export function resetSwiftStateForTests() {
+  currentEpoch = null;
+  currentGeneration = 0;
+  currentWindowState = null;
+  surfaceRevision = 0;
+  bootstrapPromise = null;
+}
+
+if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
+  window.__nativeEventListenerRegistered = true;
+  window.addEventListener('agentmirror:native', (e) => {
+    const detail = e?.detail;
+    if (detail) {
+      if (detail.epoch) currentEpoch = detail.epoch;
+      if (detail.event === 'window.state' && detail.payload) {
+        currentWindowState = detail.payload;
+        if (typeof detail.payload.geometryGeneration === 'number') {
+          currentGeneration = detail.payload.geometryGeneration;
+        }
+        window.dispatchEvent(new CustomEvent('agentmirror:window-state-updated', { detail: detail.payload }));
+      }
+    }
+  });
+}
+
 function ensureSwiftCallback() {
   if (typeof window !== 'undefined' && !window.__nativeCallback) {
     window.__nativeCallback = (id, result, error) => {
@@ -62,13 +102,18 @@ function ensureSwiftCallback() {
   }
 }
 
-async function callSwiftRPC(method, args = {}) {
+async function rawCallSwiftRPC(method, params = {}, { sendEpoch = false } = {}) {
   ensureSwiftCallback();
   const id = `req-${++rpcSeq}-${Date.now()}`;
-  const envelope = { v: 1, id, method, args };
+  const envelope = { v: 1, id, method, params };
+  if (sendEpoch && currentEpoch) {
+    envelope.epoch = currentEpoch;
+  }
   const handler = window.webkit?.messageHandlers?.native;
   if (!handler || typeof handler.postMessage !== 'function') {
-    throw new Error(`Swift native handler unavailable for method ${method}`);
+    const err = new Error(`Swift native handler unavailable for method ${method}`);
+    err.code = 'unavailable';
+    throw err;
   }
 
   try {
@@ -78,8 +123,10 @@ async function callSwiftRPC(method, args = {}) {
       const reply = await res;
       if (reply && typeof reply === 'object') {
         if (reply.ok === false) {
-          const err = new Error(reply.error?.message || 'RPC failed');
-          if (reply.error?.code) err.code = reply.error.code;
+          const code = reply.error?.code || 'unknown';
+          const msg = reply.error?.message || reply.error?.code || 'RPC failed';
+          const err = new Error(msg);
+          err.code = code;
           throw err;
         }
         return reply.result !== undefined ? reply.result : reply;
@@ -95,13 +142,47 @@ async function callSwiftRPC(method, args = {}) {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       pendingRpc.delete(id);
-      reject(new Error(`Swift RPC timeout for method ${method}`));
+      const err = new Error(`Swift RPC timeout for method ${method}`);
+      err.code = 'timeout';
+      reject(err);
     }, 15000);
     pendingRpc.set(id, {
       resolve: (val) => { clearTimeout(timeoutId); resolve(val); },
       reject: (err) => { clearTimeout(timeoutId); reject(err); },
     });
   });
+}
+
+export async function bootstrapSwift() {
+  if (bootstrapPromise) return bootstrapPromise;
+  bootstrapPromise = (async () => {
+    try {
+      const res = await rawCallSwiftRPC('bootstrap', {});
+      if (res && typeof res === 'object') {
+        currentEpoch = res.epoch || null;
+        if (res.window) {
+          currentWindowState = res.window;
+          if (typeof res.window.geometryGeneration === 'number') {
+            currentGeneration = res.window.geometryGeneration;
+          }
+        }
+      }
+      return res;
+    } catch (e) {
+      bootstrapPromise = null;
+      throw e;
+    }
+  })();
+  return bootstrapPromise;
+}
+
+async function callSwiftRPC(method, params = {}) {
+  if (method !== 'bootstrap') {
+    if (!currentEpoch) {
+      await bootstrapSwift();
+    }
+  }
+  return rawCallSwiftRPC(method, params, { sendEpoch: method !== 'bootstrap' });
 }
 
 function assertDevicesKey(key) {
@@ -132,6 +213,11 @@ export function setNativeEngineForTests(engine) {
 export function resetNativeEngineForTests() {
   testEngineOverride = null;
   mockSecureStore.clear();
+  currentEpoch = null;
+  currentGeneration = 0;
+  currentWindowState = null;
+  surfaceRevision = 0;
+  bootstrapPromise = null;
 }
 
 /**
@@ -285,7 +371,7 @@ export const nativeCapabilities = {
       if (testEngineOverride?.clipboard?.readImage) return testEngineOverride.clipboard.readImage();
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        const result = await callSwiftRPC('clipboard.readImage');
+        const result = await callSwiftRPC('clipboard.image', {});
         if (!result) return null;
         let bytes;
         if (result.bytes instanceof Uint8Array) {
@@ -322,7 +408,7 @@ export const nativeCapabilities = {
       if (testEngineOverride?.clipboard?.readFiles) return testEngineOverride.clipboard.readFiles();
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        const files = await callSwiftRPC('clipboard.readFiles');
+        const files = await callSwiftRPC('clipboard.files', {});
         if (files == null) return [];
         if (!Array.isArray(files)) throw new Error('剪贴板文件路径无效');
         return files;
@@ -363,12 +449,12 @@ export const nativeCapabilities = {
         const payload = {
           url,
           token,
-          deviceId,
+          deviceId: deviceId || '',
           filename: safeFilename,
           mime: safeMime,
           bytesBase64: bytesBase64 || uint8ArrayToBase64(u8),
         };
-        const result = await callSwiftRPC('upload.http', payload);
+        const result = await callSwiftRPC('upload', payload);
         const path = typeof result === 'string' ? result : result?.path;
         if (!path || typeof path !== 'string') {
           throw new Error('invalid_response: missing upload path');
@@ -418,7 +504,10 @@ export const nativeCapabilities = {
       if (testEngineOverride?.secureStore?.get) return testEngineOverride.secureStore.get(key);
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        return callSwiftRPC('secureStore.get', { key: 'devices' });
+        const res = await callSwiftRPC('devices.load', {});
+        if (Array.isArray(res)) return res;
+        if (res && Array.isArray(res.devices)) return res.devices;
+        return res || [];
       }
       if (env === 'tauri') {
         const { load } = await import('@tauri-apps/plugin-store');
@@ -433,7 +522,8 @@ export const nativeCapabilities = {
       if (testEngineOverride?.secureStore?.set) return testEngineOverride.secureStore.set(key, value);
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        await callSwiftRPC('secureStore.set', { key: 'devices', value });
+        const devices = Array.isArray(value) ? value : (value?.devices || []);
+        await callSwiftRPC('devices.save', { devices });
         return true;
       }
       if (env === 'tauri') {
@@ -451,21 +541,84 @@ export const nativeCapabilities = {
   },
 
   surface: {
-    async update({ viewportCSS, dragRects = [], exclusionRects = [] } = {}) {
+    async update(params = {}) {
       if (testEngineOverride?.surface?.update) {
-        return testEngineOverride.surface.update({ viewportCSS, dragRects, exclusionRects });
+        return testEngineOverride.surface.update(params);
       }
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        const vp = viewportCSS || {
+        if (!currentEpoch) {
+          await bootstrapSwift();
+        }
+
+        const vp = params.viewportCSS || {
           width: typeof window !== 'undefined' ? window.innerWidth : 0,
           height: typeof window !== 'undefined' ? window.innerHeight : 0,
         };
-        return callSwiftRPC('surface.update', {
-          viewportCSS: vp,
+        const dpr = (currentWindowState && typeof currentWindowState.devicePixelRatio === 'number')
+          ? currentWindowState.devicePixelRatio
+          : (params.devicePixelRatio || (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
+
+        const viewportWidth = (currentWindowState?.viewportCSS?.width && typeof currentWindowState.viewportCSS.width === 'number')
+          ? Math.round(currentWindowState.viewportCSS.width)
+          : Math.round(vp.width || 0);
+
+        const viewportHeight = (currentWindowState?.viewportCSS?.height && typeof currentWindowState.viewportCSS.height === 'number')
+          ? Math.round(currentWindowState.viewportCSS.height)
+          : Math.round(vp.height || 0);
+
+        const dragRects = (params.dragRects || []).map((r) => ({
+          x: Math.max(0, Math.round(r.x)),
+          y: Math.max(0, Math.round(r.y)),
+          width: Math.max(0, Math.round(r.width)),
+          height: Math.max(0, Math.round(r.height)),
+        }));
+
+        const exclusionRects = (params.exclusionRects || []).map((r) => ({
+          x: Math.max(0, Math.round(r.x)),
+          y: Math.max(0, Math.round(r.y)),
+          width: Math.max(0, Math.round(r.width)),
+          height: Math.max(0, Math.round(r.height)),
+        }));
+
+        // chromeRect must strictly contain all dragRects
+        let maxDragY = 38;
+        for (const r of dragRects) {
+          if (r.y + r.height > maxDragY) {
+            maxDragY = r.y + r.height;
+          }
+        }
+        const chromeRect = params.chromeRect ? {
+          x: Math.max(0, Math.round(params.chromeRect.x)),
+          y: Math.max(0, Math.round(params.chromeRect.y)),
+          width: Math.max(0, Math.round(params.chromeRect.width)),
+          height: Math.max(0, Math.round(params.chromeRect.height)),
+        } : {
+          x: 0,
+          y: 0,
+          width: viewportWidth,
+          height: Math.min(viewportHeight, maxDragY),
+        };
+
+        const generation = typeof params.geometryGeneration === 'number'
+          ? params.geometryGeneration
+          : currentGeneration;
+
+        const payload = {
+          phase: params.phase || 'arm',
+          geometryGeneration: generation,
+          revision: typeof params.revision === 'number' ? params.revision : ++surfaceRevision,
+          viewportCSS: {
+            width: viewportWidth,
+            height: viewportHeight,
+          },
+          devicePixelRatio: params.devicePixelRatio || (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1,
           dragRects,
           exclusionRects,
-        });
+          chromeRect,
+        };
+
+        return callSwiftRPC('surface.update', payload);
       }
       return { ok: true };
     },

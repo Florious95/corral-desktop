@@ -61,6 +61,12 @@ test('collectSurfaceGeometry properly separates dragRects and exclusionRects', (
   assert.equal(geom.exclusionRects.length, 1);
   assert.deepEqual(geom.exclusionRects[0], { x: 100, y: 6, width: 26, height: 26 });
 
+  // chromeRect must contain all dragRects
+  assert.equal(geom.phase, 'arm');
+  assert.ok(geom.chromeRect);
+  assert.equal(geom.chromeRect.width, 1200);
+  assert.ok(geom.chromeRect.height >= 38);
+
   if (originalWindow !== undefined) globalThis.window = originalWindow;
   else delete globalThis.window;
 });
@@ -91,7 +97,7 @@ test('createSurfaceGeometryWatcher debounces updates by SURFACE_DEBOUNCE_MS', as
   watcher.dispose();
 });
 
-test('nativeCapabilities.surface.update dispatches RPC in Swift environment', async () => {
+test('nativeCapabilities.surface.update dispatches RPC in Swift environment with complete 8-field payload', async () => {
   resetNativeEngineForTests();
   const originalWindow = globalThis.window;
   const calls = [];
@@ -102,6 +108,15 @@ test('nativeCapabilities.surface.update dispatches RPC in Swift environment', as
         native: {
           postMessage: async (envelope) => {
             calls.push(envelope);
+            if (envelope.method === 'bootstrap') {
+              return {
+                ok: true,
+                result: {
+                  epoch: 'test-epoch-999',
+                  window: { geometryGeneration: 3 },
+                },
+              };
+            }
             if (envelope.method === 'surface.update') {
               return { ok: true, result: { applied: true } };
             }
@@ -121,15 +136,64 @@ test('nativeCapabilities.surface.update dispatches RPC in Swift environment', as
   });
 
   assert.deepEqual(updateResult, { applied: true });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, 'surface.update');
-  assert.equal(calls[0].args.viewportCSS.width, 1400);
-  assert.equal(calls[0].args.dragRects.length, 1);
-  assert.equal(calls[0].args.exclusionRects.length, 1);
+  // Call 0: bootstrap, Call 1: surface.update
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].method, 'bootstrap');
+  assert.equal(calls[1].method, 'surface.update');
+  assert.equal(calls[1].epoch, 'test-epoch-999');
+
+  const p = calls[1].params;
+  assert.equal(p.phase, 'arm');
+  assert.equal(p.geometryGeneration, 3);
+  assert.ok(typeof p.revision === 'number' && p.revision > 0);
+  assert.deepEqual(p.viewportCSS, { width: 1400, height: 900 });
+  assert.equal(typeof p.devicePixelRatio, 'number');
+  assert.equal(p.dragRects.length, 1);
+  assert.equal(p.exclusionRects.length, 1);
+  assert.deepEqual(p.chromeRect, { x: 0, y: 0, width: 1400, height: 38 });
 
   if (originalWindow !== undefined) globalThis.window = originalWindow;
   else delete globalThis.window;
   resetNativeEngineForTests();
+});
+
+test('createSurfaceGeometryWatcher only deduplicates after successful ACK and retries on failure', async () => {
+  let attempts = 0;
+  let succeeds = false;
+
+  const mockContainer = {
+    querySelectorAll: () => [],
+  };
+
+  const watcher = createSurfaceGeometryWatcher({
+    container: mockContainer,
+    debounceMs: 10,
+    onUpdate: async () => {
+      attempts += 1;
+      if (!succeeds) {
+        throw new Error('RPC transient failure');
+      }
+      return { ok: true };
+    },
+  });
+
+  // Attempt 1: Fails
+  watcher.triggerImmediately();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(attempts, 1);
+
+  // Attempt 2: Same geometry scheduled again. Because previous failed, it MUST retry!
+  succeeds = true;
+  watcher.triggerImmediately();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(attempts, 2);
+
+  // Attempt 3: Same geometry scheduled again after success. It MUST be deduplicated!
+  watcher.triggerImmediately();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(attempts, 2);
+
+  watcher.dispose();
 });
 
 test('nativeCapabilities.surface.update returns safe ok in Mock environment without side-effects', async () => {

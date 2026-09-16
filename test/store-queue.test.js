@@ -166,3 +166,28 @@ test('generic latest-wins queue retries after a failed write on a later request'
   await queue.idle();
   assert.deepEqual(values, [{ n: 1 }]);
 });
+
+test('loadDevicesSecure propagates underlying errors without silently returning empty array', async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { __TAURI_INTERNALS__: {} };
+
+  setSecureStoreForTests({
+    load: async () => ({
+      get: async () => {
+        const err = new Error('keychain unavailable');
+        err.code = 'unavailable';
+        throw err;
+      },
+    }),
+  });
+
+  await assert.rejects(
+    loadDevicesSecure(),
+    (err) => err.code === 'unavailable' || err.message.includes('keychain unavailable'),
+  );
+
+  setSecureStoreForTests(null);
+  if (originalWindow !== undefined) globalThis.window = originalWindow;
+  else delete globalThis.window;
+});
+
