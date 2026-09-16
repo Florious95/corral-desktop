@@ -519,11 +519,13 @@ export const nativeCapabilities = {
 
     async set(key, value) {
       assertDevicesKey(key);
+      if (!Array.isArray(value)) {
+        throw new Error('secureStore: devices must be an array');
+      }
       if (testEngineOverride?.secureStore?.set) return testEngineOverride.secureStore.set(key, value);
       const env = detectNativeEnvironment();
       if (env === 'swift') {
-        const devices = Array.isArray(value) ? value : (value?.devices || []);
-        await callSwiftRPC('devices.save', { devices });
+        await callSwiftRPC('devices.save', { devices: value });
         return true;
       }
       if (env === 'tauri') {
@@ -549,6 +551,21 @@ export const nativeCapabilities = {
       if (env === 'swift') {
         if (!currentEpoch) {
           await bootstrapSwift();
+        }
+
+        const generation = typeof params.geometryGeneration === 'number'
+          ? params.geometryGeneration
+          : currentGeneration;
+
+        const rev = typeof params.revision === 'number' ? params.revision : ++surfaceRevision;
+
+        if (params.phase === 'disarm') {
+          const disarmPayload = {
+            phase: 'disarm',
+            geometryGeneration: generation,
+            revision: rev,
+          };
+          return callSwiftRPC('surface.update', disarmPayload);
         }
 
         const vp = params.viewportCSS || {
@@ -600,14 +617,10 @@ export const nativeCapabilities = {
           height: Math.min(viewportHeight, maxDragY),
         };
 
-        const generation = typeof params.geometryGeneration === 'number'
-          ? params.geometryGeneration
-          : currentGeneration;
-
         const payload = {
           phase: params.phase || 'arm',
           geometryGeneration: generation,
-          revision: typeof params.revision === 'number' ? params.revision : ++surfaceRevision,
+          revision: rev,
           viewportCSS: {
             width: viewportWidth,
             height: viewportHeight,
