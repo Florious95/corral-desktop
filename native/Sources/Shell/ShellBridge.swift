@@ -1,8 +1,9 @@
 import AppKit
 import WebKit
 
-public enum ShellError: String, Error {
+public enum ShellError: String, Error, Sendable {
     case invalidRequest = "invalid_request"
+    case staleGeometry = "stale_geometry"
     case unsupported, unavailable, timeout, cancelled
     case tooLarge = "too_large"
     case permissionDenied = "permission_denied"
@@ -25,11 +26,20 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     let services: (any ShellServiceHandling)?
     private(set) var epoch = UUID().uuidString
     private var seen: Set<String> = []
+    private var seenOrder: [String] = []
     private var pending: [String: (Task<Void, Never>, @MainActor @Sendable (Any?, String?) -> Void)] = [:]
     private var ready = false
     private var sequence = 0
-    static let windowMethods: Set<String> = ["bootstrap", "window.getState", "window.isFullscreen", "window.setFullscreen", "window.toggleFullscreen", "window.minimize", "window.close", "surface.update"]
-    static let serviceMethods: Set<String> = ["devices.load", "devices.save", "clipboard.image", "clipboard.files", "upload", "migration.loadUI", "migration.saveUI"]
+
+    static let windowMethods: Set<String> = [
+        "bootstrap", "window.getState", "window.isFullscreen", "window.setFullscreen",
+        "window.toggleFullscreen", "window.minimize", "window.close", "surface.update"
+    ]
+    static let serviceMethods: Set<String> = [
+        "devices.load", "devices.save", "clipboard.image", "clipboard.files", "upload",
+        "migration.loadUI", "migration.saveUI"
+    ]
+
     init(services: (any ShellServiceHandling)?) { self.services = services }
 
     func reset() {
@@ -41,33 +51,49 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         epoch = UUID().uuidString
         seen.removeAll()
+        seenOrder.removeAll()
         ready = false
         sequence = 0
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
-        guard message.frameInfo.isMainFrame, LocalContent.isEntry(message.frameInfo.request.url),
-              let owner, message.webView === owner.webView, owner.acceptsMessages else {
-            replyHandler(nil, "permission_denied"); return
+        guard message.frameInfo.isMainFrame,
+              LocalContent.isEntry(message.frameInfo.request.url),
+              let owner,
+              message.webView === owner.webView,
+              owner.acceptsMessages else {
+            replyHandler(nil, "permission_denied")
+            return
         }
-        guard let request = message.body as? [String: Any], let id = request["id"] as? String, !id.isEmpty, id.utf8.count <= 128 else {
-            replyHandler(nil, "invalid_request"); return
+        guard let request = message.body as? [String: Any],
+              let id = request["id"] as? String,
+              !id.isEmpty,
+              id.utf8.count <= 128 else {
+            replyHandler(nil, "invalid_request")
+            return
         }
         do {
             guard Set(request.keys).isSubset(of: ["v", "id", "epoch", "method", "params", "args"]),
-                  let version = request["v"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(), version == 1,
-                  request["epoch"] == nil || request["epoch"] as? String == epoch,
+                  let version = request["v"] as? NSNumber,
+                  CFGetTypeID(version) != CFBooleanGetTypeID(),
+                  version == 1,
                   !(request["params"] != nil && request["args"] != nil),
                   let method = request["method"] as? String,
                   let params = (request["params"] ?? request["args"]) as? [String: Any],
-                  JSONSerialization.isValidJSONObject(request) else { throw ShellError.invalidRequest }
-            // Epoch is mandatory for geometry; legacy #121 window requests remain compatible.
-            if method == "surface.update", request["epoch"] as? String != epoch { throw ShellError.invalidRequest }
-            guard try JSONSerialization.data(withJSONObject: request).count <= 1_048_576 else { throw ShellError.tooLarge }
-            guard !seen.contains(id), seen.count < 4096, pending.count < 64 else { throw ShellError.invalidRequest }
-            guard Self.windowMethods.contains(method) || Self.serviceMethods.contains(method) else { throw ShellError.unsupported }
-            seen.insert(id)
+                  JSONSerialization.isValidJSONObject(request) else {
+                throw ShellError.invalidRequest
+            }
+            if method != "bootstrap" && (Self.serviceMethods.contains(method) || method == "surface.update") {
+                guard request["epoch"] as? String == epoch else { throw ShellError.staleGeometry }
+            }
+            guard JSONSerialization.data(withJSONObject: request).count <= 1_048_576,
+                  !seen.contains(id),
+                  pending.count < 64,
+                  Self.windowMethods.contains(method) || Self.serviceMethods.contains(method) else {
+                throw ShellError.invalidRequest
+            }
+            remember(id)
             let generation = epoch
             let task = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -83,20 +109,35 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
             pending[id] = (task, replyHandler)
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(method == "upload" ? 20 : 5))
-                guard let self, generation == self.epoch, let (task, _) = self.pending[id] else { return }
+                guard let self, generation == self.epoch,
+                      let (task, _) = self.pending[id] else { return }
                 task.cancel()
                 self.finish(id, response: self.failure(id: id, code: .timeout))
             }
-        } catch { replyHandler(failure(id: id, code: error as? ShellError ?? .invalidRequest), nil) }
+        } catch {
+            replyHandler(failure(id: id, code: error as? ShellError ?? .invalidRequest), nil)
+        }
+    }
+
+    private func remember(_ id: String) {
+        seen.insert(id)
+        seenOrder.append(id)
+        if seenOrder.count > 4096, let oldest = seenOrder.first {
+            seenOrder.removeFirst()
+            seen.remove(oldest)
+        }
     }
 
     private func finish(_ id: String, response: [String: Any]) {
         guard let (_, reply) = pending.removeValue(forKey: id) else { return }
         reply(response, nil)
     }
+
     private func failure(id: String, code: ShellError) -> [String: Any] {
-        ["v": 1, "epoch": epoch, "id": id, "ok": false, "error": ["code": code.rawValue, "message": code.rawValue]]
+        ["v": 1, "epoch": epoch, "id": id, "ok": false,
+         "error": ["code": code.rawValue, "message": code.rawValue]]
     }
+
     private func dispatch(_ method: String, params: [String: Any]) async throws -> Any {
         guard let owner else { throw ShellError.unavailable }
         if Self.serviceMethods.contains(method) {
@@ -110,14 +151,17 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
             return ["v": 1, "epoch": epoch, "runtime": "swift",
                     "methods": Array(Self.windowMethods.union((services?.availableMethods ?? []).intersection(Self.serviceMethods))).sorted(),
                     "window": owner.windowState,
-                    "accessibility": ["reduceTransparency": NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
-                                      "increaseContrast": NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast]] as [String: Any]
+                    "accessibility": [
+                        "reduceTransparency": NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
+                        "increaseContrast": NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+                    ]] as [String: Any]
         case "surface.update":
             guard ready else { throw ShellError.unavailable }
             return try owner.updateSurface(params)
         case "window.setFullscreen":
             let key = params["fullscreen"] != nil ? "fullscreen" : "flag"
-            guard Set(params.keys) == [key], let flag = params[key] as? NSNumber,
+            guard Set(params.keys) == [key],
+                  let flag = params[key] as? NSNumber,
                   CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw ShellError.invalidRequest }
             try owner.setFullscreen(flag.boolValue)
             return NSNull()
@@ -136,12 +180,17 @@ final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
             return NSNull()
         }
     }
+
     func emitWindowState() {
         guard ready, let owner, owner.acceptsMessages else { return }
         sequence += 1
-        let event: [String: Any] = ["v": 1, "epoch": epoch, "event": "window.state", "seq": sequence, "payload": owner.windowState]
+        let event: [String: Any] = ["v": 1, "epoch": epoch, "event": "window.state",
+                                    "seq": sequence, "payload": owner.windowState]
         Task { @MainActor [weak owner] in
-            _ = try? await owner?.webView.callAsyncJavaScript("window.dispatchEvent(new CustomEvent('agentmirror:native', {detail: event}))", arguments: ["event": event], in: nil, contentWorld: .page)
+            _ = try? await owner?.webView.callAsyncJavaScript(
+                "window.dispatchEvent(new CustomEvent('agentmirror:native', {detail: event}))",
+                arguments: ["event": event], in: nil, contentWorld: .page
+            )
         }
     }
 }
