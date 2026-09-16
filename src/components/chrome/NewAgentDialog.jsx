@@ -75,7 +75,10 @@ export default function NewAgentDialog({
           <div className="chr-dialog-title">新建 Agent</div>
           <div className="chr-dialog-sub">在「{spaceName}」中创建</div>
 
+          <label className="chr-label" htmlFor="new-agent-name">任务名称</label>
           <input
+            id="new-agent-name"
+            name="new-agent-name"
             className="chr-input"
             autoFocus
             required
