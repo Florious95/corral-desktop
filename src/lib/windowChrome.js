@@ -1,3 +1,5 @@
+import { nativeCapabilities } from '../core/nativeCapabilities.js';
+
 /**
  * Hover stadium chrome (user-confirmed mockup 2026-08-22).
  * Hide delay matches mockup.html (160ms), not instant mouseleave.
@@ -57,12 +59,11 @@ export async function runWindowChrome(kind, api) {
 }
 
 export async function desktopWindowApi() {
-  const { getCurrentWindow } = await import('@tauri-apps/api/window');
-  const w = getCurrentWindow();
   return {
-    close: () => w.close(),
-    minimize: () => w.minimize(),
-    isFullscreen: () => w.isFullscreen(),
-    setFullscreen: (v) => w.setFullscreen(v),
+    close: () => nativeCapabilities.window.close(),
+    minimize: () => nativeCapabilities.window.minimize(),
+    isFullscreen: () => nativeCapabilities.window.isFullscreen(),
+    setFullscreen: (v) => nativeCapabilities.window.setFullscreen(v),
+    startDragging: () => nativeCapabilities.window.startDragging(),
   };
 }

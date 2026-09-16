@@ -1,4 +1,5 @@
 import { isLocalUrl } from './local.js';
+import { nativeCapabilities } from './nativeCapabilities.js';
 
 /*
  * localStorage persistence (CLIENT-CONTRACT §4).
@@ -17,6 +18,10 @@ export const SECURE_STORE_FILE = 'devices.json';
 
 export function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+export function isNativeDesktop() {
+  return nativeCapabilities.environment === 'swift' || isTauri();
 }
 
 export const PREFIX = 'agentmirror.desktop.v1.';
@@ -85,13 +90,13 @@ function normalizeDevices(raw) {
 /** @returns {{id:string,name:string,url:string,token:string}[]} tokens included — internal use only. */
 export function loadDevices(storage) {
   // Desktop shell: never read pairing material from localStorage (UI-SPEC §7.4).
-  if (isTauri()) return [];
+  if (isNativeDesktop()) return [];
   return normalizeDevices(readJson(storage, KEYS.devices));
 }
 
 export function saveDevices(devices, storage) {
   const payload = devices.map((d) => ({ id: d.id, name: d.name, url: d.url, token: d.token }));
-  if (isTauri()) {
+  if (isNativeDesktop()) {
     queueSecureSave(payload);
     return true;
   }
@@ -205,10 +210,16 @@ let secureStoreLocker = lockSecureStore;
 
 /** Desktop hydrate. Tests inject a fake backend through setSecureStoreForTests. */
 export async function loadDevicesSecure() {
-  if (!isTauri()) return [];
+  if (!isNativeDesktop()) return [];
   try {
-    const s = await secureStoreLoader();
-    const devices = normalizeDevices(await s.get('devices'));
+    let devicesRaw;
+    if (secureStoreLoader !== pluginStore) {
+      const s = await secureStoreLoader();
+      devicesRaw = await s.get('devices');
+    } else {
+      devicesRaw = await nativeCapabilities.secureStore.get('devices');
+    }
+    const devices = normalizeDevices(devicesRaw);
     secureSaveQueue.prime(devices);
     return devices;
   } catch {
@@ -217,10 +228,14 @@ export async function loadDevicesSecure() {
 }
 
 async function writeSecureDevices(payload) {
-  const s = await secureStoreLoader();
-  await s.set('devices', payload);
-  await s.save();
-  await secureStoreLocker();
+  if (secureStoreLoader !== pluginStore) {
+    const s = await secureStoreLoader();
+    await s.set('devices', payload);
+    await s.save();
+    await secureStoreLocker();
+  } else {
+    await nativeCapabilities.secureStore.set('devices', payload);
+  }
 }
 
 let secureSaveQueue = createLatestWinsQueue(writeSecureDevices);
@@ -236,7 +251,7 @@ export function setSecureStoreForTests(backend) {
 }
 
 function queueSecureSave(devices) {
-  if (isTauri()) secureSaveQueue.enqueue(devices);
+  if (isNativeDesktop()) secureSaveQueue.enqueue(devices);
 }
 
 /** Await all queued secure-store work; useful for deterministic shell tests. */
