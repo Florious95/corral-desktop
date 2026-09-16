@@ -421,12 +421,15 @@ export default function App({ seedDevices } = {}) {
     };
   }, [dm, selected]);
 
+  const [selectedAgentKey, setSelectedAgentKey] = useState(null);
+
   /* ——— 会话动作 ——— */
   const openAgent = useCallback((key) => {
     if (dragCtrl.current?.suppressClickUntil && Date.now() < dragCtrl.current.suppressClickUntil) {
       return;
     }
     geomTrace('activate', { ref: key });
+    setSelectedAgentKey(key);
     setWorkspace((prev) => smartOpenSession(prev, key));
   }, []);
 
@@ -445,6 +448,7 @@ export default function App({ seedDevices } = {}) {
     if (dragCtrl.current?.suppressClickUntil && Date.now() < dragCtrl.current.suppressClickUntil) {
       return;
     }
+    setSelectedAgentKey(null);
     setWorkspace((prev) => switchWorkspaceTab(prev, uid));
   }, []);
 
@@ -455,6 +459,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const handleCreateTab = useCallback(() => {
+    setSelectedAgentKey(null);
     setWorkspace((prev) => createWorkspaceTab(prev));
   }, []);
 
@@ -858,7 +863,7 @@ export default function App({ seedDevices } = {}) {
             onAgentMenu={handleAgentMenu}
             onOpenAgent={openAgent}
             onAgentPointerDown={handleAgentPointerDown}
-            activeUid={workspace.activeUid}
+            activeUid={selectedAgentKey || workspace.activeUid}
             deviceLabel={deviceLabel}
             anyDeviceOnline={anyDeviceOnline}
             onToggleDevices={() => setDevicesOpen((v) => !v)}

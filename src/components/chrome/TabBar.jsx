@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, PlusIcon } from '../../lib/icons.jsx';
-import { getLeaves } from '../../lib/workspaceLayout.js';
+import { getLeaves, isBlankTab } from '../../lib/workspaceLayout.js';
 
 /**
  * 计算标签页对应的实时运行状态（支持多分屏与单会话秒级联动）
@@ -127,9 +127,12 @@ export default function TabBar({
           const activeTitle = agent ? agent.title : (tab.activeUid || tab.uid);
           const leaves = (tab.root && typeof tab.root === 'object') ? getLeaves(tab.root) : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
 
+          const isBlank = isBlankTab(tab);
           let title;
           if (tab.name) {
             title = tab.name;
+          } else if (isBlank) {
+            title = '新工作台';
           } else if (tab.activeUid || agent) {
             title = leaves.length > 1 ? `${activeTitle} (${leaves.length})` : activeTitle;
           } else if (tab.uid && !tab.uid.startsWith('tab-')) {
@@ -142,15 +145,16 @@ export default function TabBar({
           const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
           const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
           const status = agent?.state || agent?.status || 'unknown';
-          const finalStatus = getTabStatus(tab, leaves, agentsByUid, agent);
+          const finalStatus = isBlank ? 'unknown' : getTabStatus(tab, leaves, agentsByUid, agent);
 
           return (
             <div
               key={tabKey}
               data-tab-uid={tabKey}
               data-pinned="false"
+              data-blank={isBlank ? 'true' : undefined}
               data-tauri-drag-region="false"
-              className={`tb-tab${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
+              className={`tb-tab${isBlank ? ' is-blank' : ''}${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
               title={subtitle}
               role="tab"
               aria-selected={isActive}
