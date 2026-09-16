@@ -31,6 +31,7 @@ final class LocalContentTests: XCTestCase {
         let full = content.responsePlan(for: request())
         XCTAssertEqual(full.statusCode, 200)
         XCTAssertEqual(full.headers["Content-Type"], "text/html; charset=utf-8")
+        XCTAssertEqual(full.headers["Access-Control-Allow-Origin"], "*")
         XCTAssertEqual(full.headers["Content-Length"], "10")
         XCTAssertEqual(full.range?.count, 10)
 
@@ -53,19 +54,16 @@ final class LocalContentTests: XCTestCase {
         XCTAssertFalse(head.bodyAllowed)
     }
 
-    func testEntryRewritesViteModuleTagForCustomSchemeExecution() throws {
+    func testEntryPreservesViteModuleTagForCustomSchemeStreaming() throws {
         let html = "<html><head><script type=\"module\" crossorigin src=\"./entry.js\"></script><link rel=\"stylesheet\" crossorigin href=\"./app.css\"></head><body><div id=\"root\"></div></body></html>"
         try Data(html.utf8).write(to: root.appendingPathComponent("index.html"))
 
         let content = try LocalContent(distURL: root)
         let plan = content.responsePlan(for: request())
-        let body = try XCTUnwrap(plan.body)
-        let rewritten = try XCTUnwrap(String(data: body, encoding: .utf8))
-        XCTAssertFalse(rewritten.contains("type=\"module\""))
-        XCTAssertFalse(rewritten.contains(" crossorigin"))
-        XCTAssertTrue(rewritten.contains("<script defer src=\"./entry.js\">"))
-        XCTAssertEqual(plan.headers["Content-Length"], String(body.count))
-        XCTAssertEqual(plan.range, 0..<Int64(body.count))
+        XCTAssertEqual(plan.file, root.appendingPathComponent("index.html"))
+        XCTAssertEqual(plan.headers["Content-Length"], String(html.utf8.count))
+        XCTAssertEqual(plan.range, 0..<Int64(html.utf8.count))
+        XCTAssertEqual(plan.statusCode, 200)
     }
 
     func testMissingMalformedAndBinaryResourcesHaveSafeResponses() throws {
