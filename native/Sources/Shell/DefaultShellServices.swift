@@ -11,7 +11,7 @@ import Services
 open class DefaultShellServices: ShellServiceHandling {
     public static let shared = DefaultShellServices()
 
-    public let namespace: KeychainNamespace
+    public let namespace: DeviceStoreNamespace
     public let availableMethods: Set<String> = [
         "devices.load", "devices.save",
         "secureStore.get", "secureStore.set",
@@ -26,7 +26,7 @@ open class DefaultShellServices: ShellServiceHandling {
     private let clipboardService: ClipboardService
 
     public init(
-        namespace: KeychainNamespace = .currentApp,
+        namespace: DeviceStoreNamespace = .currentApp,
         deviceStore: DeviceStore? = nil,
         uploadService: UploadService = .shared,
         clipboardService: ClipboardService? = nil
