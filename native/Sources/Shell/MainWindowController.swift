@@ -23,12 +23,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         bridge = ShellBridge(services: services ?? DefaultShellServices.shared)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")
         webView = WKWebView(frame: .zero, configuration: config)
+        webView.setValue(false, forKey: "drawsBackground")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "AgentMirror"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
         window.minSize = NSSize(width: 1100, height: 700)
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = false

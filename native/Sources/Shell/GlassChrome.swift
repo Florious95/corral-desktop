@@ -14,7 +14,7 @@ public final class GlassChrome: NSView {
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
-        translatesAutoresizingMaskIntoConstraints = false
+        autoresizingMask = [.width, .height]
         setupMaterial()
         NotificationCenter.default.addObserver(
             self,
@@ -29,10 +29,18 @@ public final class GlassChrome: NSView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
+    public override func layout() {
+        super.layout()
+        fallback.frame = bounds
+        solidFallback.frame = bounds
+        glassContainer?.frame = bounds
+        glassView?.frame = bounds
+    }
+
     private func setupMaterial() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
-        fallback.material = .headerView
+        fallback.material = .sidebar
         fallback.blendingMode = .behindWindow
         fallback.state = .active
         fallback.autoresizingMask = [.width, .height]
@@ -61,7 +69,7 @@ public final class GlassChrome: NSView {
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         usesOpaqueFallback = reduceTransparency || increaseContrast
-        fallback.isHidden = usesSystemGlass || usesOpaqueFallback
+        fallback.isHidden = usesOpaqueFallback
         glassContainer?.isHidden = !usesSystemGlass || usesOpaqueFallback
         solidFallback.isHidden = !usesOpaqueFallback
         solidFallback.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
