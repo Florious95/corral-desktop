@@ -21,11 +21,15 @@ test('App does not wire TerminalPane onResize to a second network resize', () =>
   const terminalPane = source('src/components/terminal/TerminalPane.jsx');
   assert.match(terminalPane, /onResizeRef\.current\?\.\(rows, cols\)/);
   assert.match(terminalPane, /clientRef\.current\?\.subscribe\(target, act\.rows, act\.cols/);
+  assert.match(terminalPane, /lastSubscribe/);
+  assert.match(terminalPane, /skipped: 'same_geometry'/);
 });
 
 test('TerminalPane requests a same-grid snapshot when delta writes overflow', () => {
   const terminalPane = source('src/components/terminal/TerminalPane.jsx');
   assert.match(terminalPane, /onWriteBackpressure:/);
-  assert.match(terminalPane, /gate\.noteSent\(grid\.rows, grid\.cols\)/);
-  assert.match(terminalPane, /'write_backpressure'/);
+  assert.match(terminalPane, /sendIfNeeded\(\{ type: 'subscribe', rows: grid\.rows, cols: grid\.cols \}, 'write_backpressure'/);
+  const listenerAttach = terminalPane.indexOf('const off = attach ? attach(handleBinary) : null;');
+  const open = terminalPane.indexOf('view.open();');
+  assert.ok(listenerAttach >= 0 && listenerAttach < open, 'binary frame listener attaches before initial subscribe');
 });

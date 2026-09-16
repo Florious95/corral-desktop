@@ -110,8 +110,9 @@ export default function TerminalPane({
     });
     const gate = new SameWidthController();
     let firstSub = true;
+    let lastSubscribe = null;
     let view;
-    const sendIfNeeded = (act, reason) => {
+    const sendIfNeeded = (act, reason, { force = false } = {}) => {
       const fit = view?.lastFit || {};
       geomTrace('derived', {
         ref: target,
@@ -135,7 +136,22 @@ export default function TerminalPane({
         });
         return;
       }
-      clientRef.current?.subscribe(target, act.rows, act.cols, reason);
+      const subscribeKey = `${target}:${act.rows}x${act.cols}`;
+      if (!force && lastSubscribe === subscribeKey) {
+        geomTrace('subscribe', {
+          ref: target,
+          rows: act.rows,
+          cols: act.cols,
+          reason,
+          ok: false,
+          skipped: 'same_geometry',
+          ...bookOf(target),
+        });
+        return;
+      }
+      const sent = clientRef.current?.subscribe(target, act.rows, act.cols, reason);
+      if (sent === false) return;
+      lastSubscribe = subscribeKey;
       gate.noteSent(act.rows, act.cols);
     };
     view = new TerminalView(host, {
@@ -149,15 +165,14 @@ export default function TerminalPane({
       onWriteBackpressure: () => {
         const grid = gate.grid;
         if (!grid) return;
-        gate.noteSent(grid.rows, grid.cols);
-        clientRef.current?.subscribe(target, grid.rows, grid.cols, 'write_backpressure');
+        // A recovery subscribe is intentional even at the same geometry; all
+        // ordinary settled-grid callbacks still pass through the dedupe gate.
+        sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'write_backpressure', { force: true });
       },
       onHistoryBoundary: () => loadHistory(),
       onData: (data) => pump.onData(data),
       onBinary: (data) => pump.onBinary(data),
     });
-    view.open();
-    viewRef.current = view;
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
     });
@@ -251,7 +266,10 @@ export default function TerminalPane({
     const attach = subRef.current || (c && typeof c.onBinary === 'function' ? (fn) => c.onBinary(fn) : null);
     const off = attach ? attach(handleBinary) : null;
 
-    // A: 首订走 onResize（fit/webgl 落定后的 debounce），点开瞬间的过渡宽度不下订。
+    // The frame listener must be live before open() can report its initial grid
+    // and trigger the first subscribe.
+    viewRef.current = view;
+    view.open();
 
     const ro = new ResizeObserver(() => view.fit());
     ro.observe(host);

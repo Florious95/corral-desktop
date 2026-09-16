@@ -14,6 +14,7 @@ import { project, migrateLegacyPanes, getLeaves } from '../../lib/workspaceLayou
  * @param {Object|null} [props.root]                  二叉分屏树 root
  * @param {Array<{uid: string, pinned: boolean}>} [props.tabs] 全局 Tab 列表
  * @param {string|null} [props.activeUid]             当前焦点会话 uid
+ * @param {string|null} [props.previewUid]            虚空预览槽会话 uid
  * @param {Map<string, Object>} [props.agentByKey]    会话数据映射表
  * @param {(agent: Object) => JSX.Element} props.renderPane 渲染终端内容
  * @param {(uid: string) => void} [props.onFocusPane] 聚焦窗格
@@ -25,6 +26,7 @@ export default function SplitPanes({
   root = null,
   tabs = [],
   activeUid = null,
+  previewUid = null,
   agentByKey = new Map(),
   renderPane,
   onFocusPane,
@@ -80,7 +82,7 @@ export default function SplitPanes({
   const lastRects = useRef(new Map());
 
   useEffect(() => {
-    const validTabs = new Set(
+    const validUids = new Set(
       (tabs && tabs.length > 0)
         ? tabs.flatMap((t) => {
             if (t.root) return getLeaves(t.root);
@@ -89,17 +91,20 @@ export default function SplitPanes({
           })
         : (panes && panes.length > 0 ? panes.map((p) => p.key) : visibleUids)
     );
+    // previewUid lives outside workspace.tabs until it is committed to a tab.
+    // Keep it resident so the first click can mount its TerminalPane immediately.
+    if (previewUid) validUids.add(previewUid);
 
     setResidentUids((prev) => {
-      const filtered = prev.filter((uid) => validTabs.has(uid));
+      const filtered = prev.filter((uid) => validUids.has(uid));
       const existing = new Set(filtered);
-      const toAdd = visibleUids.filter((uid) => !existing.has(uid) && validTabs.has(uid));
+      const toAdd = visibleUids.filter((uid) => !existing.has(uid) && validUids.has(uid));
       if (toAdd.length === 0 && filtered.length === prev.length) {
         return prev;
       }
       return [...filtered, ...toAdd];
     });
-  }, [tabs, panes, visibleUids]);
+  }, [tabs, panes, previewUid, visibleUids]);
 
   // 记录每个可见窗格的最新非零矩形（供移入后台时保持尺寸，避免坍缩为 0 或 display:none）
   for (const uid of visibleUids) {

@@ -77,6 +77,8 @@ test('resize 上报合并成一次：连续 fit 只回调最终几何', async ()
   view.open();                                  // 800/8=100 列, 400/16=25 行
   assert.deepEqual(view.term.cols, 100);
   assert.deepEqual(view.term.rows, 25);
+  assert.deepEqual(calls.resize, [[25, 100]], '首订几何就绪后立即上报');
+  calls.resize.length = 0;
 
   container.clientWidth = 640;                  // 80 列
   view.fit();

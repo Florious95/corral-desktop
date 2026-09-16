@@ -66,6 +66,15 @@ test('B: settled width change re-subscribes (resize would no-op)', () => {
   assert.deepEqual(g.settle(39, 50), { type: 'subscribe', rows: 39, cols: 50 });
 });
 
+test('same settled geometry does not emit a duplicate subscribe action', () => {
+  const g = new SameWidthController();
+  assert.deepEqual(g.settle(24, 80), { type: 'subscribe', rows: 24, cols: 80 });
+  g.noteSent(24, 80);
+  g.acceptSnapshot();
+  assert.deepEqual(g.settle(24, 80), { type: 'none' });
+  assert.deepEqual(g.nextAction(), { type: 'none' });
+});
+
 test('open → window width → split: every painted snapshot matches that grid', () => {
   const g = new SameWidthController();
   const painted = [];

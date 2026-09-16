@@ -4,7 +4,7 @@
  * 保留 web 版 TerminalView 的全部语义，只换实现底座：
  *   - snapshot → reset() + write()（清屏重建；游标锚 ESC[row;colH 在字节尾，必须整段原样喂）
  *   - delta    → write()（追加）
- *   - resize   → 120ms debounce 合并后回调（服务端每次真 reflow 都补一帧 snapshot，不合并会闪）
+ *   - 首次几何 → 立即回调；后续 resize → 120ms debounce 合并（服务端每次真 reflow 都补一帧 snapshot，不合并会闪）
  *   - 滚到顶   → onHistoryBoundary()，由调用方去拉协议 scrollback
  *
  * ⛔ 不引 @xterm/addon-fit：仓库装的是 @xterm/xterm@6.0.0，addon-fit@0.11 面向 xterm5 的私有
@@ -144,7 +144,7 @@ export class TerminalView {
   }
 
   /**
-   * 按容器像素重算 rows/cols。首帧立刻落到格子上；之后 120ms 内的抖动只记目标，
+   * 按容器像素重算 rows/cols。首帧立刻落到格子并上报订阅；之后 120ms 内的抖动只记目标，
    * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
    * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
    */
@@ -167,8 +167,12 @@ export class TerminalView {
     this._pendingCols = cols;
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {
+      const initialFit = !this._hasFit;
       this._hasFit = true;
-      this._commitGrid(cols, rows, { reportDelay: true });
+      // The first settled grid is the subscription handshake; do not make it
+      // wait for the resize debounce. `immediate` is reserved for renderer
+      // changes and keeps the normal post-initial debounce semantics.
+      this._commitGrid(cols, rows, { reportDelay: !initialFit });
       return;
     }
     if (cols === this.term.cols && rows === this.term.rows) {
