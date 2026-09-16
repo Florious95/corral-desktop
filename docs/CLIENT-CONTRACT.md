@@ -68,6 +68,14 @@ level2_subscribe/unsubscribe/frame/heartbeat、pane_mode_changed、scroll_wheel�
 `input.bytes` 在桌面薄 codec 中以标准 RFC 4648 base64 编码，必须非空且不超过 1 MiB；
 它与 `keys`、`text`/`attachment_path` 三类载荷互斥。
 
+生命周期扩展也由桌面薄 codec 负责，保持版本与字段白名单校验，不修改 core：
+`auth_ack.payload.agent_launchers` 是当前连接设备的能力广告，元素为
+`{provider, display_name, supports_bypass, naming}`；`create_agent` 请求携带
+`{req_id, workspace, anchor_ref, provider, name, bypass}`，结果为
+`create_agent_result {req_id, ok, ref, name, naming, reason}`；`close_session` 请求携带
+`{req_id, ref}`，结果为 `close_session_result {req_id, ok, reason}`。`ref` 是不透明会话引用，
+关闭请求使用裸 `ref`（不是带设备前缀的 uid），所有请求不自动重放。
+
 ### 1.2 连接边界
 
 `src/core/client.js` 继承实际 core Client。认证、重连退避、listing/seq 连续性、
@@ -150,6 +158,8 @@ client/protocol 测试验证桌面薄适配。`node scripts/core-module-graph.mj
 | `keys(ref, key)` | `reqId \| null` | 单个键名字符串 |
 | `scrollback(ref, fromLine, count)` | `reqId \| null` | 未 READY 直接返回 `null` |
 | `resize(ref, rows, cols)` | `bool` | 未 READY 返回 `false` |
+| `createAgent({workspace, anchor_ref, provider, name, bypass})` | `reqId \| null` | 仅 READY 发送；成功后等权威 listing 再打开 |
+| `closeSession(ref)` | `reqId \| null` | 仅 READY 发送；成功后等权威 listing 移除 |
 | `subscribeLevel2(cwd)` / `unsubscribeLevel2()` | `bool` | §1.2 补丁 |
 
 只读属性:`isReady`、`state`、`activeRefs`(`string[]`)、`workspaces`、`sessionsByRef`(`Map`)、`session(ref)`、`lastSeq`。
@@ -159,7 +169,8 @@ client/protocol 测试验证桌面薄适配。`node scripts/core-module-graph.mj
 ```js
 export class DeviceManager {
   constructor({ storage = globalThis.localStorage, wsFactory,
-                onModelChange, onDeviceChange, onBinary, onInputResult, onError })
+                onModelChange, onDeviceChange, onBinary, onInputResult,
+                onLifecycleResult, onCapabilityChange, onError })
 
   // —— 设备增删改 ——
   addDevice({ name, url, token })      // → deviceId(crypto.randomUUID);落盘;默认 checked=true
@@ -185,6 +196,10 @@ export class DeviceManager {
   keys(uid, key)                       // → { deviceId, reqId } | null
   scrollback(uid, fromLine, count)     // → { deviceId, reqId } | null
   resize(uid, rows, cols)              // → bool
+  createAgent({ deviceId, workspace, anchorRef, provider, name, bypass })
+                                      // → { deviceId, reqId } | null
+  closeSession(uid)                   // → { deviceId, reqId } | null; uid 仅用于路由
+  getAgentLaunchers(deviceId)         // → launcher[];断线时为空
 
   // —— 二级状态流 ——
   subscribeLevel2(spaceKey)            // 一台设备同一时刻只能订一个 cwd(硬约束,见 2.5)
@@ -225,6 +240,8 @@ AggregatedSession = {
 - `onDeviceChange(devices)` —— 任一设备 `onStateChange` / `onConnectionIssue` / 增删改后触发。
 - `onBinary({ deviceId, uid, frame })` —— **必须包 deviceId**;底层 `frame.ref` 单独用会串设备。
 - `onInputResult({ deviceId, reqId, ok, reason })`
+- `onLifecycleResult({ deviceId, kind, reqId, payload })` —— create/close 结果原样传递，UI 以权威 listing 收敛。
+- `onCapabilityChange(deviceId)` —— auth_ack 能力广告变化；断线/重连期间清空。
 - `onError({ deviceId, code, message })` —— 来自 `onLocalError` 与 `error` 帧。⛔ message 里不得拼 token。
 
 ### 2.5 level2 的硬约束
@@ -539,7 +556,8 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
     `attach_preview {ref,path}`，不注册 `input_ack`，不发 `input.attachment_path` 或 `input.text`，也不自动 Enter。
     图片留在远端 CLI 输入框，用户后续真实回车才沿裸 Enter 路由提交。Cmd+V 始终只发 `input.text`；
     Ctrl+V 纯文本不发帧；主区不再挂载底部图片条、图片加号或键位说明，路径不得进入 `input.text`。
-15. **协议 v1 不支持远程创建 Agent**。「新建 Agent」对话框的创建按钮 → toast
-    「当前 daemon 协议不支持远程创建 Agent」。没有对应帧类型,别去发明。
+15. **生命周期结果不是权威目录。** `create_agent_result(ok=true)` 只提供新会话的 opaque `ref`，必须等
+    `listing/list_delta` 确认该 ref 后才打开；`close_session_result(ok=true)` 只确认请求受理，必须等
+    authoritative removed delta 后再清理本地 workspace、Tab、pane 与订阅。断线/超时不自动重试，旧能力广告在断线时清空。
 16. **不要引用外部工作树的绝对路径**。构建仅消费本仓 gitlink 管理的 `deps/corral-core`；既有夹具留在 `test/testdata/`；
     `/Volumes/nvme/Projects/远程Agent安卓/` 只读,且不能成为本仓构建期依赖。

@@ -36,7 +36,9 @@ function GroupHeader({ open, onToggle, working = false, children }) {
  * @param {string[]} props.openKeys                    当前在分裂列里的 Agent.key
  * @param {Object<string,boolean>} [props.closing]     正在播关闭动画的 Agent.key
  * @param {(e:MouseEvent, spaceKey:string) => void} props.onSpaceMenu
+ * @param {(spaceKey:string) => void} [props.onNewAgent]
  * @param {(e:MouseEvent, agentKey:string) => void} props.onAgentMenu
+ * @param {(agent:Object) => void} [props.onCloseAgent]
  * @param {(key:string) => void} props.onOpenAgent
  * @param {string} props.deviceLabel                   §7.2 规则算好的底部文案
  * @param {boolean} props.anyDeviceOnline
@@ -58,7 +60,9 @@ export default function Sidebar({
   openKeys,
   closing,
   onSpaceMenu,
+  onNewAgent,
   onAgentMenu,
+  onCloseAgent,
   onOpenAgent,
   onAgentPointerDown,
   activeUid = null,
@@ -97,6 +101,7 @@ export default function Sidebar({
             selected={selected}
             onSelect={onSelect}
             onContextMenu={onSpaceMenu}
+            onNewAgent={onNewAgent}
             multiDevice={multiDevice}
           />
         ) : null}
@@ -114,6 +119,7 @@ export default function Sidebar({
             closing={closing}
             onOpen={onOpenAgent}
             onContextMenu={onAgentMenu}
+            onClose={onCloseAgent}
             onPointerDown={onAgentPointerDown}
             multiDevice={multiDevice}
           />

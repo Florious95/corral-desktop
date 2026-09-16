@@ -454,19 +454,20 @@ src/
 /**
  * @param {boolean} open
  * @param {string}  spaceName                     目标 Space 显示名
+ * @param {{provider:string,display_name:string,supports_bypass:boolean,naming:string}[]} launchers
+ * @param {boolean} loading
  * @param {(v:{name:string,provider:string,bypass:boolean}) => void} onCreate
  * @param {() => void} onCancel
  */
 ```
-内部状态：`name:''`、`provider:'claude-code'`、`bypass:false`（每次 open 重置）。
+内部状态：`name:''`、`provider:''`、`bypass:false`（每次 open 重置）；厂家只来自当前设备 `auth_ack.agent_launchers`。
 
 - **scrim**：`position:fixed; inset:0; z-index:50; background:var(--scrim); backdrop-filter:var(--scrim-blur); animation:menuIn var(--d-hover) ease-out`；点击 = `onCancel`。
 - **卡片**：`position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:51; width:420px; background:var(--glass-dialog); backdrop-filter:var(--blur-dialog); border-radius:var(--r-14); box-shadow:var(--shadow-dialog); padding:20px; animation:menuIn var(--d-dialog) var(--ease)`。
 - 标题 `新建 Agent`（`--fs-15`/700/`margin-bottom:2px`）；副标题 `在「{spaceName}」中创建`（`--fs-12`/`--text-muted`/`margin-bottom:14px`）。
-- 名称输入框：placeholder `任务名称（可留空）`，`autoFocus`，样式同 §4.3 输入框。
-- 小标题 `选择厂家`：`font-size:var(--fs-115); font-weight:600; color:var(--text-muted); margin-bottom:8px`。
-- **厂家网格**：`display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px`。7 项（4+3 两行）：
-  `claude-code/Claude Code`、`codex/Codex`、`grok/Grok`、`opencode/OpenCode`、`cursor/Cursor`、`zai/Z Code`、`kimi/Kimi Code`。
+- 名称输入框：placeholder `任务名称`，`autoFocus`，样式同 §4.3 输入框；必须非空、≤64 Unicode 字符且不得含控制字符，否则禁用创建并给出错误提示。
+- 小标题 `选择 Agent`：`font-size:var(--fs-115); font-weight:600; color:var(--text-muted); margin-bottom:8px`。
+- **厂家网格**：`launchers.map(...)` 动态渲染当前设备广告的 provider/display_name；不得维护静态厂家数组。
   格子：`display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 4px 8px; border-radius:var(--r-9); cursor:pointer; transition:background var(--d-hover),box-shadow var(--d-hover)`；未选 `background:transparent; box-shadow:var(--ring-tile)`；选中 `background:var(--hover-4); box-shadow:var(--ring-tile-sel)`；hover `background:var(--hover-2)`。图标 `<ProviderIcon size={20} active/>`，名字 `font-size:var(--fs-105); color:var(--icon-strong); white-space:nowrap`。
 - **Bypass 行**：`display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:var(--r-9); background:var(--fill-subtle); margin-bottom:16px`。
   - 左文：`Bypass permissions`（`--fs-125`/600/`var(--warn-text)`）+ `允许 Agent 不经确认执行 shell 命令`（`--fs-11`/`--text-muted`/`margin-top:1px`）。
@@ -474,7 +475,13 @@ src/
 - **按钮行**：`display:flex; justify-content:flex-end; gap:8px`。
   - 次要按钮：`padding:7px 14px; border-radius:var(--r-8); font-size:var(--fs-13); font-weight:600; color:var(--icon-strong); cursor:pointer`；hover `background:var(--hover-4)`。
   - 主按钮：`padding:7px 16px; border-radius:var(--r-8); font-size:var(--fs-13); font-weight:600; color:#fff; background:var(--ink-800); cursor:pointer`；hover `background:var(--ink-900)`；active `background:#000`。
-- **「创建」行为（协议裁定）**：`onCreate` 由 App 实现为「关闭对话框 + `toast('当前 daemon 协议不支持远程创建 Agent')`」。协议 v1 无远程创建能力，**不要**发任何帧。
+- **Bypass 行**：仅当前 launcher 的 `supports_bypass=true` 时渲染；其余 provider 强制传 `bypass:false`。
+- **创建中**：提交后按钮显示 `创建中…`、保留对话框并禁止重复提交/取消；收到成功 result 后仍须等待 authoritative listing/list_delta 包含新 ref，再关闭对话框并聚焦新 Agent。
+- **「创建」行为（协议裁定 2026-09-17）**：App 通过已认证 WebSocket 发送 `create_agent`；失败 toast 保留表单；错误帧/断连不假结算，受控超时解除 loading。
+
+### 4.4.1 `chrome/CloseAgentDialog.jsx`
+
+受控二次确认弹层，props 为 `open`、`agent`、`loading`、`onConfirm`、`onCancel`。复用 §4.4 的 scrim/card/button token；展示「关闭 Agent」及终止风险提示。取消、Esc、scrim 点击只调用 `onCancel`，确认才调用 `onConfirm`；不得调用原生 `window.confirm`。发送请求后按钮禁用并显示 `关闭中…`，服务端权威删除前不改变 Agent 行与工作区。
 
 ### 4.5 `chrome/ContextMenu.jsx`
 
@@ -528,7 +535,9 @@ src/
  * @param {Agent[]} agents                        已按 selected 过滤后的可见集合
  * @param {string[]} openKeys                     当前在分裂列里的 Agent.key
  * @param {(e:MouseEvent, spaceKey:string) => void} onSpaceMenu
+ * @param {(spaceKey:string) => void} [onNewAgent]
  * @param {(e:MouseEvent, agentKey:string) => void} onAgentMenu
+ * @param {(agent:Object) => void} [onCloseAgent]
  * @param {(key:string) => void} onOpenAgent
  * @param {string} deviceLabel                    §7.2 规则算好的底部文案
  * @param {boolean} anyDeviceOnline
@@ -557,6 +566,7 @@ src/
  * @param {string} selected
  * @param {(key:string) => void} onSelect
  * @param {(e:MouseEvent, key:string) => void} onContextMenu
+ * @param {(spaceKey:string) => void} [onNewAgent]
  * @param {boolean} multiDevice
  */
 ```
@@ -566,7 +576,7 @@ src/
 - **两个虚拟行置顶**（不可右键，`onContextMenu` 只 `preventDefault`）：
   1. `all` / `All Spaces` / `<GridIcon size={15} stroke="var(--icon-strong)"/>` / count = 可见 Agent 总数
   2. `fav` / `收藏` / `<StarIcon size={15} fill="var(--amber)"/>` / count = 收藏数
-- **真实 Space 行**：图标 `<FolderIcon size={15} stroke="var(--icon)"/>`。
+- **真实 Space 行**：图标 `<FolderIcon size={15} stroke="var(--icon)"/>`；hover 时显示 `<PlusIcon/>`，点击只打开动态能力的新建 Agent 对话框。
 - 行样式：`display:flex; align-items:center; gap:10px; height:32px; flex:none; box-sizing:border-box; padding:0 10px; border-radius:var(--r-7); font-size:var(--fs-135); cursor:pointer; transition:background var(--d-hover); animation:rowIn var(--d-toggle) ease-out`；选中 `background:var(--sel-bg); font-weight:600`，未选 `background:transparent; font-weight:400`；hover `background:var(--hover-5)`。
 - 名字 span：`overflow:hidden; text-overflow:ellipsis; white-space:nowrap`。
 - 右侧（从右往左）：count `font-size:var(--fs-12); color:var(--text-muted); font-weight:400; flex:none`，其左依次是
@@ -583,6 +593,7 @@ src/
  * @param {Object<string,boolean>} closing  key → 正在播关闭动画
  * @param {(key:string) => void} onOpen
  * @param {(e:MouseEvent, key:string) => void} onContextMenu
+ * @param {(agent:Object) => void} [onClose]
  * @param {boolean} multiDevice
  * @param {string} emptyHint                空态第二行文案
  */
@@ -614,7 +625,7 @@ src/
 - **第一行**：`display:flex; align-items:center; gap:8px; font-size:var(--fs-13); font-weight:600; min-width:0`
   - `<ProviderIcon provider={provider} size={18} active={state==='working'||state==='blocked'}/>`
   - title span（省略号）
-  - 尾部容器 `margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`。两者可同时出现（对勾在左，星在右）。
+  - 尾部容器 `margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；hover 右侧提供 `关闭 Agent` X 按钮并触发二次确认。两者可同时出现（对勾在左，星在右）。
 - **第二行**：`display:flex; align-items:center; gap:6px; font-size:var(--fs-11); color:var(--text-muted); margin-top:3px`
   - **状态点** `8px` 圆，`border-radius:var(--r-pill); flex:none`：
     | state | 样式 | title |
@@ -744,8 +755,8 @@ src/
 | 收藏 / 取消收藏 | star / starFill | 未收藏 `var(--text)`；已收藏 `var(--amber-deep)` | 翻转 fav 并持久化 |
 | 关闭 | x | `var(--danger)` | **`separator:true`**（上边框 + `margin-top:4px`）。行为见下 |
 
-**「关闭」的语义（协议偏差裁定）**：协议 v1 **没有** kill session 能力，所以「关闭」= *关闭这个 Agent 打开的所有分裂列 + 取消订阅*，不动远端会话。`panes.includes(key) === false` 时该项 `disabled:true`（`var(--text-faint)`）。
-设计稿的 190ms 关闭动画**保留**，用在**行因服务端 `list_delta` 消失**时：先 `closing[key]=true`（opacity→0、scale→.94，`.18s`），`setTimeout(190)` 后再从数组里移除，并同步剔除 `panes` 里的该 key。
+**「关闭」的语义（协议裁定 2026-09-17）**：关闭 Agent 必须二次确认，然后通过已认证 WebSocket 发送 `close_session` 终止远端会话；收到 `close_session_result(ok:true)` 后仍保留行与工作区引用，直到权威 `listing/list_delta(removed)` 到达，再清理本地工作区、Tab、分裂列与订阅。请求失败或超时只反馈错误，不伪造删除；一次只允许一个关闭请求。
+设计稿的 190ms 关闭动画**保留**，用在**行因服务端 `list_delta` 消失**时：先 `closing[key]=true`（opacity→0、scale→.94，`.18s`），`setTimeout(190)` 后再从数组里移除，并同步剔除 `panes` 里的该 key。关闭确认使用受控对话框，不调用原生 `window.confirm`。
 
 **C. 分裂列（pane）**
 设 `idx = panes.indexOf(id)`：
@@ -762,7 +773,9 @@ src/
 // 内存态
 devices[], clients:Map<deviceId,Client>, listings:Map<deviceId,Workspace[]>,
 menu:{kind:'space'|'agent'|'pane', id, x, y} | null,
-newAgentSpace:string|null, addDeviceOpen:boolean, toast:string|null, closing:{}
+newAgentSpace:string|null, newAgentLaunchers:Launcher[], createPending:Request|null,
+closeConfirmAgent:Agent|null, closePending:Request|null, addDeviceOpen:boolean,
+toast:string|null, closing:{}
 
 // localStorage（前缀 am.）
 am.devices        Device[]（⛔ token 不放这里，见下）
@@ -775,6 +788,7 @@ am.collapsed / am.spacesOpen / am.agentsOpen   boolean
 🔴 **token 不写 localStorage**：走 Rust 侧 `tauri-plugin-store`，落 `$APP_DATA/devices.json`（文件权限 0600）。前端只读回 `{id,name,url,online}`，token 由 Rust 在建连时注入；UI 里 token 输入框恒为 `type="password"`，任何日志/toast/错误文案都不得回显 token。
 
 启动恢复：`am.panes` 里指向已不存在的 Agent.key 在首个 listing 到达后静默剔除。
+生命周期 pending 不落盘；断线、错误或超时解除 loading，不自动重试。关闭请求在权威删除前保留行与工作区，权威删除后沿既有 190ms 退场路径清理。
 
 ---
 
@@ -879,8 +893,8 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 | 侧栏宽度可调（原型 prop 240–340） | 固定 280 | 无需求 |
 | 分裂列拖拽调宽 | 不做，flex 均分 | 无需求 |
 | 外层 1400px 卡片圆角 + 四层投影 + body 径向渐变 | **删除** | 画布演示，真实窗口交给 macOS |
-| 「新建 Agent」真正创建远程会话 | 按钮只弹 toast | 协议 v1 无此能力 |
-| 「关闭 Agent」杀掉远端 tmux 会话 | 只关本地列 | 协议 v1 无 kill |
+| 「新建 Agent」真正创建远程会话 | **已支持** | 依据当前设备 `auth_ack.agent_launchers` 能力广告发送 `create_agent` |
+| 「关闭 Agent」杀掉远端 tmux 会话 | **已支持** | 二次确认后发送 `close_session`，以权威 listing/list_delta 驱动本地清理 |
 | 终端列 Cmd/Ctrl-V 粘贴 | **已恢复**（PR93/94；2026-09-12 核对） | Cmd+V 文本；Ctrl+V 原生图片上传后预贴，不自动 Enter；见 §6.2 |
 
 ---
@@ -909,6 +923,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 20. **2026-09-15**：恢复 macOS 原生红绿灯，彻底废除浮动胶囊（ChromePill）；实现全宽一体化常驻 Header（TitleBar），预留 80px 原生灯留白区，侧栏开关迁入顶栏，独立于侧栏折叠。
 21. **2026-09-15 (PR B)**：全局 Tab 会话生命周期与同父平铺常驻分屏舞台（TerminalStage）。顶栏接入 TabBar（会话名 + 状态指示灯，Working 绿灯微动、Idle 静止、Unknown 灰空心；支持 Pin 紧凑锚定与关闭）；主区采用纯函数二叉分屏树（workspaceLayout.js）计算绝对几何，所有 TerminalPane 作为同一 DOM 父容器直接子节点投影定位，切分重排零 React Unmount、零 xterm 重建、零闪屏；采用 am.workspace.v1 本地白名单持久化。
 22. **2026-09-15 (PR C)**：Tab 长按平滑调序与四向边缘吸附分屏引擎（tabDrag.js）。采用 Pointer Events（pointerdown/move/up + setPointerCapture），长按阈值 180ms、容差 6px；Zero Forced Reflow：pointerdown 预缓存视口与几何坐标，pointermove 仅记录点位并由单 rAF 调度，热路径绝对严禁读取 DOM 布局；主区触发 25% 四向边缘吸附（带 3px 切换滞回防抖与中心 50%×50% no-drop 区域）；GPU 硬件加速预览（translate3d + scale + opacity，悬浮期间绝不触碰真实 DOM/树）；pointerup 瞬间原子提交树变更，保持终端同父平铺保活，零 Unmount，120ms 防抖收敛。
+23. **2026-09-17**：新建 Agent 仅展示当前 `auth_ack.agent_launchers` 广告的 provider；名称限制为非空、≤64 Unicode 字符且无控制字符，Bypass 由 `supports_bypass` 控制。`create_agent` 成功后等待权威 listing/list_delta 入驻再打开；`close_session` 成功后等待权威移除再清理本地状态，关闭确认采用受控对话框。
 
 ## core 依赖边界（裁定 2026-09-12）
 

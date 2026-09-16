@@ -3,6 +3,11 @@ import * as core from '../../deps/corral-core/web/js/protocol.js';
 export * from '../../deps/corral-core/web/js/protocol.js';
 
 const fields = Object.freeze({
+  auth_ack: ['ok', 'reason', 'agent_launchers'],
+  create_agent: ['req_id', 'workspace', 'anchor_ref', 'provider', 'name', 'bypass'],
+  create_agent_result: ['req_id', 'ok', 'ref', 'name', 'naming', 'reason'],
+  close_session: ['req_id', 'ref'],
+  close_session_result: ['req_id', 'ok', 'reason'],
   level2_subscribe: ['workspace'],
   level2_unsubscribe: [],
   level2_frame: ['workspace', 'seq', 'sessions'],
@@ -86,6 +91,60 @@ export function validateFrame(type, p = {}) {
     if ((hasText ? 1 : 0) + (hasKeys ? 1 : 0) + (hasBytes ? 1 : 0) > 1) {
       return 'input carries more than one of text/attachment_path, keys, bytes; at most one is allowed';
     }
+    return null;
+  }
+  if (type === 'auth_ack') {
+    const authError = core.validateFrame(type, p);
+    if (authError) return authError;
+    if (p.agent_launchers !== undefined && !Array.isArray(p.agent_launchers)) {
+      return 'auth_ack agent_launchers must be an array';
+    }
+    const seen = new Set();
+    for (const launcher of p.agent_launchers || []) {
+      if (!launcher || typeof launcher.provider !== 'string' || !launcher.provider
+        || typeof launcher.display_name !== 'string' || !launcher.display_name
+        || !['cli', 'tmux'].includes(launcher.naming)
+        || typeof launcher.supports_bypass !== 'boolean') {
+        return 'auth_ack agent launcher is invalid';
+      }
+      if (seen.has(launcher.provider)) return `auth_ack duplicate agent launcher: ${launcher.provider}`;
+      seen.add(launcher.provider);
+    }
+    return null;
+  }
+  if (type === 'create_agent' || type === 'create_agent_result' || type === 'close_session' || type === 'close_session_result') {
+    if (!Number.isInteger(p.req_id) || p.req_id < 1 || p.req_id > 0xffffffff) {
+      return `${type} req_id must be in uint32 range`;
+    }
+  }
+  if (type === 'create_agent') {
+    if (typeof p.workspace !== 'string' || !p.workspace) return 'create_agent workspace must be non-empty';
+    if (typeof p.anchor_ref !== 'string' || !p.anchor_ref) return 'create_agent anchor_ref must be non-empty';
+    if (typeof p.provider !== 'string' || !p.provider) return 'create_agent provider must be non-empty';
+    if (typeof p.name !== 'string' || !p.name.trim() || Array.from(p.name).length > 64
+      || Array.from(p.name).some((ch) => /\p{Cc}/u.test(ch))) return 'create_agent name is invalid';
+    if (typeof p.bypass !== 'boolean') return 'create_agent bypass must be boolean';
+    return null;
+  }
+  if (type === 'create_agent_result') {
+    if (p.ok === true) {
+      if (typeof p.ref !== 'string' || !p.ref || typeof p.name !== 'string' || !p.name
+        || !['cli', 'tmux'].includes(p.naming) || p.reason) return 'successful create_agent_result is invalid';
+    } else if (p.ok === false) {
+      if (!['invalid_field', 'target_not_found', 'provider_unavailable', 'unsupported_bypass', 'launch_failed'].includes(p.reason)) {
+        return 'failed create_agent_result reason is invalid';
+      }
+    } else return 'create_agent_result ok must be boolean';
+    return null;
+  }
+  if (type === 'close_session') {
+    if (typeof p.ref !== 'string' || !p.ref) return 'close_session ref must be non-empty';
+    return null;
+  }
+  if (type === 'close_session_result') {
+    if (p.ok === true && p.reason) return 'accepted close_session_result must not carry a reason';
+    if (p.ok === false && !p.reason) return 'failed close_session_result must carry a reason';
+    if (typeof p.ok !== 'boolean') return 'close_session_result ok must be boolean';
     return null;
   }
   if (fields[type].includes('workspace') && (typeof p.workspace !== 'string' || !p.workspace)) return `${type} workspace must be non-empty`;

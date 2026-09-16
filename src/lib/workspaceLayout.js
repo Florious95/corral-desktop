@@ -529,6 +529,40 @@ export function closeWorkspacePane(state, uid) {
 }
 
 /**
+ * 从所有工作台移除已由服务端关闭的会话；不发送任何协议帧。
+ */
+export function removeSessionFromWorkspace(state, uid) {
+  if (!uid || !state) return state;
+  let changed = state.previewUid === uid;
+  const tabs = (state.tabs || []).map((tab) => {
+    const hasRoot = !!(tab.root && findLeaf(tab.root, uid));
+    const hasFlat = !tab.root && tab.activeUid === uid;
+    if (!hasRoot && !hasFlat) return tab;
+    changed = true;
+    const root = hasRoot ? removeNode(tab.root, uid) : null;
+    const leaves = getLeaves(root);
+    const activeUid = tab.activeUid === uid || !leaves.includes(tab.activeUid)
+      ? (leaves[0] || null) : tab.activeUid;
+    let finalRoot = root;
+    if (root && isPureColumnsTree(root) && leaves.length >= 2) {
+      finalRoot = buildEqualRatioColumnsTree(leaves.map((key) => ({ kind: 'leaf', uid: key })));
+    }
+    return {
+      ...tab,
+      root: finalRoot,
+      activeUid,
+      isBlank: !finalRoot && !activeUid,
+    };
+  });
+  if (!changed) return state;
+  return syncActiveTabFields({
+    ...state,
+    previewUid: state.previewUid === uid ? null : state.previewUid,
+    tabs,
+  });
+}
+
+/**
  * 钉选/取消钉选 Tab
  * 保持 pinned 是 tabs 数组的连续前缀
  */

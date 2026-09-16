@@ -13,6 +13,7 @@ import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import PairingDialog from './components/chrome/PairingDialog.jsx';
 import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
+import CloseAgentDialog from './components/chrome/CloseAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
 import { watchFullscreen } from './lib/fullscreen.js';
@@ -37,12 +38,12 @@ import {
   getAllWorkspaceSessions,
   smartOpenSession,
   closeWorkspacePane,
+  removeSessionFromWorkspace,
   focusWorkspacePane,
   getLeaves,
   openSession,
   focusTab,
   splitSession,
-  closeTab,
   closePane,
   pinTab,
   closeOtherTabs,
@@ -59,6 +60,7 @@ import {
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
 const CLOSE_MS = 190;
+const LIFECYCLE_TIMEOUT_MS = 10000;
 /** 右键菜单夹取尺寸（UI-SPEC §4.5） */
 const MENU_W = 180, MENU_H = 168;
 
@@ -92,6 +94,12 @@ export default function App({ seedDevices } = {}) {
   const [devices, setDevices] = useState([]);
   const [workspaces, setWorkspaces] = useState([]);
   const [toastMsg, setToastMsg] = useState(null);
+  const [lifecycleEvent, setLifecycleEvent] = useState(null);
+  const [createPending, setCreatePending] = useState(null);
+  const [closePending, setClosePending] = useState(null);
+  const [closeConfirmAgent, setCloseConfirmAgent] = useState(null);
+  const lifecycleTimerRef = useRef(new Map());
+  const [capabilityRevision, setCapabilityRevision] = useState(0);
 
   const toastInputFail = (reason) => {
     setToastMsg(reason === 'timeout' ? '未收到回执' : `发送失败：${reason || '未知原因'}`);
@@ -116,6 +124,8 @@ export default function App({ seedDevices } = {}) {
         // ack 一到就要让用户看见失败（C-077 / R-54）；超时/清场文案由 submitPaneEnter 发
         if (!r.ok && r.reason !== ACK_TIMEOUT && r.reason !== ACK_CLEARED) toastInputFail(r.reason);
       },
+      onLifecycleResult: (r) => setLifecycleEvent({ ...r, nonce: `${Date.now()}-${Math.random()}` }),
+      onCapabilityChange: () => setCapabilityRevision((v) => v + 1),
       // ⛔ message 由 DeviceManager 保证不含 token
       onError: ({ code, message }) => setToastMsg(code === 'auth' ? message : `${code}：${message}`),
     });
@@ -306,6 +316,15 @@ export default function App({ seedDevices } = {}) {
     };
   }), [workspaces, localById]);
 
+  const newAgentTarget = useMemo(
+    () => workspaces.find((w) => w.spaceKey === newAgentSpace) || null,
+    [workspaces, newAgentSpace],
+  );
+  const newAgentLaunchers = useMemo(
+    () => newAgentTarget ? dm.getAgentLaunchers(newAgentTarget.deviceId) : [],
+    [dm, newAgentTarget, capabilityRevision],
+  );
+
   const favSet = useMemo(() => new Set(favs), [favs]);
 
   const allAgents = useMemo(() => {
@@ -358,7 +377,7 @@ export default function App({ seedDevices } = {}) {
         ghostTimers.current.delete(a.key);
         setGhosts((g) => g.filter((x) => x.key !== a.key));
         setClosing((c) => { const next = { ...c }; delete next[a.key]; return next });
-        setWorkspace((prev) => closeTab(prev, a.key));
+        setWorkspace((prev) => removeSessionFromWorkspace(prev, a.key));
         shims.current.delete(a.key);
         pendingPasteRef.current.delete(a.key);
       }, CLOSE_MS));
@@ -435,10 +454,154 @@ export default function App({ seedDevices } = {}) {
     setFavs((f) => (f.includes(favKey) ? f.filter((k) => k !== favKey) : [...f, favKey]));
   }, []);
 
-  const closeAgent = useCallback((key) => {
-    setWorkspace((prev) => closeWorkspacePane(prev, key));
-    shims.current.delete(key);
-    pendingPasteRef.current.delete(key);
+  const openNewAgentDialog = useCallback((spaceKey) => {
+    const target = workspaces.find((w) => w.spaceKey === spaceKey);
+    const anchor = target?.sessions?.find((session) => `${target.deviceId}::${session.ref}` === activeKey)
+      || target?.sessions?.[0];
+    if (!anchor?.ref) {
+      setToastMsg('该目录没有可用的 Agent 锚点');
+      return;
+    }
+    setNewAgentSpace(spaceKey);
+  }, [workspaces, activeKey]);
+
+  const handleCreateAgent = useCallback(({ name, provider, bypass }) => {
+    const target = newAgentTarget;
+    const anchor = target?.sessions?.find((session) => `${target.deviceId}::${session.ref}` === activeKey)
+      || target?.sessions?.[0];
+    const anchorRef = anchor?.ref;
+    if (!target || !anchorRef) {
+      setToastMsg('该目录没有可用的 Agent 锚点');
+      return;
+    }
+    const result = dm.createAgent({
+      deviceId: target.deviceId,
+      workspace: target.cwd,
+      anchorRef,
+      provider,
+      name,
+      bypass,
+    });
+    if (!result) {
+      setToastMsg('创建请求未发送：设备未连接');
+      return;
+    }
+    const timerKey = `create:${result.deviceId}:${result.reqId}`;
+    clearTimeout(lifecycleTimerRef.current.get(timerKey));
+    lifecycleTimerRef.current.set(timerKey, setTimeout(() => {
+      lifecycleTimerRef.current.delete(timerKey);
+      setCreatePending((pending) => (
+        pending?.deviceId === result.deviceId && pending.reqId === result.reqId ? null : pending
+      ));
+      setToastMsg('创建请求超时，等待会话列表确认');
+    }, LIFECYCLE_TIMEOUT_MS));
+    setCreatePending(result);
+  }, [dm, newAgentTarget, activeKey]);
+
+  const submitCloseAgent = useCallback((agent) => {
+    setCloseConfirmAgent(null);
+    if (!agent?.key) return;
+    if (closePending) {
+      setToastMsg('已有关闭请求处理中');
+      return;
+    }
+    const result = dm.closeSession(agent.key);
+    if (!result) {
+      setToastMsg('关闭请求未发送：设备未连接');
+      return;
+    }
+    const timerKey = `close:${result.deviceId}:${result.reqId}`;
+    clearTimeout(lifecycleTimerRef.current.get(timerKey));
+    lifecycleTimerRef.current.set(timerKey, setTimeout(() => {
+      lifecycleTimerRef.current.delete(timerKey);
+      setClosePending((pending) => (
+        pending?.deviceId === result.deviceId && pending.reqId === result.reqId ? null : pending
+      ));
+      setToastMsg('关闭请求超时，状态待核');
+    }, LIFECYCLE_TIMEOUT_MS));
+    setClosePending({ ...result, uid: agent.key });
+  }, [dm, closePending]);
+
+  const closeAgent = useCallback((agent) => {
+    if (!agent?.key) return;
+    if (closePending) {
+      setToastMsg('已有关闭请求处理中');
+      return;
+    }
+    setCloseConfirmAgent(agent);
+  }, [closePending]);
+
+  useEffect(() => {
+    if (!lifecycleEvent) return;
+    const { kind, deviceId, reqId, payload } = lifecycleEvent;
+    if (kind === 'create_agent_result' && createPending?.deviceId === deviceId && createPending.reqId === reqId && !createPending.ref) {
+      const timerKey = `create:${deviceId}:${reqId}`;
+      if (payload.ok === true && payload.ref) {
+        // The result confirms tmux creation, not catalog publication. Keep the
+        // dialog pending until listing/list_delta contains this exact ref.
+        setCreatePending({ deviceId, reqId, ref: payload.ref });
+      } else if (payload.ok === true) {
+        clearTimeout(lifecycleTimerRef.current.get(timerKey));
+        lifecycleTimerRef.current.delete(timerKey);
+        setCreatePending(null);
+        setToastMsg('Agent 创建结果缺少会话引用，状态待核');
+      } else {
+        const labels = {
+          invalid_field: '名称或目标参数无效',
+          target_not_found: '创建位置已失效，请刷新目录',
+          provider_unavailable: '当前设备不支持该 Agent',
+          unsupported_bypass: '该 Agent 不支持 Bypass',
+          launch_failed: 'Agent 创建未确认，请刷新会话列表',
+        };
+        clearTimeout(lifecycleTimerRef.current.get(timerKey));
+        lifecycleTimerRef.current.delete(timerKey);
+        setToastMsg(labels[payload.reason] || `Agent 创建失败：${payload.reason || '未知原因'}`);
+        setCreatePending(null);
+      }
+    }
+    if (kind === 'close_session_result' && closePending?.deviceId === deviceId && closePending.reqId === reqId && !closePending.awaitingListing) {
+      const timerKey = `close:${deviceId}:${reqId}`;
+      if (payload.ok === true) {
+        // Keep the workspace reference until the authoritative listing removes
+        // this ref; the existing disappearance effect then performs cleanup.
+        setClosePending({ ...closePending, awaitingListing: true });
+      } else {
+        clearTimeout(lifecycleTimerRef.current.get(timerKey));
+        lifecycleTimerRef.current.delete(timerKey);
+        setClosePending(null);
+        setToastMsg(`Agent 关闭失败：${payload.reason || '未知原因'}`);
+      }
+    }
+  }, [lifecycleEvent, createPending, closePending]);
+
+  useEffect(() => {
+    if (!createPending?.ref) return;
+    const uid = `${createPending.deviceId}::${createPending.ref}`;
+    if (!agentByKey.has(uid)) return;
+    const timerKey = `create:${createPending.deviceId}:${createPending.reqId}`;
+    clearTimeout(lifecycleTimerRef.current.get(timerKey));
+    lifecycleTimerRef.current.delete(timerKey);
+    setWorkspace((prev) => smartOpenSession(prev, uid));
+    setNewAgentSpace(null);
+    setCreatePending(null);
+    setToastMsg('Agent 已创建');
+  }, [createPending, agentByKey]);
+
+  useEffect(() => {
+    if (!closePending?.awaitingListing || agentByKey.has(closePending.uid)) return;
+    const timerKey = `close:${closePending.deviceId}:${closePending.reqId}`;
+    clearTimeout(lifecycleTimerRef.current.get(timerKey));
+    lifecycleTimerRef.current.delete(timerKey);
+    // The listing disappearance effect owns the 190ms exit animation and
+    // removes the pane/subscription after it settles. Only resolve the request
+    // here, after the authoritative delta has arrived.
+    setClosePending(null);
+    setToastMsg('Agent 已关闭');
+  }, [closePending, agentByKey]);
+
+  useEffect(() => () => {
+    for (const timer of lifecycleTimerRef.current.values()) clearTimeout(timer);
+    lifecycleTimerRef.current.clear();
   }, []);
 
   const handleSelectTab = useCallback((uid) => {
@@ -693,14 +856,13 @@ export default function App({ seedDevices } = {}) {
         label: '新建 Agent',
         icon: icon(PlusIcon),
         color: 'var(--text)',
-        onClick: () => { closeMenu(); setNewAgentSpace(space ? space.name : '') },
+        onClick: () => { closeMenu(); openNewAgentDialog(space?.key); },
       }];
     }
 
     if (menu.kind === 'agent') {
       const agent = agentByKey.get(menu.id);
       if (!agent) return [];
-      const inTabs = workspace.tabs.some((t) => t.uid === agent.key);
       return [
         {
           key: 'fav',
@@ -717,8 +879,8 @@ export default function App({ seedDevices } = {}) {
           icon: icon(XIcon, { strokeWidth: 2 }),
           color: 'var(--danger)',
           separator: true,
-          disabled: !inTabs,
-          onClick: () => { closeMenu(); closeAgent(agent.key); },
+          disabled: closePending?.uid === agent.key,
+          onClick: () => { closeMenu(); closeAgent(agent); },
         },
       ];
     }
@@ -820,8 +982,10 @@ export default function App({ seedDevices } = {}) {
     workspace,
     visibleLeaves,
     closeMenu,
+    openNewAgentDialog,
     toggleFav,
     closeAgent,
+    closePending,
     handlePinTab,
     handleCloseTab,
     handleCloseOtherTabs,
@@ -855,7 +1019,9 @@ export default function App({ seedDevices } = {}) {
             closing={closing}
             openKeys={openKeys}
             onSpaceMenu={handleSpaceMenu}
+            onNewAgent={openNewAgentDialog}
             onAgentMenu={handleAgentMenu}
+            onCloseAgent={closeAgent}
             onOpenAgent={openAgent}
             onAgentPointerDown={handleAgentPointerDown}
             activeUid={workspace.activeUid}
@@ -963,12 +1129,19 @@ export default function App({ seedDevices } = {}) {
 
       <NewAgentDialog
         open={newAgentSpace !== null}
-        spaceName={newAgentSpace || ''}
-        onCreate={() => {
-          setNewAgentSpace(null);
-          setToastMsg('当前 daemon 协议不支持远程创建 Agent'); // 协议 v1 无此帧，别去发明
-        }}
-        onCancel={() => setNewAgentSpace(null)}
+        spaceName={newAgentTarget?.label || newAgentTarget?.cwd || ''}
+        launchers={newAgentLaunchers}
+        loading={!!createPending}
+        onCreate={handleCreateAgent}
+        onCancel={() => { if (!createPending) setNewAgentSpace(null); }}
+      />
+
+      <CloseAgentDialog
+        open={closeConfirmAgent !== null}
+        agent={closeConfirmAgent}
+        loading={!!closePending}
+        onConfirm={() => submitCloseAgent(closeConfirmAgent)}
+        onCancel={() => { if (!closePending) setCloseConfirmAgent(null); }}
       />
 
       {/* 拖拽 GPU 预览浮层与吸附高亮（全屏视口级） */}

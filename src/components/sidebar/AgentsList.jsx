@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from './ProviderIcon.jsx';
 import { PROVIDER_LABEL } from '../../core/providers.js';
-import { StarIcon, CheckIcon } from '../../lib/icons.jsx';
+import { StarIcon, CheckIcon, XIcon } from '../../lib/icons.jsx';
 import { AGENT_ROW_HEIGHT as ROW, sortAgents, visibleWindow } from './agentWindow.js';
 
 const MIN_H = 108;
@@ -35,6 +35,7 @@ const sameAgentRow = (prev, next) => {
     && prev.multiDevice === next.multiDevice
     && prev.onOpen === next.onOpen
     && prev.onContextMenu === next.onContextMenu
+    && prev.onClose === next.onClose
     && prev.onPointerDown === next.onPointerDown
     && a.key === b.key
     && a.title === b.title
@@ -47,7 +48,7 @@ const sameAgentRow = (prev, next) => {
 };
 
 const AgentRow = memo(function AgentRow({
-  agent: ag, top, isOpen, isActive = false, isClosing, onOpen, onContextMenu, multiDevice, onPointerDown,
+  agent: ag, top, isOpen, isActive = false, isClosing, onOpen, onContextMenu, onClose, multiDevice, onPointerDown,
 }) {
   return (
     <div
@@ -70,6 +71,19 @@ const AgentRow = memo(function AgentRow({
           active={ag.state === 'working' || ag.state === 'blocked'}
         />
         <span className="agents-row-title">{ag.title}</span>
+        {onClose ? (
+          <button
+            type="button"
+            className="chr-btn-reset agents-row-close"
+            aria-label={`关闭 Agent ${ag.title || ag.ref}`}
+            title="关闭 Agent"
+            disabled={isClosing}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onClose(ag); }}
+          >
+            <XIcon size={12} strokeWidth={2} />
+          </button>
+        ) : null}
         <span className="agents-row-marks">
           {ag.state === 'done' ? (
             <CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4} />
@@ -100,6 +114,7 @@ const AgentRow = memo(function AgentRow({
  * @param {Object<string,boolean>} [props.closing]     key → 正在播关闭动画
  * @param {(key:string) => void} props.onOpen
  * @param {(e:MouseEvent, key:string) => void} props.onContextMenu
+ * @param {(agent:Object) => void} [props.onClose]
  * @param {boolean} props.multiDevice
  * @param {string} [props.emptyHint]                   空态第二行文案
  * @param {string} [props.emptyTitle]                  空态第一行文案（搜索无结果时替换）
@@ -111,6 +126,7 @@ export default function AgentsList({
   closing = {},
   onOpen,
   onContextMenu,
+  onClose,
   multiDevice,
   onPointerDown,
   emptyHint = '会话由主机发现后会出现在这里',
@@ -163,6 +179,7 @@ export default function AgentsList({
               isClosing={!!closing[ag.key]}
               onOpen={onOpen}
               onContextMenu={onContextMenu}
+              onClose={onClose}
               multiDevice={multiDevice}
               onPointerDown={onPointerDown}
             />
