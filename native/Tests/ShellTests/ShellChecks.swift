@@ -69,6 +69,17 @@ struct ShellChecks {
         expect(!LocalContent.isEntry(URL(string: "agentmirror://app/index.html?other=1")), "entry query rejects")
         expect(LocalContent.isEntry(URL(string: "agentmirror://app/index.html#route")), "entry fragment allowed")
         let controller = try MainWindowController(distURL: fixture, websiteDataStore: .nonPersistent())
+        let requiredMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        expect(controller.window?.styleMask.isSuperset(of: requiredMask) == true, "window style mask keeps native controls")
+        for buttonType in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = controller.window?.standardWindowButton(buttonType),
+                  let titlebarView = button.superview else {
+                expect(false, "traffic light exists")
+                continue
+            }
+            expect(titlebarView.bounds.contains(button.frame), "traffic light remains visible")
+            expect(abs(button.frame.midY - 16.0) < 0.6, "traffic light aligns at y=16")
+        }
         let initialFrame = controller.window?.frame
         controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
         expect(controller.window?.frame == initialFrame, "resize state callback preserves frame")
