@@ -3,6 +3,7 @@ import WebKit
 
 @MainActor
 public final class MainWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate {
+    private static let webHeaderHeight: CGFloat = 38
     public let webView: WKWebView
     private let bridge: ShellBridge
     private let dragSurface = DragSurfaceView()
@@ -24,9 +25,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")
         webView = WKWebView(frame: .zero, configuration: config)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "AgentMirror"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.minSize = NSSize(width: 640, height: 400)
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = false
@@ -42,6 +45,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
             view.autoresizingMask = [.width, .height]
             root.addSubview(view)
         }
+        window.layoutIfNeeded()
+        alignTrafficLights()
         reload()
     }
 
@@ -113,9 +118,18 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
                 "geometryGeneration": dragSurface.geometry.geometryGeneration]
     }
 
-    public func windowDidResize(_ notification: Notification) { geometryChanged() }
-    public func windowDidChangeScreen(_ notification: Notification) { geometryChanged() }
-    public func windowDidChangeBackingProperties(_ notification: Notification) { geometryChanged() }
+    public func windowDidResize(_ notification: Notification) {
+        alignTrafficLights()
+        geometryChanged()
+    }
+    public func windowDidChangeScreen(_ notification: Notification) {
+        alignTrafficLights()
+        geometryChanged()
+    }
+    public func windowDidChangeBackingProperties(_ notification: Notification) {
+        alignTrafficLights()
+        geometryChanged()
+    }
     public func windowWillEnterFullScreen(_ notification: Notification) { fullscreenTarget = true; geometryChanged() }
     public func windowWillExitFullScreen(_ notification: Notification) { fullscreenTarget = false; geometryChanged() }
     public func windowDidEnterFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged() }
@@ -124,6 +138,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     public func windowDidFailToExitFullScreen(_ window: NSWindow) { fullscreenTarget = nil; geometryChanged() }
     public func windowDidMiniaturize(_ notification: Notification) { geometryChanged() }
     public func windowDidDeminiaturize(_ notification: Notification) { geometryChanged() }
+
+    /// The Web header is the source of truth for the vertical center. AppKit's
+    /// titlebar buttons stay native; only their presentation Y is adjusted.
+    private func alignTrafficLights() {
+        guard let window, let contentView = window.contentView else { return }
+        let targetY = contentView.bounds.maxY - Self.webHeaderHeight / 2
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = window.standardWindowButton(kind),
+                  let superview = button.superview else { continue }
+            let target = superview.convert(NSPoint(x: 0, y: targetY), from: contentView)
+            var frame = button.frame
+            frame.origin.y = target.y - frame.height / 2
+            button.frame = frame
+        }
+    }
 
     private func geometryChanged() {
         dragSurface.geometry.invalidate()

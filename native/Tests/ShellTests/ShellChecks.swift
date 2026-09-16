@@ -69,6 +69,9 @@ struct ShellChecks {
         expect(!LocalContent.isEntry(URL(string: "agentmirror://app/index.html?other=1")), "entry query rejects")
         expect(LocalContent.isEntry(URL(string: "agentmirror://app/index.html#route")), "entry fragment allowed")
         let controller = try MainWindowController(distURL: fixture, websiteDataStore: .nonPersistent())
+        let initialFrame = controller.window?.frame
+        controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
+        expect(controller.window?.frame == initialFrame, "resize state callback preserves frame")
         var finished = false
         controller.onLoadFinished = { finished = true }
         for _ in 0..<100 where !finished { try await Task.sleep(for: .milliseconds(100)) }
@@ -90,6 +93,7 @@ struct ShellChecks {
         finished = false
         controller.reload()
         for _ in 0..<100 where !finished { try await Task.sleep(for: .milliseconds(100)) }
+        expect(controller.window?.frame == initialFrame, "reload preserves frame")
         _ = try await javascript("window.webkit.messageHandlers.native.postMessage({v:1,id:'reload-bootstrap',method:'bootstrap',params:{}}).then(x => window.boot = x); void 0", in: controller.webView)
         try await Task.sleep(for: .milliseconds(200))
         let newEpoch = try await javascript("window.boot.result.epoch", in: controller.webView) as? String
