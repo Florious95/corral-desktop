@@ -64,7 +64,17 @@ export function collectSurfaceGeometry(container = typeof document !== 'undefine
     // 确保仅收集位于顶栏内的交互元素
     if (el.closest && el.closest('.tb, .tb-session-header, [data-tauri-drag-region="deep"], [data-window-drag="true"]')) {
       const rect = elementToRect(el);
-      if (rect) exclusionRects.push(rect);
+      if (rect) {
+        // 对于顶栏交互按钮（如折叠按钮、新建按钮、红绿灯留白），将排除保护区域纵向扩展至顶栏全高（0..38px）并水平扩展4px安全边距
+        // 彻底杜绝鼠标点击或双击边缘误触底层 DragSurfaceView 触发窗口拖拽或双击缩放窗口尺寸
+        if (typeof el.matches === 'function' && el.matches('.tb-sidebar-toggle, .tb-tab-add, .tb-traffic-lights')) {
+          rect.y = 0;
+          rect.height = 38;
+          rect.x = Math.max(0, rect.x - 4);
+          rect.width = rect.width + 8;
+        }
+        exclusionRects.push(rect);
+      }
     }
   });
 

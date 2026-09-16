@@ -93,8 +93,9 @@ public final class DragSurfaceView: NSView {
     public override var mouseDownCanMoveWindow: Bool { false }
 
     public override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let window,
-              geometry.isDraggable(point, bounds: bounds,
+        guard let window else { return nil }
+        let localPoint = superview != nil ? convert(point, from: superview) : point
+        guard geometry.isDraggable(localPoint, bounds: bounds,
                                    backingScale: window.backingScaleFactor,
                                    flipped: isFlipped) else { return nil }
         return self

@@ -71,6 +71,47 @@ test('collectSurfaceGeometry properly separates dragRects and exclusionRects', (
   else delete globalThis.window;
 });
 
+test('collectSurfaceGeometry expands vertical exclusion to full header height for toggle controls', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    innerWidth: 1200,
+    innerHeight: 800,
+  };
+
+  const mockHeader = {
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 38 }),
+    closest: () => false,
+    matches: (sel) => sel.includes('.tb'),
+  };
+
+  const mockToggle = {
+    getBoundingClientRect: () => ({ left: 80, top: 3, width: 28, height: 26 }),
+    closest: (sel) => sel.includes('.tb'),
+    matches: (sel) => sel.includes('.tb-sidebar-toggle'),
+  };
+
+  const mockContainer = {
+    querySelectorAll: (selector) => {
+      if (selector.includes('.tb-session-header')) return [mockHeader];
+      if (selector.includes('.tb-sidebar-toggle')) return [mockToggle];
+      return [];
+    },
+  };
+
+  const geom = collectSurfaceGeometry(mockContainer);
+  assert.equal(geom.exclusionRects.length, 1);
+  // Must expand vertically to 0..38 and horizontally with 4px margin
+  assert.deepEqual(geom.exclusionRects[0], {
+    x: 76,
+    y: 0,
+    width: 36,
+    height: 38,
+  });
+
+  if (originalWindow !== undefined) globalThis.window = originalWindow;
+  else delete globalThis.window;
+});
+
 test('createSurfaceGeometryWatcher debounces updates by SURFACE_DEBOUNCE_MS', async () => {
   const mockContainer = {
     querySelectorAll: () => [],
