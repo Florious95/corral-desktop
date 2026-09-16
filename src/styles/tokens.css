@@ -16,14 +16,15 @@
   --ink-100: #b8b4ab;
   --ink-060: #c4c0b7;
 
-  /* ——— 1.2 表面 / 文字 / 图标 ——— */
-  --bg: #fbfaf8;
-  --sidebar-bg: #ebe8e3;
-  --titlebar-top: #eeebe6;
-  --titlebar-bottom: #e9e6e1;
+  /* ——— 1.2 表面 / 文字 / 图标 (Transparent Surface Contract) ——— */
+  --bg: rgba(251, 250, 248, 0.94);
+  --bg-solid: #fbfaf8;
+  --sidebar-bg: rgba(235, 232, 227, 0.55);
+  --titlebar-top: rgba(238, 235, 230, 0.40);
+  --titlebar-bottom: rgba(233, 230, 225, 0.25);
   --titlebar-grad: linear-gradient(180deg, var(--titlebar-top), var(--titlebar-bottom));
-  --bar-bg: #f7f5f1;
-  --surface-sunken: #f0ede8;
+  --bar-bg: rgba(247, 245, 241, 0.65);
+  --surface-sunken: rgba(240, 237, 232, 0.60);
   --field-bg: #ffffff;
 
   --text: var(--ink-800);

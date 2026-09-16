@@ -449,4 +449,25 @@ export const nativeCapabilities = {
       return true;
     },
   },
+
+  surface: {
+    async update({ viewportCSS, dragRects = [], exclusionRects = [] } = {}) {
+      if (testEngineOverride?.surface?.update) {
+        return testEngineOverride.surface.update({ viewportCSS, dragRects, exclusionRects });
+      }
+      const env = detectNativeEnvironment();
+      if (env === 'swift') {
+        const vp = viewportCSS || {
+          width: typeof window !== 'undefined' ? window.innerWidth : 0,
+          height: typeof window !== 'undefined' ? window.innerHeight : 0,
+        };
+        return callSwiftRPC('surface.update', {
+          viewportCSS: vp,
+          dragRects,
+          exclusionRects,
+        });
+      }
+      return { ok: true };
+    },
+  },
 };
