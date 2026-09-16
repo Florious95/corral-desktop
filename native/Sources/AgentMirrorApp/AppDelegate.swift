@@ -1,21 +1,29 @@
 import AppKit
+import Shell
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var windowController: MainWindowController?
+    private var windowController: Shell.MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let resolvedWebRoot = WebViewHost.resolveWebRoot()
-        NSLog("AgentMirror web root: %@", resolvedWebRoot?.path ?? "<missing>")
-        guard let webRoot = resolvedWebRoot else {
+        guard let webRoot = WebViewHost.resolveWebRoot() else {
             showMissingWebRoot()
             NSApp.terminate(nil)
             return
         }
 
-        windowController = MainWindowController(webRoot: webRoot)
-        windowController?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        do {
+            windowController = try Shell.MainWindowController(distURL: webRoot)
+            windowController?.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } catch {
+            showMissingWebRoot()
+            NSApp.terminate(nil)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        windowController?.dispose()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
