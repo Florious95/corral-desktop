@@ -35,6 +35,9 @@ function skipTauriPluginsInBrowser() {
 }
 
 export default defineConfig({
+  // The Swift shell loads dist/index.html via file URL. Relative assets work
+  // in both WKWebView and the existing Tauri/browser development surfaces.
+  base: './',
   plugins: isTauriBundling() ? [react()] : [skipTauriPluginsInBrowser(), react()],
   clearScreen: false,
   server: { port: 1430, strictPort: true },

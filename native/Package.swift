@@ -2,13 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "AgentMirrorServices",
-    platforms: [.macOS(.v14)],
+    name: "AgentMirrorNative",
+    platforms: [
+        .macOS(.v14),
+    ],
     products: [
+        .executable(name: "AgentMirrorApp", targets: ["AgentMirrorApp"]),
         .library(name: "Services", targets: ["Services"]),
     ],
     targets: [
-        .target(name: "Services", path: "Sources/Services"),
+        .executableTarget(
+            name: "AgentMirrorApp",
+            dependencies: ["Services"],
+            path: "Sources/AgentMirrorApp"
+        ),
+        .target(
+            name: "Services",
+            path: "Sources/Services"
+        ),
         .testTarget(
             name: "ServicesTests",
             dependencies: ["Services"],
