@@ -890,16 +890,31 @@ test('sidebar session drag-and-drop: dragging an unopened agent from sidebar spl
   ctrl.dispose();
 });
 
-test('top window drag: -webkit-app-region drag/no-drag styles and native startDragging hook', async () => {
-  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
-  assert.match(chromeCss, /\[data-tauri-drag-region\],\s*\.tb-drag\s*\{\s*-webkit-app-region:\s*drag;/);
-  assert.match(chromeCss, /button,\s*\.tb-tab,\s*\.tb-sidebar-toggle,\s*input,\s*select\s*\{\s*-webkit-app-region:\s*no-drag;/);
-
+test('top window drag: native data-tauri-drag-region deep and false contract with permissions', async () => {
   const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');
-  assert.match(titleBarJsx, /startDragging/);
+  const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const tabBarJsx = await readFile(new URL('../src/components/chrome/TabBar.jsx', import.meta.url), 'utf8');
+  const capabilitiesJson = await readFile(new URL('../src-tauri/capabilities/default.json', import.meta.url), 'utf8');
 
-  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
-  assert.match(app, /startDragging/);
+  // 1. TitleBar 和 session header 顶层必须声明 data-tauri-drag-region="deep"
+  assert.match(titleBarJsx, /data-tauri-drag-region="deep"/);
+  assert.match(appJsx, /data-tauri-drag-region="deep"/);
+
+  // 2. 交互控件必须显式声明 data-tauri-drag-region="false"
+  assert.match(titleBarJsx, /data-tauri-drag-region="false"/);
+  assert.match(tabBarJsx, /data-tauri-drag-region="false"/);
+
+  // 3. 内部非交互节点不得残留 bare 属性，避免 composedPath 提前误判
+  assert.equal(titleBarJsx.includes('className="tb-drag" data-tauri-drag-region'), false);
+  assert.equal(appJsx.includes('className="tb-drag" data-tauri-drag-region'), false);
+  assert.equal(tabBarJsx.includes('className="tb-tabbar" data-tauri-drag-region'), false);
+
+  // 4. capabilities 必须授权 core:window:allow-start-dragging 权限
+  assert.match(capabilitiesJson, /"core:window:allow-start-dragging"/);
+
+  // 5. 源码中满足 startDragging 架构说明
+  assert.match(titleBarJsx, /startDragging/);
+  assert.match(appJsx, /startDragging/);
 });
 
 test('instant drag & omnipresent dropzone: dx > 4px instant drag and empty stage full preview', () => {

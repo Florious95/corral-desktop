@@ -64,33 +64,6 @@
   outline: 2px solid var(--input-focus);
   outline-offset: 1px;
 }
-[data-tauri-drag-region],
-.tb-drag {
-  -webkit-app-region: drag;
-}
-
-button,
-.tb-tab,
-.tb-sidebar-toggle,
-input,
-select {
-  -webkit-app-region: no-drag;
-}
-
-.tb-sidebar-header,
-.tb-session-header,
-.tb-tabbar,
-.tb-tabs-scroll,
-.tb-traffic-lights {
-  -webkit-app-region: drag;
-}
-
-.tb-tab-close,
-.tb-tab-add,
-.tb-btn,
-[data-no-drag] {
-  -webkit-app-region: no-drag;
-}
 
 .tb-drag {
   margin-left: auto;
@@ -161,7 +134,6 @@ select {
   padding: 0;
   flex: none;
   transition: background var(--d-hover), color var(--d-hover);
-  -webkit-app-region: no-drag;
 }
 .tb-tab-add:hover {
   background: var(--hover-4);

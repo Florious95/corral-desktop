@@ -11,7 +11,8 @@ test('TitleBar renders full-width header with 80px native traffic lights safe gu
   assert.match(titleBarJsx, /className="tb-traffic-lights"/);
   assert.match(titleBarJsx, /className="tb-btn tb-sidebar-toggle"/);
   assert.match(titleBarJsx, /<SidebarIcon\s+size=\{16\}/);
-  assert.match(titleBarJsx, /className="tb-drag"\s+data-tauri-drag-region/);
+  assert.match(titleBarJsx, /data-tauri-drag-region="deep"/);
+  assert.match(titleBarJsx, /className="tb-drag"/);
 
   // Traffic lights safe reservation (78~86px range, exactly 80px)
   assert.match(chromeCss, /\.tb-traffic-lights\s*\{[^}]*width:\s*80px;/);
@@ -51,28 +52,49 @@ test('Rust main.rs restores macOS native traffic lights and drops hide_native_tr
   assert.match(mainRs, /ensure_devices_store/);
 });
 
-test('triggerWindowDrag respects interactive controls and enables window dragging on blank areas', async () => {
-  const { triggerWindowDrag } = await import('../src/lib/windowChrome.js');
+test('Tauri native drag contract: data-tauri-drag-region deep and false resolution via official drag.js rules', async () => {
+  // 按照顾问裁定第 4.2 节：基于锁定 Tauri 2.11.5 官方 drag.js 源码实现精准规则校验
+  const TAURI_DRAG_REGION_ATTR = 'data-tauri-drag-region';
+  const CLICKABLE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL', 'SUMMARY']);
+  const INTERACTIVE_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio', 'switch', 'option']);
 
-  // 1. 点击 button 或带有 no-drag 的交互元素时，坚决不触发拖窗
-  let dragCalled = false;
-  triggerWindowDrag({
-    button: 0,
-    target: { closest: (sel) => (sel.includes('button') ? true : null) },
-  });
-  assert.equal(dragCalled, false);
+  function isClickableElement(el) {
+    return CLICKABLE_TAGS.has(el.tagName)
+      || (el.getAttribute && el.getAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false')
+      || (el.getAttribute && el.getAttribute('tabindex') && el.getAttribute('tabindex') !== '-1')
+      || (el.getAttribute && INTERACTIVE_ROLES.has(el.getAttribute('role')));
+  }
 
-  // 2. 右键或非主键点击，不触发拖窗
-  triggerWindowDrag({
-    button: 2,
-    target: { closest: () => null },
-  });
-  assert.equal(dragCalled, false);
+  function isDragRegion(composedPath) {
+    for (const el of composedPath) {
+      if (!el || !el.getAttribute) continue;
+      const attr = el.getAttribute(TAURI_DRAG_REGION_ATTR);
+      if (isClickableElement(el) && attr === null) return false;
+      if (attr === null) continue;
+      if (attr === 'false') return false;
+      if (attr === 'deep') return true;
+      if (attr === '' || attr === 'true') return el === composedPath[0];
+    }
+    return false;
+  }
 
-  // 3. 校验 CSS 样式中 TabBar、Header 与拖拽留白区均具备 -webkit-app-region: drag
-  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
-  assert.match(chromeCss, /\.tb-tabbar,\s*\.tb-tabs-scroll/);
-  assert.match(chromeCss, /\.tb-tab-close,\s*\.tb-tab-add/);
+  // 1. 模拟在 TitleBar 的空白区域（.tb-drag 或 .tb-traffic-lights）按下：
+  const blankChild = { tagName: 'DIV', getAttribute: () => null };
+  const headerDeep = { tagName: 'HEADER', getAttribute: (k) => (k === TAURI_DRAG_REGION_ATTR ? 'deep' : null) };
+  assert.equal(isDragRegion([blankChild, headerDeep]), true, 'Blank area inside deep header must trigger window drag');
+
+  // 2. 模拟在折叠按钮（带 data-tauri-drag-region="false"）按下：
+  const toggleBtn = { tagName: 'BUTTON', getAttribute: (k) => (k === TAURI_DRAG_REGION_ATTR ? 'false' : null) };
+  assert.equal(isDragRegion([toggleBtn, headerDeep]), false, 'Button with drag-region false must block window drag');
+
+  // 3. 模拟在 TabBar 的 Tab 标签（role="tab" 且带 false）按下：
+  const tabEl = { tagName: 'DIV', getAttribute: (k) => (k === 'role' ? 'tab' : (k === TAURI_DRAG_REGION_ATTR ? 'false' : null)) };
+  const navEl = { tagName: 'NAV', getAttribute: () => null };
+  assert.equal(isDragRegion([tabEl, navEl, headerDeep]), false, 'Tab with role tab and false must block window drag');
+
+  // 4. 模拟在 TabBar 的空白间隙处按下：
+  const tabGap = { tagName: 'DIV', getAttribute: () => null };
+  assert.equal(isDragRegion([tabGap, navEl, headerDeep]), true, 'Gap in TabBar inside deep header must trigger window drag');
 });
 
 test('sidebar workspace working lamp and header status synchronization', async () => {
@@ -93,46 +115,31 @@ test('sidebar workspace working lamp and header status synchronization', async (
   assert.match(tabBarJsx, /a\?\.state === 'working' \|\| a\?\.status === 'working'/);
 });
 
-test('triggerWindowDrag guarantees exactly-once dispatch and deduplicates bubble/burst events', async () => {
-  const { triggerWindowDrag, resetDragThrottleForTest } = await import('../src/lib/windowChrome.js');
-  resetDragThrottleForTest();
-
-  let stopCount = 0;
-  const mockEvt = {
-    button: 0,
-    target: { closest: () => null },
-    stopPropagation: () => { stopCount++; },
-  };
-
-  // 第一次调用：成功分发，标记 _amDragHandled 为 true，并调用 stopPropagation
-  const first = triggerWindowDrag(mockEvt);
-  assert.equal(first, true);
-  assert.equal(mockEvt._amDragHandled, true);
-  assert.equal(stopCount, 1);
-
-  // 同一事件冒泡至父元素再次调用：被 _amDragHandled 立即拦截，返回 false
-  const second = triggerWindowDrag(mockEvt);
-  assert.equal(second, false);
-  assert.equal(stopCount, 1);
-
-  // 100ms 内微秒级抛出的另一个事件对象（如同一手势派发的 mousedown）：被时间戳节流拦截
-  const burstEvt = {
-    button: 0,
-    target: { closest: () => null },
-    stopPropagation: () => { stopCount++; },
-  };
-  const third = triggerWindowDrag(burstEvt);
-  assert.equal(third, false);
-  assert.equal(stopCount, 2);
-
-  // 校验组件源码：TitleBar.jsx、TabBar.jsx、App.jsx 均无内联 getCurrentWindow().startDragging()
+test('elimination of corrupt drag code and verification of capability permissions', async () => {
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+  const windowChromeJs = await readFile(new URL('../src/lib/windowChrome.js', import.meta.url), 'utf8');
   const titleBarJsx = await readFile(new URL('../src/components/chrome/TitleBar.jsx', import.meta.url), 'utf8');
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
   const tabBarJsx = await readFile(new URL('../src/components/chrome/TabBar.jsx', import.meta.url), 'utf8');
+  const capabilitiesJson = await readFile(new URL('../src-tauri/capabilities/default.json', import.meta.url), 'utf8');
 
+  // 1. 彻底清除 -webkit-app-region 腐败声明
+  assert.equal(chromeCss.includes('-webkit-app-region'), false, 'All -webkit-app-region declarations must be deleted');
+
+  // 2. 彻底删除 windowChrome.js 中过时的 triggerWindowDrag 与节流辅助代码
+  assert.equal(windowChromeJs.includes('triggerWindowDrag'), false, 'triggerWindowDrag must be removed from windowChrome.js');
+  assert.equal(windowChromeJs.includes('resetDragThrottleForTest'), false);
+  assert.equal(windowChromeJs.includes('appWindowInstance'), false);
+
+  // 3. 各组件中彻底移除 triggerWindowDrag 与内联 startDragging 调用
+  assert.equal(titleBarJsx.includes('triggerWindowDrag'), false);
+  assert.equal(appJsx.includes('triggerWindowDrag'), false);
+  assert.equal(tabBarJsx.includes('triggerWindowDrag'), false);
   assert.equal(titleBarJsx.includes('.getCurrentWindow().startDragging()'), false);
   assert.equal(appJsx.includes('.getCurrentWindow().startDragging()'), false);
-  assert.equal(tabBarJsx.includes('.getCurrentWindow().startDragging()'), false);
+
+  // 4. capabilities 必须授予核心权限 core:window:allow-start-dragging
+  assert.match(capabilitiesJson, /"core:window:allow-start-dragging"/);
 });
 
 test('visual & aesthetic refinement (2026-09-16 advisor review closing)', async () => {
