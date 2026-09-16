@@ -205,3 +205,38 @@ test('nativeCapabilities.surface.update returns safe ok in Mock environment with
   });
   assert.deepEqual(result, { ok: true });
 });
+
+test('OPEN-2 & OPEN-3: watcher sends disarm immediately upon layout change and disposes cleanly', async () => {
+  const dispatched = [];
+  const mockContainer = {
+    querySelectorAll: () => [],
+  };
+
+  const watcher = createSurfaceGeometryWatcher({
+    container: mockContainer,
+    debounceMs: 30,
+    onUpdate: (geom) => dispatched.push(geom),
+  });
+
+  // Initial schedule has run report (arm)
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(dispatched.length >= 1);
+  assert.equal(dispatched[dispatched.length - 1].phase, 'arm');
+
+  // Trigger disarm
+  dispatched.length = 0;
+  watcher.disarm();
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].phase, 'disarm');
+
+  // Trigger dispose: sends final disarm and cancels all pending tasks
+  dispatched.length = 0;
+  watcher.dispose();
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].phase, 'disarm');
+
+  // Wait past debounce interval; no more updates should be dispatched after dispose
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(dispatched.length, 1);
+});
+

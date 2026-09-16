@@ -261,6 +261,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   useEffect(() => {
+    surfaceWatcherRef.current?.disarm();
     surfaceWatcherRef.current?.schedule();
   }, [collapsed, workspace.tabs, nativeFullscreen]);
 

@@ -29,9 +29,12 @@ function elementToRect(el) {
 export function collectSurfaceGeometry(container = typeof document !== 'undefined' ? document : null) {
   if (typeof window === 'undefined' || !container) {
     return {
+      phase: 'arm',
       viewportCSS: { width: 0, height: 0 },
+      devicePixelRatio: 1,
       dragRects: [],
       exclusionRects: [],
+      chromeRect: { x: 0, y: 0, width: 0, height: 0 },
     };
   }
 
@@ -97,14 +100,25 @@ export function createSurfaceGeometryWatcher({
   debounceMs = SURFACE_DEBOUNCE_MS,
   onUpdate = (geom) => nativeCapabilities.surface.update(geom),
 } = {}) {
+  let isDisposed = false;
   let timer = null;
   let lastGeomJson = '';
   let inFlight = false;
   let scheduledAgain = false;
 
+  const disarmImmediate = () => {
+    if (isDisposed) return;
+    // OPEN-2: 布局变动前立即向 Native 下发 disarm，报废旧的拖拽区域
+    try {
+      onUpdate({ phase: 'disarm' });
+    } catch (_) {
+      // 容错忽略
+    }
+  };
+
   const report = async () => {
-    if (!container || inFlight) {
-      if (inFlight) scheduledAgain = true;
+    if (isDisposed || !container || inFlight) {
+      if (inFlight && !isDisposed) scheduledAgain = true;
       return;
     }
     const geom = collectSurfaceGeometry(container);
@@ -114,13 +128,15 @@ export function createSurfaceGeometryWatcher({
     inFlight = true;
     try {
       await onUpdate(geom);
-      // 关键：仅在成功上报 ACK 后才记录 lastGeomJson 去重缓存
-      lastGeomJson = json;
+      if (!isDisposed) {
+        // 关键：仅在成功上报 ACK 后才记录 lastGeomJson 去重缓存
+        lastGeomJson = json;
+      }
     } catch (_) {
       // 上报失败不记录去重缓存，允许后续重试上报
     } finally {
       inFlight = false;
-      if (scheduledAgain) {
+      if (scheduledAgain && !isDisposed) {
         scheduledAgain = false;
         schedule();
       }
@@ -128,27 +144,36 @@ export function createSurfaceGeometryWatcher({
   };
 
   const schedule = () => {
+    if (isDisposed) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
-      report();
+      timer = null;
+      if (!isDisposed) report();
     }, debounceMs);
+  };
+
+  const onLayoutChange = () => {
+    if (isDisposed) return;
+    // OPEN-2: 先立即 disarm 报废旧区域，再开启 120ms 防抖定时器定案 arm
+    disarmImmediate();
+    schedule();
   };
 
   let ro = null;
   const observeTarget = container?.body || (container?.documentElement ? container.documentElement : container);
   if (typeof ResizeObserver !== 'undefined' && observeTarget && typeof observeTarget === 'object') {
     try {
-      ro = new ResizeObserver(() => schedule());
+      ro = new ResizeObserver(() => onLayoutChange());
       ro.observe(observeTarget);
     } catch {
       // 容错忽略
     }
   }
 
-  const onWinResize = () => schedule();
+  const onWinResize = () => onLayoutChange();
   const onWindowState = () => {
     lastGeomJson = '';
-    schedule();
+    onLayoutChange();
   };
 
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -161,13 +186,26 @@ export function createSurfaceGeometryWatcher({
 
   return {
     triggerImmediately() {
+      if (isDisposed) return;
       if (timer) clearTimeout(timer);
       report();
     },
     schedule,
+    disarm: disarmImmediate,
     dispose() {
-      if (timer) clearTimeout(timer);
-      if (ro) ro.disconnect();
+      // OPEN-3: 销毁前先发出最后一次 disarm，确保原生外壳清理在途点击区
+      disarmImmediate();
+      isDisposed = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      inFlight = false;
+      scheduledAgain = false;
+      if (ro) {
+        ro.disconnect();
+        ro = null;
+      }
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
         window.removeEventListener('resize', onWinResize);
         window.removeEventListener('agentmirror:window-state-updated', onWindowState);
