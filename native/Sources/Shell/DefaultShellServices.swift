@@ -53,7 +53,7 @@ open class DefaultShellServices: ShellServiceHandling {
                 try await deviceStore.saveDevices(devices)
                 return true
             case "secureStore.set":
-                try requireDevicesKey(params)
+                try requireDevicesSet(params)
                 let devices = try decodeDevices(params["value"])
                 try await deviceStore.saveDevices(devices)
                 return true
@@ -122,6 +122,13 @@ open class DefaultShellServices: ShellServiceHandling {
     private func requireDevicesKey(_ params: [String: Any]) throws {
         guard params["key"] as? String == "devices",
               Set(params.keys) == ["key"] else {
+            throw ShellError.invalidRequest
+        }
+    }
+
+    private func requireDevicesSet(_ params: [String: Any]) throws {
+        guard params["key"] as? String == "devices",
+              Set(params.keys).isSubset(of: ["key", "value", "devices"]) else {
             throw ShellError.invalidRequest
         }
     }
