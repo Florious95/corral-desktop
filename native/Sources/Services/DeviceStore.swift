@@ -1,8 +1,8 @@
 import Foundation
-import Security
+import Darwin
 
-/// The only persisted device fields. The custom Codable implementation rejects
-/// unknown fields so secrets or UI state cannot silently enter the store.
+/// The only persisted device fields. Unknown fields and invalid device values
+/// are rejected so credentials cannot be smuggled into the store.
 private struct AnyCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int?
@@ -92,128 +92,53 @@ public struct Device: Codable, Equatable, Sendable {
     }
 }
 
-public struct KeychainNamespace: Equatable, Hashable, Sendable {
-    public let service: String
-    public let account: String
-    public let accessGroup: String?
-
-    public init(service: String, account: String, accessGroup: String? = nil) {
-        self.service = service
-        self.account = account
-        self.accessGroup = accessGroup
-    }
-
-    public static let production = KeychainNamespace(
-        service: "com.agentmirror.desktop.devices.v1",
-        account: "device-list"
-    )
-
-    /// Keep command-line probes and isolated test bundles from reading the
-    /// production Keychain item. Only the signed release bundle gets the
-    /// historical production service name.
-    public static var currentApp: KeychainNamespace {
-        guard Bundle.main.bundleIdentifier == "com.agentmirror.desktop" else {
-            return KeychainNamespace(
-                service: "com.agentmirror.desktop.test.devices.v1",
-                account: "device-list"
-            )
-        }
-        return .production
-    }
-}
-
-public enum KeychainError: Error, Equatable, Sendable {
-    case status(Int32)
-    case invalidResult
-
-    var statusCode: Int32? {
-        guard case let .status(value) = self else { return nil }
-        return value
-    }
-}
-
-/// Narrow abstraction used by DeviceStore and Migration. Production uses the
-/// Security framework; tests inject an isolated in-memory implementation.
-public protocol KeychainClient: Sendable {
-    func copyMatching(namespace: KeychainNamespace) throws -> Data?
-    func add(data: Data, namespace: KeychainNamespace) throws
-    func update(data: Data, namespace: KeychainNamespace) throws
-    func delete(namespace: KeychainNamespace) throws
-}
-
-/// Security.framework-backed generic-password storage. The keychain item is
-/// device-only and is not synchronizable to iCloud.
-public final class SystemKeychain: KeychainClient, @unchecked Sendable {
-    public init() {}
-
-    public func copyMatching(namespace: KeychainNamespace) throws -> Data? {
-        var query = baseQuery(namespace)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess else { throw KeychainError.status(status) }
-        guard let data = result as? Data else { throw KeychainError.invalidResult }
-        return data
-    }
-
-    public func add(data: Data, namespace: KeychainNamespace) throws {
-        var attributes = baseQuery(namespace)
-        attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        attributes[kSecAttrSynchronizable as String] = false
-
-        let status = SecItemAdd(attributes as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeychainError.status(status) }
-    }
-
-    public func update(data: Data, namespace: KeychainNamespace) throws {
-        let query = baseQuery(namespace)
-        let attributes: [String: Any] = [kSecValueData as String: data]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        guard status == errSecSuccess else { throw KeychainError.status(status) }
-    }
-
-    public func delete(namespace: KeychainNamespace) throws {
-        let status = SecItemDelete(baseQuery(namespace) as CFDictionary)
-        guard status == errSecSuccess else { throw KeychainError.status(status) }
-    }
-
-    private func baseQuery(_ namespace: KeychainNamespace) -> [String: Any] {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: namespace.service,
-            kSecAttrAccount as String: namespace.account,
-        ]
-        if let accessGroup = namespace.accessGroup {
-            query[kSecAttrAccessGroup as String] = accessGroup
-        }
-        return query
-    }
-}
-
 public enum DeviceStoreError: Error, Equatable, Sendable {
     case invalidDevices
     case invalidStoredData
-    case keychain(KeychainError)
+    case io
 }
 
-/// Actor-isolated device list. All writes replace one keychain item, and all
-/// callers therefore observe serialized, whole-list updates.
+/// Atomic, actor-isolated device storage. The file is private to the current
+/// app user (0600) and lives alongside the former Tauri devices.json path.
 public actor DeviceStore {
-    public static let shared = DeviceStore(namespace: .currentApp)
+    public static let fileName = "devices.json"
+    public static let shared = DeviceStore(fileURL: DeviceStore.defaultFileURL())
 
-    public let namespace: KeychainNamespace
-    private let keychain: any KeychainClient
+    public let fileURL: URL
+    private let fileManager: FileManager
 
     public init(
-        namespace: KeychainNamespace = .production,
-        keychain: any KeychainClient = SystemKeychain()
+        fileURL: URL = DeviceStore.defaultFileURL(),
+        fileManager: FileManager = .default
     ) {
-        self.namespace = namespace
-        self.keychain = keychain
+        self.fileURL = fileURL.standardizedFileURL
+        self.fileManager = fileManager
+    }
+
+    public static func defaultFileURL(fileManager: FileManager = .default) -> URL {
+        let appSupport = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.homeDirectoryForCurrentUser
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.agentmirror.desktop.test"
+        return appSupport
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    /// Ensure the existing Tauri-compatible path is a regular 0600 file. A
+    /// missing store is initialized with an empty device envelope. Symlinks
+    /// and other special files fail closed rather than being followed.
+    public func prepare() throws {
+        if Self.lstatInfo(atPath: fileURL.path) == nil {
+            guard errno == ENOENT else { throw DeviceStoreError.io }
+            try writeAtomically(Self.encodeEnvelope([]))
+            return
+        }
+        guard Self.isRegularFile(atPath: fileURL.path) else {
+            throw DeviceStoreError.invalidStoredData
+        }
+        try setPrivatePermissions()
     }
 
     public func loadDevices() throws -> [Device] {
@@ -225,15 +150,24 @@ public actor DeviceStore {
     }
 
     public func load() throws -> [Device] {
+        try prepare()
+        let data: Data
         do {
-            guard let data = try keychain.copyMatching(namespace: namespace) else {
-                return []
-            }
-            return try JSONDecoder().decode([Device].self, from: data)
-        } catch let error as KeychainError {
-            throw DeviceStoreError.keychain(error)
+            data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
         } catch {
-            throw DeviceStoreError.invalidStoredData
+            throw DeviceStoreError.io
+        }
+
+        do {
+            // plugin-store's existing representation is an object envelope.
+            return try JSONDecoder().decode(DeviceEnvelope.self, from: data).devices
+        } catch {
+            do {
+                // Keep compatibility with early snapshots that stored an array.
+                return try JSONDecoder().decode([Device].self, from: data)
+            } catch {
+                throw DeviceStoreError.invalidStoredData
+            }
         }
     }
 
@@ -241,50 +175,120 @@ public actor DeviceStore {
         guard devices.allSatisfy(Device.isValid) else {
             throw DeviceStoreError.invalidDevices
         }
-
-        let data: Data
-        do {
-            data = try JSONEncoder().encode(devices)
-        } catch {
-            throw DeviceStoreError.invalidDevices
-        }
-
-        do {
-            try keychain.update(data: data, namespace: namespace)
-        } catch let error as KeychainError where error.statusCode == Int32(errSecItemNotFound) {
-            do {
-                try keychain.add(data: data, namespace: namespace)
-            } catch let addError as KeychainError where addError.statusCode == Int32(errSecDuplicateItem) {
-                // Another process may have created the item between update and
-                // add. Retrying update keeps the operation whole-list atomic.
-                do {
-                    try keychain.update(data: data, namespace: namespace)
-                } catch let updateError as KeychainError {
-                    throw DeviceStoreError.keychain(updateError)
-                } catch {
-                    throw DeviceStoreError.keychain(.invalidResult)
-                }
-            } catch let addError as KeychainError {
-                throw DeviceStoreError.keychain(addError)
-            } catch {
-                throw DeviceStoreError.keychain(.invalidResult)
-            }
-        } catch let error as KeychainError {
-            throw DeviceStoreError.keychain(error)
-        } catch {
-            throw DeviceStoreError.keychain(.invalidResult)
-        }
+        try prepare()
+        try writeAtomically(Self.encodeEnvelope(devices))
     }
 
     public func delete() throws {
-        do {
-            try keychain.delete(namespace: namespace)
-        } catch let error as KeychainError where error.statusCode == Int32(errSecItemNotFound) {
+        guard Self.lstatInfo(atPath: fileURL.path) != nil else {
+            guard errno == ENOENT else { throw DeviceStoreError.io }
             return
-        } catch let error as KeychainError {
-            throw DeviceStoreError.keychain(error)
-        } catch {
-            throw DeviceStoreError.keychain(.invalidResult)
         }
+        guard Self.isRegularFile(atPath: fileURL.path) else {
+            throw DeviceStoreError.invalidStoredData
+        }
+        do {
+            try fileManager.removeItem(at: fileURL)
+        } catch {
+            throw DeviceStoreError.io
+        }
+    }
+
+    private func setPrivatePermissions() throws {
+        do {
+            try fileManager.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o600)],
+                ofItemAtPath: fileURL.path
+            )
+        } catch {
+            throw DeviceStoreError.io
+        }
+    }
+
+    private func writeAtomically(_ data: Data) throws {
+        let directory = fileURL.deletingLastPathComponent()
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: NSNumber(value: 0o700)]
+            )
+            let temporaryURL = directory.appendingPathComponent(
+                ".\(Self.fileName).\(UUID().uuidString).tmp",
+                isDirectory: false
+            )
+            guard fileManager.createFile(
+                atPath: temporaryURL.path,
+                contents: data,
+                attributes: [.posixPermissions: NSNumber(value: 0o600)]
+            ) else {
+                throw DeviceStoreError.io
+            }
+            do {
+                try fileManager.setAttributes(
+                    [.posixPermissions: NSNumber(value: 0o600)],
+                    ofItemAtPath: temporaryURL.path
+                )
+                if Self.lstatInfo(atPath: fileURL.path) != nil {
+                    guard Self.isRegularFile(atPath: fileURL.path) else {
+                        throw DeviceStoreError.invalidStoredData
+                    }
+                    _ = try fileManager.replaceItemAt(
+                        fileURL,
+                        withItemAt: temporaryURL,
+                        backupItemName: nil,
+                        options: .usingNewMetadataOnly
+                    )
+                } else {
+                    guard errno == ENOENT else { throw DeviceStoreError.io }
+                    try fileManager.moveItem(at: temporaryURL, to: fileURL)
+                }
+            } catch {
+                try? fileManager.removeItem(at: temporaryURL)
+                throw error
+            }
+        } catch let error as DeviceStoreError {
+            throw error
+        } catch {
+            throw DeviceStoreError.io
+        }
+    }
+
+    private static func encodeEnvelope(_ devices: [Device]) throws -> Data {
+        do {
+            return try JSONEncoder().encode(DeviceEnvelope(devices: devices))
+        } catch {
+            throw DeviceStoreError.io
+        }
+    }
+
+    private static func lstatInfo(atPath path: String) -> stat? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
+        return info
+    }
+
+    private static func isRegularFile(atPath path: String) -> Bool {
+        guard let info = lstatInfo(atPath: path) else { return false }
+        return (info.st_mode & S_IFMT) == S_IFREG
+    }
+}
+
+private struct DeviceEnvelope: Codable {
+    let devices: [Device]
+
+    init(devices: [Device]) {
+        self.devices = devices
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case devices
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        devices = container.contains(.devices)
+            ? try container.decode([Device].self, forKey: .devices)
+            : []
     }
 }

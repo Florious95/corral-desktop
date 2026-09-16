@@ -5,13 +5,12 @@ import Shell
 /// Application-owned composition root for the four native capabilities.
 ///
 /// This is deliberately a concrete protocol conformer rather than a subclass:
-/// the app owns service identity and can inject an isolated namespace in tests,
+/// the app owns service identity and can inject an isolated file store in tests,
 /// while Shell still provides its own equivalent default for direct probes.
 @MainActor
 public final class AppServices: ShellServiceHandling {
     public static let shared = AppServices()
 
-    public let namespace: KeychainNamespace
     public let availableMethods: Set<String> = [
         "devices.load", "devices.save",
         "secureStore.get", "secureStore.set",
@@ -25,19 +24,13 @@ public final class AppServices: ShellServiceHandling {
     private let uiSnapshotStore: UISnapshotStore
 
     public init(
-        namespace: KeychainNamespace = .currentApp,
         deviceStore: DeviceStore? = nil,
         uploadService: UploadService = .shared,
         clipboardService: ClipboardService? = nil,
         uiSnapshotStore: UISnapshotStore? = nil
     ) {
-        self.namespace = namespace
-        let store = deviceStore ?? (namespace == .currentApp
-            ? DeviceStore.shared
-            : DeviceStore(namespace: namespace))
         self.implementation = DefaultShellServices(
-            namespace: namespace,
-            deviceStore: store,
+            deviceStore: deviceStore,
             uploadService: uploadService,
             clipboardService: clipboardService ?? ClipboardService.shared
         )

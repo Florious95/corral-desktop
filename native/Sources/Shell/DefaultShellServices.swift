@@ -11,7 +11,6 @@ import Services
 open class DefaultShellServices: ShellServiceHandling {
     public static let shared = DefaultShellServices()
 
-    public let namespace: KeychainNamespace
     public let availableMethods: Set<String> = [
         "devices.load", "devices.save",
         "secureStore.get", "secureStore.set",
@@ -26,15 +25,11 @@ open class DefaultShellServices: ShellServiceHandling {
     private let clipboardService: ClipboardService
 
     public init(
-        namespace: KeychainNamespace = .currentApp,
         deviceStore: DeviceStore? = nil,
         uploadService: UploadService = .shared,
         clipboardService: ClipboardService? = nil
     ) {
-        self.namespace = namespace
-        self.deviceStore = deviceStore ?? (namespace == .currentApp
-            ? DeviceStore.shared
-            : DeviceStore(namespace: namespace))
+        self.deviceStore = deviceStore ?? DeviceStore.shared
         self.uploadService = uploadService
         self.clipboardService = clipboardService ?? ClipboardService.shared
     }
@@ -156,7 +151,7 @@ open class DefaultShellServices: ShellServiceHandling {
 
     private static func map(_ error: Error) -> ShellError {
         switch error {
-        case is DeviceStoreError, is MigrationError:
+        case is DeviceStoreError:
             return .storageFailed
         case is ClipboardError:
             return .invalidRequest

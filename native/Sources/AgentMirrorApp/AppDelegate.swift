@@ -1,15 +1,14 @@
 import AppKit
+import Foundation
 import Services
 import Shell
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let makeWindow: () throws -> Shell.MainWindowController
-    private let migration: DeviceMigration
     private var windowController: Shell.MainWindowController?
 
     override init() {
-        migration = DeviceMigration(namespace: AppServices.shared.namespace)
         makeWindow = {
             guard let webRoot = Self.resolveWebRoot() else { throw ShellError.unavailable }
             return try Shell.MainWindowController(
@@ -24,9 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                // Migrate before constructing the WebView so a first page boot
-                // can only observe the completed Keychain-backed device list.
-                try await migrationDevices()
+                // Keep the legacy Tauri path and tighten it to a private file;
+                // no credential service or system authorization is used here.
+                try await DeviceStore.shared.prepare()
                 windowController = try makeWindow()
                 windowController?.showWindow(nil)
                 NSApp.activate(ignoringOtherApps: true)
@@ -49,23 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    private func migrationDevices() async throws {
-        _ = try await migration.migrate(from: Self.legacyDevicesURL())
-    }
-
-    private static func legacyDevicesURL() throws -> URL {
-        guard let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first else {
-            throw ShellError.unavailable
-        }
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.agentmirror.desktop"
-        return appSupport
-            .appendingPathComponent(bundleID, isDirectory: true)
-            .appendingPathComponent("devices.json", isDirectory: false)
-    }
-
     private static func resolveWebRoot() -> URL? {
         guard let resourceURL = Bundle.main.resourceURL else { return nil }
         let candidates = [
@@ -81,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = "AgentMirror 无法启动"
-        alert.informativeText = "前端资源或安全存储初始化失败。请检查应用安装后重试。"
+        alert.informativeText = "前端资源或设备配置初始化失败。请检查应用安装后重试。"
         alert.addButton(withTitle: "退出")
         alert.runModal()
     }
