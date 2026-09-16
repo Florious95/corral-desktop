@@ -47,7 +47,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  align-self: center;
+  /* 顶栏高度 38px，原生红绿灯中心在 y=16px；按钮高 26px，top 设为 3px 使中心点 3 + 13 = 16px 像素级精确共线 */
+  align-self: flex-start;
+  margin-top: 3px;
   cursor: pointer;
   color: var(--icon-titlebar);
   background: none;

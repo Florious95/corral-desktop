@@ -71,6 +71,47 @@ test('collectSurfaceGeometry properly separates dragRects and exclusionRects', (
   else delete globalThis.window;
 });
 
+test('collectSurfaceGeometry expands vertical exclusion to full header height for toggle controls', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    innerWidth: 1200,
+    innerHeight: 800,
+  };
+
+  const mockHeader = {
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 38 }),
+    closest: () => false,
+    matches: (sel) => sel.includes('.tb'),
+  };
+
+  const mockToggle = {
+    getBoundingClientRect: () => ({ left: 80, top: 3, width: 28, height: 26 }),
+    closest: (sel) => sel.includes('.tb'),
+    matches: (sel) => sel.includes('.tb-sidebar-toggle'),
+  };
+
+  const mockContainer = {
+    querySelectorAll: (selector) => {
+      if (selector.includes('.tb-session-header')) return [mockHeader];
+      if (selector.includes('.tb-sidebar-toggle')) return [mockToggle];
+      return [];
+    },
+  };
+
+  const geom = collectSurfaceGeometry(mockContainer);
+  assert.equal(geom.exclusionRects.length, 1);
+  // Must expand vertically to 0..38 and horizontally with 4px margin
+  assert.deepEqual(geom.exclusionRects[0], {
+    x: 76,
+    y: 0,
+    width: 36,
+    height: 38,
+  });
+
+  if (originalWindow !== undefined) globalThis.window = originalWindow;
+  else delete globalThis.window;
+});
+
 test('createSurfaceGeometryWatcher debounces updates by SURFACE_DEBOUNCE_MS', async () => {
   const mockContainer = {
     querySelectorAll: () => [],
@@ -241,4 +282,64 @@ test('OPEN-2 & OPEN-3: watcher sends disarm immediately upon layout change and d
   await new Promise((r) => setTimeout(r, 60));
   assert.equal(dispatched.length, 1);
 });
+
+test('P0 guard: window-state-updated with unchanged viewport does not trigger disarm or report', async () => {
+  const dispatched = [];
+  const listeners = new Map();
+  const originalWindow = globalThis.window;
+
+  globalThis.window = {
+    innerWidth: 1000,
+    innerHeight: 800,
+    addEventListener: (t, fn) => listeners.set(t, fn),
+    removeEventListener: (t) => listeners.delete(t),
+  };
+
+  const watcher = createSurfaceGeometryWatcher({
+    container: { querySelectorAll: () => [] },
+    debounceMs: 20,
+    onUpdate: (geom) => dispatched.push(geom),
+  });
+
+  // Wait for initial arm
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].phase, 'arm');
+
+  // Clear log
+  dispatched.length = 0;
+
+  // Broadcast window-state-updated with same viewport dimensions (1000x800)
+  const onWindowState = listeners.get('agentmirror:window-state-updated');
+  assert.ok(typeof onWindowState === 'function');
+
+  onWindowState({
+    detail: {
+      geometryGeneration: 2,
+      viewportCSS: { width: 1000, height: 800 },
+    },
+  });
+
+  // Must NOT trigger disarm, and must NOT trigger report
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(dispatched.length, 0, 'No IPC disarm or arm must be dispatched when dimensions are unchanged');
+
+  // Now broadcast with CHANGED viewport (1100x900)
+  onWindowState({
+    detail: {
+      geometryGeneration: 3,
+      viewportCSS: { width: 1100, height: 900 },
+    },
+  });
+
+  // Must NOT trigger disarm, but should trigger debounced arm with new size!
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].phase, 'arm');
+
+  watcher.dispose();
+  if (originalWindow !== undefined) globalThis.window = originalWindow;
+  else delete globalThis.window;
+});
+
 

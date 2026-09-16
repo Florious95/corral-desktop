@@ -64,7 +64,17 @@ export function collectSurfaceGeometry(container = typeof document !== 'undefine
     // 确保仅收集位于顶栏内的交互元素
     if (el.closest && el.closest('.tb, .tb-session-header, [data-tauri-drag-region="deep"], [data-window-drag="true"]')) {
       const rect = elementToRect(el);
-      if (rect) exclusionRects.push(rect);
+      if (rect) {
+        // 对于顶栏交互按钮（如折叠按钮、新建按钮、红绿灯留白），将排除保护区域纵向扩展至顶栏全高（0..38px）并水平扩展4px安全边距
+        // 彻底杜绝鼠标点击或双击边缘误触底层 DragSurfaceView 触发窗口拖拽或双击缩放窗口尺寸
+        if (typeof el.matches === 'function' && el.matches('.tb-sidebar-toggle, .tb-tab-add, .tb-traffic-lights')) {
+          rect.y = 0;
+          rect.height = 38;
+          rect.x = Math.max(0, rect.x - 4);
+          rect.width = rect.width + 8;
+        }
+        exclusionRects.push(rect);
+      }
     }
   });
 
@@ -178,10 +188,37 @@ export function createSurfaceGeometryWatcher({
     }
   }
 
-  const onWinResize = () => onLayoutChange();
-  const onWindowState = () => {
-    lastGeomJson = '';
+  let lastViewportWidth = typeof window !== 'undefined' ? Math.round(window.innerWidth || 0) : -1;
+  let lastViewportHeight = typeof window !== 'undefined' ? Math.round(window.innerHeight || 0) : -1;
+
+  const onWinResize = () => {
+    if (isDisposed) return;
+    if (typeof window !== 'undefined') {
+      const w = Math.round(window.innerWidth || 0);
+      const h = Math.round(window.innerHeight || 0);
+      if (w === lastViewportWidth && h === lastViewportHeight) return;
+      lastViewportWidth = w;
+      lastViewportHeight = h;
+    }
     onLayoutChange();
+  };
+
+  const onWindowState = (e) => {
+    if (isDisposed) return;
+    // P0: 严禁在此无脑清空 lastGeomJson 并无脑调用 onLayoutChange() (disarmImmediate)，彻底切断死循环！
+    // 仅当 Native 广播的视口尺寸确实发生改变时，才进行防抖调度 schedule()
+    const payload = e?.detail;
+    const vp = payload?.viewportCSS;
+    if (vp && typeof vp.width === 'number' && typeof vp.height === 'number') {
+      const w = Math.round(vp.width);
+      const h = Math.round(vp.height);
+      if (w !== lastViewportWidth || h !== lastViewportHeight) {
+        lastViewportWidth = w;
+        lastViewportHeight = h;
+        lastGeomJson = '';
+        schedule();
+      }
+    }
   };
 
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
