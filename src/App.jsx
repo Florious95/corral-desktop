@@ -916,6 +916,7 @@ export default function App({ seedDevices } = {}) {
                 root={workspace.root}
                 tabs={workspace.tabs}
                 activeUid={workspace.activeUid}
+                previewUid={workspace.previewUid}
                 agentByKey={agentByKey}
                 onFocusPane={handleFocusPane}
                 onClosePane={handleClosePane}

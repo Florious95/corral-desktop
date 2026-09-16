@@ -34,6 +34,8 @@ test('TerminalStage (SplitPanes) guarantees same-parent flattened absolute proje
 
   // Same-parent single DOM container
   assert.match(splitPanesJsx, /className="splitpanes terminal-stage"/);
+  assert.match(splitPanesJsx, /previewUid/);
+  assert.match(splitPanesJsx, /validUids\.add\(previewUid\)/);
   assert.match(splitPanesJsx, /key=\{uid\}/);
   assert.match(splitPanesJsx, /className=\{`pane-host\$\{isVisible \? '' : ' is-hidden'\}/);
 
@@ -67,8 +69,8 @@ test('App wires TabBar into session header and mounts TerminalStage with am.work
   // Session header hosts TabBar
   assert.match(appJsx, /<header className=\{`tb-session-header[\s\S]*?<TabBar[\s\S]*?<\/header>/);
 
-  // SplitPanes receives root, tabs, activeUid
-  assert.match(appJsx, /<SplitPanes[\s\S]*?root=\{workspace\.root\}[\s\S]*?tabs=\{workspace\.tabs\}[\s\S]*?activeUid=\{workspace\.activeUid\}/);
+  // SplitPanes receives root, tabs, activeUid, and the transient preview uid
+  assert.match(appJsx, /<SplitPanes[\s\S]*?root=\{workspace\.root\}[\s\S]*?tabs=\{workspace\.tabs\}[\s\S]*?activeUid=\{workspace\.activeUid\}[\s\S]*?previewUid=\{workspace\.previewUid\}/);
 
   // Storage persistence with am.workspace.v1
   assert.match(appJsx, /loadWorkspaceFromStorage/);

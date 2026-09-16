@@ -639,6 +639,7 @@ src/
  * @param {Object|null} root                     二叉分屏树 root（LeafNode | SplitNode）
  * @param {Array<{uid: string, pinned: boolean}>} tabs 全局 Tab 列表
  * @param {string|null} activeUid                当前焦点会话 uid
+ * @param {string|null} previewUid               虚空预览槽会话 uid（未固化到 tabs 时仍须挂载）
  * @param {Map<string, Object>} agentByKey       会话数据映射表
  * @param {(agent:Agent) => JSX.Element} renderPane 渲染终端内容
  * @param {(uid:string) => void} onFocusPane     聚焦窗格
@@ -653,6 +654,7 @@ src/
   - **核心保障**：所有的 `TerminalPane` 作为同一 DOM 父容器下的直接子组件，通过 `absolute` 定位投影（纯函数 `project(root, rect, gap=1)` 计算 `{x, y, w, h}`）；
   - 无论分屏怎么切分、重排或前后台切换，React `key={uid}` 与组件在 DOM 树中的层级永远保持不变，**彻底杜绝组件 Unmount、零 xterm 重建、零闪屏**。
 - **后台常驻机制**：
+  - 合法宿主 UID 是已固化 Tab 的全部叶子加上当前 root 叶子（含 `previewUid`）；预览尚未写入 `tabs` 时也必须挂载 TerminalPane；
   - 已打开且未关闭的会话宿主常驻于 DOM 中，切换到后台时保留最后的非零尺寸矩形，施加 `visibility:hidden; pointer-events:none; inert; aria-hidden:true`；
   - 重新切回可见时直接恢复 `visibility:visible`，仅在几何发生真实改变时触发 120ms 防抖的 xterm `fit()`。
   - 仅在 Tab 明确关闭或服务端确认删除时，才真正卸载该组件并完整清理 xterm / 监听器 / 资源。
@@ -681,7 +683,7 @@ src/
 - **终端区**：`flex:1; min-height:0; padding:8px 10px 0; background:var(--bg)`。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  尺寸变化 → `fit()` 目标 cols/rows **120ms 落定后再** `term.resize`（裁定 2026-08-23）。首帧立刻落到格子。
+  首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。
   **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就用最新几何重发 `subscribe`（不再紧跟同尺寸网络 `resize`）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
 - 挂载：网格落定后 `subscribe(ref, rows, cols)`；改宽重订；卸载 `unsubscribe(ref)`。断线重连由 Client 侧 `replaySubscriptions()` 负责。
