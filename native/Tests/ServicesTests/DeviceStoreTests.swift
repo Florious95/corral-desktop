@@ -1,90 +1,48 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import Services
 
 final class DeviceStoreTests: XCTestCase {
-    func testSaveLoadDeleteUsesOnlyWhitelistedFields() async throws {
-        let keychain = InMemoryKeychain()
-        let storeNamespace = namespace("store")
-        let store = DeviceStore(namespace: storeNamespace, keychain: keychain)
-        let device = Device(id: "one", name: "Local", url: "ws://127.0.0.1:9900/ws", token: "")
+    func testSaveLoadDeleteUsesOnlyWhitelistedFieldsAnd0600File() async throws {
+        let fixture = Fixture()
+        let fileURL = fixture.directory.appendingPathComponent("devices.json")
+        let store = DeviceStore(fileURL: fileURL)
+        let device = Device(
+            id: "one",
+            name: "Local",
+            url: "ws://127.0.0.1:9900/ws",
+            token: "token-value"
+        )
 
         try await store.save([device])
+
         let loaded = try await store.load()
         XCTAssertEqual(loaded, [device])
-
-        let persisted = try XCTUnwrap(keychain.data(for: storeNamespace))
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: persisted) as? [[String: Any]])
-        XCTAssertEqual(Set(object[0].keys), ["id", "name", "url", "token"])
+        XCTAssertEqual(fileMode(fileURL), 0o600)
+        XCTAssertEqual(fileMode(fixture.directory), 0o700)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any]
+        )
+        XCTAssertEqual(Set(object.keys), ["devices"])
+        let encodedDevice = try XCTUnwrap(
+            (object["devices"] as? [[String: Any]])?.first
+        )
+        XCTAssertEqual(Set(encodedDevice.keys), ["id", "name", "url", "token"])
 
         try await store.delete()
-        let afterDelete = try await store.load()
-        XCTAssertEqual(afterDelete, [])
-        XCTAssertTrue(keychain.operations.contains(.delete))
+        let loadedAfterDelete = try await store.load()
+        XCTAssertEqual(loadedAfterDelete, [])
     }
 
-    func testSaveRejectsInvalidDevicesAndDoesNotOverwriteExistingData() async throws {
-        let keychain = InMemoryKeychain()
-        let store = DeviceStore(namespace: namespace("validation"), keychain: keychain)
-        let valid = Device(id: "one", name: "Remote", url: "wss://daemon.example/ws", token: "token")
-        try await store.save([valid])
-
-        let invalid = Device(id: "", name: "Remote", url: "wss://daemon.example/ws", token: "token")
-        await XCTAssertThrowsErrorAsync(try await store.save([invalid])) { error in
-            XCTAssertEqual(error as? DeviceStoreError, .invalidDevices)
-        }
-        let remoteWithoutToken = Device(id: "two", name: "Remote", url: "wss://daemon.example/ws", token: "")
-        await XCTAssertThrowsErrorAsync(try await store.save([remoteWithoutToken])) { error in
-            XCTAssertEqual(error as? DeviceStoreError, .invalidDevices)
-        }
-        let loaded = try await store.load()
-        XCTAssertEqual(loaded, [valid])
-    }
-
-    func testMalformedOrNonWhitelistedStoredJSONFailsClosed() async throws {
-        let keychain = InMemoryKeychain()
-        let storeNamespace = namespace("malformed")
-        let store = DeviceStore(namespace: storeNamespace, keychain: keychain)
-
-        keychain.setData(Data("not-json".utf8), for: storeNamespace)
-        await XCTAssertThrowsErrorAsync(try await store.load()) { error in
-            XCTAssertEqual(error as? DeviceStoreError, .invalidStoredData)
-        }
-
-        let extraField = #"[{"id":"one","name":"Local","url":"ws://127.0.0.1:9900/ws","token":"","unexpected":true}]"#
-        keychain.setData(Data(extraField.utf8), for: storeNamespace)
-        await XCTAssertThrowsErrorAsync(try await store.load()) { error in
-            XCTAssertEqual(error as? DeviceStoreError, .invalidStoredData)
-        }
-    }
-
-    func testConcurrentSavesAreSerializedAndLeaveOneCompleteList() async throws {
-        let keychain = InMemoryKeychain()
-        let store = DeviceStore(namespace: namespace("concurrent"), keychain: keychain)
-        let candidates = (0..<40).map { index in
-            [Device(id: "device-\(index)", name: "Device \(index)", url: "wss://daemon.example/\(index)", token: "token-\(index)")]
-        }
-
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for devices in candidates {
-                group.addTask {
-                    try await store.save(devices)
-                }
-            }
-            try await group.waitForAll()
-        }
-
-        let result = try await store.load()
-        XCTAssertEqual(result.count, 1)
-        XCTAssertTrue(candidates.contains(result))
-    }
-
-    func testNamespacesDoNotShareKeychainItems() async throws {
-        let keychain = InMemoryKeychain()
-        let first = DeviceStore(namespace: namespace("first"), keychain: keychain)
-        let second = DeviceStore(namespace: namespace("second"), keychain: keychain)
+    func testMissingFileLoadsAsEmptyAndSeparateURLsAreIsolated() async throws {
+        let fixture = Fixture()
+        let first = DeviceStore(fileURL: fixture.directory.appendingPathComponent("one.json"))
+        let second = DeviceStore(fileURL: fixture.directory.appendingPathComponent("two.json"))
         let device = Device(id: "one", name: "Local", url: "ws://localhost:9900/ws", token: "")
 
+        let initial = try await first.load()
+        XCTAssertEqual(initial, [])
         try await first.save([device])
         let firstLoaded = try await first.load()
         let secondLoaded = try await second.load()
@@ -92,227 +50,255 @@ final class DeviceStoreTests: XCTestCase {
         XCTAssertEqual(secondLoaded, [])
     }
 
-    func testSystemKeychainCRUDUsesAnIsolatedNamespace() throws {
-        let namespace = KeychainNamespace(
-            service: "com.agentmirror.tests.\(UUID().uuidString)",
-            account: "devices"
-        )
-        let keychain = SystemKeychain()
-        let first = Data("first".utf8)
-        let second = Data("second".utf8)
-        defer { try? keychain.delete(namespace: namespace) }
+    func testInvalidDevicesAreRejectedBeforeAnyWrite() async throws {
+        let fixture = Fixture()
+        let fileURL = fixture.directory.appendingPathComponent("devices.json")
+        let store = DeviceStore(fileURL: fileURL)
+        let valid = Device(id: "one", name: "Local", url: "ws://localhost:9900/ws", token: "")
+        try await store.save([valid])
+        let before = try Data(contentsOf: fileURL)
 
-        XCTAssertNil(try keychain.copyMatching(namespace: namespace))
-        try keychain.add(data: first, namespace: namespace)
-        XCTAssertEqual(try keychain.copyMatching(namespace: namespace), first)
-        try keychain.update(data: second, namespace: namespace)
-        XCTAssertEqual(try keychain.copyMatching(namespace: namespace), second)
-        try keychain.delete(namespace: namespace)
-        XCTAssertNil(try keychain.copyMatching(namespace: namespace))
-    }
-
-    func testMigrationCopiesLegacyEnvelopeLeavesSourceAndMarksVersion() async throws {
-        let keychain = InMemoryKeychain()
-        let namespace = namespace("migration")
-        let devices = [Device(id: "one", name: "Remote", url: "wss://daemon.example/ws", token: "secret")]
-        let source = Data(#"{"devices":[{"id":"one","name":"Remote","url":"wss://daemon.example/ws","token":"secret"}],"other":true}"#.utf8)
-        let reader = StaticReader(result: .success(source))
-        let migration = DeviceMigration(namespace: namespace, keychain: keychain, reader: reader)
-
-        let result = try await migration.migrate(from: legacyURL())
-        XCTAssertEqual(result, .migrated(deviceCount: 1))
-        let store = DeviceStore(namespace: namespace, keychain: keychain)
-        let loaded = try await store.load()
-        XCTAssertEqual(loaded, devices)
-        XCTAssertEqual(reader.readCount, 1)
-        XCTAssertEqual(reader.lastData, source)
-        let secondResult = try await migration.migrate(from: legacyURL())
-        XCTAssertEqual(secondResult, .alreadyMigrated)
-        XCTAssertEqual(reader.readCount, 1)
-
-        let markerNamespace = KeychainNamespace(service: namespace.service, account: "migration-devices-v1")
-        XCTAssertEqual(keychain.data(for: markerNamespace), Data("devices-v1".utf8))
-    }
-
-    func testMalformedMigrationPreservesSourceAndDoesNotWriteDevices() async throws {
-        let keychain = InMemoryKeychain()
-        let namespace = namespace("bad-migration")
-        let source = Data(#"{"devices":[{"id":"one","name":7,"url":"wss://daemon.example/ws","token":"secret"}]}"#.utf8)
-        let reader = StaticReader(result: .success(source))
-        let migration = DeviceMigration(namespace: namespace, keychain: keychain, reader: reader)
-
-        await XCTAssertThrowsErrorAsync(try await migration.migrate(from: legacyURL())) { error in
-            XCTAssertEqual(error as? MigrationError, .invalidLegacyData)
+        let invalid = Device(id: "", name: "Local", url: "ws://localhost:9900/ws", token: "")
+        await XCTAssertThrowsErrorAsync(try await store.save([invalid])) { error in
+            XCTAssertEqual(error as? DeviceStoreError, .invalidDevices)
         }
-        let store = DeviceStore(namespace: namespace, keychain: keychain)
-        let loaded = try await store.load()
-        XCTAssertEqual(loaded, [])
-        XCTAssertEqual(reader.lastData, source)
-        let markerNamespace = KeychainNamespace(service: namespace.service, account: "migration-devices-v1")
-        XCTAssertNil(keychain.data(for: markerNamespace))
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
     }
 
-    func testFailedMigrationLeavesReal0600SourceUntouched() async throws {
-        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(".build", isDirectory: true)
-            .appendingPathComponent("s1-fixtures-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
+    func testMalformedAndUnknownFieldsFailClosed() async throws {
+        let fixture = Fixture()
+        let fileURL = fixture.directory.appendingPathComponent("devices.json")
+        let store = DeviceStore(fileURL: fileURL)
 
-        let sourceURL = root.appendingPathComponent("devices.json")
-        let source = Data(#"{"devices":[{"id":"one","name":"Remote","url":"wss://daemon.example/ws","token":"secret"}]}"#.utf8)
-        try source.write(to: sourceURL, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sourceURL.path)
-        let beforeMode = try fileMode(sourceURL)
+        let malformedInputs = [
+            Data(#"{"# .utf8),
+            Data(#"{"devices":[],"other":true}"#.utf8),
+            Data(#"{"devices":[{"id":"one","name":"Local","url":"ws://localhost:1","token":"","other":true}]}"#.utf8),
+        ]
+        for input in malformedInputs {
+            try write0600(input, to: fileURL)
+            await XCTAssertThrowsErrorAsync(try await store.load()) { error in
+                XCTAssertEqual(error as? DeviceStoreError, .invalidStoredData)
+            }
+        }
+    }
 
-        let keychain = InMemoryKeychain()
-        keychain.failure(for: .add, is: KeychainError.status(Int32(errSecAuthFailed)))
-        let namespace = namespace("failed-file-migration")
-        let migration = DeviceMigration(namespace: namespace, keychain: keychain, reader: FileManagerDevicesFileReader())
+    func testNonPrivateFileFailsClosed() async throws {
+        let fixture = Fixture()
+        let fileURL = fixture.directory.appendingPathComponent("devices.json")
+        let store = DeviceStore(fileURL: fileURL)
+        try write0600(Data(#"{"devices":[]}"#.utf8), to: fileURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o644)],
+            ofItemAtPath: fileURL.path
+        )
+
+        await XCTAssertThrowsErrorAsync(try await store.load()) { error in
+            XCTAssertEqual(error as? DeviceStoreError, .invalidStoredData)
+        }
+    }
+
+    func testSymlinkFailsClosed() async throws {
+        let fixture = Fixture()
+        let target = fixture.directory.appendingPathComponent("target.json")
+        let link = fixture.directory.appendingPathComponent("devices.json")
+        try write0600(Data(#"{"devices":[]}"#.utf8), to: target)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        let store = DeviceStore(fileURL: link)
+
+        await XCTAssertThrowsErrorAsync(try await store.load()) { error in
+            XCTAssertEqual(error as? DeviceStoreError, .invalidStoredData)
+        }
+    }
+
+    func testConcurrentActorSavesLeaveOneCompleteCandidate() async throws {
+        let fixture = Fixture()
+        let store = DeviceStore(fileURL: fixture.directory.appendingPathComponent("devices.json"))
+        let candidates = (0..<12).map { index in
+            [Device(
+                id: "device-\(index)",
+                name: "Device \(index)",
+                url: "ws://localhost:\(9900 + index)/ws",
+                token: ""
+            )]
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            for candidate in candidates {
+                group.addTask {
+                    try? await store.save(candidate)
+                }
+            }
+        }
+
+        let loaded = try await store.load()
+        XCTAssertTrue(candidates.contains(loaded))
+        XCTAssertEqual(fileMode(fixture.directory.appendingPathComponent("devices.json")), 0o600)
+    }
+
+    func testMigrationPreservesDistinctSourceAndWritesMarker() async throws {
+        let fixture = Fixture()
+        let sourceURL = fixture.directory.appendingPathComponent("legacy-devices.json")
+        let targetURL = fixture.directory
+            .appendingPathComponent("native", isDirectory: true)
+            .appendingPathComponent("devices.json")
+        let source = Data(#"{"devices":[{"id":"one","name":"Remote","url":"wss://daemon.example/ws","token":"legacy-token"}]}"#.utf8)
+        try write0600(source, to: sourceURL)
+        let migration = DeviceMigration(
+            namespace: DeviceStoreNamespace(fileURL: targetURL),
+            reader: FileManagerDevicesFileReader()
+        )
+
+        let migrationResult = try await migration.migrate(from: sourceURL)
+        XCTAssertEqual(migrationResult, .migrated(deviceCount: 1))
+        XCTAssertEqual(try Data(contentsOf: sourceURL), source)
+        XCTAssertEqual(fileMode(sourceURL), 0o600)
+        let store = DeviceStore(fileURL: targetURL)
+        let loaded = try await store.load()
+        XCTAssertEqual(
+            loaded,
+            [Device(id: "one", name: "Remote", url: "wss://daemon.example/ws", token: "legacy-token")]
+        )
+        let markerURL = targetURL.deletingLastPathComponent()
+            .appendingPathComponent(DeviceMigration.markerFileName)
+        XCTAssertEqual(try Data(contentsOf: markerURL), Data(DeviceMigration.currentVersion.utf8))
+        XCTAssertEqual(fileMode(markerURL), 0o600)
+        let secondResult = try await migration.migrate(from: sourceURL)
+        XCTAssertEqual(secondResult, .alreadyMigrated)
+    }
+
+    func testMigrationAcceptsEmptyTauriStoreObject() async throws {
+        let fixture = Fixture()
+        let sourceURL = fixture.directory.appendingPathComponent("legacy-devices.json")
+        let targetURL = fixture.directory.appendingPathComponent("target/devices.json")
+        let source = Data("{}".utf8)
+        try write0600(source, to: sourceURL)
+
+        let migration = DeviceMigration(namespace: DeviceStoreNamespace(fileURL: targetURL))
+        let migrationResult = try await migration.migrate(from: sourceURL)
+        XCTAssertEqual(migrationResult, .migrated(deviceCount: 0))
+        let loaded = try await DeviceStore(fileURL: targetURL).load()
+        XCTAssertEqual(loaded, [])
+        XCTAssertEqual(try Data(contentsOf: sourceURL), source)
+    }
+
+    func testMigrationSupportsSourceAtTargetAndKeepsLogicalDevices() async throws {
+        let fixture = Fixture()
+        let targetURL = fixture.directory.appendingPathComponent("devices.json")
+        let source = Data(#"{"devices":[{"id":"one","name":"Local","url":"ws://localhost:9900/ws","token":""}]}"#.utf8)
+        try write0600(source, to: targetURL)
+        let migration = DeviceMigration(
+            namespace: DeviceStoreNamespace(fileURL: targetURL),
+            reader: FileManagerDevicesFileReader()
+        )
+
+        let migrationResult = try await migration.migrate(from: targetURL)
+        XCTAssertEqual(migrationResult, .migrated(deviceCount: 1))
+        XCTAssertEqual(try Data(contentsOf: targetURL), source)
+        let loaded = try await DeviceStore(fileURL: targetURL).load()
+        XCTAssertEqual(
+            loaded,
+            [Device(id: "one", name: "Local", url: "ws://localhost:9900/ws", token: "")]
+        )
+        XCTAssertEqual(fileMode(targetURL), 0o600)
+    }
+
+    func testMalformedMigrationLeavesSourceUntouchedAndWritesNoMarker() async throws {
+        let fixture = Fixture()
+        let sourceURL = fixture.directory.appendingPathComponent("legacy-devices.json")
+        let targetURL = fixture.directory.appendingPathComponent("target/devices.json")
+        let source = Data(#"{"devices":[{"id":"one","name":7,"url":"ws://localhost:1","token":""}]}"#.utf8)
+        try write0600(source, to: sourceURL)
+        let sourceMode = fileMode(sourceURL)
+        let migration = DeviceMigration(
+            namespace: DeviceStoreNamespace(fileURL: targetURL),
+            reader: FileManagerDevicesFileReader()
+        )
 
         await XCTAssertThrowsErrorAsync(try await migration.migrate(from: sourceURL)) { error in
-            XCTAssertEqual(error as? MigrationError, .keychain(.status(Int32(errSecAuthFailed))))
+            XCTAssertEqual(error as? MigrationError, .invalidLegacyData)
         }
         XCTAssertEqual(try Data(contentsOf: sourceURL), source)
-        XCTAssertEqual(try fileMode(sourceURL), beforeMode)
+        XCTAssertEqual(fileMode(sourceURL), sourceMode)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: targetURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: targetURL.deletingLastPathComponent()
+                .appendingPathComponent(DeviceMigration.markerFileName).path
+        ))
     }
 
-    func testMissingSourceMarksMigrationWithoutCreatingEmptyDeviceOverwrite() async throws {
-        let keychain = InMemoryKeychain()
-        let namespace = namespace("missing")
-        let existing = [Device(id: "one", name: "Remote", url: "wss://daemon.example/ws", token: "token")]
-        let existingStore = DeviceStore(namespace: namespace, keychain: keychain)
-        try await existingStore.save(existing)
-        let migration = DeviceMigration(
-            namespace: namespace,
-            keychain: keychain,
-            reader: StaticReader(result: .failure(.notFound))
+    func testMigrationMissingSourceOnlyWritesMarker() async throws {
+        let fixture = Fixture()
+        let targetURL = fixture.directory.appendingPathComponent("target/devices.json")
+        let missingURL = fixture.directory.appendingPathComponent("missing.json")
+        let migration = DeviceMigration(namespace: DeviceStoreNamespace(fileURL: targetURL))
+
+        let migrationResult = try await migration.migrate(from: missingURL)
+        XCTAssertEqual(migrationResult, .noLegacyFile)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: targetURL.path))
+        let markerURL = targetURL.deletingLastPathComponent()
+            .appendingPathComponent(DeviceMigration.markerFileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: markerURL.path))
+        XCTAssertEqual(fileMode(markerURL), 0o600)
+    }
+
+    func testMigrationRejectsInvalidMarker() async throws {
+        let fixture = Fixture()
+        let targetURL = fixture.directory.appendingPathComponent("target/devices.json")
+        let markerURL = targetURL.deletingLastPathComponent()
+            .appendingPathComponent(DeviceMigration.markerFileName)
+        try write0600(Data("wrong-version".utf8), to: markerURL)
+        let migration = DeviceMigration(namespace: DeviceStoreNamespace(fileURL: targetURL))
+
+        await XCTAssertThrowsErrorAsync(try await migration.migrate(from: fixture.directory.appendingPathComponent("missing.json"))) { error in
+            XCTAssertEqual(error as? MigrationError, .unsupportedMarker)
+        }
+    }
+}
+
+private final class Fixture {
+    let directory: URL
+
+    init() {
+        directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build", isDirectory: true)
+            .appendingPathComponent("device-store-tests-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: 0o700)]
         )
-
-        let result = try await migration.migrate(from: legacyURL())
-        XCTAssertEqual(result, .noLegacyFile)
-        let loaded = try await existingStore.load()
-        XCTAssertEqual(loaded, existing)
-        let secondResult = try await migration.migrate(from: legacyURL())
-        XCTAssertEqual(secondResult, .alreadyMigrated)
     }
 
-    private func namespace(_ label: String) -> KeychainNamespace {
-        KeychainNamespace(service: "com.agentmirror.tests.\(label).\(UUID().uuidString)", account: "devices")
-    }
-
-    private func legacyURL() -> URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("devices.json")
-    }
-
-    private func fileMode(_ url: URL) throws -> Int {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).intValue
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
     }
 }
 
-private final class InMemoryKeychain: KeychainClient, @unchecked Sendable {
-    enum Operation: Hashable {
-        case copyMatching
-        case add
-        case update
-        case delete
+private func write0600(_ data: Data, to url: URL) throws {
+    let directory = url.deletingLastPathComponent()
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)]
+    )
+    guard FileManager.default.createFile(
+        atPath: url.path,
+        contents: data,
+        attributes: [.posixPermissions: NSNumber(value: 0o600)]
+    ) else {
+        throw NSError(domain: "DeviceStoreTests", code: 1)
     }
-
-    private let lock = NSLock()
-    private var values: [KeychainNamespace: Data] = [:]
-    private var failures: [Operation: KeychainError] = [:]
-    private(set) var operations: [Operation] = []
-
-    func copyMatching(namespace: KeychainNamespace) throws -> Data? {
-        try withLock {
-            operations.append(.copyMatching)
-            try failIfConfigured(.copyMatching)
-            return values[namespace]
-        }
-    }
-
-    func add(data: Data, namespace: KeychainNamespace) throws {
-        try withLock {
-            operations.append(.add)
-            try failIfConfigured(.add)
-            guard values[namespace] == nil else {
-                throw KeychainError.status(Int32(errSecDuplicateItem))
-            }
-            values[namespace] = data
-        }
-    }
-
-    func update(data: Data, namespace: KeychainNamespace) throws {
-        try withLock {
-            operations.append(.update)
-            try failIfConfigured(.update)
-            guard values[namespace] != nil else {
-                throw KeychainError.status(Int32(errSecItemNotFound))
-            }
-            values[namespace] = data
-        }
-    }
-
-    func delete(namespace: KeychainNamespace) throws {
-        try withLock {
-            operations.append(.delete)
-            try failIfConfigured(.delete)
-            guard values.removeValue(forKey: namespace) != nil else {
-                throw KeychainError.status(Int32(errSecItemNotFound))
-            }
-        }
-    }
-
-    func setData(_ data: Data, for namespace: KeychainNamespace) {
-        withLock {
-            values[namespace] = data
-        }
-    }
-
-    func data(for namespace: KeychainNamespace) -> Data? {
-        withLock { values[namespace] }
-    }
-
-    func failure(for operation: Operation, is error: KeychainError) {
-        withLock { failures[operation] = error }
-    }
-
-    private func failIfConfigured(_ operation: Operation) throws {
-        if let error = failures.removeValue(forKey: operation) {
-            throw error
-        }
-    }
-
-    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return try body()
-    }
+    try FileManager.default.setAttributes(
+        [.posixPermissions: NSNumber(value: 0o600)],
+        ofItemAtPath: url.path
+    )
 }
 
-private final class StaticReader: LegacyDevicesFileReader, @unchecked Sendable {
-    private let lock = NSLock()
-    private let result: Result<Data, LegacyDevicesFileError>
-    private(set) var readCount = 0
-    private(set) var lastData: Data?
-
-    init(result: Result<Data, LegacyDevicesFileError>) {
-        self.result = result
-    }
-
-    func read(from url: URL) throws -> Data {
-        lock.lock()
-        readCount += 1
-        defer { lock.unlock() }
-        switch result {
-        case let .success(data):
-            lastData = data
-            return data
-        case let .failure(error):
-            throw error
-        }
-    }
+private func fileMode(_ url: URL) -> Int {
+    var info = stat()
+    guard lstat(url.path, &info) == 0 else { return -1 }
+    return Int(info.st_mode & 0o777)
 }
 
 private func XCTAssertThrowsErrorAsync<T: Sendable>(

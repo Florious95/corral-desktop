@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             do {
                 // Migrate before constructing the WebView so a first page boot
-                // can only observe the completed Keychain-backed device list.
+                // can only observe the completed private-file device list.
                 try await migrationDevices()
                 windowController = try makeWindow()
                 windowController?.showWindow(nil)

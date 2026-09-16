@@ -11,7 +11,7 @@ import Shell
 public final class AppServices: ShellServiceHandling {
     public static let shared = AppServices()
 
-    public let namespace: KeychainNamespace
+    public let namespace: DeviceStoreNamespace
     public let availableMethods: Set<String> = [
         "devices.load", "devices.save",
         "secureStore.get", "secureStore.set",
@@ -25,7 +25,7 @@ public final class AppServices: ShellServiceHandling {
     private let uiSnapshotStore: UISnapshotStore
 
     public init(
-        namespace: KeychainNamespace = .currentApp,
+        namespace: DeviceStoreNamespace = .currentApp,
         deviceStore: DeviceStore? = nil,
         uploadService: UploadService = .shared,
         clipboardService: ClipboardService? = nil,
