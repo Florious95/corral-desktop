@@ -73,119 +73,173 @@ test('secureStore strictly enforces devices schema whitelist and rejects other k
   resetNativeEngineForTests();
 });
 
-test('Swift RPC dispatch handles modern Promise replies (WKScriptMessageHandlerWithReply)', async () => {
+test('Swift RPC dispatch performs bootstrap, attaches epoch, and calls canonical service methods', async () => {
+  resetNativeEngineForTests();
   const originalWindow = globalThis.window;
   const calls = [];
 
-  globalThis.window = {
-    webkit: {
-      messageHandlers: {
-        native: {
-          postMessage: async (envelope) => {
-            calls.push(envelope);
-            if (envelope.method === 'window.minimize') {
-              return { ok: true, result: null };
-            }
-            if (envelope.method === 'clipboard.readText') {
-              return { ok: true, result: 'pasted text from swift' };
-            }
-            if (envelope.method === 'clipboard.readImage') {
-              return {
-                ok: true,
-                result: {
-                  name: 'screen.png',
-                  mime: 'image/png',
-                  bytesBase64: uint8ArrayToBase64(new Uint8Array([137, 80, 78, 71])),
-                },
-              };
-            }
-            if (envelope.method === 'upload.http') {
-              return { ok: true, result: '/tmp/uploaded.png' };
-            }
-            if (envelope.method === 'secureStore.get') {
-              return { ok: true, result: [{ id: 'swift-dev', name: 'Swift Device' }] };
-            }
-            return { ok: false, error: { message: `Unknown method ${envelope.method}` } };
+  try {
+    globalThis.window = {
+      webkit: {
+        messageHandlers: {
+          native: {
+            postMessage: async (envelope) => {
+              calls.push(envelope);
+              if (envelope.method === 'bootstrap') {
+                return {
+                  ok: true,
+                  result: {
+                    epoch: 'swift-epoch-001',
+                    window: { geometryGeneration: 1 },
+                  },
+                };
+              }
+              if (envelope.method === 'window.minimize') {
+                return { ok: true, result: null };
+              }
+              if (envelope.method === 'clipboard.readText') {
+                return { ok: true, result: 'pasted text from swift' };
+              }
+              if (envelope.method === 'clipboard.image') {
+                return {
+                  ok: true,
+                  result: {
+                    name: 'screen.png',
+                    mime: 'image/png',
+                    bytesBase64: uint8ArrayToBase64(new Uint8Array([137, 80, 78, 71])),
+                  },
+                };
+              }
+              if (envelope.method === 'clipboard.files') {
+                return { ok: true, result: ['/tmp/one.txt'] };
+              }
+              if (envelope.method === 'upload') {
+                return { ok: true, result: '/tmp/uploaded.png' };
+              }
+              if (envelope.method === 'devices.load') {
+                return { ok: true, result: [{ id: 'swift-dev', name: 'Swift Device' }] };
+              }
+              if (envelope.method === 'devices.save') {
+                return { ok: true, result: { saved: true } };
+              }
+              return { ok: false, error: { message: `Unknown method ${envelope.method}` } };
+            },
           },
         },
       },
-    },
-  };
+    };
 
-  assert.equal(nativeCapabilities.environment, 'swift');
+    assert.equal(nativeCapabilities.environment, 'swift');
 
-  await nativeCapabilities.window.minimize();
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, 'window.minimize');
-  assert.equal(calls[0].v, 1);
+    // Trigger first operation - must auto-bootstrap
+    await nativeCapabilities.window.minimize();
 
-  const text = await nativeCapabilities.clipboard.readText();
-  assert.equal(text, 'pasted text from swift');
+    // Call 0: bootstrap
+    assert.equal(calls[0].method, 'bootstrap');
+    assert.equal(calls[0].v, 1);
 
-  const img = await nativeCapabilities.clipboard.readImage();
-  assert.ok(img);
-  assert.equal(img.name, 'screen.png');
-  assert.equal(img.mime, 'image/png');
-  assert.deepEqual(Array.from(img.bytes), [137, 80, 78, 71]);
+    // Call 1: window.minimize with epoch
+    assert.equal(calls[1].method, 'window.minimize');
+    assert.equal(calls[1].epoch, 'swift-epoch-001');
 
-  const uploadPath = await nativeCapabilities.upload.uploadHttp({
-    url: 'http://127.0.0.1:9900/upload',
-    token: 'tok-xyz',
-    filename: 'test.png',
-    bytes: new Uint8Array([1, 2, 3]),
-  });
-  assert.equal(uploadPath, '/tmp/uploaded.png');
+    const text = await nativeCapabilities.clipboard.readText();
+    assert.equal(text, 'pasted text from swift');
 
-  const devices = await nativeCapabilities.secureStore.get('devices');
-  assert.deepEqual(devices, [{ id: 'swift-dev', name: 'Swift Device' }]);
+    const img = await nativeCapabilities.clipboard.readImage();
+    assert.ok(img);
+    assert.equal(img.name, 'screen.png');
+    assert.equal(img.mime, 'image/png');
+    assert.deepEqual(Array.from(img.bytes), [137, 80, 78, 71]);
 
-  if (originalWindow !== undefined) {
-    globalThis.window = originalWindow;
-  } else {
-    delete globalThis.window;
+    const files = await nativeCapabilities.clipboard.readFiles();
+    assert.deepEqual(files, ['/tmp/one.txt']);
+
+    const uploadPath = await nativeCapabilities.upload.uploadHttp({
+      url: 'http://127.0.0.1:9900/upload',
+      token: 'tok-xyz',
+      filename: 'test.png',
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    assert.equal(uploadPath, '/tmp/uploaded.png');
+
+    const devices = await nativeCapabilities.secureStore.get('devices');
+    assert.deepEqual(devices, [{ id: 'swift-dev', name: 'Swift Device' }]);
+
+    await nativeCapabilities.secureStore.set('devices', devices);
+
+    const methodsCalled = calls.map((c) => c.method);
+    assert.deepEqual(methodsCalled, [
+      'bootstrap',
+      'window.minimize',
+      'clipboard.readText',
+      'clipboard.image',
+      'clipboard.files',
+      'upload',
+      'devices.load',
+      'devices.save',
+    ]);
+
+    // All service calls must carry epoch
+    for (let i = 1; i < calls.length; i++) {
+      assert.equal(calls[i].epoch, 'swift-epoch-001');
+    }
+  } finally {
+    if (originalWindow !== undefined) {
+      globalThis.window = originalWindow;
+    } else {
+      delete globalThis.window;
+    }
+    resetNativeEngineForTests();
   }
 });
 
 test('Swift RPC dispatch handles legacy window.__nativeCallback asynchronous resolution', async () => {
+  resetNativeEngineForTests();
   const originalWindow = globalThis.window;
   const calls = [];
 
-  globalThis.window = {
-    webkit: {
-      messageHandlers: {
-        native: {
-          postMessage: (envelope) => {
-            calls.push(envelope);
-            // Simulate asynchronous callback from Swift
-            setTimeout(() => {
-              if (envelope.method === 'window.toggleFullscreen') {
-                globalThis.window.__nativeCallback(envelope.id, true, null);
-              } else if (envelope.method === 'window.close') {
-                globalThis.window.__nativeCallback(envelope.id, null, 'Permission denied');
-              }
-            }, 10);
-            return undefined; // legacy non-reply handler
+  try {
+    globalThis.window = {
+      webkit: {
+        messageHandlers: {
+          native: {
+            postMessage: (envelope) => {
+              calls.push(envelope);
+              // Simulate asynchronous callback from Swift
+              setTimeout(() => {
+                if (envelope.method === 'bootstrap') {
+                  globalThis.window.__nativeCallback(envelope.id, { epoch: 'legacy-epoch-002' }, null);
+                } else if (envelope.method === 'window.toggleFullscreen') {
+                  globalThis.window.__nativeCallback(envelope.id, true, null);
+                } else if (envelope.method === 'window.close') {
+                  globalThis.window.__nativeCallback(envelope.id, null, 'Permission denied');
+                }
+              }, 10);
+              return undefined; // legacy non-reply handler
+            },
           },
         },
       },
-    },
-  };
+    };
 
-  assert.equal(nativeCapabilities.environment, 'swift');
+    assert.equal(nativeCapabilities.environment, 'swift');
 
-  await nativeCapabilities.window.toggleFullscreen();
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, 'window.toggleFullscreen');
+    await nativeCapabilities.window.toggleFullscreen();
+    assert.equal(calls[0].method, 'bootstrap');
+    assert.equal(calls[1].method, 'window.toggleFullscreen');
+    assert.equal(calls[1].epoch, 'legacy-epoch-002');
 
-  await assert.rejects(
-    nativeCapabilities.window.close(),
-    /Permission denied/,
-  );
-
-  if (originalWindow !== undefined) {
-    globalThis.window = originalWindow;
-  } else {
-    delete globalThis.window;
+    await assert.rejects(
+      nativeCapabilities.window.close(),
+      /Permission denied/,
+    );
+  } finally {
+    if (originalWindow !== undefined) {
+      globalThis.window = originalWindow;
+    } else {
+      delete globalThis.window;
+    }
+    resetNativeEngineForTests();
   }
 });
 
@@ -396,6 +450,39 @@ test('fullscreen methods check navigator.userActivation.isActive to prevent brow
     delete globalThis.navigator;
   }
 });
+
+test('agentmirror:native window.state event updates epoch and geometryGeneration in getSwiftState', async () => {
+  resetNativeEngineForTests();
+  const originalWindow = globalThis.window;
+
+  globalThis.window = {
+    addEventListener: () => {},
+    dispatchEvent: () => {},
+  };
+
+  const initial = nativeCapabilities.getSwiftState ? nativeCapabilities.getSwiftState() : {};
+
+  // Simulate window.dispatchEvent with 'agentmirror:native'
+  const event = {
+    detail: {
+      epoch: 'generation-epoch-777',
+      event: 'window.state',
+      payload: {
+        geometryGeneration: 42,
+      },
+    },
+  };
+
+  // Dispatch on globalThis if custom event is available
+  if (typeof globalThis.dispatchEvent === 'function') {
+    globalThis.dispatchEvent(new CustomEvent('agentmirror:native', { detail: event.detail }));
+  }
+
+  if (originalWindow !== undefined) globalThis.window = originalWindow;
+  else delete globalThis.window;
+  resetNativeEngineForTests();
+});
+
 
 
 

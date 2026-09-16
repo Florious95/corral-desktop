@@ -65,10 +65,27 @@ export function collectSurfaceGeometry(container = typeof document !== 'undefine
     }
   });
 
+  let maxDragY = 38;
+  dragRects.forEach((r) => {
+    if (r.y + r.height > maxDragY) {
+      maxDragY = r.y + r.height;
+    }
+  });
+
+  const chromeRect = {
+    x: 0,
+    y: 0,
+    width: viewportCSS.width,
+    height: Math.min(viewportCSS.height, maxDragY),
+  };
+
   return {
+    phase: 'arm',
     viewportCSS,
+    devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
     dragRects,
     exclusionRects,
+    chromeRect,
   };
 }
 
@@ -82,19 +99,39 @@ export function createSurfaceGeometryWatcher({
 } = {}) {
   let timer = null;
   let lastGeomJson = '';
+  let inFlight = false;
+  let scheduledAgain = false;
 
-  const report = () => {
-    if (!container) return;
+  const report = async () => {
+    if (!container || inFlight) {
+      if (inFlight) scheduledAgain = true;
+      return;
+    }
     const geom = collectSurfaceGeometry(container);
     const json = JSON.stringify(geom);
     if (json === lastGeomJson) return; // 几何未变化跳过
-    lastGeomJson = json;
-    onUpdate(geom);
+
+    inFlight = true;
+    try {
+      await onUpdate(geom);
+      // 关键：仅在成功上报 ACK 后才记录 lastGeomJson 去重缓存
+      lastGeomJson = json;
+    } catch (_) {
+      // 上报失败不记录去重缓存，允许后续重试上报
+    } finally {
+      inFlight = false;
+      if (scheduledAgain) {
+        scheduledAgain = false;
+        schedule();
+      }
+    }
   };
 
   const schedule = () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(report, debounceMs);
+    timer = setTimeout(() => {
+      report();
+    }, debounceMs);
   };
 
   let ro = null;
@@ -109,8 +146,14 @@ export function createSurfaceGeometryWatcher({
   }
 
   const onWinResize = () => schedule();
+  const onWindowState = () => {
+    lastGeomJson = '';
+    schedule();
+  };
+
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('resize', onWinResize);
+    window.addEventListener('agentmirror:window-state-updated', onWindowState);
   }
 
   // 挂载后首次调度一次
@@ -127,6 +170,7 @@ export function createSurfaceGeometryWatcher({
       if (ro) ro.disconnect();
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
         window.removeEventListener('resize', onWinResize);
+        window.removeEventListener('agentmirror:window-state-updated', onWindowState);
       }
     },
   };

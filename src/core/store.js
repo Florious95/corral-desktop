@@ -211,20 +211,16 @@ let secureStoreLocker = lockSecureStore;
 /** Desktop hydrate. Tests inject a fake backend through setSecureStoreForTests. */
 export async function loadDevicesSecure() {
   if (!isNativeDesktop()) return [];
-  try {
-    let devicesRaw;
-    if (secureStoreLoader !== pluginStore) {
-      const s = await secureStoreLoader();
-      devicesRaw = await s.get('devices');
-    } else {
-      devicesRaw = await nativeCapabilities.secureStore.get('devices');
-    }
-    const devices = normalizeDevices(devicesRaw);
-    secureSaveQueue.prime(devices);
-    return devices;
-  } catch {
-    return [];
+  let devicesRaw;
+  if (secureStoreLoader !== pluginStore) {
+    const s = await secureStoreLoader();
+    devicesRaw = await s.get('devices');
+  } else {
+    devicesRaw = await nativeCapabilities.secureStore.get('devices');
   }
+  const devices = normalizeDevices(devicesRaw);
+  secureSaveQueue.prime(devices);
+  return devices;
 }
 
 async function writeSecureDevices(payload) {
