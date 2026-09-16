@@ -170,22 +170,23 @@ public struct LocalContent {
         let spec = value.dropFirst(6).trimmingCharacters(in: .whitespaces)
         if spec.contains(",") { return .multi }
         let parts = spec.split(separator: "-", omittingEmptySubsequences: false)
-        guard size > 0 else { return .unsatisfiable }
         guard parts.count == 2 else { return .malformed }
         let left = parts[0].trimmingCharacters(in: .whitespaces)
         let right = parts[1].trimmingCharacters(in: .whitespaces)
         guard !left.isEmpty || !right.isEmpty else { return .malformed }
         if left.isEmpty {
-            guard let suffix = Int64(right), suffix > 0 else { return .malformed }
-            let length = min(suffix, size)
-            return .single(size - length, size - 1)
+            guard right.allSatisfy(\.isNumber), let suffix = UInt64(right) else { return .malformed }
+            guard suffix > 0, size > 0 else { return .unsatisfiable }
+            let length = min(suffix, UInt64(size))
+            return .single(size - Int64(length), size - 1)
         }
-        guard let start = Int64(left), start >= 0 else { return .malformed }
-        guard start < size else { return .unsatisfiable }
+        guard left.allSatisfy(\.isNumber), let startValue = UInt64(left) else { return .malformed }
+        guard size > 0, startValue < UInt64(size) else { return .unsatisfiable }
+        let start = Int64(startValue)
         if right.isEmpty { return .single(start, size - 1) }
-        guard let requestedEnd = Int64(right) else { return .malformed }
-        guard requestedEnd >= start else { return .unsatisfiable }
-        return .single(start, min(requestedEnd, size - 1))
+        guard right.allSatisfy(\.isNumber), let requestedEnd = UInt64(right) else { return .malformed }
+        guard requestedEnd >= startValue else { return .unsatisfiable }
+        return .single(start, Int64(min(requestedEnd, UInt64(size - 1))))
     }
 }
 

@@ -61,6 +61,10 @@ final class LocalContentTests: XCTestCase {
 
         let malformed = content.responsePlan(for: request(headers: ["Range": "bytes=nope"]))
         XCTAssertEqual(malformed.statusCode, 400)
+        let malformedEnd = content.responsePlan(for: request(headers: ["Range": "bytes=1-nope"]))
+        XCTAssertEqual(malformedEnd.statusCode, 400)
+        let zeroSuffix = content.responsePlan(for: request(headers: ["Range": "bytes=-0"]))
+        XCTAssertEqual(zeroSuffix.statusCode, 416)
 
         let unsatisfiable = content.responsePlan(for: request(headers: ["Range": "bytes=100-"]))
         XCTAssertEqual(unsatisfiable.statusCode, 416)
