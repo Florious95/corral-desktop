@@ -483,6 +483,90 @@ test('agentmirror:native window.state event updates epoch and geometryGeneration
   resetNativeEngineForTests();
 });
 
+test('secureStore.set rejects with fail-closed Error when devices payload is not an Array', async () => {
+  resetNativeEngineForTests();
+
+  await assert.rejects(
+    nativeCapabilities.secureStore.set('devices', null),
+    /secureStore: devices must be an array/,
+  );
+  await assert.rejects(
+    nativeCapabilities.secureStore.set('devices', 'not-array'),
+    /secureStore: devices must be an array/,
+  );
+  await assert.rejects(
+    nativeCapabilities.secureStore.set('devices', { id: 'single-device' }),
+    /secureStore: devices must be an array/,
+  );
+  await assert.rejects(
+    nativeCapabilities.secureStore.set('devices', 12345),
+    /secureStore: devices must be an array/,
+  );
+
+  resetNativeEngineForTests();
+});
+
+test('surface.update with phase: "disarm" strictly sends only 3 fields: phase, geometryGeneration, revision', async () => {
+  resetNativeEngineForTests();
+  const originalWindow = globalThis.window;
+  const calls = [];
+
+  try {
+    globalThis.window = {
+      webkit: {
+        messageHandlers: {
+          native: {
+            postMessage: async (envelope) => {
+              calls.push(envelope);
+              if (envelope.method === 'bootstrap') {
+                return {
+                  ok: true,
+                  result: {
+                    epoch: 'disarm-epoch-888',
+                    window: { geometryGeneration: 7 },
+                  },
+                };
+              }
+              if (envelope.method === 'surface.update') {
+                return { ok: true, result: { disarmed: true } };
+              }
+              return { ok: false, error: 'unknown' };
+            },
+          },
+        },
+      },
+    };
+
+    assert.equal(nativeCapabilities.environment, 'swift');
+
+    const result = await nativeCapabilities.surface.update({
+      phase: 'disarm',
+      geometryGeneration: 7,
+      revision: 10,
+      viewportCSS: { width: 1000, height: 700 }, // Extra fields passed to API must be stripped on disarm!
+      dragRects: [{ x: 0, y: 0, width: 1000, height: 38 }],
+    });
+
+    assert.deepEqual(result, { disarmed: true });
+    // Call 0: bootstrap, Call 1: surface.update (disarm)
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].method, 'surface.update');
+    assert.equal(calls[1].epoch, 'disarm-epoch-888');
+
+    const params = calls[1].params;
+    // Strictly assert the exact keys
+    assert.deepEqual(Object.keys(params).sort(), ['geometryGeneration', 'phase', 'revision']);
+    assert.equal(params.phase, 'disarm');
+    assert.equal(params.geometryGeneration, 7);
+    assert.equal(params.revision, 10);
+  } finally {
+    if (originalWindow !== undefined) globalThis.window = originalWindow;
+    else delete globalThis.window;
+    resetNativeEngineForTests();
+  }
+});
+
+
 
 
 
