@@ -27,7 +27,12 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     private(set) var epoch = UUID().uuidString
     private var seen: Set<String> = []
     private var seenOrder: [String] = []
-    private var pending: [String: (Task<Void, Never>, @MainActor @Sendable (Any?, String?) -> Void)] = [:]
+    private struct PendingRequest {
+        let work: Task<Void, Never>
+        let timeout: Task<Void, Never>
+        let reply: @MainActor @Sendable (Any?, String?) -> Void
+    }
+    private var pending: [String: PendingRequest] = [:]
     private var ready = false
     private var sequence = 0
 
@@ -36,7 +41,9 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         "window.toggleFullscreen", "window.minimize", "window.close", "surface.update"
     ]
     static let serviceMethods: Set<String> = [
-        "devices.load", "devices.save", "clipboard.image", "clipboard.files", "upload",
+        "devices.load", "devices.save", "secureStore.get", "secureStore.set",
+        "clipboard.text", "clipboard.readText", "clipboard.image", "clipboard.readImage",
+        "clipboard.files", "clipboard.readFiles", "upload", "upload.http",
         "migration.loadUI", "migration.saveUI"
     ]
 
@@ -45,9 +52,10 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     func reset() {
         let old = pending
         pending.removeAll()
-        for (id, (task, reply)) in old {
-            task.cancel()
-            reply(failure(id: id, code: .cancelled), nil)
+        for (id, request) in old {
+            request.work.cancel()
+            request.timeout.cancel()
+            request.reply(failure(id: id, code: .cancelled), nil)
         }
         epoch = UUID().uuidString
         seen.removeAll()
@@ -106,14 +114,14 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
                     self.finish(id, response: self.failure(id: id, code: error as? ShellError ?? .unavailable))
                 }
             }
-            pending[id] = (task, replyHandler)
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(method == "upload" ? 20 : 5))
+            let timeout = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(method == "upload" || method == "upload.http" ? 20 : 5))
                 guard let self, generation == self.epoch,
-                      let (task, _) = self.pending[id] else { return }
-                task.cancel()
+                      let request = self.pending[id] else { return }
+                request.work.cancel()
                 self.finish(id, response: self.failure(id: id, code: .timeout))
             }
+            pending[id] = PendingRequest(work: task, timeout: timeout, reply: replyHandler)
         } catch {
             replyHandler(failure(id: id, code: error as? ShellError ?? .invalidRequest), nil)
         }
@@ -129,8 +137,10 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     private func finish(_ id: String, response: [String: Any]) {
-        guard let (_, reply) = pending.removeValue(forKey: id) else { return }
-        reply(response, nil)
+        guard let request = pending.removeValue(forKey: id) else { return }
+        request.work.cancel()
+        request.timeout.cancel()
+        request.reply(response, nil)
     }
 
     private func failure(id: String, code: ShellError) -> [String: Any] {

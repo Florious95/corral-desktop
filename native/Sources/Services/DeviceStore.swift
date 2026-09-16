@@ -107,6 +107,19 @@ public struct KeychainNamespace: Equatable, Hashable, Sendable {
         service: "com.agentmirror.desktop.devices.v1",
         account: "device-list"
     )
+
+    /// Keep command-line probes and isolated test bundles from reading the
+    /// production Keychain item. Only the signed release bundle gets the
+    /// historical production service name.
+    public static var currentApp: KeychainNamespace {
+        guard Bundle.main.bundleIdentifier == "com.agentmirror.desktop" else {
+            return KeychainNamespace(
+                service: "com.agentmirror.desktop.test.devices.v1",
+                account: "device-list"
+            )
+        }
+        return .production
+    }
 }
 
 public enum KeychainError: Error, Equatable, Sendable {
@@ -190,6 +203,8 @@ public enum DeviceStoreError: Error, Equatable, Sendable {
 /// Actor-isolated device list. All writes replace one keychain item, and all
 /// callers therefore observe serialized, whole-list updates.
 public actor DeviceStore {
+    public static let shared = DeviceStore(namespace: .currentApp)
+
     public let namespace: KeychainNamespace
     private let keychain: any KeychainClient
 
@@ -199,6 +214,14 @@ public actor DeviceStore {
     ) {
         self.namespace = namespace
         self.keychain = keychain
+    }
+
+    public func loadDevices() throws -> [Device] {
+        try load()
+    }
+
+    public func saveDevices(_ devices: [Device]) throws {
+        try save(devices)
     }
 
     public func load() throws -> [Device] {

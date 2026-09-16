@@ -82,6 +82,8 @@ public final class SystemPasteboard: PasteboardClient {
 
 @MainActor
 public final class ClipboardService {
+    public static let shared = ClipboardService()
+
     private static let plainTextType = "public.utf8-plain-text"
     private static let legacyStringType = NSPasteboard.PasteboardType.string.rawValue
     private static let imageTypes: [(type: String, mime: String, name: String)] = [

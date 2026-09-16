@@ -16,7 +16,7 @@ let package = Package(
             path: "Sources/AgentMirrorApp"
         ),
         .target(name: "Services", path: "Sources/Services"),
-        .target(name: "Shell", path: "Sources/Shell"),
+        .target(name: "Shell", dependencies: ["Services"], path: "Sources/Shell"),
         .testTarget(
             name: "ServicesTests",
             dependencies: ["Services"],
