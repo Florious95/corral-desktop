@@ -188,12 +188,18 @@ export const nativeCapabilities = {
         return w.setFullscreen(!fs);
       }
       if (typeof document !== 'undefined') {
-        if (!document.fullscreenElement) {
-          await document.documentElement?.requestFullscreen?.();
-        } else {
+        try {
+          if (!document.fullscreenElement) {
+            await document.documentElement?.requestFullscreen?.();
+            return true;
+          }
           await document.exitFullscreen?.();
+          return false;
+        } catch (_) {
+          return false; // 浏览器拒绝全屏（如缺少用户手势）时安全降级，不抛出未处理异常
         }
       }
+      return false;
     },
 
     async isFullscreen() {
@@ -220,12 +226,20 @@ export const nativeCapabilities = {
         return getCurrentWindow().setFullscreen(Boolean(flag));
       }
       if (typeof document !== 'undefined') {
-        if (flag && !document.fullscreenElement) {
-          await document.documentElement?.requestFullscreen?.();
-        } else if (!flag && document.fullscreenElement) {
-          await document.exitFullscreen?.();
+        try {
+          if (flag && !document.fullscreenElement) {
+            await document.documentElement?.requestFullscreen?.();
+            return true;
+          }
+          if (!flag && document.fullscreenElement) {
+            await document.exitFullscreen?.();
+            return false;
+          }
+        } catch (_) {
+          return false; // 浏览器拒绝全屏（如缺少用户手势）时安全降级，不抛出未处理异常
         }
       }
+      return false;
     },
 
     async startDragging() {

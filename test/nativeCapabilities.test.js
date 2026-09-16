@@ -286,3 +286,43 @@ test('uploadHttp accepts body alias and correctly uploads via Web fetch fallback
   globalThis.fetch = originalFetch;
 });
 
+test('toggleFullscreen and setFullscreen safely catch DOM fullscreen rejections without throwing', async () => {
+  resetNativeEngineForTests();
+  const originalDocument = globalThis.document;
+
+  // Mock document rejecting requestFullscreen with "TypeError: not granted" (e.g. Headless Chrome without user gesture)
+  globalThis.document = {
+    fullscreenElement: null,
+    documentElement: {
+      requestFullscreen: async () => {
+        throw new TypeError('not granted');
+      },
+    },
+    exitFullscreen: async () => {
+      throw new Error('exit failure');
+    },
+  };
+
+  // Must not reject, returns false gracefully
+  const toggleResult = await nativeCapabilities.window.toggleFullscreen();
+  assert.equal(toggleResult, false);
+
+  const setResult = await nativeCapabilities.window.setFullscreen(true);
+  assert.equal(setResult, false);
+
+  // When exiting fullscreen and exitFullscreen rejects
+  globalThis.document.fullscreenElement = {};
+  const toggleExit = await nativeCapabilities.window.toggleFullscreen();
+  assert.equal(toggleExit, false);
+
+  const setExit = await nativeCapabilities.window.setFullscreen(false);
+  assert.equal(setExit, false);
+
+  if (originalDocument !== undefined) {
+    globalThis.document = originalDocument;
+  } else {
+    delete globalThis.document;
+  }
+});
+
+
