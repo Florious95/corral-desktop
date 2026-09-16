@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, PlusIcon } from '../../lib/icons.jsx';
 import { getLeaves } from '../../lib/workspaceLayout.js';
-import { triggerWindowDrag } from '../../lib/windowChrome.js';
 
 /**
  * 计算标签页对应的实时运行状态（支持多分屏与单会话秒级联动）
@@ -77,14 +76,9 @@ export default function TabBar({
   if (tabs.length === 0) return null;
 
   return (
-    <nav
-      className="tb-tabbar"
-      data-tauri-drag-region
-      aria-label="会话标签页"
-      onPointerDown={triggerWindowDrag}
-    >
+    <nav className="tb-tabbar" aria-label="会话标签页">
       {pinnedTabs.length > 0 && (
-        <div className="tb-tabs-pinned" data-tauri-drag-region>
+        <div className="tb-tabs-pinned">
           {pinnedTabs.map((tab, idx) => {
             const tabKey = tab.id || tab.uid;
             const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
@@ -103,6 +97,7 @@ export default function TabBar({
                 key={tabKey}
                 data-tab-uid={tabKey}
                 data-pinned="true"
+                data-tauri-drag-region="false"
                 className={`tb-tab tb-tab-pinned${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
                 title={subtitle}
                 aria-label={subtitle}
@@ -124,7 +119,7 @@ export default function TabBar({
         </div>
       )}
 
-      <div className="tb-tabs-scroll" data-tauri-drag-region>
+      <div className="tb-tabs-scroll">
         {regularTabs.map((tab, idx) => {
           const tabKey = tab.id || tab.uid;
           const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
@@ -154,6 +149,7 @@ export default function TabBar({
               key={tabKey}
               data-tab-uid={tabKey}
               data-pinned="false"
+              data-tauri-drag-region="false"
               className={`tb-tab${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
               title={subtitle}
               role="tab"
@@ -167,6 +163,7 @@ export default function TabBar({
               <button
                 type="button"
                 className="tb-tab-close"
+                data-tauri-drag-region="false"
                 title="关闭此标签页"
                 aria-label={`关闭 ${title}`}
                 onClick={(e) => {
@@ -184,6 +181,7 @@ export default function TabBar({
       <button
         type="button"
         className="tb-btn tb-tab-add"
+        data-tauri-drag-region="false"
         title="新建工作台标签页 (Cmd+T)"
         aria-label="新建工作台标签页"
         onClick={onCreateTab}

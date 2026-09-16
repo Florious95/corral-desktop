@@ -266,13 +266,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
   - **左侧列（侧边栏区域）**：
     - 顶部工具栏（TitleBar，高 38px）预留 **80px** 原生红绿灯安全留白，并在垂直方向上与折叠按钮严格共线对齐（`trafficLightPosition: { "x": 18, "y": 20 }`）；
     - 菜单缩进按钮（SidebarToggle，`28×26px`，`<SidebarIcon size={16} strokeWidth={1.8}/>`）位于左侧栏最右侧、紧靠垂直分割线左侧，垂直绝对居中；
-    - 中间区域为可拖动窗口区域（`.tb-drag`），具备 `-webkit-app-region: drag` 与 `startDragging()` 双重原生拖动保险；
+    - 中间区域为可拖动窗口区域（`.tb-drag`），由顶层 `data-tauri-drag-region="deep"` 原生接管窗口移动；
     - 侧栏会话支持即时拖动：按下鼠标位移 `dx/dy > 4px` 瞬间进入 dragging 状态（无 180ms 延迟），彻底消灭 HTML5 拖拽冲突（`-webkit-user-drag: none`）与蓝底选中文本；
     - 下方排布工作区与会话列表（SpacesList、AgentsList），彻底删除右键“分裂展示”废弃菜单；
     - 右侧拥有贯穿整个视口全高的垂直分隔线（`border-right: 1px solid var(--border-strong)`）。
   - **右侧列（会话主舞台）**：
     - 顶部放置会话选项卡栏（`tb-session-header` 内挂载 TabBar，高 38px，位于垂直分隔线右侧，仅覆盖右侧会话区，绝不在左侧菜单栏上方！）；
-    - 顶栏空白处同样具备双重原生拖动保险（`-webkit-app-region: drag` 与 `startDragging()`）；
+    - 顶栏空白处同样由顶层 `data-tauri-drag-region="deep"` 配合 Tab 与按钮 `data-tauri-drag-region="false"` 原生接管窗口移动；
     - 下方是同父平铺常驻终端舞台（TerminalStage），全域无死角分屏（多竖列连续分屏 1:1:1 绝对均等均分，彻底消灭 211 / 112 畸形比例；单会话中线左右 50/50 划分；分屏窗口点击左侧会话坚决不生效，杜绝挤占替换）；
   - **侧栏折叠**：`.app-left` 宽 **0**，无常驻窄列。展开/折叠通过快捷键 Cmd+B 或顶栏侧栏切换按钮唤出；折叠时右侧会话顶栏自动适配红绿灯留白与展开按钮。
 - `tauri.conf.json` 保持 Overlay 模式：
@@ -374,8 +374,8 @@ src/
 - **生命周期交互**：
   - 点击已可见 Tab 切换工作台并展示该工作台专属分屏树；
   - 右键菜单支持「固定/取消固定」、「关闭工作台」、「关闭其他工作台」、「关闭右侧所有工作台」。
-- **顶栏拖窗与幽灵标签/工作状态根除裁定（2026-09-17 裁定）**：
-  - **顶部长按拖窗双保险**：`TitleBar`、`TabBar`、`tb-session-header` 与所有空白留白区均挂载 `-webkit-app-region: drag` 与 `data-tauri-drag-region`；`triggerWindowDrag` 自动排除可交互控件（`button`、`.tb-tab`、输入框等），在任何非交互空白区域长按按住时均同步调用 `appWindow.startDragging()`，杜绝窗口卡顿无法移动；
+- **顶栏拖窗与幽灵标签/工作状态根除裁定（2026-09-16 顾问终极架构裁定）**：
+  - **顶部长按拖窗原生唯一通路**：彻底废除无效的 `-webkit-app-region` 与前端 JS 手动 `triggerWindowDrag` 派发逻辑，全面收敛至 Tauri 官方唯一原生通路：两侧 Header 声明 `data-tauri-drag-region="deep"`，所有交互控件（按钮、Tab 标签等）显式声明 `data-tauri-drag-region="false"`；`src-tauri/capabilities/default.json` 授权 `"core:window:allow-start-dragging"`，由 Tauri 内置特权脚本与 AppKit 原生接管窗口移动，无死角、零延迟、防误触；
   - **侧栏文件夹/工作区状态点展示**：每个工作区项（`FolderIcon`）根据内部所有会话状态动态派生；只要任一会话 `state === 'working'` 或 `status === 'working'`，无论该文件夹是否选中或折叠收起，其外层右侧均展示微动绿点；`TabBar` 顶部状态灯与之即时联动，消灭状态不同步；
   - **幽灵标签与重复标签彻底根除**：点击右侧终端窗格走纯粹的 `focusWorkspacePane`，仅更新当前激活工作台内部的 `activeUid`，绝不修改 `tabs` 结构；单会话全顶栏查重与 `openSession` 安全防穿透委派，彻底杜绝生成没有 root、没有内容、仅有标题的空壳幽灵 Tab！
 - **UI 与视觉审美精进裁定（2026-09-16 顾问审查收口）**：

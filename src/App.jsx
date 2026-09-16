@@ -51,7 +51,6 @@ import {
   findLeaf,
   removeNode,
 } from './lib/workspaceLayout.js';
-import { triggerWindowDrag } from './lib/windowChrome.js';
 import { TabDragController } from './lib/tabDrag.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
@@ -852,16 +851,14 @@ export default function App({ seedDevices } = {}) {
         </div>
 
         <main className="app-main">
-          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`}
-            data-tauri-drag-region
-            onPointerDown={triggerWindowDrag}
-          >
+          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`} data-tauri-drag-region="deep">
             {collapsed && (
               <>
                 <div className="tb-traffic-lights" aria-hidden="true" />
                 <button
                   type="button"
                   className="tb-btn tb-sidebar-toggle"
+                  data-tauri-drag-region="false"
                   title="展开侧栏"
                   aria-label="展开侧栏"
                   onClick={() => setCollapsed(false)}
@@ -883,12 +880,8 @@ export default function App({ seedDevices } = {}) {
               onContextMenu={(e, tab) => openMenu(e, 'tab', tab.id || tab.uid)}
               onPointerDown={handleTabPointerDown}
             />
-            {/* 顶部长按拖窗统一收敛至 triggerWindowDrag（底层调用 startDragging，严禁在此内联重复触发） */}
-            <div
-              className="tb-drag"
-              data-tauri-drag-region
-              onPointerDown={triggerWindowDrag}
-            />
+            {/* 顶部长按拖窗收敛至原生 data-tauri-drag-region="deep"，由 Tauri 官方 drag.js 原生触发 startDragging */}
+            <div className="tb-drag" />
           </header>
 
           <div className="main-stage-container">
