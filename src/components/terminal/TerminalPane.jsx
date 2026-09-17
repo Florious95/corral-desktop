@@ -39,6 +39,7 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
  * @param {() => void} [props.onEnter]
  * @param {() => void} [props.onCtrlV]
  * @param {(event:ClipboardEvent) => void} [props.onPaste]
+ * @param {string} props.agent.provider     Cursor uses a software input cursor; hide its parked xterm cursor
  */
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
@@ -170,6 +171,7 @@ export default function TerminalPane({
         sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'write_backpressure', { force: true });
       },
       onHistoryBoundary: () => loadHistory(),
+      hideCursor: agent.provider === 'cursor',
       onData: (data) => pump.onData(data),
       onBinary: (data) => pump.onBinary(data),
     });

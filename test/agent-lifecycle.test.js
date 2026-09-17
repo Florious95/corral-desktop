@@ -24,6 +24,7 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   const dialogSelection = source('lib/providerSelection.js');
   const spaces = source('components/sidebar/SpacesList.jsx');
   const sidebarCss = source('components/sidebar/sidebar.css');
+  const pane = source('components/terminal/TerminalPane.jsx');
   assert.match(app, /getAgentLaunchers/);
   assert.match(app, /dm\.createAgent\(/);
   assert.match(app, /dm\.closeSession\(/);
@@ -45,6 +46,7 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   assert.doesNotMatch(agents, /XIcon|agents-row-close|onClose/);
   assert.doesNotMatch(spaces, /XIcon|close Agent/i);
   assert.doesNotMatch(sidebarCss, /agents-row-close/);
+  assert.match(pane, /hideCursor: agent\.provider === 'cursor'/);
 });
 
 test('provider selection survives launcher refreshes and only resets when invalid', () => {
