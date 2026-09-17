@@ -283,8 +283,7 @@ export default function TerminalPane({
         viewRef.current.fit({ immediate: true });
         const fit = viewRef.current.lastFit;
         if (fit && fit.derived_rows && fit.derived_cols) {
-          clientRef.current?.resize?.(target, fit.derived_rows, fit.derived_cols, 'user');
-          clientRef.current?.subscribe?.(target, fit.derived_rows, fit.derived_cols, 'user');
+          sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'reflow', { force: true });
         }
       }
     };
