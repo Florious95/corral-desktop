@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveProviderSelection } from '../src/lib/providerSelection.js';
 import {
   createMultiWorkspace,
   createWorkspaceTab,
@@ -20,6 +21,7 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   const dialog = source('components/chrome/NewAgentDialog.jsx');
   const closeDialog = source('components/chrome/CloseAgentDialog.jsx');
   const agents = source('components/sidebar/AgentsList.jsx');
+  const dialogSelection = source('lib/providerSelection.js');
   const spaces = source('components/sidebar/SpacesList.jsx');
   const sidebarCss = source('components/sidebar/sidebar.css');
   assert.match(app, /getAgentLaunchers/);
@@ -30,6 +32,9 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   assert.doesNotMatch(app, /globalThis\.confirm|window\.confirm/);
   assert.match(dialog, /launchers\.map/);
   assert.match(dialog, /supports_bypass/);
+  assert.match(dialog, /resolveProviderSelection/);
+  assert.match(dialog, /wasOpen/);
+  assert.match(dialogSelection, /options\.some/);
   assert.match(dialog, /nad-bypass.*is-disabled/);
   assert.match(dialog, /!bypassSupported/);
   assert.doesNotMatch(dialog, /const PROVIDERS\s*=/);
@@ -40,6 +45,23 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   assert.doesNotMatch(agents, /XIcon|agents-row-close|onClose/);
   assert.doesNotMatch(spaces, /XIcon|close Agent/i);
   assert.doesNotMatch(sidebarCss, /agents-row-close/);
+});
+
+test('provider selection survives launcher refreshes and only resets when invalid', () => {
+  const launchers = [
+    { provider: 'pi' },
+    { provider: 'codex' },
+    { provider: 'cursor' },
+    { provider: 'grok' },
+  ];
+  let selected = resolveProviderSelection('', launchers, true);
+  assert.equal(selected, 'pi');
+  for (const provider of ['codex', 'cursor', 'grok']) {
+    selected = provider; // the user clicks a tile
+    selected = resolveProviderSelection(selected, [...launchers], false); // parent re-render
+    assert.equal(selected, provider);
+  }
+  assert.equal(resolveProviderSelection('missing', launchers, false), 'pi');
 });
 
 test('authoritative listing gates lifecycle workspace reconciliation across tabs', () => {
