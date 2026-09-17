@@ -318,7 +318,6 @@ export default function App({ seedDevices } = {}) {
           ...existing,
           status: cur,
           state: cur,
-          title: s.title || existing.title || s.name || '',
           provider: s.provider || existing.provider,
           updatedAt: Date.now(),
         });
@@ -371,11 +370,12 @@ export default function App({ seedDevices } = {}) {
     const out = [];
     for (const w of workspaces) {
       for (const s of w.sessions || []) {
-        const title = s.name || '';
+        // 服务端协议中，s.name 是权威提取的准确会话展示名（如 "桌面端leader"）；
+        // s.title 仅作为底层的 OSC 窗口外壳兜底。
+        const sessionName = s.name || s.title || '';
         const curStatus = s.state || s.status || 'unknown';
         const cached = globalSessionStatusRef.current.get(s.uid);
         const effectiveStatus = (curStatus && curStatus !== 'unknown') ? curStatus : (cached?.status || curStatus);
-        const effectiveTitle = (s.title && s.title !== '') ? s.title : (cached?.title || title);
         const effectiveProvider = s.provider || cached?.provider;
         out.push({
           key: s.uid,
@@ -385,13 +385,13 @@ export default function App({ seedDevices } = {}) {
           deviceLocal: !!localById.get(w.deviceId),
           spaceKey: w.spaceKey,
           spaceName: w.label,
-          title: effectiveTitle,
+          title: sessionName,
           // DeviceManager already projects the authoritative DTO provider;
           // do not let the display title override it in the UI layer.
           provider: effectiveProvider,
           state: effectiveStatus,
           status: effectiveStatus,
-          fav: favSet.has(`${w.spaceKey}::${title}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
+          fav: favSet.has(`${w.spaceKey}::${sessionName}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
         });
       }
     }

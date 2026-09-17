@@ -49,7 +49,7 @@
  *  @property {string}     deviceName
  *  @property {string}     spaceKey
  *  @property {string}     spaceName
- *  @property {string}     title      = session.name 原样
+ *  @property {string}     title      = session.name 原样（服务端权威提取的会话展示名，如 "桌面端leader"；底层 OSC 窗口标题 session.title 仅做兜底，严禁以 OSC 污染界面，2026-09-17 裁定）
  *  @property {string} provider  daemon 的 canonical DTO provider；缺失/非法统一为 unknown
  *  @property {AgentState} state
  *  @property {boolean}    fav        本地收藏
