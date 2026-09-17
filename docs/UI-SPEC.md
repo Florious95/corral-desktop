@@ -460,7 +460,7 @@ src/
  * @param {() => void} onCancel
  */
 ```
-内部状态：`name:''`、`provider:''`、`bypass:false`（每次 open 重置）；厂家只来自当前设备 `auth_ack.agent_launchers`。
+内部状态：`name:''`、`provider:''`、`bypass:false`（仅首次打开时重置）；厂家只来自当前设备 `auth_ack.agent_launchers`。弹窗保持打开时，即使能力 DTO 或 `launchers` 数组引用刷新，只要当前 provider 仍在有效列表中就保留用户选择；provider 失效时才回落到列表首项。
 
 - **scrim**：`position:fixed; inset:0; z-index:50; background:var(--scrim); backdrop-filter:var(--scrim-blur); animation:menuIn var(--d-hover) ease-out`；点击 = `onCancel`。
 - **卡片**：`position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:51; width:420px; background:var(--glass-dialog); backdrop-filter:var(--blur-dialog); border-radius:var(--r-14); box-shadow:var(--shadow-dialog); padding:20px; animation:menuIn var(--d-dialog) var(--ease)`。
@@ -923,6 +923,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 22. **2026-09-15 (PR C)**：Tab 长按平滑调序与四向边缘吸附分屏引擎（tabDrag.js）。采用 Pointer Events（pointerdown/move/up + setPointerCapture），长按阈值 180ms、容差 6px；Zero Forced Reflow：pointerdown 预缓存视口与几何坐标，pointermove 仅记录点位并由单 rAF 调度，热路径绝对严禁读取 DOM 布局；主区触发 25% 四向边缘吸附（带 3px 切换滞回防抖与中心 50%×50% no-drop 区域）；GPU 硬件加速预览（translate3d + scale + opacity，悬浮期间绝不触碰真实 DOM/树）；pointerup 瞬间原子提交树变更，保持终端同父平铺保活，零 Unmount，120ms 防抖收敛。
 23. **2026-09-17**：新建 Agent 仅展示当前 `auth_ack.agent_launchers` 广告的 provider；名称限制为非空、≤64 Unicode 字符且无控制字符，Bypass 由 `supports_bypass` 控制。`create_agent` 成功后等待权威 listing/list_delta 入驻再打开；`close_session` 成功后等待权威移除再清理本地状态，关闭确认采用受控对话框。
 24. **2026-09-17**：Agent 行不渲染常驻或 hover 关闭 X；终止会话唯一入口是 Agent 行右键上下文菜单，避免会话点击误触危险操作。
+25. **2026-09-17**：NewAgentDialog 的 provider 选择仅在首次打开或当前 provider 不再被能力广告支持时重置；能力列表引用刷新不得覆盖用户主动选择。
 
 ## core 依赖边界（裁定 2026-09-12）
 

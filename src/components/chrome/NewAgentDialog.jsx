@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
+import { resolveProviderSelection } from '../../lib/providerSelection.js';
 import './chrome.css';
 
 /**
@@ -19,16 +20,24 @@ export default function NewAgentDialog({
   const [name, setName] = useState('');
   const [provider, setProvider] = useState('');
   const [bypass, setBypass] = useState(false);
+  const wasOpen = useRef(false);
   const selected = useMemo(
     () => launchers.find((launcher) => launcher.provider === provider) || null,
     [launchers, provider],
   );
 
   useEffect(() => {
-    if (!open) return;
-    setName('');
-    setProvider(launchers[0]?.provider || '');
-    setBypass(false);
+    if (!open) {
+      wasOpen.current = false;
+      return;
+    }
+    const opening = !wasOpen.current;
+    wasOpen.current = true;
+    if (opening) {
+      setName('');
+      setBypass(false);
+    }
+    setProvider((current) => resolveProviderSelection(current, launchers, opening));
   }, [open, launchers]);
 
   useEffect(() => {
