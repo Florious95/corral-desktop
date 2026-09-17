@@ -276,7 +276,26 @@ export default function TerminalPane({
     const ro = new ResizeObserver(() => view.fit());
     ro.observe(host);
 
+    const handleReflow = (ev) => {
+      const targetUid = ev?.detail?.uid;
+      if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
+      if (viewRef.current && hostRef.current) {
+        viewRef.current.fit({ immediate: true });
+        const fit = viewRef.current.lastFit;
+        if (fit && fit.derived_rows && fit.derived_cols) {
+          clientRef.current?.resize?.(target, fit.derived_rows, fit.derived_cols, 'user');
+          clientRef.current?.subscribe?.(target, fit.derived_rows, fit.derived_cols, 'user');
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('terminal:reflow', handleReflow);
+    }
+
     return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('terminal:reflow', handleReflow);
+      }
       ro.disconnect();
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
@@ -337,7 +356,7 @@ export default function TerminalPane({
           </div>
         )}
 
-        <div className="terminalpane-host" ref={hostRef} />
+        <div className="terminalpane-host" ref={hostRef} data-alignment="bottom-left" />
 
         {!ready && (
           <div className="terminalpane-placeholder">
