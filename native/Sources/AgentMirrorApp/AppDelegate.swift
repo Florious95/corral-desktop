@@ -28,9 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Migrate before constructing the WebView so a first page boot
                 // can only observe the completed private-file device list.
                 try await migrationDevices()
-                windowController = try makeWindow()
-                windowController?.showWindow(nil)
+                let controller = try makeWindow()
+                windowController = controller
+                guard let window = controller.window else { throw ShellError.unavailable }
+                window.center()
+                controller.showWindow(nil)
                 NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
             } catch {
                 showLaunchFailure()
                 NSApp.terminate(nil)
