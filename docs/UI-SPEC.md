@@ -901,7 +901,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 1. 品牌名 `Motrix Agent` → **AgentMirror**（产品已定名）。
 2. 假 traffic lights → 2026-08-22 再裁定：隐藏系统灯、hover 运动场胶囊（四钮），保留 Cmd+W/Q。
 3. 状态从布尔 `running` 扩到**协议五值**；新增 `blocked` 琥珀脉冲、`done` 绿色对勾、`unknown` 浅灰空心点。
-4. Space 行**新增**设备徽章与聚合状态点（仅多设备 / 非 idle 时渲染），设计稿的 Space 行没有这两样。
+4. Space 行**新增**设备徽章与双列数字徽标（侧栏文件夹行状态灯已正式退役，收敛为双列数字徽标；顶部 TabBar 呼吸灯保留，2026-09-17 裁定），设计稿的 Space 行没有这两样。
 5. **补出 pane 列头**：设计稿算出了 `title/iconEl/statusEl` 却没渲染；分裂多列必须能分辨归属。
 6. `Add Device…` 从「插一条『等待配对』假设备」改成 **AddDeviceDialog（ws URL + token）**。
 7. **终端输入**（设计稿主区是「不在设计范围」占位）；命名快捷键保留协议闭集 `esc/ctrl_c/tab/up/down/left/right/backspace`，xterm 编好的其他有意序列走非空 `input.bytes`（标准 base64）；`keys`、`bytes`、`text`/`attachment_path` 三类载荷互斥且均不补回车。主区不额外挂载底部图片条；Ctrl+V 图片上传路径仍保留。

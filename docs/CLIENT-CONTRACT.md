@@ -36,7 +36,7 @@ session 的 `activity`（或兼容 `status`）在未点击/未选中目录时直
 workspace 聚合 = 有任一 working → working;否则有任一 idle → idle;否则 unknown
 ```
 
-(即 §5.2 优先级表在三值闭集上的退化形式。未订阅 level2 的 space 一律渲染 unknown 灰空心点。)
+(即 §5.2 优先级表在三值闭集上的退化形式。状态由本代有效 listing 与全局 session 状态决定，不依赖 level2 订阅。)
 
 ### 0.3 `input.text` **不再追加回车**(requirement 059 直通输入)
 
@@ -229,13 +229,13 @@ AggregatedWorkspace = {
   cwd,                    // 原始绝对路径
   label,                  // basename;与列表内其它 label 撞名时自动加尾部路径消歧(见下)
   sessionCount,           // = workspace.session_count(服务端权威)
-  aggregateState,         // 客户端自算(§0.2),无 level2 数据时为 'unknown'
+  aggregateState,         // 客户端自算(§0.2)，全局 session 状态聚合，未就绪时由 freshness 门禁归为 unknown
   sessions: AggregatedSession[],
 }
 AggregatedSession = {
   uid, deviceId, deviceName, ref,
   name, cwd, rows, cols,  // 来自 listing；name 为服务端权威提取的准确会话展示名（2026-09-17 裁定）
-  title, status, provider,// title 为底层 OSC 窗口标题（仅在 name 为空时兜底）；status/provider 来自 level2_frame
+  title, status, provider,// title 为底层 OSC 窗口标题（仅在 name 为空时兜底）；status 来自全局 activity/status 的闭集投影，provider 来自 DTO / level2 补充
 }
 ```
 
@@ -545,7 +545,7 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
    坏镜像流必须浮出来,不能污染终端网格。
 3. **ref ≤ 255 字节**(UTF-8 字节数,不是字符数);`reflen=0` 非法。
 4. **单帧 payload ≤ 1 MiB**(`MAX_BINARY_PAYLOAD = 1<<20`)。
-5. **状态永不进二进制通道。** `status` 只在 `level2_frame`(控制帧)里。状态判不出**不影响**镜像与输入 —— 
+5. **状态永不进二进制通道。** 状态不进二进制数据帧，由 listing/list_delta 等控制帧直接携带（legacy level2 仅作兼容兜底）。状态判不出**不影响**镜像与输入 —— 
    状态层挂了终端照样能用,不要把两者耦合成一个 loading 态。
 6. **token 不回显、不落日志。** 见 §4。`auth` 帧是它唯一的上行出口。
 7. **`input()` 不检查 `isReady`** —— 只检查 `ws.readyState===1`。AUTHENTICATING 期间发 input 会被服务端
