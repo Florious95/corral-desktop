@@ -88,6 +88,7 @@ test('auth → listing → aggregated model carries uid/spaceKey/device name', a
     const [dev] = t.dm.devices;
     assert.deepEqual(Object.keys(dev).sort(), ['checked', 'id', 'lastError', 'name', 'state', 'url']);
     assert.equal(dev.state, 'ready');
+    await waitFor(() => (t.events.models > 0 && t.events.devices > 0 ? true : null), 'model and device events');
     assert.ok(t.events.models > 0 && t.events.devices > 0);
     // Tokens live in storage only, never in the published model.
     assert.ok(!JSON.stringify(t.dm.workspaces).includes('mock-token'));

@@ -60,8 +60,9 @@ test('terminal viewport enforces bottom-left alignment for cross-device mobile c
   assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*justify-content:\s*flex-end;/);
   assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*align-items:\s*flex-start;/);
 
-  // xterm screen / viewport 约束在容器内
-  assert.match(terminalCss, /\.terminalpane-host \.xterm\s*\{[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;/);
+  // .xterm 消除压扁钳制：彻底清除 max-height，禁止 flex-shrink 压缩，允许内容自然贴合
+  assert.match(terminalCss, /\.terminalpane-host \.xterm\s*\{[^}]*flex:\s*0 0 auto;[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/);
+  assert.equal(terminalCss.includes('.terminalpane-host .xterm { max-height'), false);
 
   // DOM 上具有 data-alignment="bottom-left" 标记
   assert.match(terminalPaneJsx, /data-alignment="bottom-left"/);
@@ -83,10 +84,10 @@ test('context menu provides "Reflow to Window" (适应当前窗口) and dispatch
   // 点击触发 terminal:reflow 事件通知
   assert.match(appJsx, /window\.dispatchEvent\(new CustomEvent\('terminal:reflow'/);
 
-  // TerminalPane 监听并在触发时以 immediate: true 测量并下发 client.resize / client.subscribe
+  // TerminalPane 监听并在触发时以 immediate: true 测量并走正规受控 sendIfNeeded 几何通道
   assert.match(terminalPaneJsx, /window\.addEventListener\('terminal:reflow', handleReflow\)/);
-  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true\s*\}\)/);
-  assert.match(terminalPaneJsx, /clientRef\.current\?\.resize/);
+  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true/);
+  assert.match(terminalPaneJsx, /sendIfNeeded\(\{\s*type:\s*'subscribe'[\s\S]*?'reflow'/);
   assert.match(terminalPaneJsx, /clientRef\.current\?\.subscribe/);
 });
 
