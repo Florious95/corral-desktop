@@ -116,4 +116,110 @@ test('TerminalPane reflow uses atomic gate.settle and single controlled sendIfNe
     terminalPaneJsx,
     /sendIfNeeded\(\{\s*type:\s*'subscribe'[\s\S]*?'reflow'[\s\S]*?force:\s*true/
   );
+
+  // 5. isManualReflowing 抑制 onResize 重复发送，保证单次发送
+  assert.match(terminalPaneJsx, /if\s*\(!isManualReflowing\)\s*\{\s*const reason/);
+});
+
+test('R1 & R2 (P2): controlled reflow issues exactly 1 subscription frame (no duplicate settle) and recovers terminal asynchronously', async () => {
+  const gate = new SameWidthController();
+  const sentSubscriptions = [];
+
+  const mockClient = {
+    subscribe: (target, rows, cols, reason) => {
+      sentSubscriptions.push({ target, rows, cols, reason });
+      return true;
+    },
+  };
+
+  let isManualReflowing = false;
+  let firstSub = false;
+
+  const sendIfNeeded = (act, reason, { force = false } = {}) => {
+    if (!act || act.type !== 'subscribe') return;
+    const subscribeKey = `target:${act.rows}x${act.cols}`;
+    mockClient.subscribe('target', act.rows, act.cols, reason);
+    gate.noteSent(act.rows, act.cols);
+  };
+
+  const onResize = (rows, cols) => {
+    const act = gate.settle(rows, cols);
+    if (!isManualReflowing) {
+      const reason = firstSub ? 'activate' : 'settle';
+      sendIfNeeded(act, reason);
+    }
+  };
+
+  // 初始稳定状态：99x24
+  gate.settle(24, 99);
+  gate.noteSent(24, 99);
+  assert.equal(gate.acceptSnapshot(), true);
+
+  // 1. 触发变尺寸手动重排（99x24 -> 79x16）
+  sentSubscriptions.length = 0;
+  isManualReflowing = true;
+  const newRows = 16;
+  const newCols = 79;
+  try {
+    // 模拟 fit({ immediate: true, sync: true }) 同步触发 onResize
+    onResize(newRows, newCols);
+  } finally {
+    isManualReflowing = false;
+  }
+
+  // 同步原子确认与受控发送
+  gate.settle(newRows, newCols);
+  sendIfNeeded({ type: 'subscribe', rows: newRows, cols: newCols }, 'reflow', { force: true });
+
+  // 核心断言 R1：变尺寸重排恰好只发送 1 条订阅，绝无多余的 reason=settle 帧！
+  assert.equal(sentSubscriptions.length, 1, 'Reflow must issue exactly ONE subscription frame');
+  assert.equal(sentSubscriptions[0].reason, 'reflow');
+  assert.equal(sentSubscriptions[0].rows, 16);
+  assert.equal(sentSubscriptions[0].cols, 79);
+
+  // 2. 模拟真实网络 10ms 异步延迟后快照返回
+  await new Promise((r) => setTimeout(r, 10));
+
+  // 门禁必须 100% 接纳快照
+  assert.equal(gate.acceptSnapshot(), true, 'Fast snapshot must be accepted');
+  assert.equal(gate.awaitingSnapshot, false);
+
+  // 真实 xterm 解析渲染 16 行快照
+  const term = new Terminal({ rows: newRows, cols: newCols });
+  const encoder = new TextEncoder();
+  const fastSnapshotData = encoder.encode(
+    '\x1b[2J' +
+    '\x1b[15;1H[ █ ] ---------------- input-ready' +
+    '\x1b[16;1HStatus: connected · 10ms fast'
+  );
+  await new Promise((resolve) => term.write(fastSnapshotData, resolve));
+
+  const line15 = term.buffer.active.getLine(14)?.translateToString(true) || '';
+  const line16 = term.buffer.active.getLine(15)?.translateToString(true) || '';
+  assert.ok(line15.includes('[ █ ]'), 'Input box must be rendered in terminal buffer');
+  assert.ok(line16.includes('Status: connected'), 'Status bar must be rendered in terminal buffer');
+
+  // 快照接纳后增量帧正常可写
+  assert.equal(gate.acceptDelta(), true, 'Delta must be accepted after snapshot');
+
+  // 3. 触发同尺寸手动重排（仍为 79x16，用户点击刷新以强制恢复画面）
+  sentSubscriptions.length = 0;
+  isManualReflowing = true;
+  try {
+    onResize(newRows, newCols);
+  } finally {
+    isManualReflowing = false;
+  }
+  gate.settle(newRows, newCols);
+  sendIfNeeded({ type: 'subscribe', rows: newRows, cols: newCols }, 'reflow', { force: true });
+
+  // 断言同尺寸强制重排也恰好发出 1 条订阅
+  assert.equal(sentSubscriptions.length, 1, 'Same-geometry reflow must also issue exactly 1 subscription');
+  assert.equal(sentSubscriptions[0].reason, 'reflow');
+
+  // 模拟常规 200ms 慢响应快照到达
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(gate.acceptSnapshot(), true, 'Slow snapshot (200ms) must also be accepted');
+
+  term.dispose();
 });

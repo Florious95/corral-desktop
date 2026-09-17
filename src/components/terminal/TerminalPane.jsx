@@ -112,6 +112,7 @@ export default function TerminalPane({
     const gate = new SameWidthController();
     let firstSub = true;
     let lastSubscribe = null;
+    let isManualReflowing = false;
     let view;
     const sendIfNeeded = (act, reason, { force = false } = {}) => {
       const fit = view?.lastFit || {};
@@ -158,9 +159,11 @@ export default function TerminalPane({
     view = new TerminalView(host, {
       onResize: (rows, cols) => {
         const act = gate.settle(rows, cols);
-        const reason = firstSub ? 'activate' : 'settle';
-        sendIfNeeded(act, reason);
-        if (act && act.type === 'subscribe') firstSub = false;
+        if (!isManualReflowing) {
+          const reason = firstSub ? 'activate' : 'settle';
+          sendIfNeeded(act, reason);
+          if (act && act.type === 'subscribe') firstSub = false;
+        }
         onResizeRef.current?.(rows, cols);
       },
       onWriteBackpressure: () => {
@@ -280,12 +283,18 @@ export default function TerminalPane({
       const targetUid = ev?.detail?.uid;
       if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
       if (viewRef.current && hostRef.current) {
-        viewRef.current.fit({ immediate: true, sync: true });
+        isManualReflowing = true;
+        try {
+          viewRef.current.fit({ immediate: true, sync: true });
+        } finally {
+          isManualReflowing = false;
+        }
         const fit = viewRef.current.lastFit;
         if (fit && fit.derived_rows && fit.derived_cols) {
           // 原子同步：确保 gate.grid 在发送前与待发送尺寸严格一致，杜绝快照早到拒收死锁 (F1)
           gate.settle(fit.derived_rows, fit.derived_cols);
           sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'reflow', { force: true });
+          firstSub = false;
         }
       }
     };
