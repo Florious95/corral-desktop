@@ -113,7 +113,9 @@ export class TerminalView {
 Cursor TUI 将真实终端游标停在底部左下角，同时在自己的 follow-up 输入框绘制软件游标；
 `TerminalPane` 对 `agent.provider === 'cursor'` 传 `hideCursor:true`。该模式关闭 xterm
 游标闪烁、设 inactive cursor 为 `none`，并在挂载及每次 snapshot/delta 后补本地 `CSI ?25l`
-隐藏序列；该序列不上传服务端，其他 provider 维持原有 xterm 游标行为。
+隐藏序列；该序列不上传服务端，其他 provider 维持原有 xterm 游标行为。为保证中文 IME 不跟随停靠游标，
+该模式还扫描可视缓冲区中的 `→/-> Add a follow-up` 行，并把 xterm 的
+`.xterm-helper-textarea` 与 `.composition-view` 定位到该软件输入行；仅修改本地 DOM，绝不改写远端帧或游标状态。
 
 **必须保留的两条行为(照抄 web 版,有单测护着):**
 - `_report()` 用 **120ms debounce** 合并 resize —— 服务端每次真 reflow 都回一帧 snapshot,不合并会闪烁重画。

@@ -28,11 +28,17 @@ class FakeTerminal {
     this.dataHandlers = [];
     this.binaryHandlers = [];
     this.keyHandler = null;
-    this.buffer = { active: { viewportY: 0 } };
+    this.buffer = { active: { viewportY: 0, getLine: () => null } };
+    this.textarea = { style: {} };
+    this.composition = { style: {} };
     this.element = {
-      querySelector: () => ({
-        getBoundingClientRect: () => ({ width: this.cols * 8, height: this.rows * 16 }),
-      }),
+      querySelector: (selector) => {
+        if (selector === '.xterm-screen') {
+          return { getBoundingClientRect: () => ({ width: this.cols * 8, height: this.rows * 16 }) };
+        }
+        if (selector === '.composition-view') return this.composition;
+        return null;
+      },
     };
   }
   open() {}
@@ -240,6 +246,27 @@ test('Cursor provider suppresses the parked hardware cursor after every write', 
   assert.deepEqual([...view.term.writes[0]], [0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]);
   view.writeSnapshot(new Uint8Array([0x41]));
   assert.deepEqual([...view.term.writes[1]], [0x41, 0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]);
+  view.dispose();
+});
+
+test('Cursor IME anchor follows the visible Add a follow-up row', () => {
+  const { view } = makeView({ hideCursor: true });
+  let lineText = '→ Add a follow-up';
+  view.term.buffer.active.getLine = (index) => index === 5
+    ? { translateToString: () => lineText }
+    : null;
+  view.open();
+  assert.equal(view.term.textarea.style.left, '16px');
+  assert.equal(view.term.textarea.style.top, '80px');
+  assert.equal(view.term.textarea.style.width, '8px');
+  assert.equal(view.term.composition.style.left, '16px');
+  assert.equal(view.term.composition.style.top, '80px');
+
+  // After the placeholder is replaced, keep the same visible row and follow its end.
+  lineText = '→ hello';
+  view._syncCursorAnchor();
+  assert.equal(view.term.textarea.style.left, '56px');
+  assert.equal(view.term.textarea.style.top, '80px');
   view.dispose();
 });
 
