@@ -232,8 +232,8 @@ AggregatedWorkspace = {
 }
 AggregatedSession = {
   uid, deviceId, deviceName, ref,
-  name, cwd, rows, cols,  // 来自 listing
-  title, status, provider,// 来自 level2_frame;没订过就是 '' / 'unknown' / ''
+  name, cwd, rows, cols,  // 来自 listing；name 为服务端权威提取的准确会话展示名（2026-09-17 裁定）
+  title, status, provider,// title 为底层 OSC 窗口标题（仅在 name 为空时兜底）；status/provider 来自 level2_frame
 }
 ```
 
