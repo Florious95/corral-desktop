@@ -6,21 +6,18 @@ import { getLeaves, isBlankTab } from '../../lib/workspaceLayout.js';
 /**
  * 计算标签页对应的实时运行状态（支持多分屏与单会话秒级联动）
  */
-function getTabStatus(tab, leaves, agentsByUid, agent, globalSessionStatus = null) {
-  const gsAgent = agent?.key ? globalSessionStatus?.get(agent.key) : null;
-  const status = agent?.state || agent?.status || gsAgent?.status || gsAgent?.state || 'unknown';
+function getTabStatus(tab, leaves, agentsByUid, agent) {
+  const status = agent?.state || agent?.status || 'unknown';
   const uids = leaves.length > 0 ? leaves : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
   if (uids.length > 0) {
     const hasWorking = uids.some((u) => {
       const a = agentsByUid.get(u);
-      const gs = globalSessionStatus?.get(u);
-      return a?.state === 'working' || a?.status === 'working' || gs?.status === 'working' || gs?.state === 'working';
+      return a?.state === 'working' || a?.status === 'working';
     });
     if (hasWorking) return 'working';
     const hasIdle = uids.some((u) => {
       const a = agentsByUid.get(u);
-      const gs = globalSessionStatus?.get(u);
-      return a?.state === 'idle' || a?.status === 'idle' || gs?.status === 'idle' || gs?.state === 'idle';
+      return a?.state === 'idle' || a?.status === 'idle';
     });
     if (hasIdle) return 'idle';
   }
@@ -60,7 +57,6 @@ export default function TabBar({
   visibleUids = [],
   draggingUid = null,
   agentsByUid = new Map(),
-  globalSessionStatus = null,
   onSelectTab,
   onCloseTab,
   onCreateTab,
@@ -94,7 +90,7 @@ export default function TabBar({
             const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
             const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
             const status = agent?.state || agent?.status || 'unknown';
-            const finalStatus = getTabStatus(tab, leaves, agentsByUid, agent, globalSessionStatus);
+            const finalStatus = getTabStatus(tab, leaves, agentsByUid, agent);
 
             return (
               <div
@@ -149,7 +145,7 @@ export default function TabBar({
           const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
           const isDragging = tabKey === draggingUid || tab.uid === draggingUid;
           const status = agent?.state || agent?.status || 'unknown';
-          const finalStatus = isBlank ? 'unknown' : getTabStatus(tab, leaves, agentsByUid, agent, globalSessionStatus);
+          const finalStatus = isBlank ? 'unknown' : getTabStatus(tab, leaves, agentsByUid, agent);
 
           return (
             <div

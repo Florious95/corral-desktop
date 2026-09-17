@@ -18,8 +18,10 @@
 仅在旧 listing 完全缺少 provider 时才允许有限兼容推断。归一化后的集合为
 `claude_code` / `codex` / `copilot` / `grok` / `cursor` / `pi` / `unknown`。
 
-`status`、`title` 与 workspace 聚合状态仍以 level2 为主；未订阅时 status/title 使用
-`unknown`/空值，workspace 聚合由桌面客户端计算。历史 fixture 可能省略 provider，
+`status` 与 workspace 聚合状态自 2026-09-17 裁定起以 listing / list_delta 为全局单一状态真相源；
+session 的 `activity`（或兼容 `status`）在未点击/未选中目录时直接直通输出真实 status，
+彻底剥离 selected 单 cwd 对状态的覆盖。未连接或本连接代首帧 listing 到达前严格判定新鲜度，
+未就绪状态统一收敛为 `unknown`，不报虚假 working。历史 fixture 可能省略 provider，
 这只覆盖旧格式兼容，不得据此覆盖新格式的可靠 provider。
 
 ### 0.2 状态值是三值,不是五值;设计稿的 blocked/done 永远不会出现
@@ -34,7 +36,7 @@
 workspace 聚合 = 有任一 working → working;否则有任一 idle → idle;否则 unknown
 ```
 
-(即 §5.2 优先级表在三值闭集上的退化形式。未订阅 level2 的 space 一律渲染 unknown 灰空心点。)
+(即 §5.2 优先级表在三值闭集上的退化形式。状态由本代有效 listing 与全局 session 状态决定，不依赖 level2 订阅。)
 
 ### 0.3 `input.text` **不再追加回车**(requirement 059 直通输入)
 
@@ -227,13 +229,13 @@ AggregatedWorkspace = {
   cwd,                    // 原始绝对路径
   label,                  // basename;与列表内其它 label 撞名时自动加尾部路径消歧(见下)
   sessionCount,           // = workspace.session_count(服务端权威)
-  aggregateState,         // 客户端自算(§0.2),无 level2 数据时为 'unknown'
+  aggregateState,         // 客户端自算(§0.2)，全局 session 状态聚合，未就绪时由 freshness 门禁归为 unknown
   sessions: AggregatedSession[],
 }
 AggregatedSession = {
   uid, deviceId, deviceName, ref,
   name, cwd, rows, cols,  // 来自 listing；name 为服务端权威提取的准确会话展示名（2026-09-17 裁定）
-  title, status, provider,// title 为底层 OSC 窗口标题（仅在 name 为空时兜底）；status/provider 来自 level2_frame
+  title, status, provider,// title 为底层 OSC 窗口标题（仅在 name 为空时兜底）；status 来自全局 activity/status 的闭集投影，provider 来自 DTO / level2 补充
 }
 ```
 
@@ -252,19 +254,15 @@ AggregatedSession = {
 - `onCapabilityChange(deviceId)` —— auth_ack 能力广告变化；断线/重连期间清空。
 - `onError({ deviceId, code, message })` —— 来自 `onLocalError` 与 `error` 帧。⛔ message 里不得拼 token。
 
-### 2.5 level2 的硬约束
+### 2.5 level2 的硬约束与状态直通裁定（2026-09-17 裁定）
 
 服务端 `wsConn.level2WS` 是**单值字符串**,一个 WS 连接同时只跟踪一个 workspace。
 再次 `level2_subscribe` 会**覆盖**上一个,不是叠加。
 
-策略(与服务端 idle-gate 意图一致:进二级菜单才订):
-- 用户在侧栏选中某个 Space → `subscribeLevel2(spaceKey)`;切走 → 自动覆盖(不必先 unsubscribe)。
-- 每个 deviceId 记一个 `currentLevel2Cwd`,重复订同一个直接跳过(避免白刷一次全量扫描)。
-- 未订阅的 Space:`aggregateState='unknown'`,session 的 `status='unknown'` —— 渲染成灰空心点,**不要伪造成 idle**。
-- 离开会话页 / 应用进后台 → `unsubscribeLevel2()`,让 daemon 停扫(零订阅者=零 tmux 调用)。
-- `level2_heartbeat` 到达 = 「没变化,连接活着」→ **只刷新存活时间戳,不清空列表**。
-- `level2_frame.sessions` 是**整体替换**该 workspace 的二级视图,不是增量。
-- `level2_frame.seq` 断档 → 重发 `level2_subscribe`。
+**2026-09-17 状态单一真相源裁定**：
+- UI 状态（包括 SpacesList 双列数字与 TabBar 呼吸灯）已全面收敛至全域 listing / list_delta 单一真相源，彻底剥离选中目录对 level2 状态的依赖；
+- level2 仅作为底层历史协议能力保留，绝对不得覆盖当前全域 listing 的权威状态；
+- 设备离线、断开连接或重连后首帧 listing 尚未到达前，严格执行新鲜度门禁，状态置为 `unknown`，杜绝报虚假 working。
 
 ---
 
@@ -547,7 +545,7 @@ function encodeBinary(kind, ref, payload, meta) {          // meta 仅 kind=3
    坏镜像流必须浮出来,不能污染终端网格。
 3. **ref ≤ 255 字节**(UTF-8 字节数,不是字符数);`reflen=0` 非法。
 4. **单帧 payload ≤ 1 MiB**(`MAX_BINARY_PAYLOAD = 1<<20`)。
-5. **状态永不进二进制通道。** `status` 只在 `level2_frame`(控制帧)里。状态判不出**不影响**镜像与输入 —— 
+5. **状态永不进二进制通道。** 状态不进二进制数据帧，由 listing/list_delta 等控制帧直接携带（legacy level2 仅作兼容兜底）。状态判不出**不影响**镜像与输入 —— 
    状态层挂了终端照样能用,不要把两者耦合成一个 loading 态。
 6. **token 不回显、不落日志。** 见 §4。`auth` 帧是它唯一的上行出口。
 7. **`input()` 不检查 `isReady`** —— 只检查 `ws.readyState===1`。AUTHENTICATING 期间发 input 会被服务端

@@ -1,20 +1,5 @@
 // Spaces 列表（UI-SPEC §5.2）。虚拟行 All Spaces / 收藏 置顶，其后是真实 workspace 行。
-import { FolderIcon, GridIcon, StarIcon, CheckIcon, PlusIcon } from '../../lib/icons.jsx';
-
-/** 聚合状态点：idle / unknown 不渲染，保持行干净 */
-function SpaceState({ state }) {
-  if (state === 'done') {
-    return (
-      <span className="spaces-row-state">
-        <CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.2} />
-      </span>
-    );
-  }
-  if (state === 'working' || state === 'blocked') {
-    return <span className={`spaces-row-state spaces-dot is-${state}`} />;
-  }
-  return null;
-}
+import { FolderIcon, GridIcon, StarIcon, PlusIcon } from '../../lib/icons.jsx';
 
 function SpaceRow({
   icon,
@@ -24,7 +9,6 @@ function SpaceRow({
   selected,
   badge,
   badgeLocal,
-  state,
   onClick,
   onContextMenu,
   onNewAgent,
@@ -50,7 +34,6 @@ function SpaceRow({
           <PlusIcon size={13} strokeWidth={2} />
         </button>
       ) : null}
-      <SpaceState state={state} />
       {badge ? (
         <span className={`spaces-badge${badgeLocal ? ' is-local' : ''}`}>{badge}</span>
       ) : null}
@@ -94,8 +77,6 @@ export default function SpacesList({
   onNewAgent,
   multiDevice,
 }) {
-  const allSpacesWorking = (allWorkingCount > 0) || spaces.some((sp) => sp.state === 'working' || (sp.workingCount ?? 0) > 0);
-
   return (
     <div className="spaces-list">
       <SpaceRow
@@ -104,7 +85,6 @@ export default function SpacesList({
         count={allCount}
         workingCount={allWorkingCount}
         selected={selected === 'all'}
-        state={allSpacesWorking ? 'working' : 'unknown'}
         onClick={() => onSelect('all')}
         onContextMenu={(e) => e.preventDefault()}
       />
@@ -126,7 +106,6 @@ export default function SpacesList({
             name={sp.name}
             count={sp.count}
             workingCount={workingCount}
-            state={sp.state}
             selected={selected === sp.key}
             badge={multiDevice ? sp.deviceName : null}
             badgeLocal={sp.deviceLocal}
