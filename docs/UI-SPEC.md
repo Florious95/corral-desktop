@@ -924,6 +924,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 23. **2026-09-17**：新建 Agent 仅展示当前 `auth_ack.agent_launchers` 广告的 provider；名称限制为非空、≤64 Unicode 字符且无控制字符，Bypass 由 `supports_bypass` 控制。`create_agent` 成功后等待权威 listing/list_delta 入驻再打开；`close_session` 成功后等待权威移除再清理本地状态，关闭确认采用受控对话框。
 24. **2026-09-17**：Agent 行不渲染常驻或 hover 关闭 X；终止会话唯一入口是 Agent 行右键上下文菜单，避免会话点击误触危险操作。
 25. **2026-09-17**：NewAgentDialog 的 provider 选择仅在首次打开或当前 provider 不再被能力广告支持时重置；能力列表引用刷新不得覆盖用户主动选择。
+26. **2026-09-17**：Cursor Agent 的 follow-up 输入由 TUI 绘制软件游标；客户端隐藏底部停靠硬件游标，并将本地 IME helper/composition 视图锚定到可视 `Add a follow-up` 行，持续拦截 xterm 的内部样式冲刷，禁止在底部停靠行合成或闪烁。该适配不改变服务端帧。
 
 ## core 依赖边界（裁定 2026-09-12）
 

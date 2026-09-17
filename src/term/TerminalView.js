@@ -26,6 +26,8 @@ export const GRID_DEBOUNCE_MS = 120;
 /** Delta backlog budget; overflow requests a fresh snapshot instead of dropping silently. */
 export const MAX_PENDING_WRITE_BYTES = 4 * 1024 * 1024;
 const HIDE_CURSOR = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]); // ESC[?25l
+const FOLLOW_UP_RE = /^(?:\s*)(?:→|->)\s*Add a follow-up\b/;
+const FOLLOW_UP_PREFIX_RE = /^(?:\s*)(?:→|->)\s*/;
 
 function withHiddenCursor(bytes) {
   const hidden = new Uint8Array(bytes.byteLength + HIDE_CURSOR.byteLength);
@@ -119,12 +121,18 @@ export class TerminalView {
     this._writeScheduleKind = null;
     this._writeHandle = null;
     this._recovering = false;
+    this._cursorAnchor = null;
+    this._anchorObservers = null;
   }
 
   /** 挂载进容器并做一次 fit。 */
   open() {
     this.term.open(this.container);
-    if (this.hideCursor) this.term.write(HIDE_CURSOR);
+    if (this.hideCursor) {
+      this.term.write(HIDE_CURSOR);
+      this._cursorMoveDisposable = this.term.onCursorMove?.(() => this._syncCursorAnchor());
+      this._renderDisposable = this.term.onRender?.(() => this._syncCursorAnchor());
+    }
     this._dataDisposable = this.term.onData((data) => this.onData(data));
     // xterm emits X10 mouse reports through onBinary; each code unit is one raw byte.
     this._binaryDisposable = this.term.onBinary
@@ -146,6 +154,18 @@ export class TerminalView {
     };
     this.container.addEventListener('wheel', this._onWheel, { passive: true });
     this.fit();
+    if (this.hideCursor) {
+      this._syncCursorAnchor();
+      const textarea = this.term.textarea;
+      if (textarea?.addEventListener) {
+        const sync = () => this._syncCursorAnchor();
+        this._compositionListeners = ['compositionstart', 'compositionupdate', 'input', 'compositionend'].map((type) => {
+          textarea.addEventListener(type, sync);
+          return { type, sync };
+        });
+      }
+      this._observeCursorAnchor();
+    }
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
     this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
       this._webglAddon = addon;
@@ -325,6 +345,87 @@ export class TerminalView {
     this._write(kind, data);
   }
 
+  /** Keep Cursor's IME composition view on its software follow-up prompt. */
+  _syncCursorAnchor() {
+    if (!this.hideCursor || this._disposed) return;
+    const buffer = this.term.buffer?.active;
+    const getLine = buffer?.getLine?.bind(buffer);
+    if (!getLine) return;
+    let anchor = null;
+    const ydisp = Number.isInteger(buffer.ydisp) ? buffer.ydisp : 0;
+    for (let row = 0; row < this.term.rows; row += 1) {
+      const line = getLine(ydisp + row);
+      const text = line?.translateToString?.(false) || '';
+      const match = FOLLOW_UP_RE.exec(text);
+      if (match) {
+        const charIndex = match.index + match[0].indexOf('Add a follow-up');
+        anchor = { row, col: this._lineColumn(line, charIndex) };
+        break;
+      }
+    }
+    // Once the placeholder has been replaced with user text, retain its row and
+    // move the IME anchor to the end of that same follow-up line.
+    if (!anchor && this._cursorAnchor) {
+      const row = this._cursorAnchor.row;
+      const line = getLine(ydisp + row);
+      const text = line?.translateToString?.(false) || '';
+      if (FOLLOW_UP_PREFIX_RE.test(text)) {
+        anchor = { row, col: this._lineColumn(line, text.length) };
+      }
+    }
+    if (!anchor) return;
+    this._cursorAnchor = anchor;
+    const cell = this._cell();
+    const left = anchor.col * cell.w;
+    const top = anchor.row * cell.h;
+    const textarea = this.term.textarea;
+    if (textarea?.style) {
+      textarea.style.left = `${left}px`;
+      textarea.style.top = `${top}px`;
+      textarea.style.width = `${cell.w}px`;
+      textarea.style.height = `${cell.h}px`;
+      textarea.style.lineHeight = `${cell.h}px`;
+      textarea.style.zIndex = '-5';
+    }
+    const composition = this.term.element?.querySelector?.('.composition-view');
+    if (composition?.style) {
+      composition.style.left = `${left}px`;
+      composition.style.top = `${top}px`;
+      composition.style.height = `${cell.h}px`;
+      composition.style.lineHeight = `${cell.h}px`;
+    }
+  }
+
+  /** Reapply the anchor after xterm's internal composition/style mutation. */
+  _observeCursorAnchor() {
+    const Observer = globalThis.MutationObserver;
+    if (typeof Observer !== 'function') return;
+    const elements = [
+      this.term.textarea,
+      this.term.element?.querySelector?.('.composition-view'),
+    ].filter(Boolean);
+    this._anchorObservers = elements.map((element) => {
+      const observer = new Observer(() => this._syncCursorAnchor());
+      observer.observe(element, { attributes: true, attributeFilter: ['style'] });
+      return observer;
+    });
+  }
+
+  /** Convert a string offset to xterm cell columns so CJK input remains aligned. */
+  _lineColumn(line, charIndex) {
+    if (!line?.getCell) return charIndex;
+    let col = 0;
+    let index = 0;
+    while (index < charIndex && col < this.term.cols) {
+      const cell = line.getCell(col);
+      if (!cell) break;
+      const chars = cell.getChars?.() || '';
+      index += chars.length || 1;
+      col += Math.max(1, cell.getWidth?.() || 1);
+    }
+    return Math.min(this.term.cols, col);
+  }
+
   /** 全屏快照：清屏重建；只为裸 LF 补隐含 CR，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
     const data = withImplicitCr(u8);
@@ -386,6 +487,15 @@ export class TerminalView {
     if (this._dataDisposable) this._dataDisposable.dispose();
     if (this._binaryDisposable) this._binaryDisposable.dispose();
     if (this._scrollDisposable) this._scrollDisposable.dispose();
+    if (this._cursorMoveDisposable) this._cursorMoveDisposable.dispose();
+    if (this._renderDisposable) this._renderDisposable.dispose();
+    const textarea = this.term.textarea;
+    for (const listener of this._compositionListeners || []) {
+      textarea?.removeEventListener?.(listener.type, listener.sync);
+    }
+    this._compositionListeners = null;
+    for (const observer of this._anchorObservers || []) observer.disconnect();
+    this._anchorObservers = null;
     try { this.term.dispose(); } catch { /* 已 dispose */ }
   }
 
