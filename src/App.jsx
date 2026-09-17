@@ -298,44 +298,8 @@ export default function App({ seedDevices } = {}) {
   const checkedCount = devices.filter((d) => d.checked).length;
   const multiDevice = checkedCount > 1;
 
-  const globalSessionStatusRef = useRef(new Map());
-
-  // 同步 dm 中的全局状态
-  for (const [uid, info] of dm.globalSessionStatus) {
-    if (info && info.status && info.status !== 'unknown') {
-      const existing = globalSessionStatusRef.current.get(uid) || {};
-      globalSessionStatusRef.current.set(uid, { ...existing, ...info });
-    }
-  }
-
-  // 从 workspaces 提取有效状态并常驻
-  for (const w of workspaces) {
-    for (const s of w.sessions || []) {
-      const cur = s.state || s.status;
-      if (cur && cur !== 'unknown') {
-        const existing = globalSessionStatusRef.current.get(s.uid) || {};
-        globalSessionStatusRef.current.set(s.uid, {
-          ...existing,
-          status: cur,
-          state: cur,
-          provider: s.provider || existing.provider,
-          updatedAt: Date.now(),
-        });
-      }
-    }
-  }
-
   const spaces = useMemo(() => workspaces.map((w) => {
-    const sessions = (w.sessions || []).map((s) => {
-      const cached = globalSessionStatusRef.current.get(s.uid);
-      const curStatus = s.state || s.status || 'unknown';
-      const effectiveStatus = (curStatus && curStatus !== 'unknown') ? curStatus : (cached?.status || curStatus);
-      return {
-        ...s,
-        state: effectiveStatus,
-        status: effectiveStatus,
-      };
-    });
+    const sessions = w.sessions || [];
     const workingCount = sessions.filter((s) => s.state === 'working' || s.status === 'working').length;
     const hasWorking = workingCount > 0;
     const hasIdle = sessions.some((s) => s.state === 'idle' || s.status === 'idle');
@@ -374,9 +338,6 @@ export default function App({ seedDevices } = {}) {
         // s.title 仅作为底层的 OSC 窗口外壳兜底。
         const sessionName = s.name || s.title || '';
         const curStatus = s.state || s.status || 'unknown';
-        const cached = globalSessionStatusRef.current.get(s.uid);
-        const effectiveStatus = (curStatus && curStatus !== 'unknown') ? curStatus : (cached?.status || curStatus);
-        const effectiveProvider = s.provider || cached?.provider;
         out.push({
           key: s.uid,
           ref: s.ref,
@@ -388,9 +349,9 @@ export default function App({ seedDevices } = {}) {
           title: sessionName,
           // DeviceManager already projects the authoritative DTO provider;
           // do not let the display title override it in the UI layer.
-          provider: effectiveProvider,
-          state: effectiveStatus,
-          status: effectiveStatus,
+          provider: s.provider,
+          state: curStatus,
+          status: curStatus,
           fav: favSet.has(`${w.spaceKey}::${sessionName}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
         });
       }
@@ -430,7 +391,6 @@ export default function App({ seedDevices } = {}) {
         setWorkspace((prev) => removeSessionFromWorkspace(prev, a.key));
         shims.current.delete(a.key);
         pendingPasteRef.current.delete(a.key);
-        globalSessionStatusRef.current.delete(a.key);
       }, CLOSE_MS));
     }
   }, [allAgents]);
@@ -1145,7 +1105,6 @@ export default function App({ seedDevices } = {}) {
               visibleUids={visibleLeaves}
               draggingUid={draggingUid}
               agentsByUid={agentByKey}
-              globalSessionStatus={globalSessionStatusRef.current}
               onSelectTab={handleSelectTab}
               onCloseTab={handleCloseTab}
               onCreateTab={handleCreateTab}

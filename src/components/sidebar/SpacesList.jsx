@@ -1,18 +1,8 @@
 // Spaces 列表（UI-SPEC §5.2）。虚拟行 All Spaces / 收藏 置顶，其后是真实 workspace 行。
 import { FolderIcon, GridIcon, StarIcon, CheckIcon, PlusIcon } from '../../lib/icons.jsx';
 
-/** 聚合状态点：idle / unknown 不渲染，保持行干净 */
-function SpaceState({ state }) {
-  if (state === 'done') {
-    return (
-      <span className="spaces-row-state">
-        <CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.2} />
-      </span>
-    );
-  }
-  if (state === 'working' || state === 'blocked') {
-    return <span className={`spaces-row-state spaces-dot is-${state}`} />;
-  }
+/** 2026-09-17 裁定退役：移除文件夹行冗余绿灯，由右侧双列数字徽标表达（spaces-dot is-${state} 退役），TabBar 呼吸灯绝对保留 */
+function SpaceState() {
   return null;
 }
 
@@ -24,7 +14,6 @@ function SpaceRow({
   selected,
   badge,
   badgeLocal,
-  state,
   onClick,
   onContextMenu,
   onNewAgent,
@@ -50,7 +39,6 @@ function SpaceRow({
           <PlusIcon size={13} strokeWidth={2} />
         </button>
       ) : null}
-      <SpaceState state={state} />
       {badge ? (
         <span className={`spaces-badge${badgeLocal ? ' is-local' : ''}`}>{badge}</span>
       ) : null}

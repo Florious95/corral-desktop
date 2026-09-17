@@ -133,7 +133,6 @@ export class DeviceManager {
     this._clients = new Map();   // deviceId -> Client
     this._status = new Map();    // deviceId -> { state, lastError }
     this._level2 = new Map();    // deviceId -> { cwd, seq, sessions: Map<ref, {...}>, lastSeen }
-    this._globalSessionStatus = new Map(); // uid -> { status, state, title, provider, updatedAt }
     this._launchers = new Map(); // deviceId -> auth_ack.agent_launchers
     this._connected = false;
     this._modelTimer = null;
@@ -300,19 +299,10 @@ export class DeviceManager {
           const uid = `${d.id}::${s.ref}`;
           const x = live?.get(s.ref);
 
-          const status = x?.status || 'unknown';
-          const title = x?.title || '';
+          const rawStatus = s.activity || s.status;
+          const status = x?.status || rawStatus || 'unknown';
+          const title = x?.title || s.title || '';
           const provider = x?.provider !== undefined ? x.provider : s.provider;
-
-          if (x) {
-            this._globalSessionStatus.set(uid, {
-              status,
-              state: status,
-              title,
-              provider,
-              updatedAt: Date.now(),
-            });
-          }
 
           return {
             uid,
@@ -360,14 +350,21 @@ export class DeviceManager {
     return undefined;
   }
 
-  /** Return the globally cached session status by uid. */
+  /** 直通的会话状态查询：从权威直通模型中读取 */
   getSessionStatus(uid) {
-    return this._globalSessionStatus.get(uid) || null;
+    const s = this.agent(uid);
+    return s ? { status: s.status, state: s.state, title: s.title, provider: s.provider } : null;
   }
 
-  /** Return a copy of the global session status mapping. */
+  /** 直通的全域会话状态快照映射 */
   get globalSessionStatus() {
-    return new Map(this._globalSessionStatus);
+    const map = new Map();
+    for (const w of this.workspaces) {
+      for (const s of w.sessions || []) {
+        map.set(s.uid, { status: s.status, state: s.state, title: s.title, provider: s.provider });
+      }
+    }
+    return map;
   }
 
   /** Return only launchers advertised by this authenticated device. */
@@ -562,11 +559,6 @@ export class DeviceManager {
     this._clients.delete(deviceId);
     this._level2.delete(deviceId);
     this._launchers.delete(deviceId);
-    for (const key of this._globalSessionStatus.keys()) {
-      if (key.startsWith(`${deviceId}::`)) {
-        this._globalSessionStatus.delete(key);
-      }
-    }
   }
 
   _onState(deviceId, state) {
@@ -597,11 +589,6 @@ export class DeviceManager {
         return;
       case 'listing':
       case 'list_delta':
-        if (type === 'list_delta' && Array.isArray(payload?.removed_refs)) {
-          for (const r of payload.removed_refs) {
-            this._globalSessionStatus.delete(`${deviceId}::${r}`);
-          }
-        }
         this._scheduleModel();
         return;
       case 'create_agent_result':
@@ -620,18 +607,6 @@ export class DeviceManager {
         if (type === 'level2_frame') {
           // Whole-view replacement, not a delta (§2.5).
           lvl.sessions = new Map((payload.sessions || []).map((s) => [s.ref, s]));
-          for (const s of payload.sessions || []) {
-            const uid = `${deviceId}::${s.ref}`;
-            const curStatus = s.status || s.state || 'unknown';
-            const prev = this._globalSessionStatus.get(uid) || {};
-            this._globalSessionStatus.set(uid, {
-              status: curStatus,
-              state: curStatus,
-              title: s.title !== undefined ? s.title : prev.title || '',
-              provider: s.provider !== undefined ? s.provider : prev.provider,
-              updatedAt: Date.now(),
-            });
-          }
           this._scheduleModel();
         }
         if (gap) {
