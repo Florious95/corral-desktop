@@ -232,6 +232,17 @@ test('焦点列实心闪烁、失焦列空心：cursorBlink + outline inactive +
   view.dispose();
 });
 
+test('Cursor provider suppresses the parked hardware cursor after every write', () => {
+  const { view } = makeView({ hideCursor: true });
+  view.open();
+  assert.equal(view.term.opts.cursorBlink, false);
+  assert.equal(view.term.opts.cursorInactiveStyle, 'none');
+  assert.deepEqual([...view.term.writes[0]], [0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]);
+  view.writeSnapshot(new Uint8Array([0x41]));
+  assert.deepEqual([...view.term.writes[1]], [0x41, 0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]);
+  view.dispose();
+});
+
 test('onData 把按键交给调用方；disableStdin 为 false', () => {
   const got = [];
   const { view } = makeView({ onData: (d) => got.push(d) });

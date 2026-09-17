@@ -25,6 +25,14 @@ const WHEEL_THROTTLE_MS = 400;
 export const GRID_DEBOUNCE_MS = 120;
 /** Delta backlog budget; overflow requests a fresh snapshot instead of dropping silently. */
 export const MAX_PENDING_WRITE_BYTES = 4 * 1024 * 1024;
+const HIDE_CURSOR = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]); // ESC[?25l
+
+function withHiddenCursor(bytes) {
+  const hidden = new Uint8Array(bytes.byteLength + HIDE_CURSOR.byteLength);
+  hidden.set(bytes);
+  hidden.set(HIDE_CURSOR, bytes.byteLength);
+  return hidden;
+}
 
 function withImplicitCr(bytes) {
   let lfCount = 0;
@@ -55,11 +63,12 @@ export class TerminalView {
    * @param {(info:{queuedBytes:number,maxPendingBytes:number}) => void} [opts.onWriteBackpressure]
    * @param {number}   [opts.maxPendingWriteBytes] 仅供单测缩小积压预算
    * @param {Function} [opts.TerminalCtor]  仅供单测注入 FakeTerminal；生产走 @xterm/xterm
+   * @param {boolean} [opts.hideCursor=false] 隐藏远端停靠的硬件游标（Cursor TUI）
    */
   constructor(container, {
     onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
     scrollback = 0, fontSize = 13, maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
-    TerminalCtor = Terminal,
+    hideCursor = false, TerminalCtor = Terminal,
   } = {}) {
     this.container = container;
     this.onResize = onResize || (() => {});
@@ -71,15 +80,16 @@ export class TerminalView {
       ? maxPendingWriteBytes : MAX_PENDING_WRITE_BYTES;
 
     this.fontSize = fontSize;
+    this.hideCursor = hideCursor === true;
     this.term = new TerminalCtor({
       scrollback,
       fontSize,
       fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
       lineHeight: 1.25,
       customGlyphs: true,
-      cursorBlink: true,
+      cursorBlink: !this.hideCursor,
       cursorStyle: 'block',
-      cursorInactiveStyle: 'outline',
+      cursorInactiveStyle: this.hideCursor ? 'none' : 'outline',
       convertEol: false,
       // 输入走 onData → 协议。远程 delta 负责回显，xterm 不本地 echo。
       disableStdin: false,
@@ -114,6 +124,7 @@ export class TerminalView {
   /** 挂载进容器并做一次 fit。 */
   open() {
     this.term.open(this.container);
+    if (this.hideCursor) this.term.write(HIDE_CURSOR);
     this._dataDisposable = this.term.onData((data) => this.onData(data));
     // xterm emits X10 mouse reports through onBinary; each code unit is one raw byte.
     this._binaryDisposable = this.term.onBinary
@@ -269,7 +280,7 @@ export class TerminalView {
         this.term.reset();
         this._hasPainted = true;
       }
-      this.term.write(data, done);
+      this.term.write(this.hideCursor ? withHiddenCursor(data) : data, done);
     } catch (error) {
       done();
       throw error;
@@ -352,6 +363,7 @@ export class TerminalView {
     this._queuedWriteBytes = 0;
     this._recovering = false;
     this.term.reset();
+    if (this.hideCursor) this.term.write(HIDE_CURSOR);
   }
 
   focus() { try { this.term.focus(); } catch { /* 已 dispose */ } }
