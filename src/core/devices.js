@@ -133,6 +133,7 @@ export class DeviceManager {
     this._clients = new Map();   // deviceId -> Client
     this._status = new Map();    // deviceId -> { state, lastError }
     this._level2 = new Map();    // deviceId -> { cwd, seq, sessions: Map<ref, {...}>, lastSeen }
+    this._globalSessionStatus = new Map(); // uid -> { status, state, title, provider, updatedAt }
     this._launchers = new Map(); // deviceId -> auth_ack.agent_launchers
     this._connected = false;
     this._modelTimer = null;
@@ -296,9 +297,25 @@ export class DeviceManager {
       for (const w of client.workspaces) {
         const live = lvl && lvl.cwd === w.cwd ? lvl.sessions : null;
         const sessions = (w.sessions || []).map((s) => {
+          const uid = `${d.id}::${s.ref}`;
           const x = live?.get(s.ref);
+
+          const status = x?.status || 'unknown';
+          const title = x?.title || '';
+          const provider = x?.provider !== undefined ? x.provider : s.provider;
+
+          if (x) {
+            this._globalSessionStatus.set(uid, {
+              status,
+              state: status,
+              title,
+              provider,
+              updatedAt: Date.now(),
+            });
+          }
+
           return {
-            uid: `${d.id}::${s.ref}`,
+            uid,
             deviceId: d.id,
             deviceName: d.name,
             ref: s.ref,
@@ -306,11 +323,12 @@ export class DeviceManager {
             cwd: s.cwd,
             rows: s.rows,
             cols: s.cols,
-            title: x?.title || '',
-            status: x?.status || 'unknown',
+            title,
+            status,
+            state: status,
             // level2 is newer than listing when it supplies a provider; if its
             // field is absent, retain the reliable listing DTO value.
-            provider: providerOf(s.name, x?.provider !== undefined ? x.provider : s.provider),
+            provider: providerOf(s.name, provider),
           };
         });
         out.push({
@@ -340,6 +358,16 @@ export class DeviceManager {
       if (s) return s;
     }
     return undefined;
+  }
+
+  /** Return the globally cached session status by uid. */
+  getSessionStatus(uid) {
+    return this._globalSessionStatus.get(uid) || null;
+  }
+
+  /** Return a copy of the global session status mapping. */
+  get globalSessionStatus() {
+    return new Map(this._globalSessionStatus);
   }
 
   /** Return only launchers advertised by this authenticated device. */
@@ -534,6 +562,11 @@ export class DeviceManager {
     this._clients.delete(deviceId);
     this._level2.delete(deviceId);
     this._launchers.delete(deviceId);
+    for (const key of this._globalSessionStatus.keys()) {
+      if (key.startsWith(`${deviceId}::`)) {
+        this._globalSessionStatus.delete(key);
+      }
+    }
   }
 
   _onState(deviceId, state) {
@@ -564,6 +597,11 @@ export class DeviceManager {
         return;
       case 'listing':
       case 'list_delta':
+        if (type === 'list_delta' && Array.isArray(payload?.removed_refs)) {
+          for (const r of payload.removed_refs) {
+            this._globalSessionStatus.delete(`${deviceId}::${r}`);
+          }
+        }
         this._scheduleModel();
         return;
       case 'create_agent_result':
@@ -582,6 +620,18 @@ export class DeviceManager {
         if (type === 'level2_frame') {
           // Whole-view replacement, not a delta (§2.5).
           lvl.sessions = new Map((payload.sessions || []).map((s) => [s.ref, s]));
+          for (const s of payload.sessions || []) {
+            const uid = `${deviceId}::${s.ref}`;
+            const curStatus = s.status || s.state || 'unknown';
+            const prev = this._globalSessionStatus.get(uid) || {};
+            this._globalSessionStatus.set(uid, {
+              status: curStatus,
+              state: curStatus,
+              title: s.title !== undefined ? s.title : prev.title || '',
+              provider: s.provider !== undefined ? s.provider : prev.provider,
+              updatedAt: Date.now(),
+            });
+          }
           this._scheduleModel();
         }
         if (gap) {

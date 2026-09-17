@@ -69,13 +69,15 @@ export default function Sidebar({
   onToggleDevices,
   multiDevice,
   allCount,
+  allWorkingCount,
   favCount,
+  favWorkingCount,
 }) {
   const spaceName = spaces.find((s) => s.key === selected)?.name;
   const agentsTitle =
     selected === 'fav' ? '收藏的 Agents' : spaceName ? `${spaceName} 的 Agents` : 'Agents';
 
-  const spacesHasWorking = spaces.some((s) => s.state === 'working');
+  const spacesHasWorking = spaces.some((s) => s.state === 'working' || (s.workingCount ?? 0) > 0);
   const agentsHasWorking = agents.some((a) => a.state === 'working' || a.status === 'working');
 
   return (
@@ -95,7 +97,9 @@ export default function Sidebar({
           <SpacesList
             spaces={spaces}
             allCount={allCount ?? spaces.reduce((n, s) => n + (s.count ?? 0), 0)}
+            allWorkingCount={allWorkingCount ?? spaces.reduce((n, s) => n + (s.workingCount ?? 0), 0)}
             favCount={favCount ?? agents.filter((a) => a.fav).length}
+            favWorkingCount={favWorkingCount ?? agents.filter((a) => a.fav && (a.state === 'working' || a.status === 'working')).length}
             selected={selected}
             onSelect={onSelect}
             onContextMenu={onSpaceMenu}

@@ -4,7 +4,7 @@ import { DeviceManager } from './core/devices.js';
 import { isLocalUrl } from './core/local.js';
 import { geomTrace } from './term/geomTrace.js';
 import {
-  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon, SidebarIcon,
+  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon, SidebarIcon, ReflowIcon,
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
@@ -298,9 +298,47 @@ export default function App({ seedDevices } = {}) {
   const checkedCount = devices.filter((d) => d.checked).length;
   const multiDevice = checkedCount > 1;
 
+  const globalSessionStatusRef = useRef(new Map());
+
+  // 同步 dm 中的全局状态
+  for (const [uid, info] of dm.globalSessionStatus) {
+    if (info && info.status && info.status !== 'unknown') {
+      const existing = globalSessionStatusRef.current.get(uid) || {};
+      globalSessionStatusRef.current.set(uid, { ...existing, ...info });
+    }
+  }
+
+  // 从 workspaces 提取有效状态并常驻
+  for (const w of workspaces) {
+    for (const s of w.sessions || []) {
+      const cur = s.state || s.status;
+      if (cur && cur !== 'unknown') {
+        const existing = globalSessionStatusRef.current.get(s.uid) || {};
+        globalSessionStatusRef.current.set(s.uid, {
+          ...existing,
+          status: cur,
+          state: cur,
+          title: s.title || existing.title || s.name || '',
+          provider: s.provider || existing.provider,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+  }
+
   const spaces = useMemo(() => workspaces.map((w) => {
-    const sessions = w.sessions || [];
-    const hasWorking = sessions.some((s) => s.state === 'working' || s.status === 'working');
+    const sessions = (w.sessions || []).map((s) => {
+      const cached = globalSessionStatusRef.current.get(s.uid);
+      const curStatus = s.state || s.status || 'unknown';
+      const effectiveStatus = (curStatus && curStatus !== 'unknown') ? curStatus : (cached?.status || curStatus);
+      return {
+        ...s,
+        state: effectiveStatus,
+        status: effectiveStatus,
+      };
+    });
+    const workingCount = sessions.filter((s) => s.state === 'working' || s.status === 'working').length;
+    const hasWorking = workingCount > 0;
     const hasIdle = sessions.some((s) => s.state === 'idle' || s.status === 'idle');
     const state = hasWorking ? 'working' : (hasIdle ? 'idle' : (w.aggregateState || 'unknown'));
 
@@ -311,8 +349,10 @@ export default function App({ seedDevices } = {}) {
       deviceLocal: !!localById.get(w.deviceId),
       cwd: w.cwd,
       name: w.label,
-      count: w.sessionCount,
+      count: w.sessionCount ?? sessions.length,
+      workingCount,
       state,
+      sessions,
     };
   }), [workspaces, localById]);
 
@@ -333,6 +373,10 @@ export default function App({ seedDevices } = {}) {
       for (const s of w.sessions || []) {
         const title = s.name || '';
         const curStatus = s.state || s.status || 'unknown';
+        const cached = globalSessionStatusRef.current.get(s.uid);
+        const effectiveStatus = (curStatus && curStatus !== 'unknown') ? curStatus : (cached?.status || curStatus);
+        const effectiveTitle = (s.title && s.title !== '') ? s.title : (cached?.title || title);
+        const effectiveProvider = s.provider || cached?.provider;
         out.push({
           key: s.uid,
           ref: s.ref,
@@ -341,12 +385,12 @@ export default function App({ seedDevices } = {}) {
           deviceLocal: !!localById.get(w.deviceId),
           spaceKey: w.spaceKey,
           spaceName: w.label,
-          title,
+          title: effectiveTitle,
           // DeviceManager already projects the authoritative DTO provider;
           // do not let the display title override it in the UI layer.
-          provider: s.provider,
-          state: curStatus,
-          status: curStatus,
+          provider: effectiveProvider,
+          state: effectiveStatus,
+          status: effectiveStatus,
           fav: favSet.has(`${w.spaceKey}::${title}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
         });
       }
@@ -356,6 +400,12 @@ export default function App({ seedDevices } = {}) {
 
   const agentByKey = useMemo(() => new Map(allAgents.map((a) => [a.key, a])), [allAgents]);
   const favCount = useMemo(() => allAgents.reduce((count, agent) => count + (agent.fav ? 1 : 0), 0), [allAgents]);
+  const allWorkingCount = useMemo(() => (
+    allAgents.filter((a) => a.state === 'working' || a.status === 'working').length
+  ), [allAgents]);
+  const favWorkingCount = useMemo(() => (
+    allAgents.filter((a) => a.fav && (a.state === 'working' || a.status === 'working')).length
+  ), [allAgents]);
   liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
 
   // 服务端删会话 → 标记 closing → CLOSE_MS 后真正卸载并剔出分裂列
@@ -380,6 +430,7 @@ export default function App({ seedDevices } = {}) {
         setWorkspace((prev) => removeSessionFromWorkspace(prev, a.key));
         shims.current.delete(a.key);
         pendingPasteRef.current.delete(a.key);
+        globalSessionStatusRef.current.delete(a.key);
       }, CLOSE_MS));
     }
   }, [allAgents]);
@@ -828,6 +879,27 @@ export default function App({ seedDevices } = {}) {
   /* ——— 右键菜单 ——— */
   const closeMenu = useCallback(() => setMenu(null), []);
 
+  const triggerReflow = useCallback((uid) => {
+    if (!uid) return;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('terminal:reflow', { detail: { uid } }));
+    }
+  }, []);
+
+  const handleReflowTab = useCallback((tabKey) => {
+    const tab = workspace.tabs.find((t) => (t.id || t.uid) === tabKey);
+    const uids = tab
+      ? ((tab.root && typeof tab.root === 'object') ? getLeaves(tab.root) : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : [])))
+      : [tabKey];
+    for (const uid of uids) {
+      triggerReflow(uid);
+    }
+  }, [workspace.tabs, triggerReflow]);
+
+  const handleReflowPane = useCallback((uid) => {
+    triggerReflow(uid);
+  }, [triggerReflow]);
+
   const openMenu = useCallback((e, kind, id) => {
     e.preventDefault();
     e.stopPropagation();
@@ -893,6 +965,13 @@ export default function App({ seedDevices } = {}) {
 
       return [
         {
+          key: 'reflow',
+          label: '适应当前窗口',
+          icon: icon(ReflowIcon),
+          color: 'var(--text)',
+          onClick: () => { closeMenu(); handleReflowTab(menu.id); },
+        },
+        {
           key: 'pin',
           label: isPinned ? '取消固定' : '固定到最左',
           icon: icon(PinIcon),
@@ -930,6 +1009,13 @@ export default function App({ seedDevices } = {}) {
     const agent = agentByKey.get(menu.id);
     const unvisibleTabs = workspace.tabs.filter((t) => !visibleLeaves.includes(t.uid));
     return [
+      {
+        key: 'reflow',
+        label: '适应当前窗口',
+        icon: icon(ReflowIcon),
+        color: 'var(--text)',
+        onClick: () => { closeMenu(); handleReflowPane(menu.id); },
+      },
       {
         key: 'split-right',
         label: '向右分屏',
@@ -987,6 +1073,8 @@ export default function App({ seedDevices } = {}) {
     closeAgent,
     closePending,
     handlePinTab,
+    handleReflowTab,
+    handleReflowPane,
     handleCloseTab,
     handleCloseOtherTabs,
     handleCloseRightTabs,
@@ -1015,7 +1103,9 @@ export default function App({ seedDevices } = {}) {
             spaces={spaces}
             agents={visibleAgents}
             allCount={allAgents.length}
+            allWorkingCount={allWorkingCount}
             favCount={favCount}
+            favWorkingCount={favWorkingCount}
             closing={closing}
             openKeys={openKeys}
             onSpaceMenu={handleSpaceMenu}
@@ -1055,6 +1145,7 @@ export default function App({ seedDevices } = {}) {
               visibleUids={visibleLeaves}
               draggingUid={draggingUid}
               agentsByUid={agentByKey}
+              globalSessionStatus={globalSessionStatusRef.current}
               onSelectTab={handleSelectTab}
               onCloseTab={handleCloseTab}
               onCreateTab={handleCreateTab}

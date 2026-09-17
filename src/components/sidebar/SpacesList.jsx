@@ -16,7 +16,21 @@ function SpaceState({ state }) {
   return null;
 }
 
-function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onClick, onContextMenu, onNewAgent }) {
+function SpaceRow({
+  icon,
+  name,
+  count,
+  workingCount = 0,
+  selected,
+  badge,
+  badgeLocal,
+  state,
+  onClick,
+  onContextMenu,
+  onNewAgent,
+}) {
+  const isWorking = (workingCount ?? 0) > 0;
+
   return (
     <div
       className={`spaces-row${selected ? ' is-selected' : ''}`}
@@ -40,7 +54,17 @@ function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onCli
       {badge ? (
         <span className={`spaces-badge${badgeLocal ? ' is-local' : ''}`}>{badge}</span>
       ) : null}
-      <span className="spaces-row-count">{count}</span>
+      <div className="spaces-row-counts">
+        <span
+          className={`spaces-count-working${isWorking ? ' is-working is-active' : ' is-idle is-zero'}`}
+          title={`工作中: ${workingCount ?? 0}`}
+        >
+          {workingCount ?? 0}
+        </span>
+        <span className="spaces-row-count spaces-count-total" title={`总数: ${count}`}>
+          {count}
+        </span>
+      </div>
     </div>
   );
 }
@@ -49,7 +73,9 @@ function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onCli
  * @param {Object} props
  * @param {Array}  props.spaces
  * @param {number} props.allCount
+ * @param {number} [props.allWorkingCount]
  * @param {number} props.favCount
+ * @param {number} [props.favWorkingCount]
  * @param {string} props.selected                       'all' | 'fav' | Space.key
  * @param {(key:string) => void} props.onSelect
  * @param {(e:MouseEvent, key:string) => void} props.onContextMenu
@@ -59,14 +85,16 @@ function SpaceRow({ icon, name, count, selected, badge, badgeLocal, state, onCli
 export default function SpacesList({
   spaces,
   allCount,
+  allWorkingCount = 0,
   favCount,
+  favWorkingCount = 0,
   selected,
   onSelect,
   onContextMenu,
   onNewAgent,
   multiDevice,
 }) {
-  const allSpacesWorking = spaces.some((sp) => sp.state === 'working');
+  const allSpacesWorking = (allWorkingCount > 0) || spaces.some((sp) => sp.state === 'working' || (sp.workingCount ?? 0) > 0);
 
   return (
     <div className="spaces-list">
@@ -74,6 +102,7 @@ export default function SpacesList({
         icon={<GridIcon size={15} stroke="var(--icon-strong)" />}
         name="All Spaces"
         count={allCount}
+        workingCount={allWorkingCount}
         selected={selected === 'all'}
         state={allSpacesWorking ? 'working' : 'unknown'}
         onClick={() => onSelect('all')}
@@ -83,25 +112,30 @@ export default function SpacesList({
         icon={<StarIcon size={15} fill="var(--amber)" />}
         name="收藏"
         count={favCount}
+        workingCount={favWorkingCount}
         selected={selected === 'fav'}
         onClick={() => onSelect('fav')}
         onContextMenu={(e) => e.preventDefault()}
       />
-      {spaces.map((sp) => (
-        <SpaceRow
-          key={sp.key}
-          icon={<FolderIcon size={15} stroke="var(--icon)" />}
-          name={sp.name}
-          count={sp.count}
-          state={sp.state}
-          selected={selected === sp.key}
-          badge={multiDevice ? sp.deviceName : null}
-          badgeLocal={sp.deviceLocal}
-          onClick={() => onSelect(sp.key)}
-          onContextMenu={(e) => onContextMenu(e, sp.key)}
-          onNewAgent={onNewAgent ? () => onNewAgent(sp.key) : undefined}
-        />
-      ))}
+      {spaces.map((sp) => {
+        const workingCount = sp.workingCount ?? (sp.sessions?.filter((s) => s.state === 'working' || s.status === 'working').length || 0);
+        return (
+          <SpaceRow
+            key={sp.key}
+            icon={<FolderIcon size={15} stroke="var(--icon)" />}
+            name={sp.name}
+            count={sp.count}
+            workingCount={workingCount}
+            state={sp.state}
+            selected={selected === sp.key}
+            badge={multiDevice ? sp.deviceName : null}
+            badgeLocal={sp.deviceLocal}
+            onClick={() => onSelect(sp.key)}
+            onContextMenu={(e) => onContextMenu(e, sp.key)}
+            onNewAgent={onNewAgent ? () => onNewAgent(sp.key) : undefined}
+          />
+        );
+      })}
     </div>
   );
 }
