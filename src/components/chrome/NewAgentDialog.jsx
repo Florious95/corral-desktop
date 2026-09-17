@@ -56,6 +56,7 @@ export default function NewAgentDialog({
   const nameError = nameHasControl
     ? '名称不能包含控制字符'
     : nameTooLong ? '名称不能超过 64 个字符' : '';
+  const bypassSupported = selected?.supports_bypass === true;
   const canCreate = !loading && !!selected && !!name.trim() && !nameError;
 
   return (
@@ -111,27 +112,25 @@ export default function NewAgentDialog({
             <div className="nad-empty" role="status">当前设备未广告可用的 Agent</div>
           )}
 
-          {selected?.supports_bypass ? (
-            <div className="nad-bypass">
-              <div className="nad-bypass-main">
-                <div className="nad-bypass-title">Bypass permissions</div>
-                <div className="nad-bypass-desc">允许 Agent 不经确认执行 shell 命令</div>
-              </div>
-              <button
-                type="button"
-                className="chr-btn-reset nad-switch"
-                role="switch"
-                aria-checked={bypass}
-                aria-label="Bypass permissions"
-                disabled={loading}
-                onClick={() => setBypass((v) => !v)}
-              >
-                <span className="nad-knob" />
-              </button>
+          <div className={`nad-bypass${bypassSupported ? '' : ' is-disabled'}`} aria-disabled={!bypassSupported}>
+            <div className="nad-bypass-main">
+              <div className="nad-bypass-title">Bypass permissions</div>
+              <div className="nad-bypass-desc">允许 Agent 不经确认执行 shell 命令</div>
             </div>
-          ) : null}
+            <button
+              type="button"
+              className="chr-btn-reset nad-switch"
+              role="switch"
+              aria-checked={bypassSupported && bypass}
+              aria-label="Bypass permissions"
+              disabled={loading || !bypassSupported}
+              onClick={() => { if (bypassSupported) setBypass((v) => !v); }}
+            >
+              <span className="nad-knob" />
+            </button>
+          </div>
 
-          {loading ? <div className="nad-loading" role="status">正在创建 Agent…</div> : null}
+          <div className="nad-loading" role="status" aria-hidden={!loading}>{loading ? '正在创建 Agent…' : '\u00a0'}</div>
           <div className="chr-actions">
             <button type="button" className="chr-btn-reset chr-btn" disabled={loading} onClick={onCancel}>
               取消
