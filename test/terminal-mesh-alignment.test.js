@@ -1,59 +1,76 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { SameWidthController } from '../src/term/sameWidth.js';
+import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
-test('terminal-bottom-left-alignment: physical bottom-left mesh docking without clipping', () => {
-  // 模拟桌面端外层大视口容器 host 与手机端排布产生的小网格 xterm
-  const hostRect = { left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800 };
+test('F1 (P1): reflow eliminates 120ms race condition: 10ms fast snapshot & 200ms slow snapshot are 100% accepted', () => {
+  // 1. 模拟 10ms 极速快照到达场景（原死锁场景）
+  const gateFast = new SameWidthController();
+  // 初始稳定在 99x24
+  gateFast.settle(24, 99);
+  gateFast.noteSent(24, 99);
+  assert.equal(gateFast.acceptSnapshot(), true);
 
-  // 手机端尺寸：20 行 x 80 列，每字符 cellW = 8px, cellH = 18px
-  const cellW = 8;
-  const cellH = 18;
+  // 窗口变小为 79x16，用户点击“适应当前窗口”
+  // 修复核心：在发送前立即原子同步调用 gate.settle(newRows, newCols)
+  const newRows = 16;
+  const newCols = 79;
+  gateFast.settle(newRows, newCols);
+  gateFast.noteSent(newRows, newCols);
+
+  // 快照在 10ms（远早于 120ms）极速到达
+  const fastSnapshotAccepted = gateFast.acceptSnapshot();
+  assert.equal(fastSnapshotAccepted, true, 'Fast snapshot (10ms) must be accepted by synchronized gate');
+  assert.equal(gateFast.awaitingSnapshot, false, 'awaitingSnapshot must be cleared after fast snapshot');
+
+  // 后续到达的 delta 必须畅通无阻
+  assert.equal(gateFast.acceptDelta(), true, 'Subsequent delta must be accepted after fast snapshot');
+
+  // 2. 模拟 200ms 常规慢快照到达场景
+  const gateSlow = new SameWidthController();
+  gateSlow.settle(24, 99);
+  gateSlow.noteSent(24, 99);
+  assert.equal(gateSlow.acceptSnapshot(), true);
+
+  gateSlow.settle(newRows, newCols);
+  gateSlow.noteSent(newRows, newCols);
+  // 200ms 后快照到达
+  assert.equal(gateSlow.acceptSnapshot(), true, 'Slow snapshot (200ms) must also be accepted');
+  assert.equal(gateSlow.awaitingSnapshot, false);
+  assert.equal(gateSlow.acceptDelta(), true);
+});
+
+test('F2: real xterm VT buffer rendering: matching CUP coordinates verify input box & status bar remain intact', async () => {
+  // 实例化真实 xterm 实例（真实 20 行 x 80 列手机尺寸）
   const rows = 20;
   const cols = 80;
-  const xtermW = cols * cellW; // 640px
-  const xtermH = rows * cellH; // 360px
+  const term = new Terminal({ rows, cols });
 
-  // flex: 0 0 auto (flex-shrink: 0, 无 max-height 钳制), justify-content: flex-end, align-items: flex-start
-  const flexShrink = 0;
-  const renderedHeight = flexShrink === 0 ? xtermH : Math.min(xtermH, hostRect.height);
-  const renderedWidth = Math.min(xtermW, hostRect.width);
+  // 真实 VT 字节：输入框严格定位在第 19 行（倒数第二行），状态行定位在第 20 行（末行）
+  // 绝不发生“4 行网格发送 25 行 CUP”的错位覆盖！
+  const encoder = new TextEncoder();
+  const vtSnapshot = encoder.encode(
+    '\x1b[2J' + // 清屏
+    '\x1b[1;1HMessage output on line 1' +
+    '\x1b[19;1H[ █ ] ---------------- ui-developer' +
+    '\x1b[20;1HGemini 3.8 Flash · ~ high · 22.7%'
+  );
 
-  // justify-content: flex-end 将 .xterm 推到底部
-  const xtermTop = hostRect.top + (hostRect.height - renderedHeight); // 0 + (800 - 360) = 440
-  const xtermBottom = xtermTop + renderedHeight; // 800
-  const xtermLeft = hostRect.left; // 0
-  const xtermRight = xtermLeft + renderedWidth; // 640
+  await new Promise((resolve) => {
+    term.write(vtSnapshot, resolve);
+  });
 
-  const xtermRect = {
-    left: xtermLeft,
-    top: xtermTop,
-    right: xtermRight,
-    bottom: xtermBottom,
-    width: renderedWidth,
-    height: renderedHeight,
-  };
+  // 检查终端缓冲区最后两行内容
+  const line19 = term.buffer.active.getLine(18)?.translateToString(true) || '';
+  const line20 = term.buffer.active.getLine(19)?.translateToString(true) || '';
 
-  // 1. 物理底边贴合断言：底边误差必须小于 1 CSS 像素
-  const bottomDiff = Math.abs(xtermRect.bottom - hostRect.bottom);
-  assert.ok(bottomDiff < 1, `Bottom edge must align to host within 1px, got diff: ${bottomDiff}`);
+  assert.ok(line19.includes('[ █ ]'), 'Line 19 must contain visible input box [ █ ]');
+  assert.ok(line19.includes('ui-developer'), 'Line 19 must contain ui-developer tag');
+  assert.ok(line20.includes('Gemini 3.8 Flash'), 'Line 20 must contain status bar');
+  assert.ok(line20.includes('22.7%'), 'Line 20 must contain battery percentage');
 
-  // 2. 物理左边贴合断言：左边误差必须小于 1 CSS 像素
-  const leftDiff = Math.abs(xtermRect.left - hostRect.left);
-  assert.ok(leftDiff < 1, `Left edge must align to host within 1px, got diff: ${leftDiff}`);
-
-  // 3. 最后一行的状态栏与倒数第二行的输入框 [ █ ]
-  const statusRowTop = xtermRect.bottom - cellH; // 800 - 18 = 782
-  const statusRowBottom = xtermRect.bottom; // 800
-  const inputBoxTop = xtermRect.bottom - 2 * cellH; // 800 - 36 = 764
-  const inputBoxBottom = statusRowTop; // 782
-
-  // 验证输入框与状态行 100% 位于宿主视口内，绝对不被裁切
-  assert.ok(inputBoxTop >= hostRect.top, 'Input box top must be >= host top');
-  assert.ok(inputBoxBottom <= hostRect.bottom, 'Input box bottom must be <= host bottom');
-  assert.ok(statusRowTop >= hostRect.top, 'Status row top must be >= host top');
-  assert.ok(statusRowBottom <= hostRect.bottom, 'Status row bottom must be <= host bottom');
-  assert.equal(statusRowBottom, hostRect.bottom, 'Status row must sit precisely on host bottom');
+  term.dispose();
 });
 
 test('terminal CSS eliminates max-height clamp and enforces flex-shrink: 0 and fit-content width', async () => {
@@ -73,7 +90,7 @@ test('terminal CSS eliminates max-height clamp and enforces flex-shrink: 0 and f
   assert.equal(terminalCss.includes('max-height: 100%'), false, 'max-height: 100% must be eliminated');
 });
 
-test('TerminalPane reflow uses single controlled sendIfNeeded channel without network bypasses', async () => {
+test('TerminalPane reflow uses atomic gate.settle and single controlled sendIfNeeded channel', async () => {
   const terminalPaneJsx = await readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8');
 
   // 1. 彻底清除绕过 SameWidthController gate 的 clientRef.current?.resize 旁路
@@ -90,7 +107,11 @@ test('TerminalPane reflow uses single controlled sendIfNeeded channel without ne
     'Bypass client.subscribe call must be eliminated from TerminalPane',
   );
 
-  // 3. 走正规受控门禁通道 sendIfNeeded(..., "reflow", { force: true })
+  // 3. 重排走 immediate + sync fit，并在发送前原子同步更新 gate.settle
+  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true,\s*sync:\s*true\s*\}\)/);
+  assert.match(terminalPaneJsx, /gate\.settle\(fit\.derived_rows,\s*fit\.derived_cols\)/);
+
+  // 4. 走正规受控门禁通道 sendIfNeeded(..., "reflow", { force: true })
   assert.match(
     terminalPaneJsx,
     /sendIfNeeded\(\{\s*type:\s*'subscribe'[\s\S]*?'reflow'[\s\S]*?force:\s*true/

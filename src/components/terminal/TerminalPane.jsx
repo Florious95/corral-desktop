@@ -280,9 +280,11 @@ export default function TerminalPane({
       const targetUid = ev?.detail?.uid;
       if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
       if (viewRef.current && hostRef.current) {
-        viewRef.current.fit({ immediate: true });
+        viewRef.current.fit({ immediate: true, sync: true });
         const fit = viewRef.current.lastFit;
         if (fit && fit.derived_rows && fit.derived_cols) {
+          // 原子同步：确保 gate.grid 在发送前与待发送尺寸严格一致，杜绝快照早到拒收死锁 (F1)
+          gate.settle(fit.derived_rows, fit.derived_cols);
           sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'reflow', { force: true });
         }
       }

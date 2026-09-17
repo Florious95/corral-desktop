@@ -86,7 +86,7 @@ test('context menu provides "Reflow to Window" (适应当前窗口) and dispatch
 
   // TerminalPane 监听并在触发时以 immediate: true 测量并走正规受控 sendIfNeeded 几何通道
   assert.match(terminalPaneJsx, /window\.addEventListener\('terminal:reflow', handleReflow\)/);
-  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true\s*\}\)/);
+  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true/);
   assert.match(terminalPaneJsx, /sendIfNeeded\(\{\s*type:\s*'subscribe'[\s\S]*?'reflow'/);
   assert.match(terminalPaneJsx, /clientRef\.current\?\.subscribe/);
 });
