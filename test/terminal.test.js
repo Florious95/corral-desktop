@@ -270,6 +270,33 @@ test('Cursor IME anchor follows the visible Add a follow-up row', () => {
   view.dispose();
 });
 
+test('Cursor IME anchor wins after xterm rewrites helper styles', () => {
+  const previousObserver = globalThis.MutationObserver;
+  const observers = [];
+  globalThis.MutationObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    disconnect() {}
+  };
+  let view;
+  try {
+    ({ view } = makeView({ hideCursor: true }));
+    view.term.buffer.active.getLine = (index) => index === 5
+      ? { translateToString: () => '→ Add a follow-up' }
+      : null;
+    view.open();
+    view.term.textarea.style.top = '414px';
+    view.term.composition.style.top = '414px';
+    for (const observer of observers) observer.callback();
+    assert.equal(view.term.textarea.style.top, '80px');
+    assert.equal(view.term.composition.style.top, '80px');
+  } finally {
+    view?.dispose();
+    if (previousObserver) globalThis.MutationObserver = previousObserver;
+    else delete globalThis.MutationObserver;
+  }
+});
+
 test('onData 把按键交给调用方；disableStdin 为 false', () => {
   const got = [];
   const { view } = makeView({ onData: (d) => got.push(d) });

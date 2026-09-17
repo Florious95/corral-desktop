@@ -122,6 +122,7 @@ export class TerminalView {
     this._writeHandle = null;
     this._recovering = false;
     this._cursorAnchor = null;
+    this._anchorObservers = null;
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -158,11 +159,12 @@ export class TerminalView {
       const textarea = this.term.textarea;
       if (textarea?.addEventListener) {
         const sync = () => this._syncCursorAnchor();
-        this._compositionListeners = ['compositionstart', 'compositionupdate'].map((type) => {
+        this._compositionListeners = ['compositionstart', 'compositionupdate', 'input', 'compositionend'].map((type) => {
           textarea.addEventListener(type, sync);
           return { type, sync };
         });
       }
+      this._observeCursorAnchor();
     }
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
     this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
@@ -394,6 +396,21 @@ export class TerminalView {
     }
   }
 
+  /** Reapply the anchor after xterm's internal composition/style mutation. */
+  _observeCursorAnchor() {
+    const Observer = globalThis.MutationObserver;
+    if (typeof Observer !== 'function') return;
+    const elements = [
+      this.term.textarea,
+      this.term.element?.querySelector?.('.composition-view'),
+    ].filter(Boolean);
+    this._anchorObservers = elements.map((element) => {
+      const observer = new Observer(() => this._syncCursorAnchor());
+      observer.observe(element, { attributes: true, attributeFilter: ['style'] });
+      return observer;
+    });
+  }
+
   /** Convert a string offset to xterm cell columns so CJK input remains aligned. */
   _lineColumn(line, charIndex) {
     if (!line?.getCell) return charIndex;
@@ -477,6 +494,8 @@ export class TerminalView {
       textarea?.removeEventListener?.(listener.type, listener.sync);
     }
     this._compositionListeners = null;
+    for (const observer of this._anchorObservers || []) observer.disconnect();
+    this._anchorObservers = null;
     try { this.term.dispose(); } catch { /* 已 dispose */ }
   }
 
