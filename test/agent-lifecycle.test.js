@@ -20,6 +20,8 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   const dialog = source('components/chrome/NewAgentDialog.jsx');
   const closeDialog = source('components/chrome/CloseAgentDialog.jsx');
   const agents = source('components/sidebar/AgentsList.jsx');
+  const spaces = source('components/sidebar/SpacesList.jsx');
+  const sidebarCss = source('components/sidebar/sidebar.css');
   assert.match(app, /getAgentLaunchers/);
   assert.match(app, /dm\.createAgent\(/);
   assert.match(app, /dm\.closeSession\(/);
@@ -28,10 +30,16 @@ test('agent lifecycle UI is capability-driven and uses typed request state', () 
   assert.doesNotMatch(app, /globalThis\.confirm|window\.confirm/);
   assert.match(dialog, /launchers\.map/);
   assert.match(dialog, /supports_bypass/);
+  assert.match(dialog, /nad-bypass.*is-disabled/);
+  assert.match(dialog, /!bypassSupported/);
   assert.doesNotMatch(dialog, /const PROVIDERS\s*=/);
   assert.match(closeDialog, /onConfirm/);
   assert.doesNotMatch(closeDialog, /window\.confirm|globalThis\.confirm/);
-  assert.match(agents, /onClose\(ag\)/);
+  assert.match(app, /key: 'close'/);
+  assert.doesNotMatch(app, /onCloseAgent/);
+  assert.doesNotMatch(agents, /XIcon|agents-row-close|onClose/);
+  assert.doesNotMatch(spaces, /XIcon|close Agent/i);
+  assert.doesNotMatch(sidebarCss, /agents-row-close/);
 });
 
 test('authoritative listing gates lifecycle workspace reconciliation across tabs', () => {

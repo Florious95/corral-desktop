@@ -726,6 +726,10 @@
   background: var(--fill-subtle);
   margin-bottom: 16px;
 }
+.nad-bypass.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .nad-bypass-main {
   flex: 1;
   min-width: 0;

@@ -1021,7 +1021,6 @@ export default function App({ seedDevices } = {}) {
             onSpaceMenu={handleSpaceMenu}
             onNewAgent={openNewAgentDialog}
             onAgentMenu={handleAgentMenu}
-            onCloseAgent={closeAgent}
             onOpenAgent={openAgent}
             onAgentPointerDown={handleAgentPointerDown}
             activeUid={workspace.activeUid}

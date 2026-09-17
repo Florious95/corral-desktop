@@ -475,8 +475,8 @@ src/
 - **按钮行**：`display:flex; justify-content:flex-end; gap:8px`。
   - 次要按钮：`padding:7px 14px; border-radius:var(--r-8); font-size:var(--fs-13); font-weight:600; color:var(--icon-strong); cursor:pointer`；hover `background:var(--hover-4)`。
   - 主按钮：`padding:7px 16px; border-radius:var(--r-8); font-size:var(--fs-13); font-weight:600; color:#fff; background:var(--ink-800); cursor:pointer`；hover `background:var(--ink-900)`；active `background:#000`。
-- **Bypass 行**：仅当前 launcher 的 `supports_bypass=true` 时渲染；其余 provider 强制传 `bypass:false`。
-- **创建中**：提交后按钮显示 `创建中…`、保留对话框并禁止重复提交/取消；收到成功 result 后仍须等待 authoritative listing/list_delta 包含新 ref，再关闭对话框并聚焦新 Agent。
+- **Bypass 行**：始终渲染并占位，保证切换 provider 时弹窗高度恒定；当前 launcher 的 `supports_bypass=false` 或未选中时，卡片与开关置灰禁用且强制传 `bypass:false`。支持时恢复正常交互。
+- **创建中**：提交后按钮显示 `创建中…`、保留对话框并禁止重复提交/取消；加载状态也保留固定占位，避免弹窗高度跳变；收到成功 result 后仍须等待 authoritative listing/list_delta 包含新 ref，再关闭对话框并聚焦新 Agent。
 - **「创建」行为（协议裁定 2026-09-17）**：App 通过已认证 WebSocket 发送 `create_agent`；失败 toast 保留表单；错误帧/断连不假结算，受控超时解除 loading。
 
 ### 4.4.1 `chrome/CloseAgentDialog.jsx`
@@ -537,7 +537,6 @@ src/
  * @param {(e:MouseEvent, spaceKey:string) => void} onSpaceMenu
  * @param {(spaceKey:string) => void} [onNewAgent]
  * @param {(e:MouseEvent, agentKey:string) => void} onAgentMenu
- * @param {(agent:Object) => void} [onCloseAgent]
  * @param {(key:string) => void} onOpenAgent
  * @param {string} deviceLabel                    §7.2 规则算好的底部文案
  * @param {boolean} anyDeviceOnline
@@ -593,7 +592,6 @@ src/
  * @param {Object<string,boolean>} closing  key → 正在播关闭动画
  * @param {(key:string) => void} onOpen
  * @param {(e:MouseEvent, key:string) => void} onContextMenu
- * @param {(agent:Object) => void} [onClose]
  * @param {boolean} multiDevice
  * @param {string} emptyHint                空态第二行文案
  */
@@ -625,7 +623,7 @@ src/
 - **第一行**：`display:flex; align-items:center; gap:8px; font-size:var(--fs-13); font-weight:600; min-width:0`
   - `<ProviderIcon provider={provider} size={18} active={state==='working'||state==='blocked'}/>`
   - title span（省略号）
-  - 尾部容器 `margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；hover 右侧提供 `关闭 Agent` X 按钮并触发二次确认。两者可同时出现（对勾在左，星在右）。
+  - 尾部容器 `margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`。行内不渲染关闭按钮；`关闭 Agent` 仅从该行右键上下文菜单进入并触发二次确认。两者可同时出现（对勾在左，星在右）。
 - **第二行**：`display:flex; align-items:center; gap:6px; font-size:var(--fs-11); color:var(--text-muted); margin-top:3px`
   - **状态点** `8px` 圆，`border-radius:var(--r-pill); flex:none`：
     | state | 样式 | title |
@@ -755,7 +753,7 @@ src/
 | 收藏 / 取消收藏 | star / starFill | 未收藏 `var(--text)`；已收藏 `var(--amber-deep)` | 翻转 fav 并持久化 |
 | 关闭 | x | `var(--danger)` | **`separator:true`**（上边框 + `margin-top:4px`）。行为见下 |
 
-**「关闭」的语义（协议裁定 2026-09-17）**：关闭 Agent 必须二次确认，然后通过已认证 WebSocket 发送 `close_session` 终止远端会话；收到 `close_session_result(ok:true)` 后仍保留行与工作区引用，直到权威 `listing/list_delta(removed)` 到达，再清理本地工作区、Tab、分裂列与订阅。请求失败或超时只反馈错误，不伪造删除；一次只允许一个关闭请求。
+**「关闭」的语义（协议裁定 2026-09-17）**：关闭 Agent 仅从 Agent 行右键上下文菜单进入，必须二次确认，然后通过已认证 WebSocket 发送 `close_session` 终止远端会话；收到 `close_session_result(ok:true)` 后仍保留行与工作区引用，直到权威 `listing/list_delta(removed)` 到达，再清理本地工作区、Tab、分裂列与订阅。请求失败或超时只反馈错误，不伪造删除；一次只允许一个关闭请求。
 设计稿的 190ms 关闭动画**保留**，用在**行因服务端 `list_delta` 消失**时：先 `closing[key]=true`（opacity→0、scale→.94，`.18s`），`setTimeout(190)` 后再从数组里移除，并同步剔除 `panes` 里的该 key。关闭确认使用受控对话框，不调用原生 `window.confirm`。
 
 **C. 分裂列（pane）**
@@ -908,7 +906,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 5. **补出 pane 列头**：设计稿算出了 `title/iconEl/statusEl` 却没渲染；分裂多列必须能分辨归属。
 6. `Add Device…` 从「插一条『等待配对』假设备」改成 **AddDeviceDialog（ws URL + token）**。
 7. **终端输入**（设计稿主区是「不在设计范围」占位）；命名快捷键保留协议闭集 `esc/ctrl_c/tab/up/down/left/right/backspace`，xterm 编好的其他有意序列走非空 `input.bytes`（标准 base64）；`keys`、`bytes`、`text`/`attachment_path` 三类载荷互斥且均不补回车。主区不额外挂载底部图片条；Ctrl+V 图片上传路径仍保留。
-8. 「关闭」语义改为**关闭分裂列**并在无列时置灰；190ms 关闭动画改挂到「服务端删除会话」路径。
+8. 「关闭 Agent」仅保留在 Agent 行右键菜单；二次确认后终止远端会话，190ms 关闭动画仍挂到「服务端删除会话」路径。
 9. 分裂列 `:first-child` 去掉 `border-left`（原型与侧栏 border-right 会并出双线）。
 10. `max-height:clamp(96px, 100dvh - 464px, 288px)` 的 `100dvh` → `100vh`（桌面端窗口无动态视口）。
 11. 新增 `prefers-reduced-motion` 降级（脉冲/过渡关闭）与输入框可见 focus ring —— 无障碍基础不省。
@@ -924,6 +922,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 21. **2026-09-15 (PR B)**：全局 Tab 会话生命周期与同父平铺常驻分屏舞台（TerminalStage）。顶栏接入 TabBar（会话名 + 状态指示灯，Working 绿灯微动、Idle 静止、Unknown 灰空心；支持 Pin 紧凑锚定与关闭）；主区采用纯函数二叉分屏树（workspaceLayout.js）计算绝对几何，所有 TerminalPane 作为同一 DOM 父容器直接子节点投影定位，切分重排零 React Unmount、零 xterm 重建、零闪屏；采用 am.workspace.v1 本地白名单持久化。
 22. **2026-09-15 (PR C)**：Tab 长按平滑调序与四向边缘吸附分屏引擎（tabDrag.js）。采用 Pointer Events（pointerdown/move/up + setPointerCapture），长按阈值 180ms、容差 6px；Zero Forced Reflow：pointerdown 预缓存视口与几何坐标，pointermove 仅记录点位并由单 rAF 调度，热路径绝对严禁读取 DOM 布局；主区触发 25% 四向边缘吸附（带 3px 切换滞回防抖与中心 50%×50% no-drop 区域）；GPU 硬件加速预览（translate3d + scale + opacity，悬浮期间绝不触碰真实 DOM/树）；pointerup 瞬间原子提交树变更，保持终端同父平铺保活，零 Unmount，120ms 防抖收敛。
 23. **2026-09-17**：新建 Agent 仅展示当前 `auth_ack.agent_launchers` 广告的 provider；名称限制为非空、≤64 Unicode 字符且无控制字符，Bypass 由 `supports_bypass` 控制。`create_agent` 成功后等待权威 listing/list_delta 入驻再打开；`close_session` 成功后等待权威移除再清理本地状态，关闭确认采用受控对话框。
+24. **2026-09-17**：Agent 行不渲染常驻或 hover 关闭 X；终止会话唯一入口是 Agent 行右键上下文菜单，避免会话点击误触危险操作。
 
 ## core 依赖边界（裁定 2026-09-12）
 
