@@ -21,7 +21,7 @@ test('SpacesList renders dual-column badges: working sessions (green when >0, gr
   // 全量行常驻实时：All Spaces、收藏与各个目录空间行均传递 workingCount 与 count
   assert.match(spacesListJsx, /name="All Spaces"[\s\S]*?count=\{allCount\}[\s\S]*?workingCount=\{allWorkingCount\}/);
   assert.match(spacesListJsx, /name="收藏"[\s\S]*?count=\{favCount\}[\s\S]*?workingCount=\{favWorkingCount\}/);
-  assert.match(spacesListJsx, /workingCount=\{workingCount\}[\s\S]*?state=\{sp\.state\}/);
+  assert.match(spacesListJsx, /workingCount=\{workingCount\}/);
 
   // CSS 样式保障：绿色与灰色切换，tabular-nums 数字等宽，右对齐并列
   assert.match(sidebarCss, /\.spaces-row-counts\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;/);

@@ -376,7 +376,7 @@ src/
   - 右键菜单支持「固定/取消固定」、「关闭工作台」、「关闭其他工作台」、「关闭右侧所有工作台」。
 - **顶栏拖窗与幽灵标签/工作状态根除裁定（2026-09-16 顾问终极架构裁定）**：
   - **顶部长按拖窗原生唯一通路**：彻底废除无效的 `-webkit-app-region` 与前端 JS 手动 `triggerWindowDrag` 派发逻辑，全面收敛至 Tauri 官方唯一原生通路：两侧 Header 声明 `data-tauri-drag-region="deep"`，所有交互控件（按钮、Tab 标签等）显式声明 `data-tauri-drag-region="false"`；`src-tauri/capabilities/default.json` 授权 `"core:window:allow-start-dragging"`，由 Tauri 内置特权脚本与 AppKit 原生接管窗口移动，无死角、零延迟、防误触；
-  - **侧栏文件夹/工作区状态点展示**：每个工作区项（`FolderIcon`）根据内部所有会话状态动态派生；只要任一会话 `state === 'working'` 或 `status === 'working'`，无论该文件夹是否选中或折叠收起，其外层右侧均展示微动绿点；`TabBar` 顶部状态灯与之即时联动，消灭状态不同步；
+  - **侧栏文件夹/工作区双列数字徽标展示（2026-09-17 裁定）**：侧边栏文件夹行（SpacesList）行内状态灯彻底退役，统一收敛为最右侧并列双列数字徽标（左列为工作中会话数，有工作会话时为绿色数字，无工作会话时为灰色数字；右列为总会话数）；全域状态直接源于服务端 listing / list_delta 直通模型，不受侧栏文件夹选中与否影响；TabBar 顶部状态呼吸灯（`tb-lamp-pulse`）绝对完好保留；断线或重连新代首帧到达前严格执行新鲜度判定，不报虚假 working；
   - **幽灵标签与重复标签彻底根除**：点击右侧终端窗格走纯粹的 `focusWorkspacePane`，仅更新当前激活工作台内部的 `activeUid`，绝不修改 `tabs` 结构；单会话全顶栏查重与 `openSession` 安全防穿透委派，彻底杜绝生成没有 root、没有内容、仅有标题的空壳幽灵 Tab！
 - **UI 与视觉审美精进裁定（2026-09-16 顾问审查收口）**：
   - **激活 Tab 与未定义变量清除**：彻底消除未定义 CSS 变量（`--surface-2`、`--border-soft`、`--hover-6`）；激活 Tab 采用 `background: var(--bg); border-color: var(--border-input); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06);`；
@@ -578,9 +578,8 @@ src/
 - **真实 Space 行**：图标 `<FolderIcon size={15} stroke="var(--icon)"/>`；hover 时显示 `<PlusIcon/>`，点击只打开动态能力的新建 Agent 对话框。
 - 行样式：`display:flex; align-items:center; gap:10px; height:32px; flex:none; box-sizing:border-box; padding:0 10px; border-radius:var(--r-7); font-size:var(--fs-135); cursor:pointer; transition:background var(--d-hover); animation:rowIn var(--d-toggle) ease-out`；选中 `background:var(--sel-bg); font-weight:600`，未选 `background:transparent; font-weight:400`；hover `background:var(--hover-5)`。
 - 名字 span：`overflow:hidden; text-overflow:ellipsis; white-space:nowrap`。
-- 右侧（从右往左）：count `font-size:var(--fs-12); color:var(--text-muted); font-weight:400; flex:none`，其左依次是
+- 右侧（从右往左）：双列数字徽标（`.spaces-row-counts`），包含右侧总数（`count`，`font-size:var(--fs-12); color:var(--text-muted); font-weight:400; flex:none`）与左侧工作中数（`workingCount`，有会话工作时呈现为亮绿色数字 `.is-working.is-active`，无工作会话时呈现为灰色数字 `.is-idle.is-zero`）。行内原有聚合状态绿灯彻底退役（2026-09-17 裁定）。其左侧是：
   - **设备徽章**（仅 `multiDevice` 时渲染）：pill，`font-size:var(--fs-10); font-weight:500; padding:1px 6px; border-radius:var(--r-pill); margin-right:6px; box-shadow:var(--ring-hairline)`；本机 `background:var(--badge-local-bg); color:var(--badge-local-fg)`，远端 `background:var(--badge-remote-bg); color:var(--badge-remote-fg)`。
-  - **聚合状态**（`state` 为 `working`/`blocked`/`done` 时才渲染，`idle`/`unknown` 不渲染，保持行干净）：`working`→6px 绿点 + `pulse`，`blocked`→6px 琥珀点 + `pulseAmber`，`done`→`<CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.2}/>`；`margin-right:6px; flex:none`。
 - **重名消歧**：先按 `basename(cwd)` 分组；某个 basename 出现 >1 次时，这组内所有行的 `name` 改为 `` `${basename(dirname(cwd))}/${basename(cwd)}` ``；若仍冲突，再往上追加一级路径。逻辑放 `lib/aggregate.js`，SpacesList 只渲染 `space.name`。
 
 ### 5.3 `sidebar/AgentsList.jsx`

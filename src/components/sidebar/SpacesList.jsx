@@ -1,10 +1,5 @@
 // Spaces 列表（UI-SPEC §5.2）。虚拟行 All Spaces / 收藏 置顶，其后是真实 workspace 行。
-import { FolderIcon, GridIcon, StarIcon, CheckIcon, PlusIcon } from '../../lib/icons.jsx';
-
-/** 2026-09-17 裁定退役：移除文件夹行冗余绿灯，由右侧双列数字徽标表达（spaces-dot is-${state} 退役），TabBar 呼吸灯绝对保留 */
-function SpaceState() {
-  return null;
-}
+import { FolderIcon, GridIcon, StarIcon, PlusIcon } from '../../lib/icons.jsx';
 
 function SpaceRow({
   icon,
@@ -82,8 +77,6 @@ export default function SpacesList({
   onNewAgent,
   multiDevice,
 }) {
-  const allSpacesWorking = (allWorkingCount > 0) || spaces.some((sp) => sp.state === 'working' || (sp.workingCount ?? 0) > 0);
-
   return (
     <div className="spaces-list">
       <SpaceRow
@@ -92,7 +85,6 @@ export default function SpacesList({
         count={allCount}
         workingCount={allWorkingCount}
         selected={selected === 'all'}
-        state={allSpacesWorking ? 'working' : 'unknown'}
         onClick={() => onSelect('all')}
         onContextMenu={(e) => e.preventDefault()}
       />
@@ -114,7 +106,6 @@ export default function SpacesList({
             name={sp.name}
             count={sp.count}
             workingCount={workingCount}
-            state={sp.state}
             selected={selected === sp.key}
             badge={multiDevice ? sp.deviceName : null}
             badgeLocal={sp.deviceLocal}

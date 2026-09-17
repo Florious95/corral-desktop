@@ -102,17 +102,21 @@ test('sidebar workspace working lamp and header status synchronization', async (
   const spacesListJsx = await readFile(new URL('../src/components/sidebar/SpacesList.jsx', import.meta.url), 'utf8');
   const tabBarJsx = await readFile(new URL('../src/components/chrome/TabBar.jsx', import.meta.url), 'utf8');
 
-  // Sidebar 传入 working 状态给折叠 GroupHeader
+  // 1. Sidebar 传入 working 状态给折叠 GroupHeader
   assert.match(sidebarJsx, /working=\{spacesHasWorking\}/);
   assert.match(sidebarJsx, /spaces-dot is-working/);
 
-  // SpacesList 支持工作状态绿点展示
-  assert.match(spacesListJsx, /state=\{allSpacesWorking \? 'working' : 'unknown'\}/);
-  assert.match(spacesListJsx, /spaces-dot is-\$\{state\}/);
+  // 2. SpacesList 文件夹行绿灯已退役（2026-09-17 裁定）：行内状态灯已彻底移除，收敛至右侧双列数字徽标
+  assert.equal(spacesListJsx.includes('SpaceState'), false, 'SpaceState must be eliminated from SpacesList');
+  assert.equal(spacesListJsx.includes('spaces-dot is-'), false, 'spaces-dot must be eliminated from SpacesList');
+  assert.match(spacesListJsx, /className="spaces-row-counts"/);
+  assert.match(spacesListJsx, /spaces-count-working/);
+  assert.match(spacesListJsx, /spaces-count-total/);
 
-  // TabBar 具备 getTabStatus 实时联动引擎
+  // 3. TabBar 具备 getTabStatus 实时联动引擎，顶部选项卡呼吸灯绝对完好保留
   assert.match(tabBarJsx, /getTabStatus/);
   assert.match(tabBarJsx, /a\?\.state === 'working' \|\| a\?\.status === 'working'/);
+  assert.match(tabBarJsx, /<StatusLamp status=\{finalStatus\} \/>/);
 });
 
 test('elimination of corrupt drag code and verification of capability permissions', async () => {

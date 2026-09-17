@@ -22,6 +22,27 @@ import * as store from './store.js';
 const MODEL_DEBOUNCE_MS = 100;
 
 /** Client-side workspace aggregate (§0.2): the server no longer computes it. */
+const VALID_STATUSES = new Set(['working', 'idle']);
+
+/**
+ * 全局状态解析与闭集归一（2026-09-17 裁定）：
+ * 1. listing / list_delta 为全局单一状态真相源：只要显式携带 activity 或 status（包括 'unknown'），权威以其为准，绝不被旧 level2 覆盖；
+ * 2. 仅当 listing 完全缺少状态字段时（兼容旧协议），才允许 level2 补充状态；
+ * 3. 闭集归一：仅 'working' 与 'idle' 保留，非法值或未知值一律归一为 'unknown'。
+ */
+export function normalizeSessionStatus(session, liveSession) {
+  if (!session || typeof session !== 'object') return 'unknown';
+  let raw;
+  if (session.activity !== undefined) {
+    raw = session.activity;
+  } else if (session.status !== undefined) {
+    raw = session.status;
+  } else if (liveSession?.status !== undefined) {
+    raw = liveSession.status;
+  }
+  return VALID_STATUSES.has(raw) ? raw : 'unknown';
+}
+
 function aggregateState(sessions) {
   if (sessions.some((s) => s.status === 'working' || s.state === 'working')) return 'working';
   if (sessions.some((s) => s.status === 'idle' || s.state === 'idle')) return 'idle';
@@ -133,6 +154,7 @@ export class DeviceManager {
     this._clients = new Map();   // deviceId -> Client
     this._status = new Map();    // deviceId -> { state, lastError }
     this._level2 = new Map();    // deviceId -> { cwd, seq, sessions: Map<ref, {...}>, lastSeen }
+    this._listingFresh = new Map(); // deviceId -> boolean: 本代 listing 首帧是否已有效就绪
     this._launchers = new Map(); // deviceId -> auth_ack.agent_launchers
     this._connected = false;
     this._modelTimer = null;
@@ -293,15 +315,22 @@ export class DeviceManager {
       const client = this._clients.get(d.id);
       if (!client) continue;
       const lvl = this._level2.get(d.id);
+      // 连接代新鲜度判定（2026-09-17 裁定）：
+      // 客户端必须处于 READY 且已收到当前连接代的有效 listing 首帧；
+      // 若处于断线、重连或重连后首帧未到，状态降级为 unknown，不报虚假 working。
+      const devStatus = this._status.get(d.id);
+      const isReady = devStatus ? devStatus.state === ClientState.READY : (client.isReady !== false);
+      const isFresh = isReady && (this._listingFresh.has(d.id) ? this._listingFresh.get(d.id) === true : true);
       for (const w of client.workspaces) {
         const live = lvl && lvl.cwd === w.cwd ? lvl.sessions : null;
         const sessions = (w.sessions || []).map((s) => {
           const uid = `${d.id}::${s.ref}`;
           const x = live?.get(s.ref);
 
-          const rawStatus = s.activity || s.status;
-          const status = x?.status || rawStatus || 'unknown';
-          const title = x?.title || s.title || '';
+          // R1: 以 listing/list_delta 为全局单一真相源，绝不让旧 level2 压制全局状态
+          // R4: 状态闭集归一化
+          const status = isFresh ? normalizeSessionStatus(s, x) : 'unknown';
+          const title = s.title || x?.title || '';
           const provider = x?.provider !== undefined ? x.provider : s.provider;
 
           return {
@@ -350,13 +379,13 @@ export class DeviceManager {
     return undefined;
   }
 
-  /** 直通的会话状态查询：从权威直通模型中读取 */
+  /** 直通查询指定会话状态快照 */
   getSessionStatus(uid) {
     const s = this.agent(uid);
     return s ? { status: s.status, state: s.state, title: s.title, provider: s.provider } : null;
   }
 
-  /** 直通的全域会话状态快照映射 */
+  /** 直通全域会话状态快照映射 */
   get globalSessionStatus() {
     const map = new Map();
     for (const w of this.workspaces) {
@@ -548,6 +577,7 @@ export class DeviceManager {
     });
     this._clients.set(deviceId, client);
     this._launchers.set(deviceId, []);
+    this._listingFresh.set(deviceId, false);
     this._status.set(deviceId, { state: ClientState.STOPPED, lastError: null });
     client.connect();
   }
@@ -558,6 +588,7 @@ export class DeviceManager {
     c.disconnect();
     this._clients.delete(deviceId);
     this._level2.delete(deviceId);
+    this._listingFresh.delete(deviceId);
     this._launchers.delete(deviceId);
   }
 
@@ -567,6 +598,9 @@ export class DeviceManager {
     const lvl = this._level2.get(deviceId);
     if (lvl && state === ClientState.READY) lvl.seq = null;
     const ok = state === ClientState.READY;
+    if (!ok) {
+      this._listingFresh.set(deviceId, false);
+    }
     if (!ok && (this._launchers.get(deviceId)?.length || 0) > 0) {
       this._launchers.set(deviceId, []);
       this.onCapabilityChange(deviceId);
@@ -588,6 +622,9 @@ export class DeviceManager {
         }
         return;
       case 'listing':
+        this._listingFresh.set(deviceId, true);
+        this._scheduleModel();
+        return;
       case 'list_delta':
         this._scheduleModel();
         return;
