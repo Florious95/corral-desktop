@@ -924,7 +924,6 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 24. **2026-09-17**：Agent 行不渲染常驻或 hover 关闭 X；终止会话唯一入口是 Agent 行右键上下文菜单，避免会话点击误触危险操作。
 25. **2026-09-17**：NewAgentDialog 的 provider 选择仅在首次打开或当前 provider 不再被能力广告支持时重置；能力列表引用刷新不得覆盖用户主动选择。
 26. **2026-09-17**：Cursor Agent 的 follow-up 输入由 TUI 绘制软件游标；客户端隐藏底部停靠硬件游标，并将本地 IME helper/composition 视图锚定到可视 `Add a follow-up` 行，持续拦截 xterm 的内部样式冲刷，禁止在底部停靠行合成或闪烁。该适配不改变服务端帧。
-27. **2026-09-17 (PR-C)**：终端视口采用左下角物理贴齐对齐（`.terminalpane-host` 声明 `display:flex; flex-direction:column; justify-content:flex-end; align-items:flex-start;`；彻底清除 `.xterm` 的 `max-height:100%` 压扁钳制，设置为 `flex:0 0 auto; width:fit-content; max-width:100%;`），确保手机端小网格会话切回桌面端大视口时，输入框 `[ █ ]` 与状态栏完整保留且 100% 停留在视口可见底部，用户可直接打字交互；选项卡与窗格右键菜单增加【适应当前窗口】（Reflow to Window），走原子同步单一受控通道（显式单次发送订阅，杜绝重复 settle 帧），不发无谓旁路；跨端动态尺寸以当前 v1 协议为界。
 
 ## core 依赖边界（裁定 2026-09-12）
 
