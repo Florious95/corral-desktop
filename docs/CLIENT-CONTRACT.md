@@ -298,11 +298,6 @@ delta(bash SIGWINCH 重绘是纯 `\r ESC[K …`)会画到快照末尾,产生残�
 
 字节永远是 `Uint8Array` 直喂 `term.write()`:ANSI 不转义,UTF-8 多字节序列可跨帧,xterm 自己拼。
 
-**视口物理左下对齐与受控重排（2026-09-17 裁定）**：
-- 桌面端终端视口宿主采用 flex 左下贴齐对齐（`.terminalpane-host` 使用 `display:flex; flex-direction:column; justify-content:flex-end; align-items:flex-start;`；消除 `.xterm` 的 `max-height` 钳制，使用 `flex:0 0 auto; width:fit-content; max-width:100%;`），保证移动端较小尺寸网格切回桌面端时，网格最底端的输入框与状态行 100% 贴附在宿主视口底部，完全可见可交互；
-- 右键【适应当前窗口】（Reflow to Window）通过 `fit({ immediate: true, sync: true })` 与 `gate.settle` 原子同步，走单一受控几何通道显式发送恰好 1 次订阅，杜绝重复 settle 帧与快照早到死锁；
-- 交付边界：当前以 v1 协议双端被动镜像为界，桌面端实现本地网格与 DOM 容器的无损物理对齐。
-
 ### 3.2 卸载
 
 ```

@@ -179,7 +179,7 @@ export class TerminalView {
    * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
    * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
    */
-  fit({ immediate = false, sync = false } = {}) {
+  fit({ immediate = false } = {}) {
     const el = this.container;
     if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
@@ -200,17 +200,10 @@ export class TerminalView {
     if (!this._hasFit || immediate) {
       const initialFit = !this._hasFit;
       this._hasFit = true;
-      if (sync) {
-        clearTimeout(this._gridTimer);
-        clearTimeout(this._resizeTimer);
-        this._gridTimer = null;
-        this._resizeTimer = null;
-      }
       // The first settled grid is the subscription handshake; do not make it
       // wait for the resize debounce. `immediate` is reserved for renderer
-      // changes and keeps the normal post-initial debounce semantics, unless sync is requested.
-      const reportDelay = sync ? false : !initialFit;
-      this._commitGrid(cols, rows, { reportDelay });
+      // changes and keeps the normal post-initial debounce semantics.
+      this._commitGrid(cols, rows, { reportDelay: !initialFit });
       return;
     }
     if (cols === this.term.cols && rows === this.term.rows) {
