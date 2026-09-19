@@ -81,11 +81,22 @@ where F: FnMut(&str, Option<u16>, Option<&str>, Option<&str>) {
     let text = response.into_string().map_err(|e| format!("invalid_response: {e}"))?;
     let parsed: UploadResponse = serde_json::from_str(&text)
         .map_err(|_| "invalid_response: upload response is not JSON".to_string())?;
-    if !Path::new(&parsed.path).is_absolute() {
+    if !is_absolute_upload_path(&parsed.path) {
         return Err("invalid_response: upload path is not absolute".to_string());
     }
     log(&safe_url, Some(status), Some("ok"), None);
     Ok(parsed.path)
+}
+
+fn is_absolute_upload_path(path: &str) -> bool {
+    if path.starts_with('/') || Path::new(path).is_absolute() {
+        return true;
+    }
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
 
 fn unix_ms() -> u128 {
@@ -244,6 +255,15 @@ mod tests {
         let url = server("HTTP/1.1 200 OK\r\nContent-Length: 25\r\n\r\n{\"path\":\"/tmp/image.png\"}", true);
         let path = upload_once(&url, "test-token", "x.png", "image/png", b"PNG", |_, _, _, _| {}).unwrap();
         assert_eq!(path, "/tmp/image.png");
+    }
+
+    #[test]
+    fn upload_path_accepts_posix_and_windows_absolute_paths() {
+        assert!(is_absolute_upload_path("/tmp/image.png"));
+        assert!(is_absolute_upload_path("C:\\\\tmp\\\\image.png"));
+        assert!(is_absolute_upload_path("d:/tmp/image.png"));
+        assert!(!is_absolute_upload_path("tmp/image.png"));
+        assert!(!is_absolute_upload_path("C:image.png"));
     }
 
     #[test]
