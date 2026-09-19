@@ -104,6 +104,8 @@ export default function App({ seedDevices } = {}) {
   const [closePending, setClosePending] = useState(null);
   const closePendingRef = useRef(null);
   closePendingRef.current = closePending;
+  const activeCloseRef = useRef(null);
+  const [dismissedUids, setDismissedUids] = useState(new Set());
   const [closeConfirmAgent, setCloseConfirmAgent] = useState(null);
   const lifecycleTimerRef = useRef(new Map());
   const [capabilityRevision, setCapabilityRevision] = useState(0);
@@ -111,6 +113,8 @@ export default function App({ seedDevices } = {}) {
   const toastInputFail = (reason) => {
     setToastMsg(reason === 'timeout' ? '未收到回执' : `发送失败：${reason || '未知原因'}`);
   };
+
+  const onErrorRef = useRef(null);
 
   if (dmRef.current === null) {
     dmRef.current = new DeviceManager({
@@ -135,21 +139,7 @@ export default function App({ seedDevices } = {}) {
       onLifecycleResult: (r) => setLifecycleEvent({ ...r, nonce: `${Date.now()}-${Math.random()}` }),
       onCapabilityChange: () => setCapabilityRevision((v) => v + 1),
       // ⛔ message 由 DeviceManager 保证不含 token
-      onError: ({ deviceId, code, message }) => {
-        if (closePendingRef.current && (code === 'unsupported_type' || message?.includes('unknown frame type'))) {
-          const closingUid = closePendingRef.current.uid;
-          const timerKey = `close:${closePendingRef.current.deviceId}:${closePendingRef.current.reqId}`;
-          clearTimeout(lifecycleTimerRef.current.get(timerKey));
-          lifecycleTimerRef.current.delete(timerKey);
-          setClosePending(null);
-          if (closingUid) {
-            setWorkspace((prev) => removeSessionFromWorkspace(prev, closingUid));
-          }
-          setToastMsg('服务端当前不支持远端销毁会话，已从工作台移出');
-          return;
-        }
-        setToastMsg(code === 'auth' ? message : `${code}：${message}`);
-      },
+      onError: (err) => onErrorRef.current?.(err),
     });
   }
   const dm = dmRef.current;
@@ -321,7 +311,10 @@ export default function App({ seedDevices } = {}) {
   const multiDevice = checkedCount > 1;
 
   const spaces = useMemo(() => workspaces.map((w) => {
-    const sessions = w.sessions || [];
+    const rawSessions = w.sessions || [];
+    const sessions = dismissedUids.size > 0
+      ? rawSessions.filter((s) => !dismissedUids.has(s.uid))
+      : rawSessions;
     const workingCount = sessions.filter((s) => s.state === 'working' || s.status === 'working').length;
     const hasWorking = workingCount > 0;
     const hasIdle = sessions.some((s) => s.state === 'idle' || s.status === 'idle');
@@ -334,12 +327,12 @@ export default function App({ seedDevices } = {}) {
       deviceLocal: !!localById.get(w.deviceId),
       cwd: w.cwd,
       name: w.label,
-      count: w.sessionCount ?? sessions.length,
+      count: sessions.length,
       workingCount,
       state,
       sessions,
     };
-  }), [workspaces, localById]);
+  }), [workspaces, localById, dismissedUids]);
 
   const newAgentTarget = useMemo(
     () => workspaces.find((w) => w.spaceKey === newAgentSpace) || null,
@@ -356,6 +349,7 @@ export default function App({ seedDevices } = {}) {
     const out = [];
     for (const w of workspaces) {
       for (const s of w.sessions || []) {
+        if (dismissedUids.has(s.uid)) continue;
         // 服务端协议中，s.name 是权威提取的准确会话展示名（如 "桌面端leader"）；
         // s.title 仅作为底层的 OSC 窗口外壳兜底。
         const sessionName = s.name || s.title || '';
@@ -380,7 +374,7 @@ export default function App({ seedDevices } = {}) {
       }
     }
     return out;
-  }, [workspaces, localById, favSet]);
+  }, [workspaces, localById, favSet, dismissedUids]);
 
   const agentByKey = useMemo(() => new Map(allAgents.map((a) => [a.key, a])), [allAgents]);
   const favCount = useMemo(() => allAgents.reduce((count, agent) => count + (agent.fav ? 1 : 0), 0), [allAgents]);
@@ -586,10 +580,46 @@ export default function App({ seedDevices } = {}) {
     setCreatePending(result);
   }, [dm, newAgentTarget, activeKey]);
 
+  const handleUnsupportedClose = useCallback((closingUid, deviceId, reqId) => {
+    const targetUid = closingUid || activeCloseRef.current?.uid || closePendingRef.current?.uid;
+    const targetDeviceId = deviceId || activeCloseRef.current?.deviceId || closePendingRef.current?.deviceId;
+    const targetReqId = reqId || activeCloseRef.current?.reqId || closePendingRef.current?.reqId;
+
+    if (targetDeviceId && targetReqId) {
+      const timerKey = `close:${targetDeviceId}:${targetReqId}`;
+      clearTimeout(lifecycleTimerRef.current.get(timerKey));
+      lifecycleTimerRef.current.delete(timerKey);
+    }
+    activeCloseRef.current = null;
+    closePendingRef.current = null;
+    setClosePending(null);
+
+    if (targetUid) {
+      setDismissedUids((prev) => new Set([...prev, targetUid]));
+      setWorkspace((prev) => removeSessionFromWorkspace(prev, targetUid));
+      shims.current.delete(targetUid);
+      pendingPasteRef.current.delete(targetUid);
+    }
+    setToastMsg('服务端当前不支持远端销毁会话，已从工作台移出');
+  }, []);
+
+  onErrorRef.current = ({ deviceId, code, message }) => {
+    const isUnsupported = code === 'unsupported_type'
+      || code === 'unknown frame type'
+      || message?.includes('unsupported_type')
+      || message?.includes('unknown frame type');
+
+    if (isUnsupported && (activeCloseRef.current || closePendingRef.current)) {
+      handleUnsupportedClose();
+      return;
+    }
+    setToastMsg(code === 'auth' ? message : `${code}：${message}`);
+  };
+
   const submitCloseAgent = useCallback((agent) => {
     setCloseConfirmAgent(null);
     if (!agent?.key) return;
-    if (closePending) {
+    if (activeCloseRef.current || closePending) {
       setToastMsg('已有关闭请求处理中');
       return;
     }
@@ -598,16 +628,24 @@ export default function App({ seedDevices } = {}) {
       setToastMsg('关闭请求未发送：设备未连接');
       return;
     }
+    const pendingObj = { ...result, uid: agent.key, agent };
+    activeCloseRef.current = pendingObj;
+    closePendingRef.current = pendingObj;
+    setClosePending(pendingObj);
+
     const timerKey = `close:${result.deviceId}:${result.reqId}`;
     clearTimeout(lifecycleTimerRef.current.get(timerKey));
     lifecycleTimerRef.current.set(timerKey, setTimeout(() => {
       lifecycleTimerRef.current.delete(timerKey);
+      if (activeCloseRef.current?.deviceId === result.deviceId && activeCloseRef.current?.reqId === result.reqId) {
+        activeCloseRef.current = null;
+        closePendingRef.current = null;
+      }
       setClosePending((pending) => (
         pending?.deviceId === result.deviceId && pending.reqId === result.reqId ? null : pending
       ));
       setToastMsg('关闭请求超时，状态待核');
     }, LIFECYCLE_TIMEOUT_MS));
-    setClosePending({ ...result, uid: agent.key });
   }, [dm, closePending]);
 
   const closeAgent = useCallback((agent) => {
@@ -647,24 +685,31 @@ export default function App({ seedDevices } = {}) {
         setCreatePending(null);
       }
     }
-    if (kind === 'close_session_result' && closePending?.deviceId === deviceId && closePending.reqId === reqId && !closePending.awaitingListing) {
-      const timerKey = `close:${deviceId}:${reqId}`;
-      if (payload.ok === true) {
-        // Keep the workspace reference until the authoritative listing removes
-        // this ref; the existing disappearance effect then performs cleanup.
-        setClosePending({ ...closePending, awaitingListing: true });
-      } else {
-        clearTimeout(lifecycleTimerRef.current.get(timerKey));
-        lifecycleTimerRef.current.delete(timerKey);
-        const closingUid = closePending.uid;
-        setClosePending(null);
-        if (payload.reason === 'unsupported_type' || payload.reason === 'unknown frame type') {
-          if (closingUid) {
-            setWorkspace((prev) => removeSessionFromWorkspace(prev, closingUid));
-          }
-          setToastMsg('服务端当前不支持远端销毁会话，已从工作台移出');
+    if (kind === 'close_session_result') {
+      const isTarget = (activeCloseRef.current?.deviceId === deviceId && activeCloseRef.current?.reqId === reqId)
+        || (closePending?.deviceId === deviceId && closePending.reqId === reqId);
+      if (isTarget && !closePending?.awaitingListing) {
+        const timerKey = `close:${deviceId}:${reqId}`;
+        if (payload.ok === true) {
+          // Keep the workspace reference until the authoritative listing removes
+          // this ref; the existing disappearance effect then performs cleanup.
+          setClosePending((prev) => (prev ? { ...prev, awaitingListing: true } : { deviceId, reqId, awaitingListing: true }));
         } else {
-          setToastMsg(`Agent 关闭失败：${payload.reason || '未知原因'}`);
+          clearTimeout(lifecycleTimerRef.current.get(timerKey));
+          lifecycleTimerRef.current.delete(timerKey);
+          const closingUid = activeCloseRef.current?.uid || closePending?.uid;
+          const isUnsupported = payload.reason === 'unsupported_type'
+            || payload.reason === 'unknown frame type'
+            || payload.code === 'unsupported_type';
+
+          if (isUnsupported) {
+            handleUnsupportedClose(closingUid, deviceId, reqId);
+          } else {
+            activeCloseRef.current = null;
+            closePendingRef.current = null;
+            setClosePending(null);
+            setToastMsg(`Agent 关闭失败：${payload.reason || '未知原因'}`);
+          }
         }
       }
     }
