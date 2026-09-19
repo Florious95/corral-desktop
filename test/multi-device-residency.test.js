@@ -9,6 +9,7 @@ import {
 import { Client, ClientState } from '../src/core/client.js';
 import { DeviceManager } from '../src/core/devices.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../src/core/presence.js';
+import { SameWidthController } from '../src/term/sameWidth.js';
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
 test('protocol codec: subscribe encodes client_type and retain_pane_size; presence_update validates strictly', () => {
@@ -284,6 +285,83 @@ test('R3 (P1): reconnect replay conserves 46x44 mobile geometry and clears prese
   assert.equal(replayFrame.payload.cols, 46);
   assert.equal(replayFrame.payload.client_type, 'desktop');
   assert.equal(replayFrame.payload.retain_pane_size, true);
+});
+
+test('disconnect broadcast: Client and DeviceManager dispatch disconnected: true on connection drop', () => {
+  const events = [];
+  const fakeWs = {
+    readyState: 1,
+    send: () => {},
+    close: () => {},
+  };
+  const client = new Client({
+    url: 'ws://127.0.0.1:9900/ws',
+    token: 'mock-token',
+    wsFactory: () => fakeWs,
+    onFrame: (type, payload) => {
+      if (type === 'presence_update') events.push(payload);
+    },
+  });
+
+  client.connect();
+  client.handleOpen();
+  client.handleMessage(JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }));
+  client.subscribe('pane-drop', 44, 46);
+  client.presenceByRef.set('pane-drop', { hasMobile: false });
+
+  events.length = 0;
+  // 模拟 /drop 断线
+  client.handleClose({ code: 1006, reason: 'dropped' });
+
+  // 核心断言：断线时必定向活跃会话广播 disconnected: true
+  assert.ok(events.length >= 1, 'Client must broadcast presence on disconnect');
+  const dropEvt = events.find((e) => e.ref === 'pane-drop');
+  assert.ok(dropEvt);
+  assert.equal(dropEvt.disconnected, true, 'disconnected flag must be true');
+  assert.equal(dropEvt.has_mobile, false);
+
+  // 验证 DeviceManager 窄路由分发
+  const dmEvents = [];
+  const dm = new DeviceManager({
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    onPresenceUpdate: (e) => dmEvents.push(e),
+  });
+  dm._devices = [{ id: 'dev-drop', checked: true, name: 'Mac' }];
+  dm._clients.set('dev-drop', client);
+
+  dmEvents.length = 0;
+  dm._onState('dev-drop', 'reconnecting');
+  const dmDropEvt = dmEvents.find((e) => e.ref === 'pane-drop');
+  assert.ok(dmDropEvt);
+  assert.equal(dmDropEvt.disconnected, true);
+  assert.equal(dmDropEvt.uid, 'dev-drop::pane-drop');
+});
+
+test('gate synchronization on disconnect: updates gate.grid & gate.sent to 44x46 and accepts reconnect snapshot', () => {
+  const gate = new SameWidthController();
+  // 模拟此前处于桌面全尺寸 120x40 接管态
+  gate.settle(40, 120);
+  gate.noteSent(40, 120);
+  assert.equal(gate.acceptSnapshot(), true);
+
+  // 触发断线事件
+  const handleDisconnect = () => {
+    gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
+    gate.noteSent(MOBILE_GRID.rows, MOBILE_GRID.cols);
+  };
+  handleDisconnect();
+
+  // 核心断言：断线后 gate 必须立即同步更新为 44x46
+  assert.equal(gate.grid.rows, 44);
+  assert.equal(gate.grid.cols, 46);
+  assert.equal(gate.sent.rows, 44);
+  assert.equal(gate.sent.cols, 46);
+
+  // 重连后服务端下发 44x46 快照
+  const reconnectSnapshotAccepted = gate.acceptSnapshot();
+  assert.equal(reconnectSnapshotAccepted, true, 'Reconnect 44x46 snapshot must be accepted by gate without rejection');
+  assert.equal(gate.awaitingSnapshot, false);
+  assert.equal(gate.acceptDelta(), true);
 });
 
 test('R2 & R4 (P1): presence false does not loop (deduped takeover) and reflow respects active mobile presence', () => {

@@ -606,6 +606,24 @@ export class DeviceManager {
     const ok = state === ClientState.READY;
     if (!ok) {
       this._listingFresh.set(deviceId, false);
+      const client = this._clients.get(deviceId);
+      if (client) {
+        const subKeys = client.activeSubscriptions?.keys ? [...client.activeSubscriptions.keys()] : [];
+        const presKeys = client.presenceByRef?.keys ? [...client.presenceByRef.keys()] : [];
+        const activeRefs = new Set([...subKeys, ...presKeys]);
+        for (const ref of activeRefs) {
+          this.onPresenceUpdate({
+            deviceId,
+            uid: `${deviceId}::${ref}`,
+            ref,
+            hasMobile: false,
+            mobileCount: 0,
+            desktopCount: 0,
+            disconnected: true,
+          });
+        }
+        client.presenceByRef?.clear?.();
+      }
     }
     if (!ok && (this._launchers.get(deviceId)?.length || 0) > 0) {
       this._launchers.set(deviceId, []);
@@ -643,6 +661,7 @@ export class DeviceManager {
           hasMobile: payload.has_mobile === true,
           mobileCount: payload.mobile_count ?? 0,
           desktopCount: payload.desktop_count ?? 0,
+          disconnected: payload.disconnected === true,
         });
         return;
       }
