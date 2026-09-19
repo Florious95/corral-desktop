@@ -867,3 +867,39 @@
   color: #ffffff;
 }
 
+/* ---------- §4.8 WSL Bootstrap Card ---------- */
+.wsl-bootstrap-card {
+  max-width: 520px;
+  margin: auto;
+  text-align: center;
+  padding: 36px 24px;
+}
+
+.wsl-icon.is-loading {
+  animation: wslPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes wslPulse {
+  0%, 100% { opacity: 0.6; transform: scale(0.96); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+.wsl-command-box {
+  margin: 14px auto;
+  padding: 8px 14px;
+  background: var(--field-bg, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--border-input, rgba(255, 255, 255, 0.1));
+  border-radius: var(--r-8, 8px);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-12, 12px);
+  color: var(--brand, #3b82f6);
+  user-select: all;
+  max-width: 440px;
+  word-break: break-all;
+}
+
+.wsl-retry-btn {
+  margin-top: 12px;
+}
+
+

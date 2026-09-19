@@ -10,6 +10,7 @@ import {
 import TitleBar from './components/chrome/TitleBar.jsx';
 import TabBar from './components/chrome/TabBar.jsx';
 import WindowsWindowControls from './components/chrome/WindowsWindowControls.jsx';
+import WslBootstrapCard from './components/chrome/WslBootstrapCard.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import PairingDialog from './components/chrome/PairingDialog.jsx';
@@ -437,6 +438,61 @@ export default function App({ seedDevices } = {}) {
   }, [devices]);
 
   const anyDeviceOnline = devices.some((d) => d.state === 'ready');
+
+  /* ——— Windows WSL 2 自动环境自检与连接自愈状态机 ——— */
+  const [wslState, setWslState] = useState('idle'); // 'idle' | 'checking' | 'starting' | 'unready' | 'error'
+  const [wslEnvStatus, setWslEnvStatus] = useState(null);
+  const [wslError, setWslError] = useState('');
+  const wslHealedRef = useRef(false);
+
+  const checkAndHealWsl = useCallback(async () => {
+    if (nativeCapabilities.platform !== 'windows') return;
+    setWslState('checking');
+    setWslError('');
+    try {
+      const status = await nativeCapabilities.wsl.checkEnvironment();
+      setWslEnvStatus(status);
+      if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
+        setWslState('unready');
+        return;
+      }
+      if (!status.service_running) {
+        setWslState('starting');
+        try {
+          await nativeCapabilities.wsl.startService('agentmirrord');
+        } catch (err) {
+          try {
+            await nativeCapabilities.wsl.startService('corral-core');
+          } catch (e2) {
+            setWslState('error');
+            setWslError(e2?.message || '无法启动会话服务');
+            return;
+          }
+        }
+      } else {
+        setWslState('starting');
+      }
+    } catch (err) {
+      setWslState('error');
+      setWslError(err?.message || 'WSL 检测异常');
+    }
+  }, []);
+
+  useEffect(() => {
+    const isWin = nativeCapabilities.platform === 'windows';
+    if (!isWin) return;
+
+    if (anyDeviceOnline) {
+      setWslState('idle');
+      wslHealedRef.current = false;
+      return;
+    }
+
+    if (!wslHealedRef.current && wslState === 'idle') {
+      wslHealedRef.current = true;
+      checkAndHealWsl();
+    }
+  }, [anyDeviceOnline, checkAndHealWsl, wslState]);
 
   /* ——— level2：选中某个 Space 才订二级状态流（一台设备同时只能订一个 cwd） ——— */
   useEffect(() => {
@@ -1164,7 +1220,14 @@ export default function App({ seedDevices } = {}) {
           </header>
 
           <div className="main-stage-container">
-            {noDevices ? (
+            {isWindows && !anyDeviceOnline && wslState !== 'idle' ? (
+              <WslBootstrapCard
+                state={wslState}
+                envStatus={wslEnvStatus}
+                errorMsg={wslError}
+                onRetry={checkAndHealWsl}
+              />
+            ) : noDevices ? (
               <div className="app-empty">
                 <div className="app-empty-icon"><TerminalIcon size={20} /></div>
                 <div className="app-empty-title">还没有添加设备</div>
