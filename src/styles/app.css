@@ -79,6 +79,37 @@ button { border: 0; background: none; padding: 0 }
   background: var(--bg);
 }
 
+/* ——— 全屏沉浸式体验（Fullscreen Immersive Experience） ——— */
+.app-root.is-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+.app-root.is-fullscreen .app-body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.app-root.is-fullscreen .app-left {
+  border-radius: 0;
+}
+
+.app-root.is-fullscreen .app-main {
+  border-radius: 0;
+  height: 100%;
+}
+
+.app-root.is-fullscreen .main-stage-container {
+  border-radius: 0;
+  width: 100%;
+  height: 100%;
+}
+
 /* ——— 无设备引导卡片 ——— */
 
 .app-empty {

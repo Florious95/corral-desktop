@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DeviceManager } from '../src/core/devices.js';
+import { DeviceManager, providerOf } from '../src/core/devices.js';
 import { SameWidthController } from '../src/term/sameWidth.js';
 import * as store from '../src/core/store.js';
 import { startMockDaemon, REFS, ADDED_SESSION } from '../scripts/mock-daemon.mjs';
@@ -128,6 +128,18 @@ test('level2 missing provider retains listing DTO while explicit unknown overrid
     await waitFor(() => t.dm.space(spaceKey)?.sessions[0]?.title === 'unknown live', 'explicit unknown update');
     assert.equal(t.dm.space(spaceKey).sessions[0].provider, 'unknown');
   } finally { await t.teardown(); }
+});
+
+test('providerOf normalizes and recognizes pi session even when provider is empty or unknown', () => {
+  assert.equal(providerOf('pi'), 'pi');
+  assert.equal(providerOf('pi', undefined), 'pi');
+  assert.equal(providerOf('pi', null), 'pi');
+  assert.equal(providerOf('pi', ''), 'pi');
+  assert.equal(providerOf('pi', 'unknown'), 'pi');
+  assert.equal(providerOf('pi-session', 'unknown'), 'pi');
+  assert.equal(providerOf('pi', 'pi'), 'pi');
+  assert.equal(providerOf('codex-session', undefined), 'codex');
+  assert.equal(providerOf('codex-session', 'unknown'), 'unknown');
 });
 
 test('two devices union, colliding basenames disambiguate, uncheck filters without disconnecting', async () => {

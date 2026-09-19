@@ -902,4 +902,28 @@
   margin-top: 12px;
 }
 
+/* ---------- §4.9 全屏沉浸式顶栏收口 (Fullscreen Immersive Chrome) ---------- */
+.app-root.is-fullscreen .tb,
+.app-root.is-fullscreen .tb-sidebar-header,
+.app-root.is-fullscreen .tb-session-header,
+.tb.is-fullscreen {
+  border-top: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-root.is-fullscreen .tb-session-header {
+  padding-left: 10px;
+}
+
+.app-root.is-fullscreen .tb-session-header.is-windows {
+  padding-right: 138px;
+}
+
+.app-root.is-fullscreen .tb-win-controls {
+  top: 0;
+  right: 0;
+}
+
+
 
