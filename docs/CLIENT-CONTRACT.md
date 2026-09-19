@@ -298,6 +298,16 @@ delta(bash SIGWINCH 重绘是纯 `\r ESC[K …`)会画到快照末尾,产生残�
 
 字节永远是 `Uint8Array` 直喂 `term.write()`:ANSI 不转义,UTF-8 多字节序列可跨帧,xterm 自己拼。
 
+**视口物理底锚与多端协同动静双模契约（2026-09-18 裁定）**：
+- **物理底锚**：桌面端终端视口宿主采用 root 绝对底锚（`.terminalpane-host` 使用 `position: relative; display: block; overflow: hidden;`；`.terminalpane-host > .xterm` 使用 `position: absolute; left: 0; bottom: 0; width: max-content; max-width: none; max-height: none;`），保证手机端 46×44 坚屏网格在桌面视口中物理贴紧左下角，顶部自然上伸裁切，最底部的输入框与状态行 100% 完整可见可打字交互；
+- **上行声明与尺寸驻留**：桌面端 `subscribe` 携带 `client_type: "desktop"` 与 `retain_pane_size: true`，服务端开启尺寸驻留，各端离开时不还原尺寸；
+- **下行广播与动静双模**：
+  - 未知 presence 时以 46×44 保守初订，绝不以桌面大尺寸挤掉手机；
+  - 收到 `presence_update.has_mobile == true` 进入避让模式（avoidance），保持 46×44 不发桌面 resize；
+  - 收到 `presence_update.has_mobile == false` 进入接管模式（takeover），自动按桌面视口 resize 铺满窗口；
+  - 手机重回时瞬间退回避让模式；
+- **单一受控重排事务**：右键【适应当前窗口】（Reflow to Window）通过 `fit({ immediate: true, sync: true })` 与 `gate.settle` 原子同步，显式发送单次受控 `subscribe` 帧，杜绝时序死锁与重复发帧。
+
 ### 3.2 卸载
 
 ```

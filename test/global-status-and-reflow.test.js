@@ -54,14 +54,16 @@ test('terminal viewport enforces bottom-left alignment for cross-device mobile c
   const terminalCss = await readFile(new URL('../src/components/terminal/terminal.css', import.meta.url), 'utf8');
   const terminalPaneJsx = await readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8');
 
-  // .terminalpane-host 强制 flex 底部及靠左对齐
-  assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*display:\s*flex;/);
-  assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*flex-direction:\s*column;/);
-  assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*justify-content:\s*flex-end;/);
-  assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*align-items:\s*flex-start;/);
+  // .terminalpane-host 声明 position: relative; overflow: hidden;
+  assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*position:\s*relative;/);
+  assert.match(terminalCss, /\.terminalpane-host\s*\{[^}]*overflow:\s*hidden;/);
 
-  // xterm screen / viewport 约束在容器内
-  assert.match(terminalCss, /\.terminalpane-host \.xterm\s*\{[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;/);
+  // .terminalpane-host > .xterm 实施 root bottom-left 物理底锚，清除 max-height 钳制
+  assert.match(terminalCss, /\.terminalpane-host > \.xterm\s*\{[^}]*position:\s*absolute;/);
+  assert.match(terminalCss, /\.terminalpane-host > \.xterm\s*\{[^}]*left:\s*0;/);
+  assert.match(terminalCss, /\.terminalpane-host > \.xterm\s*\{[^}]*bottom:\s*0;/);
+  assert.match(terminalCss, /\.terminalpane-host > \.xterm\s*\{[^}]*width:\s*max-content;/);
+  assert.match(terminalCss, /\.terminalpane-host > \.xterm\s*\{[^}]*max-height:\s*none;/);
 
   // DOM 上具有 data-alignment="bottom-left" 标记
   assert.match(terminalPaneJsx, /data-alignment="bottom-left"/);
@@ -83,10 +85,10 @@ test('context menu provides "Reflow to Window" (适应当前窗口) and dispatch
   // 点击触发 terminal:reflow 事件通知
   assert.match(appJsx, /window\.dispatchEvent\(new CustomEvent\('terminal:reflow'/);
 
-  // TerminalPane 监听并在触发时以 immediate: true 测量并下发 client.resize / client.subscribe
+  // TerminalPane 监听并在触发时以 immediate + sync 测量并走正规受控通道
   assert.match(terminalPaneJsx, /window\.addEventListener\('terminal:reflow', handleReflow\)/);
-  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true\s*\}\)/);
-  assert.match(terminalPaneJsx, /clientRef\.current\?\.resize/);
+  assert.match(terminalPaneJsx, /viewRef\.current\.fit\(\{\s*immediate:\s*true,\s*sync:\s*true\s*\}\)/);
+  assert.match(terminalPaneJsx, /sendIfNeeded\(\{\s*type:\s*'subscribe'/);
   assert.match(terminalPaneJsx, /clientRef\.current\?\.subscribe/);
 });
 

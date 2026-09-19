@@ -136,6 +136,7 @@ export class DeviceManager {
     this.onLifecycleResult = opts.onLifecycleResult || (() => {});
     this.onCapabilityChange = opts.onCapabilityChange || (() => {});
     this.onError = opts.onError || (() => {});
+    this.onPresenceUpdate = opts.onPresenceUpdate || (() => {});
 
     // No checkedDevices key yet (first run / older data) → everything is checked.
     const explicit = store.hasCheckedDevices(this.storage);
@@ -403,9 +404,14 @@ export class DeviceManager {
 
   // ---- session actions (routed by uid) ----
 
-  subscribe(uid, rows, cols, reason = 'user') {
+  subscribe(uid, rows, cols, reason = 'user', opts = {}) {
     const t = this._route(uid);
-    return t ? t.client.subscribe(t.ref, rows, cols, reason) : false;
+    return t ? t.client.subscribe(t.ref, rows, cols, reason, opts) : false;
+  }
+
+  getPresence(uid) {
+    const t = this._route(uid);
+    return t ? t.client.presenceByRef.get(t.ref) || null : null;
   }
 
   unsubscribe(uid) {
@@ -628,6 +634,18 @@ export class DeviceManager {
       case 'list_delta':
         this._scheduleModel();
         return;
+      case 'presence_update': {
+        const uid = `${deviceId}::${payload.ref}`;
+        this.onPresenceUpdate({
+          deviceId,
+          uid,
+          ref: payload.ref,
+          hasMobile: payload.has_mobile === true,
+          mobileCount: payload.mobile_count ?? 0,
+          desktopCount: payload.desktop_count ?? 0,
+        });
+        return;
+      }
       case 'create_agent_result':
         this.onLifecycleResult({ deviceId, kind: type, reqId: payload.req_id, payload });
         return;

@@ -106,7 +106,7 @@ test('level2 replays only latest workspace alongside core subscriptions and trac
   client.handleMessage(wire('level2_frame', { workspace: '/b', seq: 1, sessions: [] }));
   assert.equal(frames.at(-1)[0], 'level2_frame');
   client.resize('a', 25, 81);
-  assert.deepEqual(client.activeSubscriptions.get('a'), { rows: 24, cols: 80 }, 'retain original resize replay semantics');
+  assert.deepEqual(client.activeSubscriptions.get('a'), { rows: 44, cols: 46, client_type: 'desktop', retain_pane_size: true }, 'replayed subscriptions reset to conservative 44x46 mobile geometry');
   client.unsubscribe('a');
   client.unsubscribeLevel2();
   sent.length = 0;

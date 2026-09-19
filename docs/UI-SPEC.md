@@ -924,6 +924,9 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 24. **2026-09-17**：Agent 行不渲染常驻或 hover 关闭 X；终止会话唯一入口是 Agent 行右键上下文菜单，避免会话点击误触危险操作。
 25. **2026-09-17**：NewAgentDialog 的 provider 选择仅在首次打开或当前 provider 不再被能力广告支持时重置；能力列表引用刷新不得覆盖用户主动选择。
 26. **2026-09-17**：Cursor Agent 的 follow-up 输入由 TUI 绘制软件游标；客户端隐藏底部停靠硬件游标，并将本地 IME helper/composition 视图锚定到可视 `Add a follow-up` 行，持续拦截 xterm 的内部样式冲刷，禁止在底部停靠行合成或闪烁。该适配不改变服务端帧。
+27. **2026-09-18（多端协同契约与物理底锚裁定）**：
+    - **视口物理底锚**：彻底废除 flex-end 与 max-height 钳制，实施完整的 root bottom-left 物理底锚（`.terminalpane-host` 声明 `position: relative; display: block; overflow: hidden;`；`.terminalpane-host > .xterm` 声明 `position: absolute; left: 0; bottom: 0; width: max-content; max-width: none; max-height: none;`）。手机端 46×44 坚屏网格（792px）在桌面视口（~600px）中物理底锚对齐，顶端自然上伸裁切，最底部的输入框 `[ █ ]` 与状态行 100% 完整可见可交互；
+    - **多端协同动静双模**：subscribe 携带 `client_type: "desktop"` 与 `retain_pane_size: true`，开启服务端尺寸驻留；未明确 presence 时以 46×44 保守初订，绝不提前挤掉手机；手机在线（`has_mobile: true`）避让模式保持 46×44 不发桌面 resize；手机离开（`has_mobile: false`）接管模式平滑铺满桌面视口；右键【适应当前窗口】走原子单一受控通道（单次发送）。
 
 ## core 依赖边界（裁定 2026-09-12）
 
