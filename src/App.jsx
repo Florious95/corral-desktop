@@ -56,6 +56,7 @@ import {
   removeNode,
 } from './lib/workspaceLayout.js';
 import { TabDragController } from './lib/tabDrag.js';
+import { getAgentFavKey, isAgentFav, toggleAgentFav } from './lib/favorites.js';
 import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
@@ -346,6 +347,7 @@ export default function App({ seedDevices } = {}) {
         out.push({
           key: s.uid,
           ref: s.ref,
+          uid: s.uid,
           deviceId: w.deviceId,
           deviceName: w.deviceName,
           deviceLocal: !!localById.get(w.deviceId),
@@ -357,7 +359,7 @@ export default function App({ seedDevices } = {}) {
           provider: s.provider,
           state: curStatus,
           status: curStatus,
-          fav: favSet.has(`${w.spaceKey}::${sessionName}`), // daemon 重启后 ref 会变，收藏 key 用 cwd+name
+          fav: isAgentFav(w.spaceKey, s, favSet),
         });
       }
     }
@@ -521,8 +523,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const toggleFav = useCallback((agent) => {
-    const favKey = `${agent.spaceKey}::${agent.title}`;
-    setFavs((f) => (f.includes(favKey) ? f.filter((k) => k !== favKey) : [...f, favKey]));
+    setFavs((prev) => toggleAgentFav(prev, agent.spaceKey, agent));
   }, []);
 
   const openNewAgentDialog = useCallback((spaceKey) => {
