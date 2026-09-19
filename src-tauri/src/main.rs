@@ -1,10 +1,10 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
 mod upload;
+mod wsl;
 
 /// Filename under $APP_DATA. Keep in sync with src/core/store.js.
 const DEVICES_FILE: &str = "devices.json";
@@ -14,10 +14,19 @@ fn devices_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join(DEVICES_FILE))
 }
 
+#[cfg(unix)]
 fn chmod600(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
     let mut perms = fs::metadata(path).map_err(|e| e.to_string())?.permissions();
     perms.set_mode(0o600);
     fs::set_permissions(path, perms).map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+fn chmod600(_path: &std::path::Path) -> Result<(), String> {
+    // The app-data directory is ACL-protected by Windows for the logged-in user.
+    Ok(())
 }
 
 /// Ensure the store file exists with 0600 so a token never lands in a world-readable file.
@@ -47,7 +56,14 @@ fn main() {
             let _ = ensure_devices_store(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![lock_devices_file, upload::upload_http, upload::read_clipboard_image, upload::read_clipboard_files])
+        .invoke_handler(tauri::generate_handler![
+            lock_devices_file,
+            wsl::check_wsl_environment,
+            wsl::start_wsl_service,
+            upload::upload_http,
+            upload::read_clipboard_image,
+            upload::read_clipboard_files,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running AgentMirror desktop");
 }
