@@ -1,4 +1,5 @@
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
+import { windowsToWsl } from '../lib/wslPath.js';
 
 export function isCtrlV(ev) {
   return !!ev && ev.type === 'keydown' && ev.ctrlKey && !ev.metaKey && !ev.altKey
@@ -37,16 +38,24 @@ export async function readClipboardFiles({ nativeInvoke } = {}) {
 }
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
+const WIN_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]|^\\\\/;
 
 /** Format absolute paths for one shell input without decoding or resolving them. */
 export function formatClipboardFiles(paths) {
   if (!Array.isArray(paths) || paths.length === 0) return '';
   return paths.map((path) => {
-    if (typeof path !== 'string' || !path.startsWith('/') || /[\0\r\n]/.test(path)) {
+    if (typeof path !== 'string' || /[\0\r\n]/.test(path)) {
       throw new Error('剪贴板文件路径无法安全粘贴');
     }
-    if (SAFE_PATH.test(path)) return path;
-    return `'${path.replaceAll("'", "'\"'\"'")}'`;
+    if (!path.startsWith('/') && !WIN_ABSOLUTE_PATH.test(path)) {
+      throw new Error('剪贴板文件路径无法安全粘贴');
+    }
+    const posixPath = windowsToWsl(path);
+    if (!posixPath || !posixPath.startsWith('/')) {
+      throw new Error('剪贴板文件路径无法安全粘贴');
+    }
+    if (SAFE_PATH.test(posixPath)) return posixPath;
+    return `'${posixPath.replaceAll("'", "'\"'\"'")}'`;
   }).join(' ');
 }
 

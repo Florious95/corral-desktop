@@ -54,6 +54,7 @@ import {
   removeNode,
 } from './lib/workspaceLayout.js';
 import { TabDragController } from './lib/tabDrag.js';
+import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
 } from './term/clipboard.js';
@@ -757,13 +758,43 @@ export default function App({ seedDevices } = {}) {
   }, [dm, uidReady]);
 
   const handlePaneCtrlV = useCallback(async (uid) => {
+    const isWindows = nativeCapabilities.platform === 'windows';
     const result = await readCtrlV();
     if (result.kind === 'image') {
       await handleAttachment(uid, result.attachment);
-    } else {
-      setToastMsg('Ctrl+V 仅支持图片，请使用 Cmd+V 粘贴文字');
+      return;
     }
-  }, [handleAttachment]);
+
+    if (isWindows) {
+      let files = null;
+      try {
+        files = await readClipboardFiles();
+      } catch {}
+      if (files?.length) {
+        try {
+          const paths = formatClipboardFiles(files);
+          if (paths && paneCanSend(uid)) {
+            handlePaneText(uid, paths);
+            return;
+          }
+        } catch (e) {
+          setToastMsg(e?.message || '文件路径无法粘贴');
+          return;
+        }
+      }
+      let text = '';
+      try {
+        text = await nativeCapabilities.clipboard.readText();
+      } catch {}
+      if (text && paneCanSend(uid)) {
+        handlePaneText(uid, text);
+        return;
+      }
+      return;
+    }
+
+    setToastMsg('Ctrl+V 仅支持图片，请使用 Cmd+V 粘贴文字');
+  }, [handleAttachment, handlePaneText, paneCanSend]);
 
   const handlePanePaste = useCallback((uid, event) => {
     const text = textFromPasteEvent(event);

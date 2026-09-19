@@ -1,4 +1,7 @@
+import React from 'react';
 import { SidebarIcon } from '../../lib/icons.jsx';
+import { nativeCapabilities } from '../../core/nativeCapabilities.js';
+import WindowsWindowControls from './WindowsWindowControls.jsx';
 
 /**
  * 左侧列 Header（UI-SPEC §4.1，2026-09-16 用户最新裁定）
@@ -14,20 +17,25 @@ import { SidebarIcon } from '../../lib/icons.jsx';
  * @param {boolean} [props.sidebarCollapsed]
  * @param {() => void} [props.onToggleSidebar]
  * @param {boolean} [props.fullscreen]
+ * @param {string} [props.platform] 平台显式覆盖（'windows' | 'macos'），默认取 nativeCapabilities.platform
  * @param {React.ReactNode} [props.children] 为侧栏顶部自定义插槽预留
  */
 export default function TitleBar({
   sidebarCollapsed = false,
   onToggleSidebar,
   fullscreen = false,
+  platform = null,
   children = null,
 }) {
+  const currentPlatform = platform || nativeCapabilities.platform;
+  const isWindows = currentPlatform === 'windows';
+
   return (
     <header
-      className={`tb tb-sidebar-header${fullscreen ? ' is-fullscreen' : ''}`}
+      className={`tb tb-sidebar-header${fullscreen ? ' is-fullscreen' : ''}${isWindows ? ' is-windows' : ''}`}
       data-tauri-drag-region="deep"
     >
-      <div className="tb-traffic-lights" aria-hidden="true" />
+      {!isWindows && <div className="tb-traffic-lights" aria-hidden="true" />}
       <div className="tb-drag" />
       {children}
       <button
@@ -41,6 +49,7 @@ export default function TitleBar({
       >
         <SidebarIcon size={16} strokeWidth={1.8} />
       </button>
+      {isWindows && <WindowsWindowControls fullscreen={fullscreen} />}
     </header>
   );
 }
