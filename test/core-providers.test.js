@@ -28,6 +28,9 @@ const CASES = [
   ['zcode', 'zai'],
   ['z-code', 'zai'],
   ['glm-4', 'zai'],
+  ['pi', 'pi'],
+  ['pi-2', 'pi'],
+  ['my-pi', 'pi'],
   ['bash', null],
   ['', null],
   ['  ', null],
@@ -74,5 +77,7 @@ test('canonical provider normalization is exact and fail-closed', () => {
   }
   assert.equal(inferCanonicalProvider('claude'), 'claude_code');
   assert.equal(inferCanonicalProvider('codex-test'), 'codex');
+  assert.equal(inferCanonicalProvider('pi'), 'pi');
+  assert.equal(inferCanonicalProvider('pi-2'), 'pi');
   assert.equal(inferCanonicalProvider('copilot-task'), 'unknown', 'legacy fuzzy names do not invent a canonical provider');
 });

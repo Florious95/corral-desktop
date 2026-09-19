@@ -53,11 +53,20 @@ function aggregateState(sessions) {
  * Provider DTOs are authoritative. Only a completely absent provider field
  * uses the old session-name inference fallback; explicit unknown/invalid
  * values fail closed instead of being replaced by a title-derived provider.
+ * Pi sessions (name 'pi' or pi-semantic) are recognised even when server reports unknown or empty.
  */
-function providerOf(name, serverProvider) {
-  return serverProvider === undefined
-    ? inferCanonicalProvider(name)
-    : normalizeProvider(serverProvider);
+export function providerOf(name, serverProvider) {
+  if (serverProvider === undefined || serverProvider === null || serverProvider === '') {
+    return inferCanonicalProvider(name);
+  }
+  const norm = normalizeProvider(serverProvider);
+  if (norm === 'unknown') {
+    const inferred = inferCanonicalProvider(name);
+    if (inferred === 'pi' || name === 'pi') {
+      return 'pi';
+    }
+  }
+  return norm;
 }
 
 function segmentsOf(cwd) {

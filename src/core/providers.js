@@ -23,6 +23,7 @@ const RULES = Object.freeze([
   ['z-code', 'zai'],
   ['glm', 'zai'],
   ['zai', 'zai'],
+  ['pi', 'pi'],
 ]);
 
 /** Canonical provider IDs emitted by the daemon (plus the fail-closed sentinel). */
@@ -95,6 +96,10 @@ export function inferProvider(sessionName) {
   if (typeof sessionName !== 'string' || sessionName.length === 0) return null;
   const n = sessionName.toLowerCase();
   for (const [needle, key] of RULES) {
+    if (needle === 'pi') {
+      if (/(?:^|[^a-z0-9])pi(?:[^a-z0-9]|$)/.test(n)) return key;
+      continue;
+    }
     if (n.includes(needle)) return key;
   }
   return null;
