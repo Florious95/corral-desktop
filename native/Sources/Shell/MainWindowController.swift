@@ -2,10 +2,29 @@ import AppKit
 import WebKit
 
 @MainActor
+final class TitlebarDragSurfaceView: NSView {
+    weak var dragSurface: DragSurfaceView?
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let dragSurface,
+              let superview,
+              dragSurface.acceptsDrag(at: dragSurface.convert(point, from: superview)) else { return nil }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragSurface?.beginDrag(with: event)
+    }
+}
+
+@MainActor
 public final class MainWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate {
     public let webView: WKWebView
     private let bridge: ShellBridge
     private let dragSurface = DragSurfaceView()
+    private let titlebarDragSurface = TitlebarDragSurfaceView()
     private let chrome = GlassChrome()
     private var allowLoad = false
     private var disposed = false
@@ -48,7 +67,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
             view.autoresizingMask = [.width, .height]
             root.addSubview(view)
         }
-        keepTitlebarControlsAboveContent(root)
+        let titlebarContainer = keepTitlebarControlsAboveContent(root)
+        installTitlebarDragSurface(on: root.superview, above: titlebarContainer)
         alignTrafficLights()
         reload()
     }
@@ -143,9 +163,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     public func windowDidMiniaturize(_ notification: Notification) { geometryChanged() }
     public func windowDidDeminiaturize(_ notification: Notification) { geometryChanged() }
 
-    private func keepTitlebarControlsAboveContent(_ contentView: NSView) {
+    @discardableResult
+    private func keepTitlebarControlsAboveContent(_ contentView: NSView) -> NSView? {
         guard let frameView = contentView.superview,
-              let closeButton = window?.standardWindowButton(.closeButton) else { return }
+              let closeButton = window?.standardWindowButton(.closeButton) else { return nil }
 
         var ancestor = closeButton.superview
         while let candidate = ancestor, candidate.superview !== frameView {
@@ -153,13 +174,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         }
         guard let titlebarContainer = ancestor,
               titlebarContainer.superview === frameView,
-              titlebarContainer !== contentView else { return }
+              titlebarContainer !== contentView else { return nil }
         frameView.addSubview(contentView, positioned: .below, relativeTo: titlebarContainer)
         frameView.addSubview(titlebarContainer, positioned: .above, relativeTo: contentView)
+        return titlebarContainer
     }
 
     private func alignTrafficLights() {
         guard let window else { return }
+        updateTitlebarDragSurfaceFrame()
         let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
         for buttonType in buttons {
             guard let button = window.standardWindowButton(buttonType),
@@ -168,6 +191,26 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
                                                          in: titlebarView.bounds)
             button.setFrameOrigin(frame.origin)
         }
+    }
+
+    private func installTitlebarDragSurface(on frameView: NSView?, above titlebarContainer: NSView?) {
+        guard let frameView, let titlebarContainer else { return }
+        titlebarDragSurface.dragSurface = dragSurface
+        titlebarDragSurface.autoresizingMask = []
+        frameView.addSubview(titlebarDragSurface, positioned: .above, relativeTo: titlebarContainer)
+        updateTitlebarDragSurfaceFrame()
+    }
+
+    private func updateTitlebarDragSurfaceFrame() {
+        guard let frameView = titlebarDragSurface.superview,
+              let closeButton = window?.standardWindowButton(.closeButton) else { return }
+        var ancestor = closeButton.superview
+        while let candidate = ancestor, candidate.superview !== frameView {
+            ancestor = candidate.superview
+        }
+        guard let titlebarContainer = ancestor,
+              titlebarContainer.superview === frameView else { return }
+        titlebarDragSurface.frame = titlebarContainer.frame
     }
 
     private func geometryChanged() {

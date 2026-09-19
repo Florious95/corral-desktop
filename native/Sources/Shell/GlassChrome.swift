@@ -93,22 +93,26 @@ public final class DragSurfaceView: NSView {
     public override var mouseDownCanMoveWindow: Bool { false }
 
     public override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let window else { return nil }
         let localPoint = superview != nil ? convert(point, from: superview) : point
-        guard geometry.isDraggable(localPoint, bounds: bounds,
-                                   backingScale: window.backingScaleFactor,
-                                   flipped: isFlipped) else { return nil }
-        return self
+        return acceptsDrag(at: localPoint) ? self : nil
+    }
+
+    func acceptsDrag(at point: NSPoint) -> Bool {
+        guard let window else { return false }
+        return geometry.isDraggable(point, bounds: bounds,
+                                    backingScale: window.backingScaleFactor,
+                                    flipped: isFlipped)
     }
 
     public override func mouseDown(with event: NSEvent) {
+        beginDrag(with: event)
+    }
+
+    func beginDrag(with event: NSEvent) {
         guard event.type == .leftMouseDown,
               let window,
               event.window === window,
-              geometry.isDraggable(convert(event.locationInWindow, from: nil),
-                                   bounds: bounds,
-                                   backingScale: window.backingScaleFactor,
-                                   flipped: isFlipped) else { return }
+              acceptsDrag(at: convert(event.locationInWindow, from: nil)) else { return }
         // This is the original AppKit event, before any async boundary.
         window.performDrag(with: event)
     }

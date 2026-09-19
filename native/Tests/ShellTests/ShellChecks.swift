@@ -69,6 +69,63 @@ struct ShellChecks {
         expect(!LocalContent.isEntry(URL(string: "agentmirror://app/index.html?other=1")), "entry query rejects")
         expect(LocalContent.isEntry(URL(string: "agentmirror://app/index.html#route")), "entry fragment allowed")
         let controller = try MainWindowController(distURL: fixture, websiteDataStore: .nonPersistent())
+        guard let root = controller.window?.contentView,
+              let frameView = root.superview else {
+            expect(false, "content root has frame view")
+            return
+        }
+        let dragSurface = root.subviews.first(where: { $0 is DragSurfaceView })
+        let titlebarDragSurface = frameView.subviews.first(where: { $0 is TitlebarDragSurfaceView })
+        expect(dragSurface != nil, "drag surface is installed")
+        expect(dragSurface?.superview === root, "drag surface stays in content root")
+        expect(dragSurface?.frame == root.bounds,
+               "drag surface matches content geometry")
+        expect(titlebarDragSurface?.superview === frameView,
+               "titlebar drag surface is a frame-view sibling")
+        if let dragSurface,
+           let titlebarDragSurface,
+           let closeButton = controller.window?.standardWindowButton(.closeButton) {
+            var titlebarContainer = closeButton.superview
+            while let candidate = titlebarContainer, candidate.superview !== frameView {
+                titlebarContainer = candidate.superview
+            }
+            if let titlebarContainer,
+               let titlebarIndex = frameView.subviews.firstIndex(where: { $0 === titlebarContainer }),
+               let contentIndex = frameView.subviews.firstIndex(where: { $0 === root }),
+               let dragIndex = frameView.subviews.firstIndex(where: { $0 === titlebarDragSurface }) {
+                expect(titlebarIndex > contentIndex,
+                       "titlebar container stays above web content")
+                expect(dragIndex > titlebarIndex,
+                       "titlebar drag surface is above native titlebar")
+                expect(titlebarDragSurface.frame == titlebarContainer.frame,
+                       "titlebar drag surface matches native titlebar")
+
+                let width = root.bounds.width
+                let height = root.bounds.height
+                let rect: [String: Double] = ["x": 0, "y": 0, "width": width, "height": 80]
+                let chromeRect: [String: Double] = ["x": 0, "y": 0, "width": width, "height": height]
+                let closeRect = root.convert(closeButton.frame, from: closeButton.superview)
+                let closeExclusion: [String: Double] = [
+                    "x": Double(closeRect.minX), "y": 0,
+                    "width": Double(closeRect.width), "height": 80,
+                ]
+                _ = try controller.updateSurface([
+                    "phase": "arm", "geometryGeneration": controller.geometryGeneration,
+                    "revision": 1,
+                    "viewportCSS": ["width": width, "height": height],
+                    "devicePixelRatio": controller.window?.backingScaleFactor ?? 1,
+                    "dragRects": [rect], "exclusionRects": [closeExclusion], "chromeRect": chromeRect,
+                ])
+                let topbarPoint = NSPoint(x: titlebarContainer.frame.minX + 200,
+                                          y: titlebarContainer.frame.midY)
+                expect(frameView.hitTest(topbarPoint) === titlebarDragSurface,
+                       "armed titlebar routes to native drag surface")
+                let closeFrame = frameView.convert(closeButton.frame, from: closeButton.superview)
+                let closePoint = NSPoint(x: closeFrame.midX, y: closeFrame.midY)
+                expect(frameView.hitTest(closePoint) === closeButton,
+                       "traffic-light exclusion still reaches native button")
+            }
+        }
         let requiredMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         expect(controller.window?.styleMask.isSuperset(of: requiredMask) == true, "window style mask keeps native controls")
         for buttonType in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
