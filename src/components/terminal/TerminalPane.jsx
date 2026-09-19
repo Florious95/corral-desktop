@@ -311,13 +311,13 @@ export default function TerminalPane({
       currentMode = initialPresence?.hasMobile ? PRESENCE_MODE.AVOIDANCE : PRESENCE_MODE.UNKNOWN;
       setPresenceMode(currentMode);
       view.setFixedGrid(MOBILE_GRID, { sync: true });
-      // 若当前为 UNKNOWN 态，开启 600ms 单桌面端探测超时：若超时未收到移动端在线信号，自动晋级 TAKEOVER 铺满全屏
+      // 若当前为 UNKNOWN 态，开启 500ms 单桌面端探测超时：若超时未收到移动端在线信号，自动晋级 TAKEOVER 铺满全屏
       if (currentMode === PRESENCE_MODE.UNKNOWN) {
         takeoverTimer = setTimeout(() => {
           if (currentMode === PRESENCE_MODE.UNKNOWN) {
             triggerTakeover();
           }
-        }, 600);
+        }, 500);
       }
     }
 
@@ -461,7 +461,7 @@ export default function TerminalPane({
 
   return (
     <div className="terminalpane" data-presence-mode={presenceMode}>
-      <div className="terminalpane-body">
+      <div className={`terminalpane-body${presenceMode === PRESENCE_MODE.TAKEOVER ? ' is-takeover' : ''}`}>
         {history && (
           <div className="terminalpane-history">
             <div className="terminalpane-history-head">

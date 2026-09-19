@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('TerminalPane implements 600ms auto-takeover timeout to prevent single-desktop deadlocks', async () => {
+test('TerminalPane implements 500ms auto-takeover timeout to prevent single-desktop deadlocks', async () => {
   const terminalPaneJsx = await readFile(
     new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url),
     'utf8',
@@ -12,11 +12,11 @@ test('TerminalPane implements 600ms auto-takeover timeout to prevent single-desk
   assert.match(terminalPaneJsx, /let takeoverTimer = null;/);
   assert.match(terminalPaneJsx, /const triggerTakeover = \(\) => \{/);
 
-  // 2. UNKNOWN 态下开启 600ms 探测超时
+  // 2. UNKNOWN 态下开启 500ms 探测超时
   assert.match(terminalPaneJsx, /if\s*\(currentMode === PRESENCE_MODE\.UNKNOWN\)\s*\{/);
   assert.match(terminalPaneJsx, /takeoverTimer = setTimeout\(\(\) => \{/);
   assert.match(terminalPaneJsx, /triggerTakeover\(\);/);
-  assert.match(terminalPaneJsx, /600\);/);
+  assert.match(terminalPaneJsx, /500\);/);
 
   // 3. 移动端 presence 广播到来或断开时清除定时器
   assert.match(terminalPaneJsx, /if\s*\(takeoverTimer\)\s*\{\s*clearTimeout\(takeoverTimer\);\s*takeoverTimer = null;\s*\}/);
@@ -46,8 +46,12 @@ test('terminal.css and TerminalPane implement dual-mode CSS decoupling for deskt
   assert.match(terminalCss, /\.terminalpane-host\.is-takeover > \.xterm\s*\{[^}]*width:\s*100%;/);
   assert.match(terminalCss, /\.terminalpane-host\.is-takeover > \.xterm\s*\{[^}]*height:\s*100%;/);
 
-  // 3. TerminalPane.jsx 根据 presenceMode 动态附加 is-takeover 类名
+  // 3. TAKEOVER 模式下解除 terminalpane-body 内缩 padding
+  assert.match(terminalCss, /\.terminalpane\[data-presence-mode="takeover"\]\s+\.terminalpane-body[^}]*padding:\s*0;/);
+
+  // 4. TerminalPane.jsx 根据 presenceMode 动态附加 is-takeover 类名
   assert.match(terminalPaneJsx, /className=\{`terminalpane-host\$\{presenceMode === PRESENCE_MODE\.TAKEOVER \? ' is-takeover' : ''\}`\}/);
+  assert.match(terminalPaneJsx, /className=\{`terminalpane-body\$\{presenceMode === PRESENCE_MODE\.TAKEOVER \? ' is-takeover' : ''\}`\}/);
 });
 
 test('auto-takeover timer logic transitions state machine cleanly in isolation', async () => {

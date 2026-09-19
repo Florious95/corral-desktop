@@ -118,6 +118,12 @@
   background: var(--bg);
 }
 
+/* 接管模式下消除内缩边距，确保 xterm 画布 100% 贴合窗格边缘全屏展示 */
+.terminalpane[data-presence-mode="takeover"] .terminalpane-body,
+.terminalpane-body.is-takeover {
+  padding: 0;
+}
+
 .terminalpane-host {
   flex: 1;
   min-height: 0;
