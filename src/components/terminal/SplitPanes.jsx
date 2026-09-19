@@ -159,7 +159,11 @@ export default function SplitPanes({
             }}
             inert={!isVisible}
             aria-hidden={!isVisible ? 'true' : undefined}
-            onMouseDown={() => onFocusPane && onFocusPane(uid)}
+            onMouseDown={() => {
+              if (uid !== previewUid && onFocusPane) {
+                onFocusPane(uid);
+              }
+            }}
             onContextMenu={(e) => onPaneMenu && onPaneMenu(e, uid)}
           >
             {renderPane ? renderPane(agent) : null}

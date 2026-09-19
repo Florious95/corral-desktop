@@ -82,9 +82,12 @@ export default function TabBar({
           {pinnedTabs.map((tab, idx) => {
             const tabKey = tab.id || tab.uid;
             const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
-            const agent = tab.activeUid ? agentsByUid.get(tab.activeUid) : agentsByUid.get(tab.uid);
-            const activeTitle = agent ? agent.title : (tab.activeUid || tab.uid);
             const leaves = (tab.root && typeof tab.root === 'object') ? getLeaves(tab.root) : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
+            const effectiveActiveUid = (leaves.length > 0 && tab.activeUid && leaves.includes(tab.activeUid))
+              ? tab.activeUid
+              : (leaves[0] || tab.activeUid || tab.uid);
+            const agent = effectiveActiveUid ? agentsByUid.get(effectiveActiveUid) : agentsByUid.get(tab.uid);
+            const activeTitle = agent ? agent.title : (effectiveActiveUid || tab.uid);
             const title = tab.name || (leaves.length > 1 ? `${activeTitle} (${leaves.length})` : activeTitle);
             const subtitle = agent ? `${title} (${agent.deviceName})` : title;
             const isVisible = visibleUids.includes(tabKey) || (tab.activeUid && visibleUids.includes(tab.activeUid));
@@ -123,9 +126,12 @@ export default function TabBar({
         {regularTabs.map((tab, idx) => {
           const tabKey = tab.id || tab.uid;
           const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
-          const agent = tab.activeUid ? agentsByUid.get(tab.activeUid) : agentsByUid.get(tab.uid);
-          const activeTitle = agent ? agent.title : (tab.activeUid || tab.uid);
           const leaves = (tab.root && typeof tab.root === 'object') ? getLeaves(tab.root) : (tab.activeUid ? [tab.activeUid] : (tab.uid ? [tab.uid] : []));
+          const effectiveActiveUid = (leaves.length > 0 && tab.activeUid && leaves.includes(tab.activeUid))
+            ? tab.activeUid
+            : (leaves[0] || tab.activeUid || tab.uid);
+          const agent = effectiveActiveUid ? agentsByUid.get(effectiveActiveUid) : agentsByUid.get(tab.uid);
+          const activeTitle = agent ? agent.title : (effectiveActiveUid || tab.uid);
 
           const isBlank = isBlankTab(tab);
           let title;

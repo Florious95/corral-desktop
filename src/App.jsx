@@ -663,7 +663,12 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const handleFocusPane = useCallback((uid) => {
-    setWorkspace((prev) => focusWorkspacePane(prev, uid));
+    setWorkspace((prev) => {
+      if (prev?.previewUid && prev.previewUid === uid) {
+        return prev;
+      }
+      return focusWorkspacePane(prev, uid);
+    });
   }, []);
 
   /* ——— 每个分裂列拿一个 Client 形状的薄 shim（按 uid 路由到 DeviceManager） ——— */

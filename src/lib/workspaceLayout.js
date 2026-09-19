@@ -344,6 +344,21 @@ export function focusWorkspacePane(state, uid) {
     const currentTab = tabs.find((t) => (t.id || t.uid) === state.activeTabId) || tabs[0];
     if (!currentTab) return state;
 
+    // 真实成员守卫：被点击的 uid 必须真正属于当前激活工作台
+    // 1. 若当前处于预览模式且被点击的是预览窗格 (uid === state.previewUid)，绝对不污染持久 Tab
+    if (state.previewUid && state.previewUid === uid) {
+      return state;
+    }
+
+    // 2. 检查 uid 是否为当前工作台的合法成员
+    const isMember = currentTab.root
+      ? !!findLeaf(currentTab.root, uid)
+      : (currentTab.activeUid === uid || (!currentTab.isBlank && (currentTab.id || currentTab.uid) === uid));
+
+    if (!isMember) {
+      return state;
+    }
+
     // 若已经就是当前聚焦的会话，严格 0 操作直接返回原引用
     if (currentTab.activeUid === uid && state.activeUid === uid) {
       return state;
