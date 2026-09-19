@@ -12,9 +12,9 @@ test('App derives authoritative session display name from s.name and never from 
   assert.match(appJsx, /const sessionName = s\.name \|\| s\.title \|\| '';/);
   assert.match(appJsx, /title: sessionName,/);
 
-  // 3. 收藏 key（fav）判定与读写使用完全相同的权威名称
-  assert.match(appJsx, /favSet\.has\(`\$\{w\.spaceKey\}::\$\{sessionName\}`\)/);
-  assert.match(appJsx, /const favKey = `\$\{agent\.spaceKey\}::\$\{agent\.title\}`;/);
+  // 3. 收藏 key（fav）判定与读写使用基于唯一标识的 isAgentFav 与 toggleAgentFav
+  assert.match(appJsx, /fav:\s*isAgentFav\(w\.spaceKey,\s*s,\s*favSet\)/);
+  assert.match(appJsx, /toggleAgentFav\(prev,\s*agent\.spaceKey,\s*agent\)/);
 });
 
 test('session display name authority: renders authoritative name "桌面端leader" instead of raw OSC title', () => {
