@@ -122,8 +122,18 @@ pub fn upload_http(app: tauri::AppHandle, url: String, token: String, filename: 
 pub fn read_clipboard_image() -> Result<Option<ClipboardImage>, String> {
     #[cfg(target_os = "macos")]
     { return read_macos_clipboard(); }
-    #[cfg(not(target_os = "macos"))]
-    { Err("unsupported_platform: clipboard image reader is macOS-only".to_string()) }
+    #[cfg(target_os = "windows")]
+    { return read_windows_clipboard_image(); }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    { Err("unsupported_platform: clipboard image reader is unavailable".to_string()) }
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_clipboard_image() -> Result<Option<ClipboardImage>, String> {
+    // Keep the command available on Windows without pulling a Win32 clipboard
+    // dependency into the desktop bundle. A future native reader can replace
+    // this isolated implementation without changing the invoke contract.
+    Err("unsupported_platform: clipboard image reader is not implemented on Windows".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -151,8 +161,17 @@ fn read_macos_clipboard() -> Result<Option<ClipboardImage>, String> {
 pub fn read_clipboard_files() -> Result<Option<Vec<String>>, String> {
     #[cfg(target_os = "macos")]
     { return read_macos_clipboard_files(); }
-    #[cfg(not(target_os = "macos"))]
-    { Err("unsupported_platform: clipboard file reader is macOS-only".to_string()) }
+    #[cfg(target_os = "windows")]
+    { return read_windows_clipboard_files(); }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    { Err("unsupported_platform: clipboard file reader is unavailable".to_string()) }
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_clipboard_files() -> Result<Option<Vec<String>>, String> {
+    // CF_HDROP support can be added here later; preserve the same Tauri command
+    // shape in the meantime so upload_http remains fully cross-platform.
+    Err("unsupported_platform: clipboard file reader is not implemented on Windows".to_string())
 }
 
 #[cfg(target_os = "macos")]
