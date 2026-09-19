@@ -7,6 +7,7 @@ import {
   inferProvider,
   inferCanonicalProvider,
   normalizeProvider,
+  DEFAULT_LAUNCHERS,
 } from '../src/core/providers.js';
 
 test('providerOf resolves "pi" accurately across absent, empty, and unknown server values', () => {
@@ -46,28 +47,64 @@ test('inferProvider accurately matches pi sessions without substring false-posit
   assert.equal(inferProvider('epic'), null);
 });
 
-test('ProviderIcon renders dedicated PiIcon SVG and prevents "U" fallback', async () => {
+test('ProviderIcon maps full official provider suite from native assets without fake Greek letter pi', async () => {
   const providerIconJsx = await readFile(
     new URL('../src/components/sidebar/ProviderIcon.jsx', import.meta.url),
     'utf8',
   );
 
-  // 1. 必须导出或定义专用的 PiIcon 官方 SVG 几何组件
-  assert.match(providerIconJsx, /export function PiIcon/);
-  assert.match(providerIconJsx, /data-provider="pi"/);
-  assert.match(providerIconJsx, /viewBox="0 0 24 24"/);
+  // 1. 严禁包含手写的希腊字母 π 字符代码或伪劣自绘 SVG
+  assert.doesNotMatch(providerIconJsx, /export function PiIcon/);
+  assert.doesNotMatch(providerIconJsx, /<rect width="24" height="24"/);
 
-  // 2. 当 provider === 'pi' 时优先拦截并直接渲染 PiIcon
-  assert.match(providerIconJsx, /if\s*\(provider\s*===\s*'pi'\)\s*\{\s*return\s*<PiIcon/);
+  // 2. 必须引入官方正版资源
+  assert.match(providerIconJsx, /import claudeCodeUrl from '.*provider_icon_claude_code\.svg';/);
+  assert.match(providerIconJsx, /import codexUrl from '.*provider_icon_codex\.svg';/);
+  assert.match(providerIconJsx, /import cursorUrl from '.*provider_icon_cursor\.svg';/);
+  assert.match(providerIconJsx, /import grokUrl from '.*provider_grok\.png';/);
+  assert.match(providerIconJsx, /import copilotUrl from '.*provider_copilot_color\.png';/);
+  assert.match(providerIconJsx, /import piUrl from '.*provider_pi\.png';/);
 
-  // 3. 验证结构：绝不让 pi 穿透走兜底首字母圆圈（防止渲染出 Unknown 的大写字母 'U'）
-  const fallbackMatch = providerIconJsx.match(/provider\?\.\[0\]\?\.toUpperCase\(\)\s*\?\?\s*'\?'/);
-  assert.ok(fallbackMatch, 'Fallback initial placeholder exists for genuinely unknown providers');
+  // 3. ICONS 映射表必须完整涵盖所有 6 大主流官方 Provider 及其别名
+  assert.match(providerIconJsx, /claude_code:\s*\[claudeCodeUrl,\s*claudeCodeUrl\]/);
+  assert.match(providerIconJsx, /codex:\s*\[codexUrl,\s*codexUrl\]/);
+  assert.match(providerIconJsx, /cursor:\s*\[cursorUrl,\s*cursorUrl\]/);
+  assert.match(providerIconJsx, /grok:\s*\[grokUrl,\s*grokUrl\]/);
+  assert.match(providerIconJsx, /copilot:\s*\[copilotUrl,\s*copilotUrl\]/);
+  assert.match(providerIconJsx, /pi:\s*\[piUrl,\s*piUrl\]/);
+});
 
-  // 4. 确保在 provider === 'pi' 分支返回之后才出现 fallback 代码
-  const piBranchIndex = providerIconJsx.indexOf("provider === 'pi'");
-  const fallbackIndex = providerIconJsx.indexOf('provider?.[0]?.toUpperCase()');
-  assert.ok(piBranchIndex > 0 && fallbackIndex > piBranchIndex, 'pi branch must return before fallback');
+test('DEFAULT_LAUNCHERS and NewAgentDialog provide full provider selection fallback', async () => {
+  const dialogJsx = await readFile(
+    new URL('../src/components/chrome/NewAgentDialog.jsx', import.meta.url),
+    'utf8',
+  );
+
+  // 1. 核心常量：DEFAULT_LAUNCHERS 必须包含全部 5 大官方主流 Provider
+  assert.ok(Array.isArray(DEFAULT_LAUNCHERS));
+  const providers = DEFAULT_LAUNCHERS.map((l) => l.provider);
+  assert.ok(providers.includes('claude_code'));
+  assert.ok(providers.includes('codex'));
+  assert.ok(providers.includes('cursor'));
+  assert.ok(providers.includes('grok'));
+  assert.ok(providers.includes('pi'));
+
+  // 2. NewAgentDialog 引入 DEFAULT_LAUNCHERS 并在未广告时自动兜底呈现
+  assert.match(dialogJsx, /import\s*\{\s*DEFAULT_LAUNCHERS\s*\}\s*from/);
+  assert.match(dialogJsx, /effectiveLaunchers/);
+  assert.match(dialogJsx, /DEFAULT_LAUNCHERS/);
+});
+
+test('App.jsx intercepts close_session unsupported_type and removes session without 10s hang', async () => {
+  const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+
+  // 1. 维护 closePendingRef
+  assert.match(appJsx, /const closePendingRef = useRef/);
+
+  // 2. 在 onError 与 close_session_result 中拦截 unsupported_type
+  assert.match(appJsx, /unsupported_type/);
+  assert.match(appJsx, /服务端当前不支持远端销毁会话，已从工作台移出/);
+  assert.match(appJsx, /removeSessionFromWorkspace/);
 });
 
 test('fullscreen styles in app.css and chrome.css guarantee edge-to-edge immersive experience', async () => {

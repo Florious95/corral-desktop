@@ -102,6 +102,8 @@ export default function App({ seedDevices } = {}) {
   const [lifecycleEvent, setLifecycleEvent] = useState(null);
   const [createPending, setCreatePending] = useState(null);
   const [closePending, setClosePending] = useState(null);
+  const closePendingRef = useRef(null);
+  closePendingRef.current = closePending;
   const [closeConfirmAgent, setCloseConfirmAgent] = useState(null);
   const lifecycleTimerRef = useRef(new Map());
   const [capabilityRevision, setCapabilityRevision] = useState(0);
@@ -133,7 +135,21 @@ export default function App({ seedDevices } = {}) {
       onLifecycleResult: (r) => setLifecycleEvent({ ...r, nonce: `${Date.now()}-${Math.random()}` }),
       onCapabilityChange: () => setCapabilityRevision((v) => v + 1),
       // ⛔ message 由 DeviceManager 保证不含 token
-      onError: ({ code, message }) => setToastMsg(code === 'auth' ? message : `${code}：${message}`),
+      onError: ({ deviceId, code, message }) => {
+        if (closePendingRef.current && (code === 'unsupported_type' || message?.includes('unknown frame type'))) {
+          const closingUid = closePendingRef.current.uid;
+          const timerKey = `close:${closePendingRef.current.deviceId}:${closePendingRef.current.reqId}`;
+          clearTimeout(lifecycleTimerRef.current.get(timerKey));
+          lifecycleTimerRef.current.delete(timerKey);
+          setClosePending(null);
+          if (closingUid) {
+            setWorkspace((prev) => removeSessionFromWorkspace(prev, closingUid));
+          }
+          setToastMsg('服务端当前不支持远端销毁会话，已从工作台移出');
+          return;
+        }
+        setToastMsg(code === 'auth' ? message : `${code}：${message}`);
+      },
     });
   }
   const dm = dmRef.current;
@@ -640,8 +656,16 @@ export default function App({ seedDevices } = {}) {
       } else {
         clearTimeout(lifecycleTimerRef.current.get(timerKey));
         lifecycleTimerRef.current.delete(timerKey);
+        const closingUid = closePending.uid;
         setClosePending(null);
-        setToastMsg(`Agent 关闭失败：${payload.reason || '未知原因'}`);
+        if (payload.reason === 'unsupported_type' || payload.reason === 'unknown frame type') {
+          if (closingUid) {
+            setWorkspace((prev) => removeSessionFromWorkspace(prev, closingUid));
+          }
+          setToastMsg('服务端当前不支持远端销毁会话，已从工作台移出');
+        } else {
+          setToastMsg(`Agent 关闭失败：${payload.reason || '未知原因'}`);
+        }
       }
     }
   }, [lifecycleEvent, createPending, closePending]);

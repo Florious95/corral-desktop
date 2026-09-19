@@ -13,7 +13,7 @@
  */
 
 import { Client, ClientState } from './client.js';
-import { inferCanonicalProvider, normalizeProvider } from './providers.js';
+import { inferCanonicalProvider, normalizeProvider, DEFAULT_LAUNCHERS } from './providers.js';
 import { uploadImage } from './upload.js';
 import { DEFAULT_LOCAL_DEVICE, isLocalUrl } from './local.js';
 import { buildPairingPayload } from './pairing.js';
@@ -406,9 +406,13 @@ export class DeviceManager {
     return map;
   }
 
-  /** Return only launchers advertised by this authenticated device. */
+  /** Return only launchers advertised by this authenticated device, falling back to canonical defaults. */
   getAgentLaunchers(deviceId) {
-    return (this._launchers.get(deviceId) || []).map((launcher) => ({ ...launcher }));
+    const advertised = this._launchers.get(deviceId);
+    if (Array.isArray(advertised) && advertised.length > 0) {
+      return advertised.map((launcher) => ({ ...launcher }));
+    }
+    return DEFAULT_LAUNCHERS.map((launcher) => ({ ...launcher }));
   }
 
   // ---- session actions (routed by uid) ----

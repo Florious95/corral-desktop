@@ -8,7 +8,7 @@ import cursorUrl from '../../../deps/corral-core/app/app/src/main/res/raw/provid
 import piUrl from '../../../deps/corral-core/app/app/src/main/res/drawable-nodpi/provider_pi.png';
 
 /** Canonical provider → [active, idle] asset. State only changes opacity. */
-const ICONS = {
+export const ICONS = {
   claude_code: [claudeCodeUrl, claudeCodeUrl],
   codex: [codexUrl, codexUrl],
   copilot: [copilotUrl, copilotUrl],
@@ -18,38 +18,8 @@ const ICONS = {
   // Sealed new-agent dialog compatibility aliases; DTOs use canonical IDs.
   'claude-code': [claudeCodeUrl, claudeCodeUrl],
   claude: [claudeCodeUrl, claudeCodeUrl],
+  openai: [codexUrl, codexUrl],
 };
-
-/**
- * Pi 专属官方 SVG 几何图标组件
- */
-export function PiIcon({ size = 18, active = false }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      style={{
-        display: 'block',
-        flex: 'none',
-        opacity: active ? 1 : 0.6,
-        transition: 'opacity var(--d-icon)',
-      }}
-      aria-label="Pi"
-      data-provider="pi"
-    >
-      <rect width="24" height="24" rx="5" fill={active ? 'var(--brand, #3b82f6)' : 'var(--border-strong, #666)'} />
-      <path
-        d="M6 7.5h12M9.5 7.5v9M15 7.5v7.5c0 1 .5 1.5 1.5 1.5"
-        stroke="#ffffff"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 /** 兜底首字母圆圈的色调 */
 const TINT = {
@@ -70,9 +40,6 @@ const TINT = {
  * @param {boolean} [props.active=false]  运行态（state 为 working/blocked）
  */
 export default function ProviderIcon({ provider = null, size = 18, active = false }) {
-  if (provider === 'pi') {
-    return <PiIcon size={size} active={active} />;
-  }
   const pair = provider ? ICONS[provider] : null;
   if (pair) {
     return (
