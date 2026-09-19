@@ -342,7 +342,7 @@ src/
 | 品牌名 | **不渲染**（不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
-| Windows 窗口控制 | 排在最右端（仅 Windows，2026-09-19 裁定）。自适应渲染 `<WindowsWindowControls />`，包含最小化、最大化/还原、关闭三联按钮；宽 46px/键，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮。 |
+| Windows 窗口控制 | （仅 Windows，2026-09-19 裁定）。左侧 TitleBar 不挂载控制按钮（防止侧栏折叠向左移位）；三联按钮 `<WindowsWindowControls />` 挂载在应用视口最右上角（`.tb-session-header` 最右侧，`position: absolute; right: 0; top: 0; width: 138px; z-index: 50`），`.tb-session-header.is-windows` 严格预留 `padding-right: 138px` 避让空间；三键各宽 46px，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮。 |
 
 ### 4.1.1 `chrome/TabBar.jsx`（2026-09-16 用户多工作台最新裁定）
 
@@ -931,7 +931,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
     - **多端协同动静双模**：subscribe 携带 `client_type: "desktop"` 与 `retain_pane_size: true`，开启服务端尺寸驻留；未明确 presence 时以 46×44 保守初订，绝不提前挤掉手机；手机在线（`has_mobile: true`）避让模式保持 46×44 不发桌面 resize；手机离开（`has_mobile: false`）接管模式平滑铺满桌面视口；右键【适应当前窗口】走原子单一受控通道（单次发送）。
 28. **2026-09-19**：标签页实施等长布局与自适应缩短；所有普通工作台标签页采用弹性等分布局（`flex: 1 1 0px; width: 160px; max-width: 160px; min-width: 44px;`），宽度严格等长；标签增多时等比自适应收缩变窄，文字优雅省略截断；钉选标签保持 32px 紧凑固定宽。
 29. **2026-09-19（Windows 端 UI 自适应与 WSL 路径映射裁定）**：
-    - **窗口控制按钮与自适应顶栏**：Windows 平台采用原生外壳架构，顶部 `TitleBar` 移除 macOS 80px 交通灯留白（收敛为 0），并在右端挂载 `<WindowsWindowControls />` 纯 CSS Fluent 风格三联按钮（最小化、最大化/还原、关闭；46px 宽，严格 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮）；
+    - **窗口控制按钮与视口右上角物理固定**：Windows 平台顶部 `TitleBar` 移除 macOS 80px 交通灯留白（收敛为 0 且折叠态亦不渲染）；三联按钮 `<WindowsWindowControls />`（最小化、最大化/还原、关闭）脱离左侧 TitleBar，挂载在整个应用窗口最右上角（`.tb-session-header` 最右端，`position: absolute; right: 0; top: 0; width: 138px; z-index: 50;`），且 `.tb-session-header.is-windows` 声明 `padding-right: 138px;` 保证 TabBar 绝不延伸遮挡；按钮各宽 46px，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮；无论侧栏处于展开态还是折叠态，物理坐标均严格恒定在 `{ right: 0, top: 0, width: 138, height: 38 }`；
     - **终端智能粘贴体验**：终端 Ctrl+V 快捷键实现智能识别，Windows 平台下若非图片内容直接作为文本/文件粘贴，消除“请按 Cmd+V”阻断提示；
     - **WSL 跨系统路径转换**：剪贴板文件路径通过 `wslPath` 双向转换为 WSL 2 POSIX 路径，并严格实施 fail-closed 白名单，绝对拒止非 WSL UNC 网络共享路径（如 `\\evil\share`）。
 

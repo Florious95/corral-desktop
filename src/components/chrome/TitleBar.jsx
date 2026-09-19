@@ -1,14 +1,13 @@
 import React from 'react';
 import { SidebarIcon } from '../../lib/icons.jsx';
 import { nativeCapabilities } from '../../core/nativeCapabilities.js';
-import WindowsWindowControls from './WindowsWindowControls.jsx';
 
 /**
  * 左侧列 Header（UI-SPEC §4.1，2026-09-16 用户最新裁定）
  *
  * 布局：
- * [原生红绿灯安全留白 80px] [侧栏折叠按钮] [拖窗空白区 flex:1]
- * 位于左侧列（侧边栏）顶部，与右侧会话区以垂直分隔线完全隔离；垂直居中对齐 macOS 原生红绿灯。
+ * - macOS: [原生红绿灯安全留白 80px] [侧栏折叠按钮] [拖窗空白区 flex:1]
+ * - Windows: [侧栏折叠按钮] [拖窗空白区 flex:1]（红绿灯留白收敛为 0，窗口控制按钮提升至顶层视口最右上角）
  *
  * 拖窗架构：采用唯一原生通路 data-tauri-drag-region="deep"，交互按钮声明 data-tauri-drag-region="false"，
  * 底层由 Tauri 官方 drag.js 与 ACL core:window:allow-start-dragging 原生调度（调用 startDragging）。
@@ -49,7 +48,6 @@ export default function TitleBar({
       >
         <SidebarIcon size={16} strokeWidth={1.8} />
       </button>
-      {isWindows && <WindowsWindowControls fullscreen={fullscreen} />}
     </header>
   );
 }

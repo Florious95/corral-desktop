@@ -811,17 +811,25 @@
 /* ---------- §4.7 Windows 11 Fluent 窗口控制按钮 ---------- */
 .tb-sidebar-header.is-windows .tb-traffic-lights,
 .tb-session-header.is-windows .tb-traffic-lights {
-  width: 0;
-  display: none;
+  width: 0 !important;
+  display: none !important;
+}
+
+.tb-session-header.is-windows {
+  padding-right: 138px; /* 严格预留 138px 避让空间，防止 TabBar 侵入或压盖最右上角三联控制按钮 */
 }
 
 .tb-win-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 38px;
+  width: 138px;
   display: inline-flex;
   align-items: center;
-  height: 100%;
-  margin-left: auto;
-  flex: none;
+  z-index: 50;
   user-select: none;
+  background: transparent;
 }
 
 .tb-win-btn {
