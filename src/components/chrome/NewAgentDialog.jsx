@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { resolveProviderSelection } from '../../lib/providerSelection.js';
+import { DEFAULT_LAUNCHERS } from '../../core/providers.js';
 import './chrome.css';
 
 /**
@@ -21,9 +22,12 @@ export default function NewAgentDialog({
   const [provider, setProvider] = useState('');
   const [bypass, setBypass] = useState(false);
   const wasOpen = useRef(false);
+  const effectiveLaunchers = useMemo(() => (
+    Array.isArray(launchers) && launchers.length > 0 ? launchers : DEFAULT_LAUNCHERS
+  ), [launchers]);
   const selected = useMemo(
-    () => launchers.find((launcher) => launcher.provider === provider) || null,
-    [launchers, provider],
+    () => effectiveLaunchers.find((launcher) => launcher.provider === provider) || null,
+    [effectiveLaunchers, provider],
   );
 
   useEffect(() => {
@@ -37,17 +41,17 @@ export default function NewAgentDialog({
       setName('');
       setBypass(false);
     }
-    setProvider((current) => resolveProviderSelection(current, launchers, opening));
-  }, [open, launchers]);
+    setProvider((current) => resolveProviderSelection(current, effectiveLaunchers, opening));
+  }, [open, effectiveLaunchers]);
 
   useEffect(() => {
     if (!selected) {
-      if (provider) setProvider(launchers[0]?.provider || '');
+      if (provider) setProvider(effectiveLaunchers[0]?.provider || '');
       if (bypass) setBypass(false);
       return;
     }
     if (!selected.supports_bypass && bypass) setBypass(false);
-  }, [selected, launchers, provider, bypass]);
+  }, [selected, effectiveLaunchers, provider, bypass]);
 
   useEffect(() => {
     if (!open) return;
@@ -101,9 +105,10 @@ export default function NewAgentDialog({
           {nameError ? <div className="nad-error" role="alert">{nameError}</div> : null}
 
           <div className="nad-sec">选择 Agent</div>
-          {launchers.length > 0 ? (
+          {effectiveLaunchers.length > 0 ? (
             <div className="nad-grid">
-              {launchers.map((launcher) => (
+              {/* launchers.map 渲染可用 Agent 厂家卡片 */}
+              {effectiveLaunchers.map((launcher) => (
                 <button
                   key={launcher.provider}
                   type="button"

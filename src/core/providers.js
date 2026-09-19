@@ -31,6 +31,18 @@ export const CANONICAL_PROVIDERS = Object.freeze([
   'claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown',
 ]);
 
+/**
+ * 标准全量 Provider 启动配置清单（兜底选型大厅）。
+ * 当服务端未广告或下发空 agent_launchers 时自动呈现，确保 5 大主流 Provider 均可正常选型创建。
+ */
+export const DEFAULT_LAUNCHERS = Object.freeze([
+  { provider: 'claude_code', display_name: 'Claude Code', supports_bypass: true },
+  { provider: 'codex', display_name: 'Codex', supports_bypass: true },
+  { provider: 'cursor', display_name: 'Cursor', supports_bypass: false },
+  { provider: 'grok', display_name: 'Grok', supports_bypass: false },
+  { provider: 'pi', display_name: 'Pi', supports_bypass: true },
+]);
+
 /** Exact DTO values accepted by the desktop; aliases are compatibility-only. */
 const PROVIDER_ALIASES = Object.freeze({
   claude_code: 'claude_code',
