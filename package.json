@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node scripts/run-tests.mjs",
     "tauri": "tauri",
     "core:init": "git submodule update --init deps/corral-core",
     "core:check": "node scripts/check-core.mjs",
