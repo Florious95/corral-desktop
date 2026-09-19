@@ -763,4 +763,59 @@ export const nativeCapabilities = {
       return false;
     },
   },
+
+  wsl: {
+    async checkEnvironment() {
+      if (testEngineOverride?.wsl?.checkEnvironment) {
+        return testEngineOverride.wsl.checkEnvironment();
+      }
+      const platform = detectPlatform();
+      const env = detectNativeEnvironment();
+      if (platform === 'windows' && env === 'tauri') {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const status = await invoke('check_wsl_environment');
+          if (status && typeof status === 'object') {
+            return {
+              wsl_installed: Boolean(status.wsl_installed),
+              ubuntu_installed: Boolean(status.ubuntu_installed),
+              ubuntu_running: Boolean(status.ubuntu_running),
+              tmux_installed: Boolean(status.tmux_installed),
+              service_running: Boolean(status.service_running),
+              wsl_ip: typeof status.wsl_ip === 'string' ? status.wsl_ip : null,
+            };
+          }
+        } catch (_) {
+          // Tauri invoke 失败安全降级
+        }
+      }
+      return {
+        wsl_installed: false,
+        ubuntu_installed: false,
+        ubuntu_running: false,
+        tmux_installed: false,
+        service_running: false,
+        wsl_ip: null,
+      };
+    },
+
+    async startService(serviceName = 'agentmirrord') {
+      if (testEngineOverride?.wsl?.startService) {
+        return testEngineOverride.wsl.startService(serviceName);
+      }
+      const platform = detectPlatform();
+      const env = detectNativeEnvironment();
+      if (platform === 'windows' && env === 'tauri') {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return invoke('start_wsl_service', {
+          service_cmd: serviceName,
+          serviceCmd: serviceName,
+          service: serviceName,
+        });
+      }
+      const err = new Error('unsupported_platform: WSL2 is available on Windows only');
+      err.code = 'unsupported_platform';
+      throw err;
+    },
+  },
 };
