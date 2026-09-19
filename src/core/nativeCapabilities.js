@@ -250,6 +250,25 @@ export function detectNativeEnvironment() {
   return 'mock';
 }
 
+export function detectPlatform() {
+  if (testEngineOverride?.platform) {
+    return typeof testEngineOverride.platform === 'function'
+      ? testEngineOverride.platform()
+      : testEngineOverride.platform;
+  }
+  if (typeof navigator !== 'undefined') {
+    const ua = navigator.userAgent || '';
+    const platform = navigator.userAgentData?.platform || navigator.platform || '';
+    if (/win/i.test(platform) || /windows/i.test(ua)) return 'windows';
+    if (/mac/i.test(platform) || /macintosh/i.test(ua)) return 'macos';
+  }
+  if (typeof process !== 'undefined' && process.platform) {
+    if (process.platform === 'win32') return 'windows';
+    if (process.platform === 'darwin') return 'macos';
+  }
+  return 'unknown';
+}
+
 let testEngineOverride = null;
 
 export function setNativeEngineForTests(engine) {
@@ -300,6 +319,10 @@ export const nativeCapabilities = {
         : testEngineOverride.environment;
     }
     return detectNativeEnvironment();
+  },
+
+  get platform() {
+    return detectPlatform();
   },
 
   window: {

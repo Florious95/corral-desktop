@@ -337,11 +337,12 @@ src/
 | 部件 | 规格 |
 |---|---|
 | 根 | `height:38px; flex:none; display:flex; align-items:center; gap:8px; padding:0 10px 0 0; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset); box-sizing:border-box; user-select:none; position:relative; z-index:10`。横贯窗口全宽。 |
-| 原生灯留白 | 排在最左端。`<div class="tb-traffic-lights" aria-hidden="true"/>`，宽 `80px`（78~86px 原生红绿灯安全保护区），不渲染任何可交互按钮。 |
+| 原生灯留白 | 排在最左端（仅 macOS）。`<div class="tb-traffic-lights" aria-hidden="true"/>`，宽 `80px`（78~86px 原生红绿灯安全保护区），不渲染任何可交互按钮。Windows 下收敛为 0 且隐藏。 |
 | 侧栏开关 | 紧接原生灯留白。`<button class="tb-btn tb-sidebar-toggle" ...>`，`28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4); color:var(--icon-strong)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
 | 品牌名 | **不渲染**（不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
+| Windows 窗口控制 | （仅 Windows，2026-09-19 裁定）。左侧 TitleBar 不挂载控制按钮（防止侧栏折叠向左移位）；三联按钮 `<WindowsWindowControls />` 挂载在应用视口最右上角（`.tb-session-header` 最右侧，`position: absolute; right: 0; top: 0; width: 138px; z-index: 50`），`.tb-session-header.is-windows` 严格预留 `padding-right: 138px` 避让空间；三键各宽 46px，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮。 |
 
 ### 4.1.1 `chrome/TabBar.jsx`（2026-09-16 用户多工作台最新裁定）
 
@@ -883,7 +884,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 | 设计稿里有 / 常见联想 | 处理 | 原因 |
 |---|---|---|
 | 平台切换按钮（`macOS · 同一套代码` 胶囊） | **删除** | 只发 macOS |
-| Windows caption 三键（46×40）、`isWin` 分支、`winRadius`、`Segoe UI` 字体切换 | **删除** | 同上 |
+| Windows caption 三键（原型 46×40 废弃方案） | **已按 2026-09-19 裁定重写** | 依据多端支持规划，采用 Tauri v2 标准集成方案：引入 `<WindowsWindowControls />`（46×38px，严格 `data-tauri-drag-region="false"`），并自适应 `TitleBar.jsx`，替代了原型的历史废案 |
 | 底部「图标 · 运行 / 空闲」画廊条（`iconGallery`） | **删除** | 设计稿演示用 |
 | 「新建文件夹」按钮 + 内联文件夹输入行（`folderEditing` 全套） | **删除** | Space = 服务端发现的 workspace，客户端不可创建 |
 | 暗色主题 | **不做** | 设计稿只有亮色；xterm 主题也固定亮色 |
@@ -929,6 +930,10 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
     - **视口物理底锚**：彻底废除 flex-end 与 max-height 钳制，实施完整的 root bottom-left 物理底锚（`.terminalpane-host` 声明 `position: relative; display: block; overflow: hidden;`；`.terminalpane-host > .xterm` 声明 `position: absolute; left: 0; bottom: 0; width: max-content; max-width: none; max-height: none;`）。手机端 46×44 坚屏网格（792px）在桌面视口（~600px）中物理底锚对齐，顶端自然上伸裁切，最底部的输入框 `[ █ ]` 与状态行 100% 完整可见可交互；
     - **多端协同动静双模**：subscribe 携带 `client_type: "desktop"` 与 `retain_pane_size: true`，开启服务端尺寸驻留；未明确 presence 时以 46×44 保守初订，绝不提前挤掉手机；手机在线（`has_mobile: true`）避让模式保持 46×44 不发桌面 resize；手机离开（`has_mobile: false`）接管模式平滑铺满桌面视口；右键【适应当前窗口】走原子单一受控通道（单次发送）。
 28. **2026-09-19**：标签页实施等长布局与自适应缩短；所有普通工作台标签页采用弹性等分布局（`flex: 1 1 0px; width: 160px; max-width: 160px; min-width: 44px;`），宽度严格等长；标签增多时等比自适应收缩变窄，文字优雅省略截断；钉选标签保持 32px 紧凑固定宽。
+29. **2026-09-19（Windows 端 UI 自适应与 WSL 路径映射裁定）**：
+    - **窗口控制按钮与视口右上角物理固定**：Windows 平台顶部 `TitleBar` 移除 macOS 80px 交通灯留白（收敛为 0 且折叠态亦不渲染）；三联按钮 `<WindowsWindowControls />`（最小化、最大化/还原、关闭）脱离左侧 TitleBar，挂载在整个应用窗口最右上角（`.tb-session-header` 最右端，`position: absolute; right: 0; top: 0; width: 138px; z-index: 50;`），且 `.tb-session-header.is-windows` 声明 `padding-right: 138px;` 保证 TabBar 绝不延伸遮挡；按钮各宽 46px，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮；无论侧栏处于展开态还是折叠态，物理坐标均严格恒定在 `{ right: 0, top: 0, width: 138, height: 38 }`；
+    - **终端智能粘贴体验**：终端 Ctrl+V 快捷键实现智能识别，Windows 平台下若非图片内容直接作为文本/文件粘贴，消除“请按 Cmd+V”阻断提示；
+    - **WSL 跨系统路径转换**：剪贴板文件路径通过 `wslPath` 双向转换为 WSL 2 POSIX 路径，并严格实施 fail-closed 白名单，绝对拒止非 WSL UNC 网络共享路径（如 `\\evil\share`）。
 
 ## core 依赖边界（裁定 2026-09-12）
 

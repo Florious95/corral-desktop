@@ -9,6 +9,7 @@ import {
 
 import TitleBar from './components/chrome/TitleBar.jsx';
 import TabBar from './components/chrome/TabBar.jsx';
+import WindowsWindowControls from './components/chrome/WindowsWindowControls.jsx';
 import DevicesPopover from './components/chrome/DevicesPopover.jsx';
 import AddDeviceDialog from './components/chrome/AddDeviceDialog.jsx';
 import PairingDialog from './components/chrome/PairingDialog.jsx';
@@ -54,6 +55,7 @@ import {
   removeNode,
 } from './lib/workspaceLayout.js';
 import { TabDragController } from './lib/tabDrag.js';
+import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
 } from './term/clipboard.js';
@@ -757,13 +759,43 @@ export default function App({ seedDevices } = {}) {
   }, [dm, uidReady]);
 
   const handlePaneCtrlV = useCallback(async (uid) => {
+    const isWindows = nativeCapabilities.platform === 'windows';
     const result = await readCtrlV();
     if (result.kind === 'image') {
       await handleAttachment(uid, result.attachment);
-    } else {
-      setToastMsg('Ctrl+V 仅支持图片，请使用 Cmd+V 粘贴文字');
+      return;
     }
-  }, [handleAttachment]);
+
+    if (isWindows) {
+      let files = null;
+      try {
+        files = await readClipboardFiles();
+      } catch {}
+      if (files?.length) {
+        try {
+          const paths = formatClipboardFiles(files);
+          if (paths && paneCanSend(uid)) {
+            handlePaneText(uid, paths);
+            return;
+          }
+        } catch (e) {
+          setToastMsg(e?.message || '文件路径无法粘贴');
+          return;
+        }
+      }
+      let text = '';
+      try {
+        text = await nativeCapabilities.clipboard.readText();
+      } catch {}
+      if (text && paneCanSend(uid)) {
+        handlePaneText(uid, text);
+        return;
+      }
+      return;
+    }
+
+    setToastMsg('Ctrl+V 仅支持图片，请使用 Cmd+V 粘贴文字');
+  }, [handleAttachment, handlePaneText, paneCanSend]);
 
   const handlePanePaste = useCallback((uid, event) => {
     const text = textFromPasteEvent(event);
@@ -1056,6 +1088,7 @@ export default function App({ seedDevices } = {}) {
   ]);
 
   const noDevices = devices.length === 0;
+  const isWindows = nativeCapabilities.platform === 'windows';
 
   return (
     <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
@@ -1096,10 +1129,10 @@ export default function App({ seedDevices } = {}) {
         </div>
 
         <main className="app-main">
-          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}`} data-tauri-drag-region="deep">
+          <header className={`tb-session-header${collapsed ? ' is-sidebar-collapsed' : ''}${isWindows ? ' is-windows' : ''}`} data-tauri-drag-region="deep">
             {collapsed && (
               <>
-                <div className="tb-traffic-lights" aria-hidden="true" />
+                {!isWindows && <div className="tb-traffic-lights" aria-hidden="true" />}
                 <button
                   type="button"
                   className="tb-btn tb-sidebar-toggle"
@@ -1127,6 +1160,7 @@ export default function App({ seedDevices } = {}) {
             />
             {/* 顶部长按拖窗收敛至原生 data-tauri-drag-region="deep"，由 Tauri 官方 drag.js 原生触发 startDragging */}
             <div className="tb-drag" />
+            {isWindows && <WindowsWindowControls fullscreen={nativeFullscreen} />}
           </header>
 
           <div className="main-stage-container">

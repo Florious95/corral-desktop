@@ -807,3 +807,63 @@
   box-shadow: var(--shadow-menu);
   animation: rowIn var(--d-toggle) ease-out;
 }
+
+/* ---------- §4.7 Windows 11 Fluent 窗口控制按钮 ---------- */
+.tb-sidebar-header.is-windows .tb-traffic-lights,
+.tb-session-header.is-windows .tb-traffic-lights {
+  width: 0 !important;
+  display: none !important;
+}
+
+.tb-session-header.is-windows {
+  padding-right: 138px; /* 严格预留 138px 避让空间，防止 TabBar 侵入或压盖最右上角三联控制按钮 */
+}
+
+.tb-win-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 38px;
+  width: 138px;
+  display: inline-flex;
+  align-items: center;
+  z-index: 50;
+  user-select: none;
+  background: transparent;
+}
+
+.tb-win-btn {
+  width: 46px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  color: var(--icon-titlebar, rgba(255, 255, 255, 0.7));
+  cursor: pointer;
+  transition: background var(--d-hover, 120ms ease), color var(--d-hover, 120ms ease);
+}
+
+.tb-win-btn:hover {
+  background: var(--hover-4, rgba(255, 255, 255, 0.08));
+  color: var(--text-strong, #ffffff);
+}
+
+.tb-win-btn:active {
+  background: var(--hover-8, rgba(255, 255, 255, 0.14));
+}
+
+.tb-win-btn.tb-win-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+.tb-win-btn.tb-win-close:active {
+  background: #b32617;
+  color: #ffffff;
+}
+
