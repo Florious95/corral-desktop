@@ -4,7 +4,7 @@
 
 const WIN_DRIVE_REGEX = /^([a-zA-Z]):[\\/](.*)$/;
 const WSL_MNT_REGEX = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/;
-const WSL_UNC_REGEX = /^\\\\wsl(?:\.localhost|\$)?\\([^\\]+)\\(.*)$/;
+const WSL_UNC_REGEX = /^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(?:\\(.*))?$/i;
 
 /**
  * 将 Windows 宿主路径转换为 WSL 2 POSIX 路径
@@ -14,6 +14,7 @@ const WSL_UNC_REGEX = /^\\\\wsl(?:\.localhost|\$)?\\([^\\]+)\\(.*)$/;
  * - windowsToWsl("D:/work/repo") -> "/mnt/d/work/repo"
  * - windowsToWsl("\\\\wsl.localhost\\Ubuntu\\home\\foo\\code") -> "/home/foo/code"
  * - 已经是 POSIX 绝对路径直接返回
+ * - ⛔ 非 WSL UNC 路径（如 \\\\evil\\share\\x）或相对路径必须 fail-closed 返回空字符串
  *
  * @param {string} winPath
  * @returns {string}
@@ -23,8 +24,8 @@ export function windowsToWsl(winPath) {
   const clean = winPath.trim().replace(/^["']|["']$/g, '');
   if (!clean) return '';
 
-  // 已经是 POSIX 路径
-  if (clean.startsWith('/')) {
+  // 已经是单斜杠开头的 POSIX 绝对路径（排除 // 双斜杠网络路径）
+  if (clean.startsWith('/') && !clean.startsWith('//')) {
     return clean;
   }
 
@@ -36,14 +37,16 @@ export function windowsToWsl(winPath) {
     return rest ? `/mnt/${drive}/${rest}` : `/mnt/${drive}`;
   }
 
-  // UNC 路径 \\wsl.localhost\Ubuntu\home\... 或 \\wsl$\Ubuntu\home\...
+  // WSL 专属 UNC 路径 \\wsl.localhost\Ubuntu\home\... 或 \\wsl$\Ubuntu\home\...
   const matchUnc = clean.match(WSL_UNC_REGEX);
   if (matchUnc) {
-    const sub = matchUnc[2].replace(/\\/g, '/');
+    const sub = matchUnc[2] ? matchUnc[2].replace(/\\/g, '/') : '';
+    if (!sub) return '/';
     return sub.startsWith('/') ? sub : `/${sub}`;
   }
 
-  return clean.replace(/\\/g, '/');
+  // 严禁放行非 WSL UNC 路径（如 \\evil\share）或未知相对路径，一律返回空字符串以 fail-closed
+  return '';
 }
 
 /**

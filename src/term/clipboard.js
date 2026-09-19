@@ -38,7 +38,8 @@ export async function readClipboardFiles({ nativeInvoke } = {}) {
 }
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
-const WIN_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]|^\\\\/;
+const WIN_DRIVE_PATH = /^[A-Za-z]:[\\/]/;
+const WSL_UNC_PATH = /^\\\\wsl(?:\.localhost|\$)\\[^\\]+(?:\\[\s\S]*)?$/i;
 
 /** Format absolute paths for one shell input without decoding or resolving them. */
 export function formatClipboardFiles(paths) {
@@ -47,11 +48,17 @@ export function formatClipboardFiles(paths) {
     if (typeof path !== 'string' || /[\0\r\n]/.test(path)) {
       throw new Error('剪贴板文件路径无法安全粘贴');
     }
-    if (!path.startsWith('/') && !WIN_ABSOLUTE_PATH.test(path)) {
+    // 严格白名单校验：只允许非双斜杠的 POSIX 绝对路径、Windows 盘符路径、及 WSL 专属 UNC 路径
+    const isPosixAbsolute = path.startsWith('/') && !path.startsWith('//');
+    const isWinDrive = WIN_DRIVE_PATH.test(path);
+    const isWslUnc = WSL_UNC_PATH.test(path);
+
+    if (!isPosixAbsolute && !isWinDrive && !isWslUnc) {
       throw new Error('剪贴板文件路径无法安全粘贴');
     }
+
     const posixPath = windowsToWsl(path);
-    if (!posixPath || !posixPath.startsWith('/')) {
+    if (!posixPath || !posixPath.startsWith('/') || posixPath.startsWith('//')) {
       throw new Error('剪贴板文件路径无法安全粘贴');
     }
     if (SAFE_PATH.test(posixPath)) return posixPath;

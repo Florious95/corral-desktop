@@ -49,6 +49,14 @@ test('formatClipboardFiles seamlessly maps Windows drive paths to WSL POSIX path
     formatClipboardFiles(['\\\\wsl.localhost\\Ubuntu\\home\\foo\\main.rs']),
     '/home/foo/main.rs'
   );
+  assert.equal(
+    formatClipboardFiles(['\\\\wsl$\\Ubuntu\\home\\foo\\main.rs']),
+    '/home/foo/main.rs'
+  );
+  assert.equal(
+    formatClipboardFiles(['\\\\WSL.LOCALHOST\\Ubuntu\\home\\foo\\main.rs']),
+    '/home/foo/main.rs'
+  );
 
   // 非法字符防护拦截
   assert.throws(() => formatClipboardFiles(['C:\\Users\\foo\\bad\nname']), /无法安全粘贴/);
@@ -56,4 +64,20 @@ test('formatClipboardFiles seamlessly maps Windows drive paths to WSL POSIX path
 
   // 相对路径依然拒绝
   assert.throws(() => formatClipboardFiles(['relative\\file.txt']), /无法安全粘贴/);
+});
+
+test('windowsToWsl and formatClipboardFiles fail closed on non-WSL UNC paths', () => {
+  // 1. windowsToWsl 必须对非 WSL UNC 路径返回空串
+  assert.equal(windowsToWsl('\\\\evil\\share\\x'), '');
+  assert.equal(windowsToWsl('\\\\192.168.1.100\\c$\\secret.txt'), '');
+  assert.equal(windowsToWsl('\\\\attacker\\payload'), '');
+  assert.equal(windowsToWsl('//evil/share/x'), '');
+  assert.equal(windowsToWsl('relative/path.txt'), '');
+
+  // 2. formatClipboardFiles 必须严格 fail-closed 拒绝非 WSL 网络共享路径
+  assert.throws(() => formatClipboardFiles(['\\\\evil\\share\\x']), /无法安全粘贴/);
+  assert.throws(() => formatClipboardFiles(['\\\\192.168.1.100\\c$\\secret.txt']), /无法安全粘贴/);
+  assert.throws(() => formatClipboardFiles(['\\\\attacker\\payload']), /无法安全粘贴/);
+  assert.throws(() => formatClipboardFiles(['//evil/share/x']), /无法安全粘贴/);
+  assert.throws(() => formatClipboardFiles(['//localhost/share']), /无法安全粘贴/);
 });
