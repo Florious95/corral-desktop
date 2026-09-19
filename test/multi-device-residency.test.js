@@ -9,6 +9,7 @@ import {
 import { Client, ClientState } from '../src/core/client.js';
 import { DeviceManager } from '../src/core/devices.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../src/core/presence.js';
+import { SameWidthController } from '../src/term/sameWidth.js';
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
 test('protocol codec: subscribe encodes client_type and retain_pane_size; presence_update validates strictly', () => {
@@ -334,6 +335,33 @@ test('disconnect broadcast: Client and DeviceManager dispatch disconnected: true
   assert.ok(dmDropEvt);
   assert.equal(dmDropEvt.disconnected, true);
   assert.equal(dmDropEvt.uid, 'dev-drop::pane-drop');
+});
+
+test('gate synchronization on disconnect: updates gate.grid & gate.sent to 44x46 and accepts reconnect snapshot', () => {
+  const gate = new SameWidthController();
+  // 模拟此前处于桌面全尺寸 120x40 接管态
+  gate.settle(40, 120);
+  gate.noteSent(40, 120);
+  assert.equal(gate.acceptSnapshot(), true);
+
+  // 触发断线事件
+  const handleDisconnect = () => {
+    gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
+    gate.noteSent(MOBILE_GRID.rows, MOBILE_GRID.cols);
+  };
+  handleDisconnect();
+
+  // 核心断言：断线后 gate 必须立即同步更新为 44x46
+  assert.equal(gate.grid.rows, 44);
+  assert.equal(gate.grid.cols, 46);
+  assert.equal(gate.sent.rows, 44);
+  assert.equal(gate.sent.cols, 46);
+
+  // 重连后服务端下发 44x46 快照
+  const reconnectSnapshotAccepted = gate.acceptSnapshot();
+  assert.equal(reconnectSnapshotAccepted, true, 'Reconnect 44x46 snapshot must be accepted by gate without rejection');
+  assert.equal(gate.awaitingSnapshot, false);
+  assert.equal(gate.acceptDelta(), true);
 });
 
 test('R2 & R4 (P1): presence false does not loop (deduped takeover) and reflow respects active mobile presence', () => {

@@ -303,6 +303,8 @@ export default function TerminalPane({
           } finally {
             isManualReflowing = false;
           }
+          gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
+          gate.noteSent(MOBILE_GRID.rows, MOBILE_GRID.cols);
         }
         return;
       }
