@@ -769,8 +769,9 @@ export const nativeCapabilities = {
       if (testEngineOverride?.wsl?.checkEnvironment) {
         return testEngineOverride.wsl.checkEnvironment();
       }
+      const platform = detectPlatform();
       const env = detectNativeEnvironment();
-      if (env === 'tauri') {
+      if (platform === 'windows' && env === 'tauri') {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           const status = await invoke('check_wsl_environment');
@@ -802,8 +803,9 @@ export const nativeCapabilities = {
       if (testEngineOverride?.wsl?.startService) {
         return testEngineOverride.wsl.startService(serviceName);
       }
+      const platform = detectPlatform();
       const env = detectNativeEnvironment();
-      if (env === 'tauri') {
+      if (platform === 'windows' && env === 'tauri') {
         const { invoke } = await import('@tauri-apps/api/core');
         return invoke('start_wsl_service', {
           service_cmd: serviceName,

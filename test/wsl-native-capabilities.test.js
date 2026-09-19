@@ -62,6 +62,41 @@ test('nativeCapabilities.wsl.startService rejects with unsupported_platform on n
   );
 });
 
+test('nativeCapabilities.wsl enforces Platform Guard: strictly rejects in Tauri environment on macOS platform', async () => {
+  resetNativeEngineForTests();
+  const prevWindow = globalThis.window;
+
+  try {
+    // 模拟 Tauri 容器环境存在，但宿主平台为 macOS
+    globalThis.window = { __TAURI_INTERNALS__: {} };
+    setNativeEngineForTests({ platform: 'macos' });
+
+    // 1. startService 必须被前置守卫拦截，拒绝执行并抛出 unsupported_platform
+    await assert.rejects(
+      nativeCapabilities.wsl.startService('agentmirrord'),
+      (err) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /unsupported_platform/);
+        assert.equal(err.code, 'unsupported_platform');
+        return true;
+      }
+    );
+
+    // 2. checkEnvironment 必须直接返回安全默认结构，不发起底层调用
+    const status = await nativeCapabilities.wsl.checkEnvironment();
+    assert.equal(status.wsl_installed, false);
+    assert.equal(status.ubuntu_installed, false);
+    assert.equal(status.service_running, false);
+  } finally {
+    if (prevWindow !== undefined) {
+      globalThis.window = prevWindow;
+    } else {
+      delete globalThis.window;
+    }
+    resetNativeEngineForTests();
+  }
+});
+
 test('nativeCapabilities.wsl.startService forwards serviceName via testEngineOverride', async () => {
   resetNativeEngineForTests();
   let requestedService = null;
