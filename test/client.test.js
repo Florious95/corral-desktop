@@ -206,7 +206,7 @@ test('subscribe: sends subscribe frame and replays on reconnect', async () => {
   assert.equal(client.subscribe('s1', 40, 100), true);
   const sub = decodeControl(ws.sent[ws.sent.length - 1]);
   assert.equal(sub.type, 'subscribe');
-  assert.deepEqual(sub.payload, { ref: 's1', rows: 40, cols: 100 });
+  assert.deepEqual(sub.payload, { ref: 's1', rows: 40, cols: 100, client_type: 'desktop', retain_pane_size: true });
 
   // Reconnect: drop + reopen; READY replays the active subscription. The
   // reconnect fires on a timer (backoff base 5ms) so wait for the socket.
@@ -223,7 +223,7 @@ test('subscribe: sends subscribe frame and replays on reconnect', async () => {
   openAndAuth(client, ws2);
   const replayed = ws2.sent.filter((m) => decodeControl(m).type === 'subscribe');
   assert.equal(replayed.length, 1);
-  assert.deepEqual(decodeControl(replayed[0]).payload, { ref: 's1', rows: 40, cols: 100 });
+  assert.deepEqual(decodeControl(replayed[0]).payload, { ref: 's1', rows: 44, cols: 46, client_type: 'desktop', retain_pane_size: true });
 });
 
 test('binary frames route to onBinary; scrollback header preserved', () => {

@@ -114,7 +114,7 @@ test('subscribe on the wire has no reason field; log has reason', () => {
   assert.equal(client.subscribe('s1', 47, 157, 'settle'), true);
   const frames = sockets[0].sent.map((m) => decodeControl(m)).filter((f) => f.type === 'subscribe');
   assert.ok(frames.length >= 1);
-  assert.deepEqual(frames.at(-1).payload, { ref: 's1', rows: 47, cols: 157 });
+  assert.deepEqual(frames.at(-1).payload, { ref: 's1', rows: 47, cols: 157, client_type: 'desktop', retain_pane_size: true });
   assert.equal('reason' in frames.at(-1).payload, false);
   const log = dumpGeomTrace().filter((e) => e.event === 'subscribe' && e.ok === true).at(-1);
   assert.equal(log.reason, 'settle');

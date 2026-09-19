@@ -290,30 +290,62 @@ export default function TerminalPane({
       view.setFixedGrid(MOBILE_GRID, { sync: true });
     }
 
-    // 监听多端 presence 广播：动静双模流转
+    // 监听多端 presence 广播：动静双模流转，消除死循环与重复发送 (R2)
     const offPresence = clientRef.current?.onPresence?.((evt) => {
+      // 若断开连接，立即将模式降级为 UNKNOWN 并锁定 46x44 (R3)
+      if (evt.disconnected) {
+        currentMode = PRESENCE_MODE.UNKNOWN;
+        setPresenceMode(PRESENCE_MODE.UNKNOWN);
+        if (viewRef.current) {
+          isManualReflowing = true;
+          try {
+            viewRef.current.setFixedGrid(MOBILE_GRID, { sync: true });
+          } finally {
+            isManualReflowing = false;
+          }
+        }
+        return;
+      }
+
       if (evt.hasMobile) {
         // 手机在线/重回 -> 避让模式 (avoidance)：保持 46x44 物理底锚，绝不发桌面 resize
-        currentMode = PRESENCE_MODE.AVOIDANCE;
-        setPresenceMode(PRESENCE_MODE.AVOIDANCE);
-        if (viewRef.current) {
-          viewRef.current.setFixedGrid(MOBILE_GRID, { sync: true });
-          if (gate.grid?.rows !== MOBILE_GRID.rows || gate.grid?.cols !== MOBILE_GRID.cols) {
-            gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
-            sendIfNeeded({ type: 'subscribe', rows: MOBILE_GRID.rows, cols: MOBILE_GRID.cols }, 'presence_avoidance', { force: true });
+        if (currentMode !== PRESENCE_MODE.AVOIDANCE || gate.grid?.rows !== MOBILE_GRID.rows || gate.grid?.cols !== MOBILE_GRID.cols) {
+          currentMode = PRESENCE_MODE.AVOIDANCE;
+          setPresenceMode(PRESENCE_MODE.AVOIDANCE);
+          if (viewRef.current) {
+            isManualReflowing = true;
+            try {
+              viewRef.current.setFixedGrid(MOBILE_GRID, { sync: true });
+            } finally {
+              isManualReflowing = false;
+            }
+            if (gate.grid?.rows !== MOBILE_GRID.rows || gate.grid?.cols !== MOBILE_GRID.cols) {
+              gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
+              sendIfNeeded({ type: 'subscribe', rows: MOBILE_GRID.rows, cols: MOBILE_GRID.cols }, 'presence_avoidance', { force: true });
+              firstSub = false;
+            }
           }
         }
       } else {
-        // 手机离开/切后台 -> 接管模式 (takeover)：平滑铺满桌面视口
-        currentMode = PRESENCE_MODE.TAKEOVER;
-        setPresenceMode(PRESENCE_MODE.TAKEOVER);
-        if (viewRef.current && hostRef.current) {
-          viewRef.current.clearFixedGrid();
-          viewRef.current.fit({ immediate: true, sync: true });
-          const fit = viewRef.current.lastFit;
-          if (fit?.derived_rows && fit?.derived_cols) {
-            gate.settle(fit.derived_rows, fit.derived_cols);
-            sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'takeover', { force: true });
+        // 手机离开 -> 仅在初次从避让/未知切入接管态（currentMode !== TAKEOVER）时，才执行一次接管！
+        // R2: 杜绝死循环！若已经处于 TAKEOVER，重复收到 false 绝对不重复发订阅
+        if (currentMode !== PRESENCE_MODE.TAKEOVER) {
+          currentMode = PRESENCE_MODE.TAKEOVER;
+          setPresenceMode(PRESENCE_MODE.TAKEOVER);
+          if (viewRef.current && hostRef.current) {
+            isManualReflowing = true;
+            try {
+              viewRef.current.clearFixedGrid();
+              viewRef.current.fit({ immediate: true, sync: true });
+            } finally {
+              isManualReflowing = false;
+            }
+            const fit = viewRef.current.lastFit;
+            if (fit?.derived_rows && fit?.derived_cols) {
+              gate.settle(fit.derived_rows, fit.derived_cols);
+              sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'takeover', { force: true });
+              firstSub = false;
+            }
           }
         }
       }
@@ -337,23 +369,34 @@ export default function TerminalPane({
     const handleReflow = (ev) => {
       const targetUid = ev?.detail?.uid;
       if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
-      if (viewRef.current && hostRef.current) {
-        currentMode = PRESENCE_MODE.TAKEOVER;
-        setPresenceMode(PRESENCE_MODE.TAKEOVER);
+      if (!viewRef.current || !hostRef.current) return;
+
+      // R4 (P1): 手动“适应当前窗口”必须严格遵守当前 presence：
+      // 当手机在线 (has_mobile: true) 或状态未知 (unknown) 时，严禁下发桌面大尺寸抢占！
+      // 只允许在当前 46x44 尺寸上发一次强制 subscribe 恢复快照与对齐
+      if (currentMode === PRESENCE_MODE.AVOIDANCE || currentMode === PRESENCE_MODE.UNKNOWN) {
+        gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
+        sendIfNeeded({ type: 'subscribe', rows: MOBILE_GRID.rows, cols: MOBILE_GRID.cols }, 'reflow_mobile_recover', { force: true });
+        firstSub = false;
+        return;
+      }
+
+      // 仅当手机离开 (takeover) 时，才允许测量桌面尺寸并发送铺满桌面视口
+      currentMode = PRESENCE_MODE.TAKEOVER;
+      setPresenceMode(PRESENCE_MODE.TAKEOVER);
+      isManualReflowing = true;
+      try {
         viewRef.current.clearFixedGrid();
-        isManualReflowing = true;
-        try {
-          viewRef.current.fit({ immediate: true, sync: true });
-        } finally {
-          isManualReflowing = false;
-        }
-        const fit = viewRef.current.lastFit;
-        if (fit && fit.derived_rows && fit.derived_cols) {
-          // 原子同步：确保 gate.grid 在发送前与待发送尺寸严格一致，杜绝快照早到拒收死锁 (F1)
-          gate.settle(fit.derived_rows, fit.derived_cols);
-          sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'reflow', { force: true });
-          firstSub = false;
-        }
+        viewRef.current.fit({ immediate: true, sync: true });
+      } finally {
+        isManualReflowing = false;
+      }
+      const fit = viewRef.current.lastFit;
+      if (fit && fit.derived_rows && fit.derived_cols) {
+        // 原子同步：确保 gate.grid 在发送前与待发送尺寸严格一致，杜绝快照早到拒收死锁 (F1)
+        gate.settle(fit.derived_rows, fit.derived_cols);
+        sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'reflow', { force: true });
+        firstSub = false;
       }
     };
     if (typeof window !== 'undefined') {

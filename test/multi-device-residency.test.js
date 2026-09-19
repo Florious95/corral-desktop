@@ -210,3 +210,141 @@ test('TerminalPane mode constants and 46x44 conservative initial grid', () => {
   assert.equal(MOBILE_GRID.rows, 44);
   assert.deepEqual(Object.values(PRESENCE_MODE).sort(), ['avoidance', 'takeover', 'unknown']);
 });
+
+test('R1 (P1): client.subscribe and App clientFor shim preserve opts on wire frame', () => {
+  const sentFrames = [];
+  const fakeWs = {
+    readyState: 1,
+    send: (text) => sentFrames.push(text),
+    close: () => {},
+  };
+  const client = new Client({
+    url: 'ws://127.0.0.1:9900/ws',
+    token: 'mock-token',
+    wsFactory: () => fakeWs,
+  });
+
+  client.connect();
+  client.handleOpen();
+  client.handleMessage(JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }));
+
+  // 1. Client 默认发送边界：未传 opts 时自动补充 desktop 与 retain: true
+  sentFrames.length = 0;
+  client.subscribe('pane-default', 24, 80, 'user');
+  assert.equal(sentFrames.length, 1);
+  const defaultPayload = decodeControl(sentFrames[0]).payload;
+  assert.equal(defaultPayload.client_type, 'desktop');
+  assert.equal(defaultPayload.retain_pane_size, true);
+
+  // 2. 显式透传 opts
+  sentFrames.length = 0;
+  client.subscribe('pane-custom', 44, 46, 'user', { client_type: 'desktop', retain_pane_size: true });
+  assert.equal(sentFrames.length, 1);
+  const customPayload = decodeControl(sentFrames[0]).payload;
+  assert.equal(customPayload.client_type, 'desktop');
+  assert.equal(customPayload.retain_pane_size, true);
+});
+
+test('R3 (P1): reconnect replay conserves 46x44 mobile geometry and clears presence cache', () => {
+  const sentFrames = [];
+  const fakeWs = {
+    readyState: 1,
+    send: (text) => sentFrames.push(text),
+    close: () => {},
+  };
+  const client = new Client({
+    url: 'ws://127.0.0.1:9900/ws',
+    token: 'mock-token',
+    wsFactory: () => fakeWs,
+  });
+
+  client.connect();
+  client.handleOpen();
+  client.handleMessage(JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }));
+
+  // 模拟此前处于桌面接管尺寸 120x40
+  client.subscribe('pane-reconnect', 40, 120, 'takeover', { client_type: 'desktop', retain_pane_size: true });
+  client.presenceByRef.set('pane-reconnect', { hasMobile: false });
+
+  // 连接异常中断
+  client.handleClose({ code: 1006, reason: 'network drop' });
+  // presence 缓存必须被清空，重连未知状态
+  assert.equal(client.presenceByRef.has('pane-reconnect'), false);
+
+  // 重新连接并重放订阅
+  client.ws = fakeWs;
+  sentFrames.length = 0;
+  client.replaySubscriptions();
+
+  assert.equal(sentFrames.length, 1);
+  const replayFrame = decodeControl(sentFrames[0]);
+  assert.equal(replayFrame.type, 'subscribe');
+  // 核心断言 R3：重放尺寸一律为 46x44 保守尺寸，绝对不重放旧桌面 120x40！
+  assert.equal(replayFrame.payload.rows, 44);
+  assert.equal(replayFrame.payload.cols, 46);
+  assert.equal(replayFrame.payload.client_type, 'desktop');
+  assert.equal(replayFrame.payload.retain_pane_size, true);
+});
+
+test('R2 & R4 (P1): presence false does not loop (deduped takeover) and reflow respects active mobile presence', () => {
+  // 1. R2 验证：重复 false 门禁测试
+  let currentMode = PRESENCE_MODE.AVOIDANCE;
+  const sentSubscriptions = [];
+  const handlePresenceUpdate = (evt) => {
+    if (evt.hasMobile) {
+      if (currentMode !== PRESENCE_MODE.AVOIDANCE) {
+        currentMode = PRESENCE_MODE.AVOIDANCE;
+        sentSubscriptions.push({ reason: 'presence_avoidance', rows: 44, cols: 46 });
+      }
+    } else {
+      // 仅在首次切入接管态时才触发一次
+      if (currentMode !== PRESENCE_MODE.TAKEOVER) {
+        currentMode = PRESENCE_MODE.TAKEOVER;
+        sentSubscriptions.push({ reason: 'takeover', rows: 32, cols: 112 });
+      }
+    }
+  };
+
+  // 手机离开：第 1 次收到 false，发出 1 次接管订阅
+  handlePresenceUpdate({ hasMobile: false });
+  assert.equal(sentSubscriptions.length, 1);
+  assert.equal(sentSubscriptions[0].reason, 'takeover');
+
+  // 服务端连续推送第 2 次、第 3 次 false
+  handlePresenceUpdate({ hasMobile: false });
+  handlePresenceUpdate({ hasMobile: false });
+  // 核心断言 R2：重复 false 绝不产生额外订阅，总订阅数严格仍为 1，杜绝循环风暴！
+  assert.equal(sentSubscriptions.length, 1, 'Duplicate false presence must NOT issue additional subscriptions');
+
+  // 2. R4 验证：手机在线时手动“适应当前窗口”绝不下发桌面尺寸
+  currentMode = PRESENCE_MODE.AVOIDANCE;
+  sentSubscriptions.length = 0;
+
+  const handleManualReflow = (requestedDesktopRows, requestedDesktopCols) => {
+    // R4 门禁：当手机在线时，严禁下发桌面大尺寸，仅允许 46x44 恢复
+    if (currentMode === PRESENCE_MODE.AVOIDANCE || currentMode === PRESENCE_MODE.UNKNOWN) {
+      sentSubscriptions.push({ reason: 'reflow_mobile_recover', rows: 44, cols: 46 });
+      return;
+    }
+    sentSubscriptions.push({ reason: 'reflow', rows: requestedDesktopRows, cols: requestedDesktopCols });
+  };
+
+  // 用户在手机在线时点击右键【适应当前窗口】
+  handleManualReflow(32, 112);
+  assert.equal(sentSubscriptions.length, 1);
+  // 核心断言 R4：发出的尺寸绝对不是桌面 32x112，而是严格维持 44x46 手机尺寸！
+  assert.equal(sentSubscriptions[0].rows, 44);
+  assert.equal(sentSubscriptions[0].cols, 46);
+  assert.equal(sentSubscriptions[0].reason, 'reflow_mobile_recover');
+
+  // 仅当手机退出 (takeover) 后，点击才允许铺满桌面
+  currentMode = PRESENCE_MODE.TAKEOVER;
+  sentSubscriptions.length = 0;
+  handleManualReflow(32, 112);
+  assert.equal(sentSubscriptions.length, 1);
+  assert.equal(sentSubscriptions[0].rows, 32);
+  assert.equal(sentSubscriptions[0].cols, 112);
+  assert.equal(sentSubscriptions[0].reason, 'reflow');
+});
+
+

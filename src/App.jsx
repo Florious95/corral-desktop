@@ -674,7 +674,7 @@ export default function App({ seedDevices } = {}) {
       const uid = agent.key;
       shim = {
         get isReady() { return dm.isReady(agent.deviceId) },
-        subscribe: (_ref, rows, cols, reason) => dm.subscribe(uid, rows, cols, reason),
+        subscribe: (_ref, rows, cols, reason, opts) => dm.subscribe(uid, rows, cols, reason, opts),
         unsubscribe: () => dm.unsubscribe(uid),
         resize: (_ref, rows, cols, reason) => dm.resize(uid, rows, cols, reason),
         scrollWheel: (_ref, delta) => dm.scrollWheel(uid, delta),

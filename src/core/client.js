@@ -39,6 +39,11 @@ export class Client extends CoreClient {
     }
     this.level2Workspace = null;
     this.presenceByRef = new Map();
+    const handleClose = this.handleClose;
+    this.handleClose = (event) => {
+      this.presenceByRef.clear();
+      handleClose.call(this, event);
+    };
     const onBinary = this.onBinary;
     this.onBinary = (frame) => {
       const session = this.session(frame.ref);
@@ -66,17 +71,12 @@ export class Client extends CoreClient {
   subscribe(ref, rows, cols, reason = 'user', opts) {
     bookkeep(ref, rows, cols);
     const ready = this.isReady;
-    const client_type = opts?.client_type;
-    const retain_pane_size = opts?.retain_pane_size;
-    const dims = { rows, cols };
-    if (client_type !== undefined) dims.client_type = client_type;
-    if (retain_pane_size !== undefined) dims.retain_pane_size = retain_pane_size;
+    const client_type = opts?.client_type || 'desktop';
+    const retain_pane_size = opts?.retain_pane_size !== undefined ? opts.retain_pane_size : true;
+    const dims = { rows, cols, client_type, retain_pane_size };
     this.activeSubscriptions.set(ref, dims);
 
-    const payload = { ref, rows, cols };
-    if (client_type !== undefined) payload.client_type = client_type;
-    if (retain_pane_size !== undefined) payload.retain_pane_size = retain_pane_size;
-
+    const payload = { ref, rows, cols, client_type, retain_pane_size };
     const ok = !ready ? true : this.sendControl('subscribe', payload);
     this.traceGeometry('subscribe', { ref, rows, cols }, reason, ready && ok, ready);
     return ok;
@@ -103,10 +103,16 @@ export class Client extends CoreClient {
     this.tracingReplay = true;
     try {
       for (const [ref, dims] of this.activeSubscriptions) {
-        const payload = { ref, rows: dims.rows, cols: dims.cols };
-        if (dims.client_type !== undefined) payload.client_type = dims.client_type;
-        if (dims.retain_pane_size !== undefined) payload.retain_pane_size = dims.retain_pane_size;
-        this.sendControl('subscribe', payload);
+        // R3: 自动重连重放一律以 46x44 保守尺寸发起，绝不重放旧桌面 120x40 冲毁手机
+        dims.rows = 44;
+        dims.cols = 46;
+        this.sendControl('subscribe', {
+          ref,
+          rows: 44,
+          cols: 46,
+          client_type: dims.client_type || 'desktop',
+          retain_pane_size: dims.retain_pane_size !== undefined ? dims.retain_pane_size : true,
+        });
       }
       if (this.overlaySocket) {
         this.sendControl('overlay_subscribe', { socket: this.overlaySocket });

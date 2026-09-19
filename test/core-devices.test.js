@@ -315,7 +315,7 @@ test('socket drop → re-auth, subscription and level2 replay', async () => {
     await waitFor(() => t.daemon.count('level2_subscribe') > before.lvl, 'level2 replay');
 
     const replay = t.daemon.received.filter((f) => f.type === 'subscribe').at(-1);
-    assert.deepEqual(replay.payload, { ref: REFS.a1, rows: 40, cols: 100 }, 'replay keeps the original geometry');
+    assert.deepEqual(replay.payload, { ref: REFS.a1, rows: 44, cols: 46, client_type: 'desktop', retain_pane_size: true }, 'replay uses conservative mobile geometry');
     await waitFor(() => t.dm.isReady(t.id), 'ready again');
     await waitFor(() => t.dm.workspaces.length === 2, 'listing after reconnect');
   } finally { await t.teardown(); }
