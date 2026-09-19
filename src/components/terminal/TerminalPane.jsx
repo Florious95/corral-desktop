@@ -279,6 +279,29 @@ export default function TerminalPane({
     const attach = subRef.current || (c && typeof c.onBinary === 'function' ? (fn) => c.onBinary(fn) : null);
     const off = attach ? attach(handleBinary) : null;
 
+    let takeoverTimer = null;
+    const triggerTakeover = () => {
+      if (currentMode !== PRESENCE_MODE.TAKEOVER) {
+        currentMode = PRESENCE_MODE.TAKEOVER;
+        setPresenceMode(PRESENCE_MODE.TAKEOVER);
+        if (viewRef.current && hostRef.current) {
+          isManualReflowing = true;
+          try {
+            viewRef.current.clearFixedGrid();
+            viewRef.current.fit({ immediate: true, sync: true });
+          } finally {
+            isManualReflowing = false;
+          }
+          const fit = viewRef.current.lastFit;
+          if (fit?.derived_rows && fit?.derived_cols) {
+            gate.settle(fit.derived_rows, fit.derived_cols);
+            sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'takeover', { force: true });
+            firstSub = false;
+          }
+        }
+      }
+    };
+
     // 保守握手初订：若 presence 未知或手机在线，以 46x44 手机尺寸初订，绝不提前以桌面大尺寸挤掉手机
     const initialPresence = clientRef.current?.getPresence?.();
     if (initialPresence && initialPresence.hasMobile === false) {
@@ -288,10 +311,22 @@ export default function TerminalPane({
       currentMode = initialPresence?.hasMobile ? PRESENCE_MODE.AVOIDANCE : PRESENCE_MODE.UNKNOWN;
       setPresenceMode(currentMode);
       view.setFixedGrid(MOBILE_GRID, { sync: true });
+      // 若当前为 UNKNOWN 态，开启 500ms 单桌面端探测超时：若超时未收到移动端在线信号，自动晋级 TAKEOVER 铺满全屏
+      if (currentMode === PRESENCE_MODE.UNKNOWN) {
+        takeoverTimer = setTimeout(() => {
+          if (currentMode === PRESENCE_MODE.UNKNOWN) {
+            triggerTakeover();
+          }
+        }, 500);
+      }
     }
 
     // 监听多端 presence 广播：动静双模流转，消除死循环与重复发送 (R2)
     const offPresence = clientRef.current?.onPresence?.((evt) => {
+      if (takeoverTimer) {
+        clearTimeout(takeoverTimer);
+        takeoverTimer = null;
+      }
       // 若断开连接，立即将模式降级为 UNKNOWN 并锁定 46x44 (R3)
       if (evt.disconnected) {
         currentMode = PRESENCE_MODE.UNKNOWN;
@@ -331,25 +366,7 @@ export default function TerminalPane({
       } else {
         // 手机离开 -> 仅在初次从避让/未知切入接管态（currentMode !== TAKEOVER）时，才执行一次接管！
         // R2: 杜绝死循环！若已经处于 TAKEOVER，重复收到 false 绝对不重复发订阅
-        if (currentMode !== PRESENCE_MODE.TAKEOVER) {
-          currentMode = PRESENCE_MODE.TAKEOVER;
-          setPresenceMode(PRESENCE_MODE.TAKEOVER);
-          if (viewRef.current && hostRef.current) {
-            isManualReflowing = true;
-            try {
-              viewRef.current.clearFixedGrid();
-              viewRef.current.fit({ immediate: true, sync: true });
-            } finally {
-              isManualReflowing = false;
-            }
-            const fit = viewRef.current.lastFit;
-            if (fit?.derived_rows && fit?.derived_cols) {
-              gate.settle(fit.derived_rows, fit.derived_cols);
-              sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'takeover', { force: true });
-              firstSub = false;
-            }
-          }
-        }
+        triggerTakeover();
       }
     });
 
@@ -376,7 +393,11 @@ export default function TerminalPane({
       // R4 (P1): 手动“适应当前窗口”必须严格遵守当前 presence：
       // 当手机在线 (has_mobile: true) 或状态未知 (unknown) 时，严禁下发桌面大尺寸抢占！
       // 只允许在当前 46x44 尺寸上发一次强制 subscribe 恢复快照与对齐
-      if (currentMode === PRESENCE_MODE.AVOIDANCE || currentMode === PRESENCE_MODE.UNKNOWN) {
+      if (takeoverTimer) {
+        clearTimeout(takeoverTimer);
+        takeoverTimer = null;
+      }
+      if (currentMode === PRESENCE_MODE.AVOIDANCE) {
         gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
         sendIfNeeded({ type: 'subscribe', rows: MOBILE_GRID.rows, cols: MOBILE_GRID.cols }, 'reflow_mobile_recover', { force: true });
         firstSub = false;
@@ -406,6 +427,10 @@ export default function TerminalPane({
     }
 
     return () => {
+      if (takeoverTimer) {
+        clearTimeout(takeoverTimer);
+        takeoverTimer = null;
+      }
       if (typeof window !== 'undefined') {
         window.removeEventListener('terminal:reflow', handleReflow);
       }
@@ -436,7 +461,7 @@ export default function TerminalPane({
 
   return (
     <div className="terminalpane" data-presence-mode={presenceMode}>
-      <div className="terminalpane-body">
+      <div className={`terminalpane-body${presenceMode === PRESENCE_MODE.TAKEOVER ? ' is-takeover' : ''}`}>
         {history && (
           <div className="terminalpane-history">
             <div className="terminalpane-history-head">
@@ -470,7 +495,11 @@ export default function TerminalPane({
           </div>
         )}
 
-        <div className="terminalpane-host" ref={hostRef} data-alignment="bottom-left" />
+        <div
+          className={`terminalpane-host${presenceMode === PRESENCE_MODE.TAKEOVER ? ' is-takeover' : ''}`}
+          ref={hostRef}
+          data-alignment="bottom-left"
+        />
 
         {!ready && (
           <div className="terminalpane-placeholder">

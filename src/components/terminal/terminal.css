@@ -118,6 +118,12 @@
   background: var(--bg);
 }
 
+/* 接管模式下消除内缩边距，确保 xterm 画布 100% 贴合窗格边缘全屏展示 */
+.terminalpane[data-presence-mode="takeover"] .terminalpane-body,
+.terminalpane-body.is-takeover {
+  padding: 0;
+}
+
 .terminalpane-host {
   flex: 1;
   min-height: 0;
@@ -134,6 +140,15 @@
   width: max-content;
   max-width: none;
   max-height: none;
+}
+
+/* 接管模式（Takeover）：单桌面端全屏自适应撑满整个视口，解除左下角 414px 物理底锚 */
+.terminalpane-host.is-takeover > .xterm {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 /* xterm 自带的视口底色是 #000（为 macOS 滚动条不透明准备的），亮色主题下要盖掉 */
