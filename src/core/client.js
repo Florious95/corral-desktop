@@ -41,7 +41,17 @@ export class Client extends CoreClient {
     this.presenceByRef = new Map();
     const handleClose = this.handleClose;
     this.handleClose = (event) => {
+      const activeRefs = new Set([...this.activeSubscriptions.keys(), ...this.presenceByRef.keys()]);
       this.presenceByRef.clear();
+      for (const ref of activeRefs) {
+        this.onFrame('presence_update', {
+          ref,
+          has_mobile: false,
+          mobile_count: 0,
+          desktop_count: 0,
+          disconnected: true,
+        });
+      }
       handleClose.call(this, event);
     };
     const onBinary = this.onBinary;
@@ -57,12 +67,16 @@ export class Client extends CoreClient {
     const onFrame = this.onFrame;
     this.onFrame = (type, payload) => {
       if (type === 'presence_update' && payload?.ref) {
-        this.presenceByRef.set(payload.ref, {
-          hasMobile: payload.has_mobile === true,
-          mobileCount: payload.mobile_count ?? 0,
-          desktopCount: payload.desktop_count ?? 0,
-          updatedAt: Date.now(),
-        });
+        if (payload.disconnected) {
+          this.presenceByRef.delete(payload.ref);
+        } else {
+          this.presenceByRef.set(payload.ref, {
+            hasMobile: payload.has_mobile === true,
+            mobileCount: payload.mobile_count ?? 0,
+            desktopCount: payload.desktop_count ?? 0,
+            updatedAt: Date.now(),
+          });
+        }
       }
       onFrame(type, payload);
     };

@@ -286,6 +286,56 @@ test('R3 (P1): reconnect replay conserves 46x44 mobile geometry and clears prese
   assert.equal(replayFrame.payload.retain_pane_size, true);
 });
 
+test('disconnect broadcast: Client and DeviceManager dispatch disconnected: true on connection drop', () => {
+  const events = [];
+  const fakeWs = {
+    readyState: 1,
+    send: () => {},
+    close: () => {},
+  };
+  const client = new Client({
+    url: 'ws://127.0.0.1:9900/ws',
+    token: 'mock-token',
+    wsFactory: () => fakeWs,
+    onFrame: (type, payload) => {
+      if (type === 'presence_update') events.push(payload);
+    },
+  });
+
+  client.connect();
+  client.handleOpen();
+  client.handleMessage(JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }));
+  client.subscribe('pane-drop', 44, 46);
+  client.presenceByRef.set('pane-drop', { hasMobile: false });
+
+  events.length = 0;
+  // 模拟 /drop 断线
+  client.handleClose({ code: 1006, reason: 'dropped' });
+
+  // 核心断言：断线时必定向活跃会话广播 disconnected: true
+  assert.ok(events.length >= 1, 'Client must broadcast presence on disconnect');
+  const dropEvt = events.find((e) => e.ref === 'pane-drop');
+  assert.ok(dropEvt);
+  assert.equal(dropEvt.disconnected, true, 'disconnected flag must be true');
+  assert.equal(dropEvt.has_mobile, false);
+
+  // 验证 DeviceManager 窄路由分发
+  const dmEvents = [];
+  const dm = new DeviceManager({
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    onPresenceUpdate: (e) => dmEvents.push(e),
+  });
+  dm._devices = [{ id: 'dev-drop', checked: true, name: 'Mac' }];
+  dm._clients.set('dev-drop', client);
+
+  dmEvents.length = 0;
+  dm._onState('dev-drop', 'reconnecting');
+  const dmDropEvt = dmEvents.find((e) => e.ref === 'pane-drop');
+  assert.ok(dmDropEvt);
+  assert.equal(dmDropEvt.disconnected, true);
+  assert.equal(dmDropEvt.uid, 'dev-drop::pane-drop');
+});
+
 test('R2 & R4 (P1): presence false does not loop (deduped takeover) and reflow respects active mobile presence', () => {
   // 1. R2 验证：重复 false 门禁测试
   let currentMode = PRESENCE_MODE.AVOIDANCE;
