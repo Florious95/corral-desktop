@@ -18,31 +18,87 @@ struct UbuntuDistribution {
     running: bool,
 }
 
-/// Decode the output of `wsl.exe -l -v` and locate an Ubuntu distribution.
+#[cfg(any(windows, test))]
+impl UbuntuDistribution {
+    fn is_ubuntu(&self) -> bool {
+        self.name.eq_ignore_ascii_case("ubuntu")
+            || self.name.to_ascii_lowercase().starts_with("ubuntu-")
+    }
+}
+
+/// Decode the output of `wsl.exe -l -v` without accepting arbitrary error text.
+#[cfg(any(windows, test))]
+fn decode_wsl_output(output: &[u8]) -> String {
+    let nul_high_bytes = output.chunks_exact(2).filter(|pair| pair[1] == 0).count();
+    let utf16le = output.starts_with(&[0xff, 0xfe])
+        || (output.len() >= 4 && nul_high_bytes >= output.len() / 4);
+    if utf16le {
+        let offset = usize::from(output.starts_with(&[0xff, 0xfe])) * 2;
+        let units: Vec<u16> = output[offset..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        return String::from_utf16_lossy(&units);
+    }
+    String::from_utf8_lossy(output)
+        .trim_start_matches('\u{feff}')
+        .to_string()
+}
+
+/// Parse the strict `wsl.exe -l -v` table shape.
 ///
-/// Older WSL builds emit this table as UTF-16LE even when stdout is captured by
-/// a process. Removing the interleaved NUL bytes handles its ASCII table output
-/// while keeping the parser independent from a Windows-only decoding crate.
+/// Every non-empty line after the header must be a three-column record, or a
+/// four-column record with the leading default `*`. This deliberately rejects
+/// warnings, error text, missing state/version columns, and WSL 1 records.
+#[cfg(any(windows, test))]
+fn parse_wsl_table(output: &[u8]) -> Option<Vec<UbuntuDistribution>> {
+    let mut distributions = Vec::new();
+    let mut saw_header = false;
+    for line in decode_wsl_output(output).lines() {
+        let fields: Vec<&str> = line
+            .trim()
+            .trim_start_matches('\u{feff}')
+            .split_whitespace()
+            .collect();
+        if fields.is_empty() {
+            continue;
+        }
+        if fields.len() == 3
+            && fields[0] == "NAME"
+            && fields[1] == "STATE"
+            && fields[2] == "VERSION"
+        {
+            if saw_header {
+                return None;
+            }
+            saw_header = true;
+            continue;
+        }
+        if !saw_header {
+            return None;
+        }
+
+        let (name, state, version) = match fields.as_slice() {
+            ["*", name, state, version] => (*name, *state, *version),
+            [name, state, version] => (*name, *state, *version),
+            _ => return None,
+        };
+        if name.is_empty() || !matches!(state, "Running" | "Stopped") || version != "2" {
+            return None;
+        }
+        distributions.push(UbuntuDistribution {
+            name: name.to_string(),
+            running: state == "Running",
+        });
+    }
+    (saw_header && !distributions.is_empty()).then_some(distributions)
+}
+
 #[cfg(any(windows, test))]
 fn find_ubuntu_distribution(output: &[u8]) -> Option<UbuntuDistribution> {
-    let text: String = String::from_utf8_lossy(output)
-        .chars()
-        .filter(|character| *character != '\0')
-        .collect();
-
-    text.lines().find_map(|line| {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        let name = fields.iter().find(|field| {
-            field.eq_ignore_ascii_case(&"ubuntu")
-                || field.to_ascii_lowercase().starts_with("ubuntu-")
-        })?;
-        Some(UbuntuDistribution {
-            name: (*name).to_string(),
-            running: fields
-                .iter()
-                .any(|field| field.eq_ignore_ascii_case("running")),
-        })
-    })
+    parse_wsl_table(output)?
+        .into_iter()
+        .find(UbuntuDistribution::is_ubuntu)
 }
 
 #[cfg(any(windows, test))]
@@ -63,19 +119,17 @@ fn run_wsl(args: &[&str]) -> Result<std::process::Output, String> {
 
 #[cfg(windows)]
 fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
-    let status_output = run_wsl(&["--status"]);
     let list_output = match run_wsl(&["-l", "-v"]) {
-        Ok(output) => output,
-        Err(_error) if status_output.is_err() => return Ok(WslEnvironmentStatus::default()),
-        Err(error) => return Err(error),
+        Ok(output) if output.status.success() => output,
+        Ok(_) | Err(_) => return Ok(WslEnvironmentStatus::default()),
     };
-
-    let wsl_installed = status_output.is_ok() || list_output.status.success();
-    if !wsl_installed {
+    let Some(distributions) = parse_wsl_table(&list_output.stdout) else {
         return Ok(WslEnvironmentStatus::default());
-    }
-
-    let Some(ubuntu) = find_ubuntu_distribution(&list_output.stdout) else {
+    };
+    let Some(ubuntu) = distributions
+        .into_iter()
+        .find(UbuntuDistribution::is_ubuntu)
+    else {
         return Ok(WslEnvironmentStatus {
             wsl_installed: true,
             ..WslEnvironmentStatus::default()
@@ -125,44 +179,41 @@ pub fn check_wsl_environment() -> Result<WslEnvironmentStatus, String> {
     }
 }
 
-#[cfg(windows)]
-fn service_command_is_safe(command: &str) -> bool {
-    !command.is_empty()
-        && command.chars().all(|character| {
-            character.is_ascii_alphanumeric()
-                || matches!(character, '/' | '_' | '-' | '.' | ' ' | ':' | '=')
-        })
+#[cfg(any(windows, test))]
+fn service_binary(command: Option<&str>) -> Option<&'static str> {
+    match command.unwrap_or("agentmirrord") {
+        "agentmirrord" => Some("agentmirrord"),
+        "corral-core" => Some("corral-core"),
+        _ => None,
+    }
 }
 
-/// Start agentmirrord (or corral-core) in the Ubuntu WSL distribution.
+/// Start a whitelisted session service in the Ubuntu WSL distribution.
 ///
-/// `service_cmd` may include ordinary command-line arguments, but shell control
-/// characters are rejected before the command is passed to `sh -lc`.
+/// The service name is passed as a standalone argv element to `nohup`; no shell
+/// is involved, so callers cannot turn this command into arbitrary WSL code.
 #[tauri::command]
 pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let command = service_cmd.unwrap_or_else(|| "agentmirrord".to_string());
-        if !service_command_is_safe(&command) {
-            return Err("invalid_service_command".to_string());
-        }
-
-        let list_output = run_wsl(&["-l", "-v"])?;
-        let ubuntu = find_ubuntu_distribution(&list_output.stdout)
-            .ok_or_else(|| "ubuntu_not_installed".to_string())?;
-        let script = format!("nohup {command} >/dev/null 2>&1 </dev/null &");
-        let status = std::process::Command::new("wsl.exe")
-            .args(["-d", &ubuntu.name, "-e", "sh", "-lc", &script])
+        let Some(service) = service_binary(service_cmd.as_deref()) else {
+            return Err("unsupported_service_command".to_string());
+        };
+        let list_output = match run_wsl(&["-l", "-v"]) {
+            Ok(output) if output.status.success() => output,
+            Ok(_) | Err(_) => return Err("ubuntu_not_installed".to_string()),
+        };
+        let Some(ubuntu) = find_ubuntu_distribution(&list_output.stdout) else {
+            return Err("ubuntu_not_installed".to_string());
+        };
+        let _child = std::process::Command::new("wsl.exe")
+            .args(["-d", &ubuntu.name, "-e", "nohup", service])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status()
-            .map_err(|error| format!("wsl_unavailable: {error}"))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("wsl_service_start_failed: exit status {status}"))
-        }
+            .spawn()
+            .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
+        Ok(())
     }
 
     #[cfg(not(windows))]
@@ -174,7 +225,7 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_ubuntu_distribution, first_ip};
+    use super::{find_ubuntu_distribution, first_ip, parse_wsl_table, service_binary};
 
     #[test]
     fn parses_running_ubuntu_from_wsl_table() {
@@ -191,12 +242,37 @@ mod tests {
 
     #[test]
     fn parses_stopped_ubuntu_and_ip() {
-        let output = b"Ubuntu Stopped 2\n";
+        let output = b"NAME STATE VERSION\nUbuntu Stopped 2\n";
         let distribution = find_ubuntu_distribution(output).unwrap();
         assert!(!distribution.running);
         assert_eq!(
             first_ip(b"172.22.16.3 127.0.0.1\n"),
             Some("172.22.16.3".to_string())
         );
+    }
+
+    #[test]
+    fn rejects_wsl_error_output() {
+        let output = b"wsl: error Ubuntu is not installed\n";
+        assert!(parse_wsl_table(output).is_none());
+        assert!(find_ubuntu_distribution(output).is_none());
+    }
+
+    #[test]
+    fn rejects_empty_and_malformed_tables() {
+        assert!(parse_wsl_table(b"").is_none());
+        assert!(parse_wsl_table(b"NAME STATE VERSION\n").is_none());
+        assert!(parse_wsl_table(b"Ubuntu Stopped 2\n").is_none());
+        assert!(parse_wsl_table(b"NAME STATE VERSION\n* Ubuntu Running\n").is_none());
+        assert!(parse_wsl_table(b"* Ubuntu Running 1\n").is_none());
+    }
+
+    #[test]
+    fn service_name_is_strictly_whitelisted() {
+        assert_eq!(service_binary(None), Some("agentmirrord"));
+        assert_eq!(service_binary(Some("agentmirrord")), Some("agentmirrord"));
+        assert_eq!(service_binary(Some("corral-core")), Some("corral-core"));
+        assert_eq!(service_binary(Some("rm -rf /")), None);
+        assert_eq!(service_binary(Some("agentmirrord --config")), None);
     }
 }
