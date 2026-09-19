@@ -11,6 +11,9 @@ import { BINARY_KIND } from '../../core/binary.js';
 import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
 import { isCtrlV } from '../../term/clipboard.js';
+import { MOBILE_GRID, PRESENCE_MODE } from '../../core/presence.js';
+
+export { MOBILE_GRID, PRESENCE_MODE };
 
 /** scrollback 请求没等到回复时的兜底解锁（ms）。不解锁的话历史面板会永久卡在 pending。 */
 const SCROLLBACK_TIMEOUT_MS = 10000;
@@ -59,6 +62,7 @@ export default function TerminalPane({
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState(null);   // { fromLine, lineCount, text }
   const [hint, setHint] = useState('');
+  const [presenceMode, setPresenceMode] = useState(PRESENCE_MODE.UNKNOWN);
   const onTextRef = useRef(onText);
   const onKeyRef = useRef(onKey);
   const onBytesRef = useRef(onBytes);
@@ -112,6 +116,8 @@ export default function TerminalPane({
     const gate = new SameWidthController();
     let firstSub = true;
     let lastSubscribe = null;
+    let currentMode = PRESENCE_MODE.UNKNOWN;
+    let isManualReflowing = false;
     let view;
     const sendIfNeeded = (act, reason, { force = false } = {}) => {
       const fit = view?.lastFit || {};
@@ -150,7 +156,10 @@ export default function TerminalPane({
         });
         return;
       }
-      const sent = clientRef.current?.subscribe(target, act.rows, act.cols, reason);
+      const sent = clientRef.current?.subscribe(target, act.rows, act.cols, reason, {
+        client_type: 'desktop',
+        retain_pane_size: true,
+      });
       if (sent === false) return;
       lastSubscribe = subscribeKey;
       gate.noteSent(act.rows, act.cols);
@@ -158,9 +167,11 @@ export default function TerminalPane({
     view = new TerminalView(host, {
       onResize: (rows, cols) => {
         const act = gate.settle(rows, cols);
-        const reason = firstSub ? 'activate' : 'settle';
-        sendIfNeeded(act, reason);
-        if (act && act.type === 'subscribe') firstSub = false;
+        if (!isManualReflowing) {
+          const reason = firstSub ? 'activate' : 'settle';
+          sendIfNeeded(act, reason);
+          if (act && act.type === 'subscribe') firstSub = false;
+        }
         onResizeRef.current?.(rows, cols);
       },
       onWriteBackpressure: () => {
@@ -268,23 +279,80 @@ export default function TerminalPane({
     const attach = subRef.current || (c && typeof c.onBinary === 'function' ? (fn) => c.onBinary(fn) : null);
     const off = attach ? attach(handleBinary) : null;
 
+    // 保守握手初订：若 presence 未知或手机在线，以 46x44 手机尺寸初订，绝不提前以桌面大尺寸挤掉手机
+    const initialPresence = clientRef.current?.getPresence?.();
+    if (initialPresence && initialPresence.hasMobile === false) {
+      currentMode = PRESENCE_MODE.TAKEOVER;
+      setPresenceMode(PRESENCE_MODE.TAKEOVER);
+    } else {
+      currentMode = initialPresence?.hasMobile ? PRESENCE_MODE.AVOIDANCE : PRESENCE_MODE.UNKNOWN;
+      setPresenceMode(currentMode);
+      view.setFixedGrid(MOBILE_GRID, { sync: true });
+    }
+
+    // 监听多端 presence 广播：动静双模流转
+    const offPresence = clientRef.current?.onPresence?.((evt) => {
+      if (evt.hasMobile) {
+        // 手机在线/重回 -> 避让模式 (avoidance)：保持 46x44 物理底锚，绝不发桌面 resize
+        currentMode = PRESENCE_MODE.AVOIDANCE;
+        setPresenceMode(PRESENCE_MODE.AVOIDANCE);
+        if (viewRef.current) {
+          viewRef.current.setFixedGrid(MOBILE_GRID, { sync: true });
+          if (gate.grid?.rows !== MOBILE_GRID.rows || gate.grid?.cols !== MOBILE_GRID.cols) {
+            gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
+            sendIfNeeded({ type: 'subscribe', rows: MOBILE_GRID.rows, cols: MOBILE_GRID.cols }, 'presence_avoidance', { force: true });
+          }
+        }
+      } else {
+        // 手机离开/切后台 -> 接管模式 (takeover)：平滑铺满桌面视口
+        currentMode = PRESENCE_MODE.TAKEOVER;
+        setPresenceMode(PRESENCE_MODE.TAKEOVER);
+        if (viewRef.current && hostRef.current) {
+          viewRef.current.clearFixedGrid();
+          viewRef.current.fit({ immediate: true, sync: true });
+          const fit = viewRef.current.lastFit;
+          if (fit?.derived_rows && fit?.derived_cols) {
+            gate.settle(fit.derived_rows, fit.derived_cols);
+            sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'takeover', { force: true });
+          }
+        }
+      }
+    });
+
     // The frame listener must be live before open() can report its initial grid
     // and trigger the first subscribe.
     viewRef.current = view;
     view.open();
 
-    const ro = new ResizeObserver(() => view.fit());
+    const ro = new ResizeObserver(() => {
+      if (currentMode === PRESENCE_MODE.TAKEOVER) {
+        view.fit();
+      } else {
+        // 避让模式下只测量容器，保持 46x44 网格不向服务端发送桌面 resize
+        view.fit({ immediate: false, sync: true });
+      }
+    });
     ro.observe(host);
 
     const handleReflow = (ev) => {
       const targetUid = ev?.detail?.uid;
       if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
       if (viewRef.current && hostRef.current) {
-        viewRef.current.fit({ immediate: true });
+        currentMode = PRESENCE_MODE.TAKEOVER;
+        setPresenceMode(PRESENCE_MODE.TAKEOVER);
+        viewRef.current.clearFixedGrid();
+        isManualReflowing = true;
+        try {
+          viewRef.current.fit({ immediate: true, sync: true });
+        } finally {
+          isManualReflowing = false;
+        }
         const fit = viewRef.current.lastFit;
         if (fit && fit.derived_rows && fit.derived_cols) {
-          clientRef.current?.resize?.(target, fit.derived_rows, fit.derived_cols, 'user');
-          clientRef.current?.subscribe?.(target, fit.derived_rows, fit.derived_cols, 'user');
+          // 原子同步：确保 gate.grid 在发送前与待发送尺寸严格一致，杜绝快照早到拒收死锁 (F1)
+          gate.settle(fit.derived_rows, fit.derived_cols);
+          sendIfNeeded({ type: 'subscribe', rows: fit.derived_rows, cols: fit.derived_cols }, 'reflow', { force: true });
+          firstSub = false;
         }
       }
     };
@@ -305,6 +373,7 @@ export default function TerminalPane({
       clearTimeout(flashTimer);
       pump.dispose();
       if (typeof off === 'function') off();
+      if (typeof offPresence === 'function') offPresence();
       view.dispose();
       viewRef.current = null;
       gRef.current = null;
@@ -321,7 +390,7 @@ export default function TerminalPane({
   }, [focused]);
 
   return (
-    <div className="terminalpane">
+    <div className="terminalpane" data-presence-mode={presenceMode}>
       <div className="terminalpane-body">
         {history && (
           <div className="terminalpane-history">

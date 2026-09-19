@@ -13,14 +13,17 @@ const fields = Object.freeze({
   level2_frame: ['workspace', 'seq', 'sessions'],
   level2_heartbeat: ['workspace', 'seq'],
   pane_mode_changed: ['ref', 'in_copy_mode'],
+  presence_update: ['ref', 'has_mobile', 'mobile_count', 'desktop_count'],
   scroll_wheel: ['ref', 'delta'],
   attach_preview: ['ref', 'path'],
+  subscribe: ['ref', 'rows', 'cols', 'client_type', 'retain_pane_size'],
 });
 export const MAX_INPUT_BYTES = 1 << 20;
 export const SESSION_STATUS = Object.freeze(['working', 'idle', 'unknown']);
 export const INPUT_KEYS = Object.freeze([...core.INPUT_KEYS, 'backspace']);
 export const isKnownKey = (key) => INPUT_KEYS.includes(key);
-export const isExtension = (type, p) => Object.hasOwn(fields, type)
+export const isExtension = (type, p) => (type !== 'subscribe' && Object.hasOwn(fields, type))
+  || (type === 'subscribe' && (p?.client_type !== undefined || p?.retain_pane_size !== undefined))
   || (type === 'input' && (p?.attachment_path !== undefined
     || p?.bytes !== undefined
     || (p?.keys !== undefined && (!Array.isArray(p.keys) || p.keys.includes('backspace')))));
@@ -90,6 +93,28 @@ export function validateFrame(type, p = {}) {
     const hasBytes = p.bytes !== undefined;
     if ((hasText ? 1 : 0) + (hasKeys ? 1 : 0) + (hasBytes ? 1 : 0) > 1) {
       return 'input carries more than one of text/attachment_path, keys, bytes; at most one is allowed';
+    }
+    return null;
+  }
+  if (type === 'subscribe') {
+    const subError = core.validateFrame(type, { ref: p.ref, rows: p.rows, cols: p.cols });
+    if (subError) return subError;
+    if (p.client_type !== undefined && (typeof p.client_type !== 'string' || !p.client_type)) {
+      return 'subscribe client_type must be a non-empty string';
+    }
+    if (p.retain_pane_size !== undefined && typeof p.retain_pane_size !== 'boolean') {
+      return 'subscribe retain_pane_size must be boolean';
+    }
+    return null;
+  }
+  if (type === 'presence_update') {
+    if (typeof p.ref !== 'string' || !p.ref) return 'presence_update ref must be non-empty';
+    if (typeof p.has_mobile !== 'boolean') return 'presence_update has_mobile must be boolean';
+    if (p.mobile_count !== undefined && (!Number.isInteger(p.mobile_count) || p.mobile_count < 0)) {
+      return 'presence_update mobile_count must be a non-negative integer';
+    }
+    if (p.desktop_count !== undefined && (!Number.isInteger(p.desktop_count) || p.desktop_count < 0)) {
+      return 'presence_update desktop_count must be a non-negative integer';
     }
     return null;
   }

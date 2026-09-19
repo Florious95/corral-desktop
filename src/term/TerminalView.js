@@ -113,6 +113,7 @@ export class TerminalView {
     this._lastWheelAt = 0;
     this._disposed = false;
     this._hasPainted = false;
+    this._fixedGrid = null;
     this._writeQueue = [];
     this._writeHead = 0;
     this._queuedWriteBytes = 0;
@@ -179,31 +180,40 @@ export class TerminalView {
    * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
    * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
    */
-  fit({ immediate = false } = {}) {
+  fit({ immediate = false, sync = false } = {}) {
     const el = this.container;
     if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
     const h = el.clientHeight;
     if (w === 0 || h === 0) return;
     const cell = this._cell();
-    const cols = Math.max(2, Math.floor(w / cell.w));
-    const rows = Math.max(2, Math.floor(h / cell.h));
+    const derivedCols = Math.max(2, Math.floor(w / cell.w));
+    const derivedRows = Math.max(2, Math.floor(h / cell.h));
     this.lastFit = {
       container_width_px: w,
       container_height_px: h,
       cell_width_px: cell.w,
-      derived_cols: cols,
-      derived_rows: rows,
+      derived_cols: derivedCols,
+      derived_rows: derivedRows,
     };
+    const cols = this._fixedGrid ? this._fixedGrid.cols : derivedCols;
+    const rows = this._fixedGrid ? this._fixedGrid.rows : derivedRows;
     this._pendingCols = cols;
     this._pendingRows = rows;
     if (!this._hasFit || immediate) {
       const initialFit = !this._hasFit;
       this._hasFit = true;
+      if (sync) {
+        clearTimeout(this._gridTimer);
+        clearTimeout(this._resizeTimer);
+        this._gridTimer = null;
+        this._resizeTimer = null;
+      }
       // The first settled grid is the subscription handshake; do not make it
       // wait for the resize debounce. `immediate` is reserved for renderer
-      // changes and keeps the normal post-initial debounce semantics.
-      this._commitGrid(cols, rows, { reportDelay: !initialFit });
+      // changes and keeps the normal post-initial debounce semantics, unless sync is requested.
+      const reportDelay = sync ? false : !initialFit;
+      this._commitGrid(cols, rows, { reportDelay });
       return;
     }
     if (cols === this.term.cols && rows === this.term.rows) {
@@ -218,6 +228,25 @@ export class TerminalView {
       if (this._disposed) return;
       this._commitGrid(this._pendingCols, this._pendingRows, { reportDelay: false });
     }, GRID_DEBOUNCE_MS);
+  }
+
+  setFixedGrid(grid, { sync = true } = {}) {
+    if (grid && Number.isInteger(grid.cols) && Number.isInteger(grid.rows)) {
+      this._fixedGrid = { cols: grid.cols, rows: grid.rows };
+      if (sync) {
+        clearTimeout(this._gridTimer);
+        clearTimeout(this._resizeTimer);
+        this._gridTimer = null;
+        this._resizeTimer = null;
+      }
+      this._commitGrid(grid.cols, grid.rows, { reportDelay: !sync });
+    } else {
+      this._fixedGrid = null;
+    }
+  }
+
+  clearFixedGrid() {
+    this._fixedGrid = null;
   }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {

@@ -86,6 +86,7 @@ function deviceSub(url) {
 export default function App({ seedDevices } = {}) {
   /* ——— 协议层：DeviceManager 是 UI 与 Client 之间的唯一边界 ——— */
   const binaryListeners = useRef(new Set());
+  const presenceListeners = useRef(new Set());
   const ackGate = useRef(null);
   if (ackGate.current === null) ackGate.current = createInputAckGate();
   const prevDevState = useRef(new Map());
@@ -119,6 +120,7 @@ export default function App({ seedDevices } = {}) {
         setDevices(ds);
       },
       onBinary: (evt) => { for (const fn of binaryListeners.current) fn(evt) },
+      onPresenceUpdate: (evt) => { for (const fn of presenceListeners.current) fn(evt); },
       onInputResult: (r) => {
         ackGate.current.onInputResult(r);
         // ack 一到就要让用户看见失败（C-077 / R-54）；超时/清场文案由 submitPaneEnter 发
@@ -677,6 +679,13 @@ export default function App({ seedDevices } = {}) {
         resize: (_ref, rows, cols, reason) => dm.resize(uid, rows, cols, reason),
         scrollWheel: (_ref, delta) => dm.scrollWheel(uid, delta),
         scrollback: (_ref, fromLine, count) => dm.scrollback(uid, fromLine, count)?.reqId ?? null,
+        getPresence: () => dm.getPresence(uid),
+        /** 监听本会话的 presence 变化（是否有手机在线等） */
+        onPresence: (fn) => {
+          const handler = (evt) => { if (evt.uid === uid) fn(evt); };
+          presenceListeners.current.add(handler);
+          return () => presenceListeners.current.delete(handler);
+        },
         /** 只投递本列的二进制帧；返回退订函数 */
         onBinary: (fn) => {
           const handler = (evt) => { if (evt.uid === uid) fn(evt.frame) };
