@@ -367,7 +367,8 @@ src/
   - **当前工作台内部切换与分屏**：当用户选中当前工作台时，在左侧栏点击任何会话，**只在当前激活工作台内部打开/替换聚焦窗格**，绝对不会在 TabBar 新增 Tab；拖拽分屏也只在当前工作台内组装网格；
   - **【+】号独立工作台隔离**：点击【+】号时新建一个独立的空白工作台标签页并切换聚焦；在该工作台内的点击与分屏完全不影响其他工作台已有的会话和多分屏状态；在不同 Tab 间切换即在多个独立分屏工作台之间秒级无缝切换；
 - **钉选标签区**（`.tb-tabs-pinned`）：紧凑锚定最左侧，每个 pinned tab 固定宽 `28px`，居中渲染 Provider 图标或首字母 + 状态灯，带 title 悬浮说明与完整无障碍属性。右键支持取消固定或关闭。
-- **普通标签区**（`.tb-tabs-scroll`）：横向自适应滚动，支持鼠标滚轮左右滑动。每个普通 Tab：
+- **普通标签区**（`.tb-tabs-scroll`）：横向自适应滚动，支持鼠标滚轮左右滑动。
+  - **等长布局与自适应缩短裁定（2026-09-19 裁定）**：所有普通未钉选工作台标签页（`.tb-tab:not(.tb-tab-pinned)`）采用弹性等分布局（`flex: 1 1 0px; width: 160px; max-width: 160px; min-width: 44px;`），宽度严格等长，彻底消除字数长短参差不齐现象；当标签页增多时等比自适应缩短变窄（160px → 120px → 90px → 最小安全宽度 44px），内部会话名通过 `text-overflow: ellipsis; overflow: hidden; white-space: nowrap;` 优雅截断省略；钉选标签（`.tb-tab-pinned`）保持固定 32px 紧凑图标宽度不参与压缩；新建加号按钮（`+`）与标签拖拽吸附系统完全兼容。
   - 动态展示当前活跃会话名称（多窗格时标出窗格数如 `Session (2)`）+ 状态灯（`.tb-tab-lamp`）。
   - **状态灯规格**：Working 状态为绿灯微动脉冲（`animation: tb-lamp-pulse`，尊重 prefers-reduced-motion）；Idle 状态为温和中性灰小点；Unknown 状态为灰色空心圆圈。
   - Hover / Active 时显露右侧快速关闭按钮（`.tb-tab-close`，`<XIcon size={11} strokeWidth={2.2}/>`）。
@@ -927,6 +928,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 27. **2026-09-18（多端协同契约与物理底锚裁定）**：
     - **视口物理底锚**：彻底废除 flex-end 与 max-height 钳制，实施完整的 root bottom-left 物理底锚（`.terminalpane-host` 声明 `position: relative; display: block; overflow: hidden;`；`.terminalpane-host > .xterm` 声明 `position: absolute; left: 0; bottom: 0; width: max-content; max-width: none; max-height: none;`）。手机端 46×44 坚屏网格（792px）在桌面视口（~600px）中物理底锚对齐，顶端自然上伸裁切，最底部的输入框 `[ █ ]` 与状态行 100% 完整可见可交互；
     - **多端协同动静双模**：subscribe 携带 `client_type: "desktop"` 与 `retain_pane_size: true`，开启服务端尺寸驻留；未明确 presence 时以 46×44 保守初订，绝不提前挤掉手机；手机在线（`has_mobile: true`）避让模式保持 46×44 不发桌面 resize；手机离开（`has_mobile: false`）接管模式平滑铺满桌面视口；右键【适应当前窗口】走原子单一受控通道（单次发送）。
+28. **2026-09-19**：标签页实施等长布局与自适应缩短；所有普通工作台标签页采用弹性等分布局（`flex: 1 1 0px; width: 160px; max-width: 160px; min-width: 44px;`），宽度严格等长；标签增多时等比自适应收缩变窄，文字优雅省略截断；钉选标签保持 32px 紧凑固定宽。
 
 ## core 依赖边界（裁定 2026-09-12）
 
