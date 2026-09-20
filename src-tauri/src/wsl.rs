@@ -408,7 +408,33 @@ fn service_binary(command: Option<&str>) -> Option<&'static str> {
 }
 
 #[cfg(any(windows, test))]
-fn service_start_args<'a>(distribution: &'a str, service: &'a str) -> [&'a str; 8] {
+fn generate_service_token() -> Result<String, String> {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| "token_generation_failed".to_string())?;
+    let mut token = String::with_capacity(26);
+    let mut buffer = 0_u16;
+    let mut bits = 0_u8;
+    for byte in bytes {
+        buffer = (buffer << 8) | u16::from(byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            token.push(ALPHABET[((buffer >> bits) & 31) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        token.push(ALPHABET[((buffer << (5 - bits)) & 31) as usize] as char);
+    }
+    Ok(token)
+}
+
+#[cfg(any(windows, test))]
+fn service_start_args<'a>(
+    distribution: &'a str,
+    service: &'a str,
+    token: &'a str,
+) -> [&'a str; 12] {
     [
         "-d",
         distribution,
@@ -418,30 +444,89 @@ fn service_start_args<'a>(distribution: &'a str, service: &'a str) -> [&'a str; 
         "AGENTMIRROR_TOKEN",
         "nohup",
         service,
+        "-listen",
+        "0.0.0.0:9900",
+        "-token",
+        token,
     ]
 }
 
 #[cfg(windows)]
-fn service_token_ready(distribution: &str) -> bool {
+const TOKEN_READ_SCRIPT: &str =
+    "if test -f \"$HOME/.config/agentmirror/token\"; then head -c 257 \"$HOME/.config/agentmirror/token\"; fi";
+
+#[cfg(windows)]
+const TOKEN_WRITE_SCRIPT: &str = r#"set -eu
+token="$1"
+path="$HOME/.config/agentmirror/token"
+mkdir -p "$(dirname "$path")"
+tmp="$path.tmp.$$"
+trap 'rm -f "$tmp"' EXIT
+umask 077
+printf '%s\n' "$token" > "$tmp"
+chmod 600 "$tmp"
+mv -f -- "$tmp" "$path"
+test -s "$path"
+"#;
+
+#[cfg(windows)]
+fn read_wsl_service_token_for_start(distribution: &str) -> Result<Option<String>, String> {
+    let output = run_wsl(&["-d", distribution, "-e", "sh", "-lc", TOKEN_READ_SCRIPT])
+        .map_err(|_| "token_file_unavailable".to_string())?;
+    if !output.status.success() {
+        return Err("token_file_unavailable".to_string());
+    }
+    match normalize_service_token(&output.stdout) {
+        Ok(token) => Ok(Some(token)),
+        Err(error) if error == "token_file_not_found" => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(windows)]
+fn write_wsl_service_token(distribution: &str, token: &str) -> Result<(), String> {
     let output = run_wsl(&[
         "-d",
         distribution,
         "-e",
         "sh",
-        "-lc",
-        "test -s \"$HOME/.config/agentmirror/token\" && head -c 257 \"$HOME/.config/agentmirror/token\"",
-    ]);
+        "-c",
+        TOKEN_WRITE_SCRIPT,
+        "agentmirrord-token",
+        token,
+    ])
+    .map_err(|_| "token_file_write_failed".to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("token_file_write_failed".to_string())
+    }
+}
+
+#[cfg(windows)]
+fn ensure_wsl_service_token(distribution: &str) -> Result<String, String> {
+    if let Some(token) = read_wsl_service_token_for_start(distribution)? {
+        return Ok(token);
+    }
+    let token = generate_service_token()?;
+    write_wsl_service_token(distribution, &token)?;
+    Ok(token)
+}
+
+#[cfg(windows)]
+fn service_token_ready(distribution: &str, expected: &str) -> bool {
+    let output = run_wsl(&["-d", distribution, "-e", "sh", "-lc", TOKEN_READ_SCRIPT]);
     output
         .ok()
         .filter(|output| output.status.success())
         .and_then(|output| normalize_service_token(&output.stdout).ok())
-        .is_some()
+        .is_some_and(|token| token == expected)
 }
 
 #[cfg(windows)]
-fn wait_for_service_token(distribution: &str) -> Result<(), String> {
+fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), String> {
     for _ in 0..50 {
-        if service_token_ready(distribution) {
+        if service_token_ready(distribution, expected) {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -451,8 +536,8 @@ fn wait_for_service_token(distribution: &str) -> Result<(), String> {
 
 /// Start a whitelisted session service in the Ubuntu WSL distribution.
 ///
-/// The service name is passed as a standalone argv element to `nohup`; no shell
-/// is involved, so callers cannot turn this command into arbitrary WSL code.
+/// The service name and token are passed as standalone argv elements to `env`
+/// and `nohup`; no shell is involved, so callers cannot inject WSL code.
 #[tauri::command]
 pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
@@ -472,12 +557,13 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
                 "service_not_installed: {service} not found in WSL Ubuntu PATH"
             ));
         }
+        let token = ensure_wsl_service_token(&ubuntu.name)?;
 
         // `spawn` only proves that Windows created wsl.exe. Probe the child
         // after a short grace period so a missing/runtime-broken Linux command
         // cannot be reported as a successful start.
         let mut child = std::process::Command::new("wsl.exe")
-            .args(service_start_args(&ubuntu.name, service))
+            .args(service_start_args(&ubuntu.name, service, &token))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -500,7 +586,7 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
         // The daemon generates and persists its pairing token only when the
         // inherited AGENTMIRROR_TOKEN is absent. Wait for that file before
         // returning so the frontend can authenticate without a race.
-        wait_for_service_token(&ubuntu.name)
+        wait_for_service_token(&ubuntu.name, &token)
     }
 
     #[cfg(not(windows))]
@@ -513,9 +599,9 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_ubuntu_distribution, first_ip, install_script, normalize_service_token,
-        parse_wsl_table, service_binary, service_probe_command, service_start_args,
-        WslEnvironmentStatus,
+        find_ubuntu_distribution, first_ip, generate_service_token, install_script,
+        normalize_service_token, parse_wsl_table, service_binary, service_probe_command,
+        service_start_args, WslEnvironmentStatus,
     };
 
     #[test]
@@ -579,9 +665,9 @@ mod tests {
     }
 
     #[test]
-    fn service_start_clears_inherited_token_environment() {
+    fn service_start_has_explicit_token_and_listen_flags() {
         assert_eq!(
-            service_start_args("Ubuntu", "agentmirrord"),
+            service_start_args("Ubuntu", "agentmirrord", "TOKEN123"),
             [
                 "-d",
                 "Ubuntu",
@@ -591,8 +677,21 @@ mod tests {
                 "AGENTMIRROR_TOKEN",
                 "nohup",
                 "agentmirrord",
+                "-listen",
+                "0.0.0.0:9900",
+                "-token",
+                "TOKEN123",
             ]
         );
+    }
+
+    #[test]
+    fn generated_service_token_is_128_bit_base32() {
+        let token = generate_service_token().unwrap();
+        assert_eq!(token.len(), 26);
+        assert!(token
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || (b'2'..=b'7').contains(&byte)));
     }
 
     #[test]
