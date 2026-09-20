@@ -75,13 +75,13 @@ struct ShellChecks {
             return
         }
         let dragSurface = root.subviews.first(where: { $0 is DragSurfaceView })
-        let titlebarDragSurface = frameView.subviews.first(where: { $0 is TitlebarDragSurfaceView })
+        let titlebarDragSurface = (frameView.subviews + root.subviews).first(where: { $0 is TitlebarDragSurfaceView })
         expect(dragSurface != nil, "drag surface is installed")
         expect(dragSurface?.superview === root, "drag surface stays in content root")
         expect(dragSurface?.frame == root.bounds,
                "drag surface matches content geometry")
-        expect(titlebarDragSurface?.superview === frameView,
-               "titlebar drag surface is a frame-view sibling")
+        expect(titlebarDragSurface?.superview === frameView || titlebarDragSurface?.superview === root,
+               "titlebar drag surface is installed in the native overlay hierarchy")
         if let dragSurface,
            let titlebarDragSurface,
            let closeButton = controller.window?.standardWindowButton(.closeButton) {
@@ -92,13 +92,21 @@ struct ShellChecks {
             if let titlebarContainer,
                let titlebarIndex = frameView.subviews.firstIndex(where: { $0 === titlebarContainer }),
                let contentIndex = frameView.subviews.firstIndex(where: { $0 === root }),
-               let dragIndex = frameView.subviews.firstIndex(where: { $0 === titlebarDragSurface }) {
+               let titlebarHost = titlebarDragSurface.superview {
                 expect(titlebarIndex > contentIndex,
                        "titlebar container stays above web content")
-                expect(dragIndex > titlebarIndex,
-                       "titlebar drag surface is above native titlebar")
-                expect(titlebarDragSurface.frame == titlebarContainer.frame,
-                       "titlebar drag surface matches native titlebar")
+                if titlebarHost === frameView {
+                    let dragIndex = frameView.subviews.firstIndex(where: { $0 === titlebarDragSurface })
+                    expect(dragIndex.map { $0 > titlebarIndex } == true,
+                           "titlebar drag surface is above native titlebar")
+                    expect(titlebarDragSurface.frame == titlebarContainer.frame,
+                           "titlebar drag surface matches native titlebar")
+                } else {
+                    expect(titlebarHost === root,
+                           "titlebar drag surface uses content fallback host")
+                    expect(titlebarDragSurface.frame == root.convert(titlebarContainer.bounds, from: titlebarContainer),
+                           "titlebar drag surface matches native titlebar")
+                }
 
                 let width = root.bounds.width
                 let height = root.bounds.height

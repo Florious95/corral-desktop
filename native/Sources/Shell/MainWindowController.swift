@@ -25,6 +25,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     private let bridge: ShellBridge
     private let dragSurface = DragSurfaceView()
     private let titlebarDragSurface = TitlebarDragSurfaceView()
+    private weak var titlebarContainer: NSView?
     private let chrome = GlassChrome()
     private var allowLoad = false
     private var disposed = false
@@ -68,7 +69,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
             root.addSubview(view)
         }
         let titlebarContainer = keepTitlebarControlsAboveContent(root)
-        installTitlebarDragSurface(on: root.superview, above: titlebarContainer)
+        installTitlebarDragSurface(in: root, titlebarContainer: titlebarContainer)
         alignTrafficLights()
         reload()
     }
@@ -193,24 +194,22 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         }
     }
 
-    private func installTitlebarDragSurface(on frameView: NSView?, above titlebarContainer: NSView?) {
-        guard let frameView, let titlebarContainer else { return }
+    private func installTitlebarDragSurface(in contentView: NSView, titlebarContainer: NSView?) {
+        guard let titlebarContainer else { return }
+        self.titlebarContainer = titlebarContainer
         titlebarDragSurface.dragSurface = dragSurface
         titlebarDragSurface.autoresizingMask = []
-        frameView.addSubview(titlebarDragSurface, positioned: .above, relativeTo: titlebarContainer)
+        // NSThemeFrame rejects arbitrary subviews on macOS 14. Keep the
+        // overlay in our content hierarchy while the full-size content view
+        // still lets it cover the native titlebar area.
+        contentView.addSubview(titlebarDragSurface, positioned: .above, relativeTo: nil)
         updateTitlebarDragSurfaceFrame()
     }
 
     private func updateTitlebarDragSurfaceFrame() {
-        guard let frameView = titlebarDragSurface.superview,
-              let closeButton = window?.standardWindowButton(.closeButton) else { return }
-        var ancestor = closeButton.superview
-        while let candidate = ancestor, candidate.superview !== frameView {
-            ancestor = candidate.superview
-        }
-        guard let titlebarContainer = ancestor,
-              titlebarContainer.superview === frameView else { return }
-        titlebarDragSurface.frame = titlebarContainer.frame
+        guard let contentView = titlebarDragSurface.superview,
+              let titlebarContainer else { return }
+        titlebarDragSurface.frame = contentView.convert(titlebarContainer.bounds, from: titlebarContainer)
     }
 
     private func geometryChanged() {
