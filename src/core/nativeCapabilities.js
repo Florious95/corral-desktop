@@ -819,5 +819,23 @@ export const nativeCapabilities = {
       err.code = 'unsupported_platform';
       throw err;
     },
+
+    async readServiceToken() {
+      if (testEngineOverride?.wsl?.readServiceToken) {
+        return testEngineOverride.wsl.readServiceToken();
+      }
+      const platform = detectPlatform();
+      const env = detectNativeEnvironment();
+      if (platform === 'windows' && env === 'tauri') {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const token = await invoke('read_wsl_service_token');
+          return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null;
+        } catch (_) {
+          return null;
+        }
+      }
+      return null;
+    },
   },
 };
