@@ -1,0 +1,135 @@
+name: Release desktop artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (defaults to v<package version>)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository and pinned core
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          submodules: recursive
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $command) {
+            winget install --id NSIS.NSIS --exact --silent --accept-package-agreements --accept-source-agreements
+          }
+
+          $nsis = Get-ChildItem `
+            -Path @('C:\Program Files (x86)\NSIS', 'C:\Program Files\NSIS') `
+            -Filter makensis.exe -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $nsis) {
+            throw 'NSIS (makensis.exe) was not found after installation.'
+          }
+          $nsis.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Check Tauri backend
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Test Tauri backend
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows installers
+        run: npm run tauri build
+
+      - name: Stage Windows release artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $bundle = Join-Path $PWD 'src-tauri\target\release\bundle'
+          $release = Join-Path $PWD 'release'
+          $portableDir = Join-Path $env:RUNNER_TEMP 'agentmirror-portable'
+          New-Item -ItemType Directory -Force -Path $release, $portableDir | Out-Null
+
+          $nsis = Get-ChildItem (Join-Path $bundle 'nsis\*.exe') -File |
+            Select-Object -First 1
+          if (-not $nsis) {
+            throw 'Tauri did not produce an NSIS installer.'
+          }
+          Copy-Item $nsis.FullName (Join-Path $release "AgentMirror_${version}_x64-setup.exe")
+
+          $msi = Get-ChildItem (Join-Path $bundle 'msi\*.msi') -File |
+            Select-Object -First 1
+          if ($msi) {
+            Copy-Item $msi.FullName (Join-Path $release "AgentMirror_${version}_x64_en-US.msi")
+          }
+
+          $binary = Join-Path $PWD 'src-tauri\target\release\agentmirror-desktop.exe'
+          if (-not (Test-Path $binary)) {
+            throw "Portable binary was not found: $binary"
+          }
+          Copy-Item $binary (Join-Path $portableDir 'AgentMirror.exe')
+          Compress-Archive -Path (Join-Path $portableDir 'AgentMirror.exe') `
+            -DestinationPath (Join-Path $release "AgentMirror-v${version}-windows-x64.zip") -Force
+
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and '${{ inputs.tag }}') {
+            '${{ inputs.tag }}'
+          } elseif ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME
+          } else {
+            "v$version"
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          "## Windows release artifacts" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          Get-ChildItem $release -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "- $($_.Name) ($($_.Length) bytes, SHA256 `$hash`)" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.artifacts.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: release/*
+          generate_release_notes: true
+          body: |
+            AgentMirror v0.1.0 desktop release.
+
+            - Windows: NSIS installer, MSI installer when produced, and a portable x64 ZIP.
+            - Windows WSL2: local-direct mode can connect to the local agentmirrord WebSocket on port 9900 without pairing.
+            - macOS: native Tauri desktop shell is distributed separately as the macOS arm64 ZIP.
+
+            SHA256 checksums are listed in the workflow summary and should be verified after download.
