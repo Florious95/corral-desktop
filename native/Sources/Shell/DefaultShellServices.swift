@@ -145,7 +145,7 @@ open class DefaultShellServices: ShellServiceHandling {
         }
     }
 
-    private static func dictionary(_ device: Device) -> [String: Any] {
+    private nonisolated static func dictionary(_ device: Device) -> [String: Any] {
         [
             "id": device.id,
             "name": device.name,

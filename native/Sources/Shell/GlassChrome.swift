@@ -49,6 +49,7 @@ public final class GlassChrome: NSView {
         addSubview(fallback)
         addSubview(solidFallback)
 
+#if compiler(>=6.4)
         if #available(macOS 26.0, *) {
             let container = NSGlassEffectContainerView(frame: bounds)
             let glass = NSGlassEffectView(frame: bounds)
@@ -63,6 +64,7 @@ public final class GlassChrome: NSView {
             glassView = glass
             usesSystemGlass = true
         }
+#endif
     }
 
     @objc private func accessibilityChanged() {
