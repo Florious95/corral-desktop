@@ -7,6 +7,7 @@ pub struct WslEnvironmentStatus {
     pub ubuntu_installed: bool,
     pub ubuntu_running: bool,
     pub tmux_installed: bool,
+    pub service_installed: bool,
     pub service_running: bool,
     pub wsl_ip: Option<String>,
 }
@@ -117,6 +118,25 @@ fn run_wsl(args: &[&str]) -> Result<std::process::Output, String> {
         .map_err(|error| format!("wsl_unavailable: {error}"))
 }
 
+#[cfg(any(windows, test))]
+fn service_probe_command(service: &str) -> Option<&'static str> {
+    match service {
+        "agentmirrord" => Some("command -v agentmirrord >/dev/null"),
+        "corral-core" => Some("command -v corral-core >/dev/null"),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn service_command_installed(distribution: &str, service: &str) -> bool {
+    let Some(probe) = service_probe_command(service) else {
+        return false;
+    };
+    run_wsl(&["-d", distribution, "-e", "sh", "-lc", probe])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 #[cfg(windows)]
 fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
     let list_output = match run_wsl(&["-l", "-v"]) {
@@ -139,6 +159,16 @@ fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
     let tmux_installed = run_wsl(&["-d", &ubuntu.name, "-e", "which", "tmux"])
         .map(|output| output.status.success())
         .unwrap_or(false);
+    let service_installed = run_wsl(&[
+        "-d",
+        &ubuntu.name,
+        "-e",
+        "sh",
+        "-lc",
+        "command -v agentmirrord >/dev/null || command -v corral-core >/dev/null",
+    ])
+    .map(|output| output.status.success())
+    .unwrap_or(false);
     let service_running = run_wsl(&[
         "-d",
         &ubuntu.name,
@@ -158,6 +188,7 @@ fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
         ubuntu_installed: true,
         ubuntu_running: ubuntu.running,
         tmux_installed,
+        service_installed,
         service_running,
         wsl_ip,
     })
@@ -206,14 +237,39 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
         let Some(ubuntu) = find_ubuntu_distribution(&list_output.stdout) else {
             return Err("ubuntu_not_installed".to_string());
         };
-        let _child = std::process::Command::new("wsl.exe")
+        if !service_command_installed(&ubuntu.name, service) {
+            return Err(format!(
+                "service_not_installed: {service} not found in WSL Ubuntu PATH"
+            ));
+        }
+
+        // `spawn` only proves that Windows created wsl.exe. Probe the child
+        // after a short grace period so a missing/runtime-broken Linux command
+        // cannot be reported as a successful start.
+        let mut child = std::process::Command::new("wsl.exe")
             .args(["-d", &ubuntu.name, "-e", "nohup", service])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
-        Ok(())
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        match child
+            .try_wait()
+            .map_err(|error| format!("wsl_service_start_failed: {error}"))?
+        {
+            Some(_) => {
+                let running = run_wsl(&["-d", &ubuntu.name, "-e", "pgrep", "-x", service])
+                    .map(|output| output.status.success())
+                    .unwrap_or(false);
+                if running {
+                    Ok(())
+                } else {
+                    Err("service_start_failed".to_string())
+                }
+            }
+            None => Ok(()),
+        }
     }
 
     #[cfg(not(windows))]
@@ -225,7 +281,10 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_ubuntu_distribution, first_ip, parse_wsl_table, service_binary};
+    use super::{
+        find_ubuntu_distribution, first_ip, parse_wsl_table, service_binary, service_probe_command,
+        WslEnvironmentStatus,
+    };
 
     #[test]
     fn parses_running_ubuntu_from_wsl_table() {
@@ -274,5 +333,30 @@ mod tests {
         assert_eq!(service_binary(Some("corral-core")), Some("corral-core"));
         assert_eq!(service_binary(Some("rm -rf /")), None);
         assert_eq!(service_binary(Some("agentmirrord --config")), None);
+    }
+
+    #[test]
+    fn service_probe_is_strict_and_uses_command_v() {
+        assert_eq!(
+            service_probe_command("agentmirrord"),
+            Some("command -v agentmirrord >/dev/null")
+        );
+        assert_eq!(
+            service_probe_command("corral-core"),
+            Some("command -v corral-core >/dev/null")
+        );
+        assert_eq!(service_probe_command("rm -rf /"), None);
+    }
+
+    #[test]
+    fn default_status_reports_service_not_installed() {
+        let status = WslEnvironmentStatus::default();
+        assert!(!status.service_installed);
+        assert_eq!(
+            serde_json::to_value(status)
+                .unwrap()
+                .get("service_installed"),
+            Some(&serde_json::Value::Bool(false))
+        );
     }
 }
