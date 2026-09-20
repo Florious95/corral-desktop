@@ -129,7 +129,7 @@ public final class ClipboardService {
         try pasteboard.fileURLs().map(Self.normalizedPath)
     }
 
-    private static func normalizedPath(_ url: URL) throws -> String {
+    private nonisolated static func normalizedPath(_ url: URL) throws -> String {
         guard url.isFileURL, url.path.hasPrefix("/") else {
             throw ClipboardError.invalidFileURL
         }
@@ -140,7 +140,7 @@ public final class ClipboardService {
         return path
     }
 
-    private static func containsUnsafePathScalar(_ value: String) -> Bool {
+    private nonisolated static func containsUnsafePathScalar(_ value: String) -> Bool {
         value.unicodeScalars.contains { scalar in
             scalar.value == 0 || scalar.value == 0x0A || scalar.value == 0x0D
         }
