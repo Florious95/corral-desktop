@@ -1,5 +1,7 @@
 use serde::Serialize;
 #[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
 use std::path::Path;
 
 #[cfg(windows)]
@@ -485,7 +487,7 @@ fn service_start_args<'a>(
     distribution: &'a str,
     service: &'a str,
     token: &'a str,
-) -> [&'a str; 12] {
+) -> [&'a str; 11] {
     [
         "-d",
         distribution,
@@ -493,7 +495,6 @@ fn service_start_args<'a>(
         "env",
         "-u",
         "AGENTMIRROR_TOKEN",
-        "nohup",
         service,
         "-listen",
         "0.0.0.0:9900",
@@ -565,6 +566,26 @@ fn ensure_wsl_service_token(distribution: &str) -> Result<String, String> {
 }
 
 #[cfg(windows)]
+fn service_process_ready(distribution: &str, service: &str) -> bool {
+    run_wsl(&["-d", distribution, "-e", "pgrep", "-x", service])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn wait_for_service_process(distribution: &str, service: &str) -> Result<(), String> {
+    // WSL cold starts can take over a second on a fresh distribution. Poll the
+    // Linux process instead of treating a successful wsl.exe spawn as ready.
+    for _ in 0..15 {
+        if service_process_ready(distribution, service) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    Err("service_start_failed".to_string())
+}
+
+#[cfg(windows)]
 fn service_token_ready(distribution: &str, expected: &str) -> bool {
     let output = run_wsl(&["-d", distribution, "-e", "sh", "-lc", TOKEN_READ_SCRIPT]);
     output
@@ -587,8 +608,10 @@ fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), Stri
 
 /// Start a whitelisted session service in the Ubuntu WSL distribution.
 ///
-/// The service name and token are passed as standalone argv elements to `env`
-/// and `nohup`; no shell is involved, so callers cannot inject WSL code.
+/// The daemon intentionally remains the foreground command owned by `wsl.exe`.
+/// WSL tears down orphaned background jobs when the launcher exits, so `nohup`
+/// alone cannot make the service survive a cold launch. The Windows launcher is
+/// detached from the GUI process while its Linux child remains foreground.
 #[tauri::command]
 pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
@@ -610,33 +633,23 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
         }
         let token = ensure_wsl_service_token(&ubuntu.name)?;
 
-        // `spawn` only proves that Windows created wsl.exe. Probe the child
-        // after a short grace period so a missing/runtime-broken Linux command
-        // cannot be reported as a successful start.
-        let mut child = std::process::Command::new("wsl.exe")
+        // Keep the daemon in the foreground inside a detached wsl.exe process.
+        // WSL therefore keeps the Linux session alive after this function and
+        // the GUI process return.
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        let _child = std::process::Command::new("wsl.exe")
             .args(service_start_args(&ubuntu.name, service, &token))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
             .spawn()
             .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let running = match child
-            .try_wait()
-            .map_err(|error| format!("wsl_service_start_failed: {error}"))?
-        {
-            Some(_) => run_wsl(&["-d", &ubuntu.name, "-e", "pgrep", "-x", service])
-                .map(|output| output.status.success())
-                .unwrap_or(false),
-            None => true,
-        };
-        if !running {
-            return Err("service_start_failed".to_string());
-        }
+        wait_for_service_process(&ubuntu.name, service)?;
 
-        // The daemon generates and persists its pairing token only when the
-        // inherited AGENTMIRROR_TOKEN is absent. Wait for that file before
-        // returning so the frontend can authenticate without a race.
+        // Ensure the token file is visible before returning so the frontend
+        // can authenticate without a race.
         wait_for_service_token(&ubuntu.name, &token)
     }
 
@@ -735,7 +748,6 @@ mod tests {
                 "env",
                 "-u",
                 "AGENTMIRROR_TOKEN",
-                "nohup",
                 "agentmirrord",
                 "-listen",
                 "0.0.0.0:9900",
