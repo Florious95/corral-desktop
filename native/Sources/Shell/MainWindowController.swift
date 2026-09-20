@@ -202,7 +202,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         // NSThemeFrame rejects arbitrary subviews on macOS 14. Keep the
         // overlay in our content hierarchy while the full-size content view
         // still lets it cover the native titlebar area.
-        contentView.addSubview(titlebarDragSurface, positioned: .above, relativeTo: nil)
+        contentView.addSubview(titlebarDragSurface)
         updateTitlebarDragSurfaceFrame()
     }
 
