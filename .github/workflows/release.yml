@@ -161,7 +161,7 @@ jobs:
       - name: Select pinned Xcode toolchain
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '26.6'
+          xcode-version: 'latest-stable'
 
       - name: Run Swift package tests
         run: swift test --package-path native --parallel
@@ -175,7 +175,7 @@ jobs:
       - name: Build production AgentMirror.app
         run: |
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
-          VERSION="$version" REQUIRE_SWIFT_6_4=1 OUT_ROOT="$RUNNER_TEMP/agentmirror-native" ./scripts/build-swift-app.sh
+          VERSION="$version" OUT_ROOT="$RUNNER_TEMP/agentmirror-native" ./scripts/build-swift-app.sh
 
       - name: Create and verify macOS DMG
         id: artifacts
