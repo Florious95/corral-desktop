@@ -89,29 +89,42 @@ export default function TabBar({
   const [capsuleStyle, setCapsuleStyle] = useState({ left: 0, scaleX: 1, opacity: 0 });
 
   // 记录每个 regular tab 的当前真实测量宽度
-  const measureCurrentTabWidth = useCallback(() => {
-    if (!scrollContainerRef.current) return null;
-    const tabEl = scrollContainerRef.current.querySelector('.tb-tab:not(.tb-tab-pinned)');
-    if (tabEl) {
-      const w = tabEl.getBoundingClientRect().width;
-      if (w > 0) return Math.round(w * 10) / 10;
+  const measureCurrentTabWidth = useCallback((targetKey) => {
+    if (targetKey && regularTabRefs.current.has(targetKey)) {
+      const el = regularTabRefs.current.get(targetKey);
+      if (el) {
+        const w = el.getBoundingClientRect().width;
+        if (w > 0) return Math.round(w * 10) / 10;
+      }
+    }
+    if (scrollContainerRef.current) {
+      const tabEl = scrollContainerRef.current.querySelector('.tb-tab:not(.tb-tab-pinned)');
+      if (tabEl) {
+        const w = tabEl.getBoundingClientRect().width;
+        if (w > 0) return Math.round(w * 10) / 10;
+      }
     }
     return null;
   }, []);
 
-  // 当点击关闭按钮时，立即捕获并锁定当前宽度
+  // 当点击关闭按钮时，立即在同步执行栈中捕获并锁定当前宽度
   const handleCloseTabWithLock = useCallback((e, tabKey) => {
     e.stopPropagation();
     if (isPointerInsideRef.current && regularTabs.length > 1) {
-      const currentWidth = measureCurrentTabWidth();
+      const currentWidth = lockedTabWidth !== null ? lockedTabWidth : measureCurrentTabWidth(tabKey);
       if (currentWidth && currentWidth > 0) {
         setLockedTabWidth(currentWidth);
+        // 同步直接写到容器 DOM style 上，彻底消除 React 渲染批处理到 commit 之间的瞬态窗口！
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.setAttribute('data-locked', 'true');
+          scrollContainerRef.current.style.setProperty('--tb-tab-width', `${currentWidth}px`);
+        }
       }
     }
     if (onCloseTab) {
       onCloseTab(tabKey);
     }
-  }, [onCloseTab, regularTabs.length, measureCurrentTabWidth]);
+  }, [onCloseTab, regularTabs.length, lockedTabWidth, measureCurrentTabWidth]);
 
   // 鼠标进入 TabBar 区域
   const handleMouseEnterTabBar = useCallback(() => {
@@ -122,6 +135,10 @@ export default function TabBar({
   const handleMouseLeaveTabBar = useCallback(() => {
     isPointerInsideRef.current = false;
     setLockedTabWidth(null);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.removeAttribute('data-locked');
+      scrollContainerRef.current.style.removeProperty('--tb-tab-width');
+    }
   }, []);
 
   // 如果剩余 regularTabs 减少到 <= 1，自动清空锁死

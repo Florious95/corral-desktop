@@ -187,8 +187,6 @@
   box-sizing: border-box;
   transition: background var(--d-hover), color var(--d-hover),
               width 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-              max-width 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-              flex-basis 0.2s cubic-bezier(0.16, 1, 0.3, 1),
               transform 0.18s cubic-bezier(0.18, 0.89, 0.32, 1.12);
 }
 .tb-tab:not(.tb-tab-pinned) {
@@ -198,9 +196,11 @@
   min-width: 44px;
 }
 .tb-tabs-scroll[data-locked='true'] .tb-tab:not(.tb-tab-pinned) {
-  flex: 0 0 var(--tb-tab-width, 160px);
-  width: var(--tb-tab-width, 160px);
-  max-width: var(--tb-tab-width, 160px);
+  flex: 0 0 var(--tb-tab-width, 160px) !important;
+  width: var(--tb-tab-width, 160px) !important;
+  min-width: var(--tb-tab-width, 160px) !important;
+  max-width: var(--tb-tab-width, 160px) !important;
+  transition: none !important;
 }
 .tb-tab:hover {
   background: var(--hover-4);
