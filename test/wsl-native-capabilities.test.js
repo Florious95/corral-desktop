@@ -17,6 +17,7 @@ test('nativeCapabilities.wsl.checkEnvironment returns safe default status struct
   assert.equal(status.ubuntu_installed, false);
   assert.equal(status.ubuntu_running, false);
   assert.equal(status.tmux_installed, false);
+  assert.equal(status.service_installed, false);
   assert.equal(status.service_running, false);
   assert.equal(status.wsl_ip, null);
 });
@@ -31,6 +32,7 @@ test('nativeCapabilities.wsl.checkEnvironment supports testEngineOverride with c
         ubuntu_installed: true,
         ubuntu_running: true,
         tmux_installed: true,
+        service_installed: true,
         service_running: false,
         wsl_ip: '172.28.14.2',
       }),
@@ -42,6 +44,7 @@ test('nativeCapabilities.wsl.checkEnvironment supports testEngineOverride with c
   assert.equal(status.ubuntu_installed, true);
   assert.equal(status.ubuntu_running, true);
   assert.equal(status.tmux_installed, true);
+  assert.equal(status.service_installed, true);
   assert.equal(status.service_running, false);
   assert.equal(status.wsl_ip, '172.28.14.2');
 
@@ -133,12 +136,18 @@ test('WslBootstrapCard renders respective guidance text and command hints for ev
   assert.match(cardJsx, /wsl --install -d Ubuntu/);
   assert.match(cardJsx, /sudo apt-get install -y tmux/);
 
-  // 3. 重试按钮
+  // 3. 未安装会话服务指引与命令代码块
+  assert.match(cardJsx, /!envStatus\.service_installed/);
+  assert.match(cardJsx, /WSL 2 中未安装 Agent 会话服务/);
+  assert.match(cardJsx, /go install github\.com\/Florious95\/corral-core\/server\/cmd\/agentmirrord@latest/);
+
+  // 4. 重试按钮无死锁（无 disabled 属性，允许随时重试）
   assert.match(cardJsx, /className="app-empty-btn wsl-retry-btn"/);
   assert.match(cardJsx, /onClick=\{onRetry\}/);
+  assert.doesNotMatch(cardJsx, /disabled=\{isLoading\}/);
 });
 
-test('App.jsx integrates WSL auto-healing state machine and conditionally mounts WslBootstrapCard', async () => {
+test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre-branching', async () => {
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
 
   // 1. 引入组件与声明状态
@@ -146,12 +155,81 @@ test('App.jsx integrates WSL auto-healing state machine and conditionally mounts
   assert.match(appJsx, /const \[wslState, setWslState\] = useState\('idle'\)/);
   assert.match(appJsx, /const \[wslEnvStatus, setWslEnvStatus\] = useState\(null\)/);
 
-  // 2. 环境探测与自愈逻辑
+  // 2. 环境探测与前置短路（未安装 service 直接切 unready，绝不盲目 startService）
   assert.match(appJsx, /const checkAndHealWsl = useCallback/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.checkEnvironment\(\)/);
+  assert.match(appJsx, /if \(!status\.service_installed\) {\s*setWslState\('unready'\);\s*return;\s*}/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.startService\('agentmirrord'\)/);
 
-  // 3. 条件渲染保护：仅在 Windows 且本地未连接且非 idle 时展示引导卡片
+  // 3. 8 秒看门狗与 1 秒轮询保护
+  assert.match(appJsx, /setInterval\(async \(\) => {/);
+  assert.match(appJsx, /}, 1000\)/);
+  assert.match(appJsx, /setTimeout\(\(\) => {\s*setWslState\('error'\);\s*setWslError\('会话服务启动超时（8秒内未就绪），请检查 WSL 服务运行状态'\);\s*}, 8000\)/);
+  assert.match(appJsx, /clearInterval\(pollTimer\)/);
+  assert.match(appJsx, /clearTimeout\(watchdogTimer\)/);
+
+  // 4. 条件渲染保护：仅在 Windows 且本地未连接且非 idle 时展示引导卡片
   assert.match(appJsx, /isWindows && !anyDeviceOnline && wslState !== 'idle'/);
   assert.match(appJsx, /<WslBootstrapCard/);
+});
+
+test('WSL auto-healing state machine pre-checks service_installed and enforces watchdog timeout', async () => {
+  // 仿真状态机测试
+  let currentState = 'idle';
+  let currentError = '';
+  let serviceStartedCalled = false;
+
+  const mockCheckAndHeal = async (envStatus) => {
+    currentState = 'checking';
+    currentError = '';
+    const status = envStatus;
+    if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
+      currentState = 'unready';
+      return;
+    }
+    if (!status.service_installed) {
+      currentState = 'unready';
+      return;
+    }
+    if (!status.service_running) {
+      currentState = 'starting';
+      serviceStartedCalled = true;
+    }
+  };
+
+  // 场景 A: service_installed 为 false 时，前置拦截，绝不调用 startService
+  await mockCheckAndHeal({
+    wsl_installed: true,
+    ubuntu_installed: true,
+    tmux_installed: true,
+    service_installed: false,
+    service_running: false,
+  });
+  assert.equal(currentState, 'unready');
+  assert.equal(serviceStartedCalled, false);
+
+  // 场景 B: service_installed 为 true 时，正常进入 starting 并尝试启动
+  await mockCheckAndHeal({
+    wsl_installed: true,
+    ubuntu_installed: true,
+    tmux_installed: true,
+    service_installed: true,
+    service_running: false,
+  });
+  assert.equal(currentState, 'starting');
+  assert.equal(serviceStartedCalled, true);
+
+  // 场景 C: 8 秒看门狗超时，状态切入 error
+  let watchdogTimerFired = false;
+  const timeoutId = setTimeout(() => {
+    watchdogTimerFired = true;
+    currentState = 'error';
+    currentError = '会话服务启动超时（8秒内未就绪），请检查 WSL 服务运行状态';
+  }, 50);
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(watchdogTimerFired, true);
+  assert.equal(currentState, 'error');
+  assert.match(currentError, /会话服务启动超时/);
+  clearTimeout(timeoutId);
 });

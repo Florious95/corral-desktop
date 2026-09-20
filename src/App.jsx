@@ -468,6 +468,10 @@ export default function App({ seedDevices } = {}) {
         setWslState('unready');
         return;
       }
+      if (!status.service_installed) {
+        setWslState('unready');
+        return;
+      }
       if (!status.service_running) {
         setWslState('starting');
         try {
@@ -484,11 +488,12 @@ export default function App({ seedDevices } = {}) {
       } else {
         setWslState('starting');
       }
+      dm.connectAll();
     } catch (err) {
       setWslState('error');
       setWslError(err?.message || 'WSL 检测异常');
     }
-  }, []);
+  }, [dm]);
 
   useEffect(() => {
     const isWin = nativeCapabilities.platform === 'windows';
@@ -505,6 +510,37 @@ export default function App({ seedDevices } = {}) {
       checkAndHealWsl();
     }
   }, [anyDeviceOnline, checkAndHealWsl, wslState]);
+
+  /* ——— WSL 2 启动期 1s 轮询自愈探测与 8s 超时看门狗保护 ——— */
+  useEffect(() => {
+    if (wslState !== 'starting') return;
+    if (anyDeviceOnline) {
+      setWslState('idle');
+      return;
+    }
+
+    const pollTimer = setInterval(async () => {
+      try {
+        const status = await nativeCapabilities.wsl.checkEnvironment();
+        setWslEnvStatus(status);
+        if (status?.service_running) {
+          dm.connectAll();
+        }
+      } catch (_) {
+        // 轮询异常静默忽略，等待看门狗或下一次轮询
+      }
+    }, 1000);
+
+    const watchdogTimer = setTimeout(() => {
+      setWslState('error');
+      setWslError('会话服务启动超时（8秒内未就绪），请检查 WSL 服务运行状态');
+    }, 8000);
+
+    return () => {
+      clearInterval(pollTimer);
+      clearTimeout(watchdogTimer);
+    };
+  }, [wslState, anyDeviceOnline, dm]);
 
   /* ——— level2：选中某个 Space 才订二级状态流（一台设备同时只能订一个 cwd） ——— */
   useEffect(() => {

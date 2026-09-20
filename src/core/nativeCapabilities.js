@@ -781,6 +781,7 @@ export const nativeCapabilities = {
               ubuntu_installed: Boolean(status.ubuntu_installed),
               ubuntu_running: Boolean(status.ubuntu_running),
               tmux_installed: Boolean(status.tmux_installed),
+              service_installed: Boolean(status.service_installed),
               service_running: Boolean(status.service_running),
               wsl_ip: typeof status.wsl_ip === 'string' ? status.wsl_ip : null,
             };
@@ -794,6 +795,7 @@ export const nativeCapabilities = {
         ubuntu_installed: false,
         ubuntu_running: false,
         tmux_installed: false,
+        service_installed: false,
         service_running: false,
         wsl_ip: null,
       };

@@ -34,12 +34,22 @@ export default function WslBootstrapCard({
     } else if (envStatus && !envStatus.tmux_installed) {
       subtitle = 'Ubuntu 中尚未安装 tmux，Agent 会话管理依赖 tmux：';
       commandHint = 'wsl -d Ubuntu -e sudo apt-get update && sudo apt-get install -y tmux';
+    } else if (envStatus && !envStatus.service_installed) {
+      subtitle = 'WSL 2 中未安装 Agent 会话服务，请在 Ubuntu 中执行命令安装：';
+      commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
     } else {
       subtitle = '请检查 WSL 2 运行状态并确保 Ubuntu 可正常启动';
     }
   } else if (state === 'error') {
     title = 'WSL 会话服务连接失败';
     subtitle = errorMsg || '无法拉起会话服务，请确保 agentmirrord 或 corral-core 在 WSL 中可执行';
+    if (envStatus && !envStatus.service_installed) {
+      subtitle = 'WSL 2 中未安装 Agent 会话服务，请在 Ubuntu 中安装 agentmirrord：';
+      commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
+    } else if (errorMsg && errorMsg.includes('service_not_installed')) {
+      subtitle = 'WSL 2 中未安装 Agent 会话服务，请在 Ubuntu 中安装 agentmirrord：';
+      commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
+    }
   }
 
   const isLoading = state === 'checking' || state === 'starting';
@@ -63,9 +73,8 @@ export default function WslBootstrapCard({
           type="button"
           className="app-empty-btn wsl-retry-btn"
           onClick={onRetry}
-          disabled={isLoading}
         >
-          {isLoading ? '正在处理...' : '重试检测'}
+          {isLoading ? '重新检测' : '重试检测'}
         </button>
       )}
     </div>
