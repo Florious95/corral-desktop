@@ -7,7 +7,8 @@ if (!stat?.isFile() || stat.size === 0) {
   throw new Error(`missing bundled Linux service: ${resource}`);
 }
 
-const header = readFileSync(resource, { encoding: null, flag: 'r' }).subarray(0, 20);
+const contents = readFileSync(resource, { encoding: null, flag: 'r' });
+const header = contents.subarray(0, 20);
 const isElf64LeX86 =
   header.length >= 20 &&
   header[0] === 0x7f &&
@@ -21,5 +22,8 @@ const isElf64LeX86 =
 if (!isElf64LeX86) {
   throw new Error('bundled Linux service is not an ELF x86_64 executable');
 }
+if (!contents.includes(Buffer.from('AgentMirror embedded providers.tsv v1'))) {
+  throw new Error('bundled Linux service does not contain the embedded provider table');
+}
 
-console.log(`Bundled agentmirrord is ready (${stat.size} bytes).`);
+console.log(`Bundled agentmirrord is ready (${stat.size} bytes, embedded providers.tsv).`);
