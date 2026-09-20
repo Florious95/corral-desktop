@@ -162,6 +162,67 @@ test('nativeCapabilities.wsl.readServiceToken enforces Platform Guard: returns n
   }
 });
 
+test('nativeCapabilities.wsl.installService rejects with unsupported_platform on non-Tauri environments', async () => {
+  resetNativeEngineForTests();
+
+  await assert.rejects(
+    nativeCapabilities.wsl.installService(),
+    (err) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /unsupported_platform/);
+      assert.equal(err.code, 'unsupported_platform');
+      return true;
+    }
+  );
+});
+
+test('nativeCapabilities.wsl enforces Platform Guard: installService strictly rejects in Tauri environment on macOS platform', async () => {
+  resetNativeEngineForTests();
+  const prevWindow = globalThis.window;
+
+  try {
+    globalThis.window = { __TAURI_INTERNALS__: {} };
+    setNativeEngineForTests({ platform: 'macos' });
+
+    await assert.rejects(
+      nativeCapabilities.wsl.installService(),
+      (err) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /unsupported_platform/);
+        assert.equal(err.code, 'unsupported_platform');
+        return true;
+      }
+    );
+  } finally {
+    if (prevWindow !== undefined) {
+      globalThis.window = prevWindow;
+    } else {
+      delete globalThis.window;
+    }
+    resetNativeEngineForTests();
+  }
+});
+
+test('nativeCapabilities.wsl.installService supports testEngineOverride', async () => {
+  resetNativeEngineForTests();
+  let installCalled = false;
+
+  setNativeEngineForTests({
+    wsl: {
+      installService: async () => {
+        installCalled = true;
+        return { ok: true };
+      },
+    },
+  });
+
+  const res = await nativeCapabilities.wsl.installService();
+  assert.equal(installCalled, true);
+  assert.deepEqual(res, { ok: true });
+
+  resetNativeEngineForTests();
+});
+
 test('WslBootstrapCard renders respective guidance text and command hints for every WSL state', async () => {
   const cardJsx = await readFile(new URL('../src/components/chrome/WslBootstrapCard.jsx', import.meta.url), 'utf8');
 
@@ -170,6 +231,9 @@ test('WslBootstrapCard renders respective guidance text and command hints for ev
   assert.match(cardJsx, /className=\{`app-empty-icon wsl-icon\$\{isLoading \? ' is-loading' : ''\}`\}/);
 
   // 2. 状态分支覆盖
+  assert.match(cardJsx, /state === 'installing'/);
+  assert.match(cardJsx, /正在为 WSL 2 安装会话服务\.\.\./);
+  assert.match(cardJsx, /正在为 WSL 2 安装会话服务组件\.\.\./);
   assert.match(cardJsx, /state === 'starting'/);
   assert.match(cardJsx, /正在唤醒 WSL 2 会话服务\.\.\./);
   assert.match(cardJsx, /state === 'unready'/);
@@ -197,10 +261,11 @@ test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre
   assert.match(appJsx, /const \[wslState, setWslState\] = useState\('idle'\)/);
   assert.match(appJsx, /const \[wslEnvStatus, setWslEnvStatus\] = useState\(null\)/);
 
-  // 2. 环境探测与前置短路（未安装 service 直接切 unready，绝不盲目 startService）
+  // 2. 环境探测与全自动开箱即用分支（未安装 service 自动切 installing 并调用 installService，安装后切 starting 启动服务）
   assert.match(appJsx, /const checkAndHealWsl = useCallback/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.checkEnvironment\(\)/);
-  assert.match(appJsx, /if \(!status\.service_installed\) {\s*setWslState\('unready'\);\s*return;\s*}/);
+  assert.match(appJsx, /if \(!status\.service_installed\) {\s*setWslState\('installing'\);/);
+  assert.match(appJsx, /nativeCapabilities\.wsl\.installService\(\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.startService\('agentmirrord'\)/);
 
   // 3. 8 秒看门狗与 1 秒轮询保护
@@ -221,23 +286,30 @@ test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre
   assert.match(appJsx, /dm\.connect\('local'\)/);
 });
 
-test('WSL auto-healing state machine pre-checks service_installed and enforces watchdog timeout', async () => {
+test('WSL auto-healing state machine automatically installs service when missing and enforces watchdog timeout', async () => {
   // 仿真状态机测试
   let currentState = 'idle';
   let currentError = '';
+  let installServiceCalled = false;
   let serviceStartedCalled = false;
 
-  const mockCheckAndHeal = async (envStatus) => {
+  const mockCheckAndHeal = async (envStatus, shouldFailInstall = false) => {
     currentState = 'checking';
     currentError = '';
-    const status = envStatus;
+    const status = { ...envStatus };
     if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
       currentState = 'unready';
       return;
     }
     if (!status.service_installed) {
-      currentState = 'unready';
-      return;
+      currentState = 'installing';
+      installServiceCalled = true;
+      if (shouldFailInstall) {
+        currentState = 'error';
+        currentError = '安装 WSL 会话服务失败: bundled binary not found';
+        return;
+      }
+      status.service_installed = true;
     }
     if (!status.service_running) {
       currentState = 'starting';
@@ -245,7 +317,9 @@ test('WSL auto-healing state machine pre-checks service_installed and enforces w
     }
   };
 
-  // 场景 A: service_installed 为 false 时，前置拦截，绝不调用 startService
+  // 场景 A: service_installed 为 false 时，自动进入 installing 并触发 installService，完成后推进到 starting
+  installServiceCalled = false;
+  serviceStartedCalled = false;
   await mockCheckAndHeal({
     wsl_installed: true,
     ubuntu_installed: true,
@@ -253,10 +327,31 @@ test('WSL auto-healing state machine pre-checks service_installed and enforces w
     service_installed: false,
     service_running: false,
   });
-  assert.equal(currentState, 'unready');
+  assert.equal(installServiceCalled, true);
+  assert.equal(currentState, 'starting');
+  assert.equal(serviceStartedCalled, true);
+
+  // 场景 B: 自动安装抛错时，转入 error 状态并展示友好原因
+  installServiceCalled = false;
+  serviceStartedCalled = false;
+  await mockCheckAndHeal(
+    {
+      wsl_installed: true,
+      ubuntu_installed: true,
+      tmux_installed: true,
+      service_installed: false,
+      service_running: false,
+    },
+    true
+  );
+  assert.equal(installServiceCalled, true);
+  assert.equal(currentState, 'error');
+  assert.match(currentError, /安装 WSL 会话服务失败/);
   assert.equal(serviceStartedCalled, false);
 
-  // 场景 B: service_installed 为 true 时，正常进入 starting 并尝试启动
+  // 场景 C: service_installed 为 true 时，直接进入 starting 并尝试启动
+  installServiceCalled = false;
+  serviceStartedCalled = false;
   await mockCheckAndHeal({
     wsl_installed: true,
     ubuntu_installed: true,
@@ -264,10 +359,11 @@ test('WSL auto-healing state machine pre-checks service_installed and enforces w
     service_installed: true,
     service_running: false,
   });
+  assert.equal(installServiceCalled, false);
   assert.equal(currentState, 'starting');
   assert.equal(serviceStartedCalled, true);
 
-  // 场景 C: 8 秒看门狗超时，状态切入 error
+  // 场景 D: 8 秒看门狗超时，状态切入 error
   let watchdogTimerFired = false;
   const timeoutId = setTimeout(() => {
     watchdogTimerFired = true;
@@ -280,6 +376,71 @@ test('WSL auto-healing state machine pre-checks service_installed and enforces w
   assert.equal(currentState, 'error');
   assert.match(currentError, /会话服务启动超时/);
   clearTimeout(timeoutId);
+});
+
+test('WSL end-to-end auto-healing flow from missing service to direct connect', async () => {
+  let step = 'init';
+  let mockEnvStatus = {
+    wsl_installed: true,
+    ubuntu_installed: true,
+    tmux_installed: true,
+    service_installed: false,
+    service_running: false,
+    wsl_ip: '172.28.14.2',
+  };
+  let tokenInjected = null;
+  let localConnected = false;
+
+  const mockNative = {
+    wsl: {
+      checkEnvironment: async () => ({ ...mockEnvStatus }),
+      installService: async () => {
+        step = 'installed';
+        mockEnvStatus.service_installed = true;
+      },
+      startService: async () => {
+        step = 'started';
+        mockEnvStatus.service_running = true;
+      },
+      readServiceToken: async () => 'zero-touch-auth-token-999',
+    },
+  };
+
+  const mockDeviceManager = {
+    devices: [{ id: 'local', url: 'ws://127.0.0.1:9900/ws', state: 'offline' }],
+    hasDeviceToken: () => Boolean(tokenInjected),
+    updateDevice: (id, patch) => {
+      if (id === 'local' && patch.token) tokenInjected = patch.token;
+    },
+    connect: (id) => {
+      if (id === 'local') localConnected = true;
+      return true;
+    },
+  };
+
+  // 模拟整套 checkAndHealWsl 全自动流转
+  let wslState = 'idle';
+  const status = await mockNative.wsl.checkEnvironment();
+  if (!status.service_installed) {
+    wslState = 'installing';
+    await mockNative.wsl.installService();
+  }
+  if (!status.service_running) {
+    wslState = 'starting';
+    await mockNative.wsl.startService('agentmirrord');
+    const token = await mockNative.wsl.readServiceToken();
+    if (token) {
+      mockDeviceManager.updateDevice('local', { token });
+      mockDeviceManager.connect('local');
+    }
+  }
+
+  assert.equal(step, 'started');
+  assert.equal(mockEnvStatus.service_installed, true);
+  assert.equal(mockEnvStatus.service_running, true);
+  assert.equal(tokenInjected, 'zero-touch-auth-token-999');
+  assert.equal(localConnected, true);
+  assert.equal(wslState, 'starting');
 });
 
 test('DeviceManager supports hasDeviceToken, getDeviceToken, and connect', async () => {

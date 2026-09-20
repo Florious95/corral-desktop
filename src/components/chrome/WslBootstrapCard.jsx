@@ -5,7 +5,7 @@ import { TerminalIcon } from '../../lib/icons.jsx';
  * Windows WSL 2 环境探测与自愈引导卡片
  *
  * @param {Object} props
- * @param {'idle'|'checking'|'starting'|'unready'|'error'} props.state
+ * @param {'idle'|'checking'|'installing'|'starting'|'unready'|'error'} props.state
  * @param {Object} [props.envStatus]
  * @param {string} [props.errorMsg]
  * @param {() => void} [props.onRetry]
@@ -20,7 +20,10 @@ export default function WslBootstrapCard({
   let subtitle = '正在检测 Windows WSL 2 与 Ubuntu 运行状态';
   let commandHint = '';
 
-  if (state === 'starting') {
+  if (state === 'installing') {
+    title = '正在为 WSL 2 安装会话服务...';
+    subtitle = '正在为 WSL 2 安装会话服务组件...';
+  } else if (state === 'starting') {
     title = '正在唤醒 WSL 2 会话服务...';
     subtitle = 'WSL 2 (Ubuntu) 与 tmux 环境已就绪，正在后台启动 agentmirrord 守护进程';
   } else if (state === 'unready') {
@@ -55,7 +58,7 @@ export default function WslBootstrapCard({
     }
   }
 
-  const isLoading = state === 'checking' || state === 'starting';
+  const isLoading = state === 'checking' || state === 'installing' || state === 'starting';
 
   return (
     <div className="app-empty wsl-bootstrap-card" data-wsl-state={state}>
