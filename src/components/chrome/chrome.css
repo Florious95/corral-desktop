@@ -111,6 +111,7 @@
   flex: none;
 }
 .tb-tabs-scroll {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -121,6 +122,27 @@
 }
 .tb-tabs-scroll::-webkit-scrollbar {
   display: none;
+}
+.tb-tab-capsule {
+  position: absolute;
+  top: 1px;
+  height: 26px;
+  border-radius: var(--r-6);
+  background: var(--bg);
+  border: 1px solid var(--border-input);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 1;
+  transition: transform 0.22s cubic-bezier(0.18, 0.89, 0.32, 1.12),
+              width 0.22s cubic-bezier(0.18, 0.89, 0.32, 1.12),
+              opacity 0.15s ease;
+  will-change: transform, width, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tb-tab-capsule {
+    transition: none !important;
+  }
 }
 .tb-tab-add {
   width: 26px;
@@ -147,6 +169,8 @@
   outline-offset: 1px;
 }
 .tb-tab {
+  position: relative;
+  z-index: 2;
   height: 26px;
   padding: 0 8px;
   border-radius: var(--r-6);
@@ -160,13 +184,22 @@
   cursor: pointer;
   border: 1px solid transparent;
   box-sizing: border-box;
-  transition: background var(--d-hover), color var(--d-hover);
+  transition: background var(--d-hover), color var(--d-hover),
+              width 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              max-width 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              flex-basis 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.18s cubic-bezier(0.18, 0.89, 0.32, 1.12);
 }
 .tb-tab:not(.tb-tab-pinned) {
   flex: 1 1 0px;
-  width: 160px;
+  width: var(--tb-tab-width, 160px);
   max-width: 160px;
   min-width: 44px;
+}
+.tb-tabs-scroll[data-locked='true'] .tb-tab:not(.tb-tab-pinned) {
+  flex: 0 0 var(--tb-tab-width, 160px);
+  width: var(--tb-tab-width, 160px);
+  max-width: var(--tb-tab-width, 160px);
 }
 .tb-tab:hover {
   background: var(--hover-4);
@@ -177,6 +210,17 @@
   color: var(--text);
   border-color: var(--border-input);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.tb-tabs-scroll.has-capsule .tb-tab.is-active {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.tb-tabs-scroll.has-capsule .tb-tab:hover {
+  background: var(--hover-2);
+}
+.tb-tabs-scroll.has-capsule .tb-tab.is-active:hover {
+  background: transparent;
 }
 .tb-tab-pinned {
   flex: none;

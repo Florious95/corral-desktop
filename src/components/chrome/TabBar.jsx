@@ -1,7 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import ProviderIcon from '../sidebar/ProviderIcon.jsx';
 import { XIcon, PlusIcon } from '../../lib/icons.jsx';
 import { getLeaves, isBlankTab } from '../../lib/workspaceLayout.js';
+
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 /**
  * 计算标签页对应的实时运行状态（支持多分屏与单会话秒级联动）
@@ -73,10 +76,103 @@ export default function TabBar({
     return { pinnedTabs: pinned, regularTabs: regular };
   }, [tabs]);
 
+  // Chrome 式 TabBar 宽度锁定机制：
+  // 当点击关闭某个 Tab 时，若鼠标仍处于 TabBar 区域内，锁定当前每个 regular tab 的宽度，
+  // 避免剩余 tab 宽度瞬间放大/回退导致后续 tab 的关闭按钮从鼠标光标下移开；
+  // 鼠标离开 TabBar 区域后（mouseleave），解除锁定并平滑自适应重新分配。
+  const [lockedTabWidth, setLockedTabWidth] = useState(null);
+  const isPointerInsideRef = useRef(false);
+  const scrollContainerRef = useRef(null);
+  const regularTabRefs = useRef(new Map());
+
+  // Rare UI 弹性胶囊状态：保存当前激活项的 { left, width, visible }
+  const [capsuleStyle, setCapsuleStyle] = useState({ left: 0, width: 0, opacity: 0 });
+
+  // 记录每个 regular tab 的当前真实测量宽度
+  const measureCurrentTabWidth = useCallback(() => {
+    if (!scrollContainerRef.current) return null;
+    const tabEl = scrollContainerRef.current.querySelector('.tb-tab:not(.tb-tab-pinned)');
+    if (tabEl) {
+      const w = tabEl.getBoundingClientRect().width;
+      if (w > 0) return Math.round(w * 10) / 10;
+    }
+    return null;
+  }, []);
+
+  // 当点击关闭按钮时，立即捕获并锁定当前宽度
+  const handleCloseTabWithLock = useCallback((e, tabKey) => {
+    e.stopPropagation();
+    if (isPointerInsideRef.current && regularTabs.length > 1) {
+      const currentWidth = measureCurrentTabWidth();
+      if (currentWidth && currentWidth > 0) {
+        setLockedTabWidth(currentWidth);
+      }
+    }
+    if (onCloseTab) {
+      onCloseTab(tabKey);
+    }
+  }, [onCloseTab, regularTabs.length, measureCurrentTabWidth]);
+
+  // 鼠标进入 TabBar 区域
+  const handleMouseEnterTabBar = useCallback(() => {
+    isPointerInsideRef.current = true;
+  }, []);
+
+  // 鼠标离开 TabBar 区域：平滑解除宽度锁定
+  const handleMouseLeaveTabBar = useCallback(() => {
+    isPointerInsideRef.current = false;
+    setLockedTabWidth(null);
+  }, []);
+
+  // 如果剩余 regularTabs 减少到 <= 1，自动清空锁死
+  useEffect(() => {
+    if (regularTabs.length <= 1 && lockedTabWidth !== null) {
+      setLockedTabWidth(null);
+    }
+  }, [regularTabs.length, lockedTabWidth]);
+
+  // 更新 Rare UI 弹性胶囊位置
+  useIsomorphicLayoutEffect(() => {
+    if (!scrollContainerRef.current) return;
+    const activeKey = activeTabId || activeUid;
+    if (!activeKey) {
+      setCapsuleStyle((prev) => (prev.opacity === 0 ? prev : { ...prev, opacity: 0 }));
+      return;
+    }
+
+    // 查找当前激活的 DOM 元素（优先在 regularTabs 中）
+    const targetEl = regularTabRefs.current.get(activeKey);
+    if (!targetEl || !scrollContainerRef.current) {
+      setCapsuleStyle((prev) => (prev.opacity === 0 ? prev : { ...prev, opacity: 0 }));
+      return;
+    }
+
+    const containerRect = scrollContainerRef.current.getBoundingClientRect();
+    const targetRect = targetEl.getBoundingClientRect();
+
+    const scrollLeft = scrollContainerRef.current.scrollLeft || 0;
+    const left = targetRect.left - containerRect.left + scrollLeft;
+    const width = targetRect.width;
+
+    if (width > 0) {
+      setCapsuleStyle({
+        left: Math.round(left),
+        width: Math.round(width),
+        opacity: 1,
+      });
+    }
+  }, [activeTabId, activeUid, regularTabs, lockedTabWidth]);
+
   if (tabs.length === 0) return null;
 
   return (
-    <nav className="tb-tabbar" aria-label="会话标签页">
+    <nav
+      className="tb-tabbar"
+      data-locked-width={lockedTabWidth !== null ? lockedTabWidth : undefined}
+      aria-label="会话标签页"
+      onMouseEnter={handleMouseEnterTabBar}
+      onMouseLeave={handleMouseLeaveTabBar}
+    >
       {pinnedTabs.length > 0 && (
         <div className="tb-tabs-pinned">
           {pinnedTabs.map((tab, idx) => {
@@ -122,7 +218,23 @@ export default function TabBar({
         </div>
       )}
 
-      <div className="tb-tabs-scroll">
+      <div
+        ref={scrollContainerRef}
+        className="tb-tabs-scroll"
+        data-locked={lockedTabWidth !== null ? 'true' : undefined}
+        style={lockedTabWidth !== null ? { '--tb-tab-width': `${lockedTabWidth}px` } : undefined}
+      >
+        {/* Rare UI 弹性物理胶囊背景指示器 */}
+        <span
+          className="tb-tab-capsule"
+          aria-hidden="true"
+          style={{
+            transform: `translateX(${capsuleStyle.left}px)`,
+            width: `${capsuleStyle.width}px`,
+            opacity: capsuleStyle.opacity,
+          }}
+        />
+
         {regularTabs.map((tab, idx) => {
           const tabKey = tab.id || tab.uid;
           const isActive = activeTabId ? tabKey === activeTabId : (tabKey === activeUid || tab.uid === activeUid);
@@ -156,6 +268,10 @@ export default function TabBar({
           return (
             <div
               key={tabKey}
+              ref={(el) => {
+                if (el) regularTabRefs.current.set(tabKey, el);
+                else regularTabRefs.current.delete(tabKey);
+              }}
               data-tab-uid={tabKey}
               data-pinned="false"
               data-blank={isBlank ? 'true' : undefined}
@@ -176,10 +292,7 @@ export default function TabBar({
                 data-tauri-drag-region="false"
                 title="关闭此标签页"
                 aria-label={`关闭 ${title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab && onCloseTab(tabKey);
-                }}
+                onClick={(e) => handleCloseTabWithLock(e, tabKey)}
               >
                 <XIcon size={11} strokeWidth={2.2} />
               </button>
