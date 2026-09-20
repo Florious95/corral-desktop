@@ -100,7 +100,8 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard message.frameInfo.isMainFrame,
               LocalContent.isEntry(message.frameInfo.request.url),
               let owner,
-              message.webView === owner.webView,
+              let webView = message.webView,
+              webView === owner.webView,
               owner.acceptsMessages else {
             replyHandler(nil, "permission_denied")
             return
