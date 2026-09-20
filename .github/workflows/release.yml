@@ -117,6 +117,16 @@ jobs:
           }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Clean and smoke-test Windows installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem (Join-Path $PWD 'release\AgentMirror_*_x64-setup.exe') -File |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw 'Staged NSIS installer was not found.'
+          }
+          .\scripts\windows-release-smoke.ps1 -InstallerPath $installer.FullName
+
       - name: Upload Windows release artifacts
         uses: actions/upload-artifact@v4
         with:
