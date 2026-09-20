@@ -85,8 +85,8 @@ export default function TabBar({
   const scrollContainerRef = useRef(null);
   const regularTabRefs = useRef(new Map());
 
-  // Rare UI 弹性胶囊状态：保存当前激活项的 { left, width, visible }
-  const [capsuleStyle, setCapsuleStyle] = useState({ left: 0, width: 0, opacity: 0 });
+  // Rare UI 弹性胶囊状态：保存当前激活项的 { left, scaleX, opacity }
+  const [capsuleStyle, setCapsuleStyle] = useState({ left: 0, scaleX: 1, opacity: 0 });
 
   // 记录每个 regular tab 的当前真实测量宽度
   const measureCurrentTabWidth = useCallback(() => {
@@ -157,7 +157,7 @@ export default function TabBar({
     if (width > 0) {
       setCapsuleStyle({
         left: Math.round(left),
-        width: Math.round(width),
+        scaleX: Math.round((width / 100) * 1000) / 1000,
         opacity: 1,
       });
     }
@@ -221,16 +221,17 @@ export default function TabBar({
       <div
         ref={scrollContainerRef}
         className="tb-tabs-scroll"
+        data-has-capsule={capsuleStyle.opacity > 0 ? 'true' : undefined}
         data-locked={lockedTabWidth !== null ? 'true' : undefined}
         style={lockedTabWidth !== null ? { '--tb-tab-width': `${lockedTabWidth}px` } : undefined}
       >
-        {/* Rare UI 弹性物理胶囊背景指示器 */}
+        {/* Rare UI 弹性物理胶囊背景指示器（纯 Compositor transform 加速） */}
         <span
           className="tb-tab-capsule"
           aria-hidden="true"
           style={{
-            transform: `translateX(${capsuleStyle.left}px)`,
-            width: `${capsuleStyle.width}px`,
+            transform: `translate3d(${capsuleStyle.left}px, 0, 0) scaleX(${capsuleStyle.scaleX})`,
+            width: '100px',
             opacity: capsuleStyle.opacity,
           }}
         />

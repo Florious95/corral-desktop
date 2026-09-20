@@ -5,10 +5,10 @@ import { readFile } from 'node:fs/promises';
 test('CSS rules: width-lock and spring capsule motion properties', async () => {
   const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
 
-  // 1. .tb-tab-capsule 声明弹性物理滑轨与缓动曲线
+  // 1. .tb-tab-capsule 声明弹性物理滑轨与纯 Compositor 缓动曲线
   assert.match(chromeCss, /\.tb-tab-capsule\s*\{[^}]*position:\s*absolute;/);
   assert.match(chromeCss, /\.tb-tab-capsule\s*\{[^}]*pointer-events:\s*none;/);
-  assert.match(chromeCss, /\.tb-tab-capsule\s*\{[^}]*will-change:\s*transform,\s*width,\s*opacity;/);
+  assert.match(chromeCss, /\.tb-tab-capsule\s*\{[^}]*will-change:\s*transform,\s*opacity;/);
   assert.match(chromeCss, /transition:[^;]*cubic-bezier\(0\.18,\s*0\.89,\s*0\.32,\s*1\.12\)/);
 
   // 2. .tb-tabs-scroll[data-locked='true'] 锁定 Tab 宽度，防止删除时瞬间重新等宽展开
@@ -28,8 +28,8 @@ test('TabBar source code: contains Rare UI spring capsule and Chrome width-lock 
 
   // 1. 声明 Rare UI 弹性物理胶囊背景指示器
   assert.match(tabBarJsx, /className="tb-tab-capsule"/);
-  assert.match(tabBarJsx, /transform:\s*`translateX\(\$\{capsuleStyle\.left\}px\)`/);
-  assert.match(tabBarJsx, /width:\s*`\$\{capsuleStyle\.width\}px`/);
+  assert.match(tabBarJsx, /transform:\s*`translate3d\(\$\{capsuleStyle\.left\}px,\s*0,\s*0\)\s*scaleX\(\$\{capsuleStyle\.scaleX\}\)`/);
+  assert.match(tabBarJsx, /data-has-capsule=\{capsuleStyle\.opacity > 0 \? 'true' : undefined\}/);
 
   // 2. 包含鼠标悬停追踪与宽度锁定
   assert.match(tabBarJsx, /onMouseEnter=\{handleMouseEnterTabBar\}/);
