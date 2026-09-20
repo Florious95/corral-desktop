@@ -452,7 +452,7 @@ export default function App({ seedDevices } = {}) {
   const anyDeviceOnline = devices.some((d) => d.state === 'ready');
 
   /* ——— Windows WSL 2 自动环境自检与连接自愈状态机 ——— */
-  const [wslState, setWslState] = useState('idle'); // 'idle' | 'checking' | 'starting' | 'unready' | 'error'
+  const [wslState, setWslState] = useState('idle'); // 'idle' | 'checking' | 'installing' | 'starting' | 'unready' | 'error'
   const [wslEnvStatus, setWslEnvStatus] = useState(null);
   const [wslError, setWslError] = useState('');
   const wslHealedRef = useRef(false);
@@ -496,8 +496,16 @@ export default function App({ seedDevices } = {}) {
         return;
       }
       if (!status.service_installed) {
-        setWslState('unready');
-        return;
+        setWslState('installing');
+        try {
+          await nativeCapabilities.wsl.installService();
+          status.service_installed = true;
+          setWslEnvStatus((prev) => ({ ...(prev || status), service_installed: true }));
+        } catch (err) {
+          setWslState('error');
+          setWslError(err?.message || '安装 WSL 会话服务失败');
+          return;
+        }
       }
       if (!status.service_running) {
         setWslState('starting');

@@ -837,5 +837,20 @@ export const nativeCapabilities = {
       }
       return null;
     },
+
+    async installService() {
+      if (testEngineOverride?.wsl?.installService) {
+        return testEngineOverride.wsl.installService();
+      }
+      const platform = detectPlatform();
+      const env = detectNativeEnvironment();
+      if (platform === 'windows' && env === 'tauri') {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return invoke('install_wsl_service');
+      }
+      const err = new Error('unsupported_platform: WSL2 is available on Windows only');
+      err.code = 'unsupported_platform';
+      throw err;
+    },
   },
 };
