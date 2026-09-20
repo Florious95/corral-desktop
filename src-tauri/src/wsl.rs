@@ -137,6 +137,24 @@ fn service_command_installed(distribution: &str, service: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(any(windows, test))]
+fn normalize_service_token(output: &[u8]) -> Result<String, String> {
+    let token = std::str::from_utf8(output)
+        .map_err(|_| "token_file_invalid".to_string())?
+        .trim();
+    if token.is_empty() {
+        return Err("token_file_not_found".to_string());
+    }
+    if token.len() > 256
+        || token
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err("token_file_invalid".to_string());
+    }
+    Ok(token.to_string())
+}
+
 #[cfg(windows)]
 fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
     let list_output = match run_wsl(&["-l", "-v"]) {
@@ -207,6 +225,46 @@ pub fn check_wsl_environment() -> Result<WslEnvironmentStatus, String> {
         // Keep the command available in non-Windows builds so the frontend can
         // use one invoke path across desktop targets.
         Ok(WslEnvironmentStatus::default())
+    }
+}
+
+/// Read the persisted local daemon token without exposing it to logs or errors.
+#[tauri::command]
+pub fn read_wsl_service_token() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let list_output = match run_wsl(&["-l", "-v"]) {
+            Ok(output) if output.status.success() => output,
+            Ok(_) => return Err("ubuntu_not_installed".to_string()),
+            Err(_) => return Err("wsl_unavailable".to_string()),
+        };
+        let Some(ubuntu) = find_ubuntu_distribution(&list_output.stdout) else {
+            return Err("ubuntu_not_installed".to_string());
+        };
+        if !ubuntu.running {
+            return Err("ubuntu_not_running".to_string());
+        }
+
+        // The path is fixed and the shell script is constant; no user input is
+        // interpolated. `head` bounds captured output before it reaches Rust.
+        let output = run_wsl(&[
+            "-d",
+            &ubuntu.name,
+            "-e",
+            "sh",
+            "-lc",
+            "test -f \"$HOME/.config/agentmirror/token\" && head -c 257 \"$HOME/.config/agentmirror/token\"",
+        ])
+        .map_err(|_| "token_file_unavailable".to_string())?;
+        if !output.status.success() {
+            return Err("token_file_not_found".to_string());
+        }
+        normalize_service_token(&output.stdout)
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err("unsupported_platform: WSL2 is available on Windows only".to_string())
     }
 }
 
@@ -282,8 +340,8 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_ubuntu_distribution, first_ip, parse_wsl_table, service_binary, service_probe_command,
-        WslEnvironmentStatus,
+        find_ubuntu_distribution, first_ip, normalize_service_token, parse_wsl_table,
+        service_binary, service_probe_command, WslEnvironmentStatus,
     };
 
     #[test]
@@ -357,6 +415,26 @@ mod tests {
                 .unwrap()
                 .get("service_installed"),
             Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn normalizes_service_token_without_exposing_invalid_content() {
+        assert_eq!(
+            normalize_service_token(b" ABCDEFGHIJKLMNOPQRSTUVWXYZ234567\n"),
+            Ok("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".to_string())
+        );
+        assert_eq!(
+            normalize_service_token(b""),
+            Err("token_file_not_found".to_string())
+        );
+        assert_eq!(
+            normalize_service_token(b"bad token\n"),
+            Err("token_file_invalid".to_string())
+        );
+        assert_eq!(
+            normalize_service_token(&vec![b'a'; 257]),
+            Err("token_file_invalid".to_string())
         );
     }
 }
