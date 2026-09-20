@@ -157,11 +157,11 @@ struct ShellChecks {
         let loaded = try await javascript("document.body.dataset.moduleReady === 'yes'", in: controller.webView) as? Bool
         expect(loaded == true, "real WK custom-scheme entry executes")
         // JS owns only test calls; no synthetic system input or user data.
-        _ = try await javascript("window.callNative = async (method, params={}, epoch) => window.webkit.messageHandlers.native.postMessage({v:1,id:crypto.randomUUID(),method,params,...(epoch ? {epoch}: {})}); window.callNative('bootstrap').then(x => window.boot = x); void 0", in: controller.webView)
+        _ = try await javascript("window.callNative = async (method, params={}, epoch) => window.webkit.messageHandlers.native.postMessage({v:1,id:crypto.randomUUID(),method,params,...(epoch ? {epoch}: {})}); window.callNative('bootstrap').then(x => window.boot = x); true", in: controller.webView)
         try await Task.sleep(for: .milliseconds(300))
         let bootOK = try await javascript("window.boot?.ok === true && window.boot.result.runtime === 'swift'", in: controller.webView) as? Bool
         expect(bootOK == true, "real WK reply bootstrap")
-        _ = try await javascript("window.callNative('window.startDragging').then(x => window.dragReply = x); void 0", in: controller.webView)
+        _ = try await javascript("window.callNative('window.startDragging').then(x => window.dragReply = x); true", in: controller.webView)
         try await Task.sleep(for: .milliseconds(200))
         expect(try await javascript("window.dragReply?.error?.code === 'unsupported'", in: controller.webView) as? Bool == true, "async drag RPC rejected")
         _ = try await javascript("window.location.href = 'https://example.invalid/'", in: controller.webView)
@@ -172,7 +172,7 @@ struct ShellChecks {
         controller.reload()
         for _ in 0..<100 where !finished { try await Task.sleep(for: .milliseconds(100)) }
         expect(controller.window?.frame == initialFrame, "reload preserves frame")
-        _ = try await javascript("window.webkit.messageHandlers.native.postMessage({v:1,id:'reload-bootstrap',method:'bootstrap',params:{}}).then(x => window.boot = x); void 0", in: controller.webView)
+        _ = try await javascript("window.webkit.messageHandlers.native.postMessage({v:1,id:'reload-bootstrap',method:'bootstrap',params:{}}).then(x => window.boot = x); true", in: controller.webView)
         try await Task.sleep(for: .milliseconds(200))
         let newEpoch = try await javascript("window.boot.result.epoch", in: controller.webView) as? String
         expect(oldEpoch != nil && newEpoch != nil && oldEpoch != newEpoch, "reload rotates epoch")
