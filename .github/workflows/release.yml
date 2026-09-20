@@ -20,6 +20,8 @@ env:
 jobs:
   windows-release:
     runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.artifacts.outputs.tag }}
     steps:
       - name: Check out repository and pinned core
         uses: actions/checkout@v4
@@ -115,25 +117,140 @@ jobs:
           }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-          "## Windows release artifacts" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
-          Get-ChildItem $release -File | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "- $($_.Name) ($($_.Length) bytes, SHA256 `$hash`)" |
-              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release
+          if-no-files-found: error
+
+  macos-release:
+    runs-on: macos-14
+    outputs:
+      tag: ${{ steps.artifacts.outputs.tag }}
+    steps:
+      - name: Check out repository and pinned core
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          submodules: recursive
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        continue-on-error: true
+        run: npm test
+
+      - name: Select pinned Xcode toolchain
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.6'
+
+      - name: Run Swift package tests
+        run: swift test --package-path native --parallel
+
+      - name: Run Swift shell checks
+        run: bash native/Tests/ShellTests/run-checks.sh
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build production AgentMirror.app
+        run: |
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+          VERSION="$version" REQUIRE_SWIFT_6_4=1 OUT_ROOT="$RUNNER_TEMP/agentmirror-native" ./scripts/build-swift-app.sh
+
+      - name: Create and verify macOS DMG
+        id: artifacts
+        run: |
+          set -euo pipefail
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+          release="$GITHUB_WORKSPACE/release"
+          app="$RUNNER_TEMP/agentmirror-native/AgentMirror.app"
+          dmg="$release/AgentMirror-v${version}-macOS-arm64.dmg"
+          mkdir -p "$release"
+          test -d "$app"
+          ./scripts/create-dmg.sh "$app" "$dmg"
+
+          mounted=0
+          mount_point=''
+          cleanup() {
+            if [[ "$mounted" -eq 1 && -n "$mount_point" ]]; then
+              hdiutil detach "$mount_point" >/dev/null || true
+            fi
           }
+          trap cleanup EXIT
+          mount_output=$(hdiutil attach -nobrowse -readonly "$dmg")
+          mount_point=$(printf '%s\n' "$mount_output" | awk '$NF ~ /^\/Volumes\// {print $NF; exit}')
+          test -n "$mount_point"
+          mounted=1
+          test -d "$mount_point/AgentMirror.app"
+          test -L "$mount_point/Applications"
+          test "$(readlink "$mount_point/Applications")" = '/Applications'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mount_point/AgentMirror.app/Contents/Info.plist")" = 'com.agentmirror.desktop'
+          file "$mount_point/AgentMirror.app/Contents/MacOS/AgentMirrorApp" | grep -q 'arm64'
+          hdiutil detach "$mount_point" >/dev/null
+          mounted=0
+
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && -n '${{ inputs.tag }}' ]]; then
+            tag='${{ inputs.tag }}'
+          elif [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$version"
+          fi
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: release
+          if-no-files-found: error
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - windows-release
+      - macos-release
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Create checksums
+        run: |
+          set -euo pipefail
+          test -n "$(find release -maxdepth 1 -type f -print -quit)"
+          (cd release && sha256sum AgentMirror* | sort) > release/SHA256SUMS
+          {
+            echo '## Release artifacts'
+            echo
+            cat release/SHA256SUMS
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.artifacts.outputs.tag }}
+          tag_name: ${{ needs.windows-release.outputs.tag }}
           target_commitish: ${{ github.sha }}
           files: release/*
           generate_release_notes: true
           body: |
-            AgentMirror v0.1.0 desktop release.
+            AgentMirror desktop release.
 
             - Windows: NSIS installer, MSI installer when produced, and a portable x64 ZIP.
             - Windows WSL2: local-direct mode can connect to the local agentmirrord WebSocket on port 9900 without pairing.
-            - macOS: native Tauri desktop shell is distributed separately as the macOS arm64 ZIP.
+            - macOS: native Swift AppKit + WKWebView arm64 DMG. Open the DMG and drag `AgentMirror.app` to the `Applications` shortcut.
 
-            SHA256 checksums are listed in the workflow summary and should be verified after download.
+            Verify downloaded artifacts with the attached `SHA256SUMS` file.
