@@ -2,6 +2,7 @@
 // Compile alongside Sources/Shell with -D SHELL_STANDALONE_TEST_RUNNER.
 #if SHELL_STANDALONE_TEST_RUNNER
 import AppKit
+import Darwin
 import WebKit
 
 @main
@@ -16,6 +17,7 @@ struct ShellChecks {
         do { try action(); expect(false, label) } catch { expect(true, label) }
     }
     @MainActor static func main() {
+        setbuf(stdout, nil)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         Task { @MainActor in
