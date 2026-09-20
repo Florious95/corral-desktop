@@ -457,6 +457,33 @@ export default function App({ seedDevices } = {}) {
   const [wslError, setWslError] = useState('');
   const wslHealedRef = useRef(false);
 
+  const syncLocalTokenAndConnect = useCallback(async () => {
+    const localDevice = dm.devices.find((d) => isLocalUrl(d.url));
+    const localId = localDevice?.id || 'local';
+    const hasToken = typeof dm.hasDeviceToken === 'function'
+      ? dm.hasDeviceToken(localId)
+      : Boolean(dm._devices?.find((d) => d.id === localId)?.token);
+    if (!hasToken) {
+      const token = await nativeCapabilities.wsl.readServiceToken();
+      if (token) {
+        dm.updateDevice('local', { token });
+        if (typeof dm.connect === 'function') {
+          dm.connect('local');
+        } else {
+          dm.connectAll();
+        }
+        return true;
+      }
+      return false;
+    }
+    if (typeof dm.connect === 'function') {
+      dm.connect('local');
+    } else {
+      dm.connectAll();
+    }
+    return true;
+  }, [dm]);
+
   const checkAndHealWsl = useCallback(async () => {
     if (nativeCapabilities.platform !== 'windows') return;
     setWslState('checking');
@@ -485,15 +512,21 @@ export default function App({ seedDevices } = {}) {
             return;
           }
         }
+        await syncLocalTokenAndConnect();
       } else {
         setWslState('starting');
+        const ok = await syncLocalTokenAndConnect();
+        if (!ok) {
+          setWslState('error');
+          setWslError('无法获取 WSL 会话服务配对令牌，请检查 ~/.config/agentmirror/token');
+          return;
+        }
       }
-      dm.connectAll();
     } catch (err) {
       setWslState('error');
       setWslError(err?.message || 'WSL 检测异常');
     }
-  }, [dm]);
+  }, [dm, syncLocalTokenAndConnect]);
 
   useEffect(() => {
     const isWin = nativeCapabilities.platform === 'windows';
@@ -524,7 +557,7 @@ export default function App({ seedDevices } = {}) {
         const status = await nativeCapabilities.wsl.checkEnvironment();
         setWslEnvStatus(status);
         if (status?.service_running) {
-          dm.connectAll();
+          await syncLocalTokenAndConnect();
         }
       } catch (_) {
         // 轮询异常静默忽略，等待看门狗或下一次轮询

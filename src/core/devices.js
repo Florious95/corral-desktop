@@ -278,6 +278,27 @@ export class DeviceManager {
     return true;
   }
 
+  /** Connect all devices or retry/connect a specific device by ID. */
+  connect(id) {
+    if (!id) {
+      this.connectAll();
+      return true;
+    }
+    return this.reconnect(id);
+  }
+
+  /** Check if a device has a configured non-empty authentication token. */
+  hasDeviceToken(id) {
+    const d = this._devices.find((x) => x.id === id);
+    return typeof d?.token === 'string' && d.token.length > 0;
+  }
+
+  /** Retrieve the device authentication token. */
+  getDeviceToken(id) {
+    const d = this._devices.find((x) => x.id === id);
+    return typeof d?.token === 'string' ? d.token : '';
+  }
+
   isReady(deviceId) {
     return this._clients.get(deviceId)?.isReady === true;
   }

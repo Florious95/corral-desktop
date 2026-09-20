@@ -49,6 +49,9 @@ export default function WslBootstrapCard({
     } else if (errorMsg && errorMsg.includes('service_not_installed')) {
       subtitle = 'WSL 2 中未安装 Agent 会话服务，请在 Ubuntu 中安装 agentmirrord：';
       commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
+    } else if (errorMsg && (errorMsg.includes('token') || errorMsg.includes('令牌'))) {
+      subtitle = errorMsg;
+      commandHint = 'wsl -d Ubuntu -e cat ~/.config/agentmirror/token';
     }
   }
 

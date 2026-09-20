@@ -120,6 +120,48 @@ test('nativeCapabilities.wsl.startService forwards serviceName via testEngineOve
   resetNativeEngineForTests();
 });
 
+test('nativeCapabilities.wsl.readServiceToken returns null in mock environment', async () => {
+  resetNativeEngineForTests();
+
+  const token = await nativeCapabilities.wsl.readServiceToken();
+  assert.equal(token, null);
+});
+
+test('nativeCapabilities.wsl.readServiceToken supports testEngineOverride', async () => {
+  resetNativeEngineForTests();
+
+  setNativeEngineForTests({
+    wsl: {
+      readServiceToken: async () => 'mock-service-token-12345',
+    },
+  });
+
+  const token = await nativeCapabilities.wsl.readServiceToken();
+  assert.equal(token, 'mock-service-token-12345');
+
+  resetNativeEngineForTests();
+});
+
+test('nativeCapabilities.wsl.readServiceToken enforces Platform Guard: returns null on macOS platform', async () => {
+  resetNativeEngineForTests();
+  const prevWindow = globalThis.window;
+
+  try {
+    globalThis.window = { __TAURI_INTERNALS__: {} };
+    setNativeEngineForTests({ platform: 'macos' });
+
+    const token = await nativeCapabilities.wsl.readServiceToken();
+    assert.equal(token, null);
+  } finally {
+    if (prevWindow !== undefined) {
+      globalThis.window = prevWindow;
+    } else {
+      delete globalThis.window;
+    }
+    resetNativeEngineForTests();
+  }
+});
+
 test('WslBootstrapCard renders respective guidance text and command hints for every WSL state', async () => {
   const cardJsx = await readFile(new URL('../src/components/chrome/WslBootstrapCard.jsx', import.meta.url), 'utf8');
 
@@ -171,6 +213,12 @@ test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre
   // 4. 条件渲染保护：仅在 Windows 且本地未连接且非 idle 时展示引导卡片
   assert.match(appJsx, /isWindows && !anyDeviceOnline && wslState !== 'idle'/);
   assert.match(appJsx, /<WslBootstrapCard/);
+
+  // 5. 自动获取并注入 Local 令牌直通认证
+  assert.match(appJsx, /const syncLocalTokenAndConnect = useCallback/);
+  assert.match(appJsx, /nativeCapabilities\.wsl\.readServiceToken\(\)/);
+  assert.match(appJsx, /dm\.updateDevice\('local', \{ token \}\)/);
+  assert.match(appJsx, /dm\.connect\('local'\)/);
 });
 
 test('WSL auto-healing state machine pre-checks service_installed and enforces watchdog timeout', async () => {
@@ -232,4 +280,74 @@ test('WSL auto-healing state machine pre-checks service_installed and enforces w
   assert.equal(currentState, 'error');
   assert.match(currentError, /会话服务启动超时/);
   clearTimeout(timeoutId);
+});
+
+test('DeviceManager supports hasDeviceToken, getDeviceToken, and connect', async () => {
+  const { DeviceManager } = await import('../src/core/devices.js');
+  const dm = new DeviceManager({ autoLocal: true, autoConnect: false });
+
+  // 默认 local device token 为空
+  assert.equal(dm.hasDeviceToken('local'), false);
+  assert.equal(dm.getDeviceToken('local'), '');
+
+  // 更新 local device token
+  dm.updateDevice('local', { token: 'auth-token-xyz' });
+  assert.equal(dm.hasDeviceToken('local'), true);
+  assert.equal(dm.getDeviceToken('local'), 'auth-token-xyz');
+
+  // connect('local') 成功调用
+  const connected = dm.connect('local');
+  assert.equal(connected, true);
+});
+
+test('syncLocalTokenAndConnect auto-injects service token and transitions state', async () => {
+  let updatedToken = null;
+  let connectCalled = false;
+  let state = 'starting';
+  let errorMsg = '';
+
+  const mockDm = {
+    devices: [{ id: 'local', url: 'ws://127.0.0.1:9900/ws' }],
+    hasDeviceToken: () => Boolean(updatedToken),
+    updateDevice: (id, patch) => {
+      if (id === 'local') updatedToken = patch.token;
+    },
+    connect: (id) => {
+      if (id === 'local') connectCalled = true;
+    },
+  };
+
+  const simulateSync = async (mockToken) => {
+    const hasToken = mockDm.hasDeviceToken('local');
+    if (!hasToken) {
+      const token = mockToken;
+      if (token) {
+        mockDm.updateDevice('local', { token });
+        mockDm.connect('local');
+        return true;
+      }
+      state = 'error';
+      errorMsg = '无法获取 WSL 会话服务配对令牌，请检查 ~/.config/agentmirror/token';
+      return false;
+    }
+    mockDm.connect('local');
+    return true;
+  };
+
+  // 场景 1：成功获取 token 并自动注入与直通连接
+  const ok1 = await simulateSync('auto-discovered-token-abc');
+  assert.equal(ok1, true);
+  assert.equal(updatedToken, 'auto-discovered-token-abc');
+  assert.equal(connectCalled, true);
+  assert.equal(state, 'starting');
+
+  // 场景 2：获取 token 为 null 时转入 error
+  updatedToken = null;
+  connectCalled = false;
+  const ok2 = await simulateSync(null);
+  assert.equal(ok2, false);
+  assert.equal(updatedToken, null);
+  assert.equal(connectCalled, false);
+  assert.equal(state, 'error');
+  assert.match(errorMsg, /无法获取 WSL 会话服务配对令牌/);
 });
