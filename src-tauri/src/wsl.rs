@@ -359,6 +359,42 @@ pub fn check_wsl_environment() -> Result<WslEnvironmentStatus, String> {
 }
 
 /// Read the persisted local daemon token without exposing it to logs or errors.
+#[cfg(any(windows, test))]
+const RUNNING_SERVICE_TOKEN_SCRIPT: &str = r#"set -eu
+for name in agentmirrord corral-core; do
+    for pid in $(pgrep -x "$name" 2>/dev/null || true); do
+        test -r "/proc/$pid/environ" || continue
+        token=$(tr '\0' '\n' < "/proc/$pid/environ" | sed -n 's/^AGENTMIRROR_TOKEN=//p' | head -c 257)
+        test -n "$token" || continue
+        printf '%s' "$token"
+        exit 0
+    done
+done
+exit 1
+"#;
+
+#[cfg(any(windows, test))]
+const SYSTEM_ENV_TOKEN_SCRIPT: &str = r#"set -eu
+for path in /etc/agentmirror/*.env; do
+    test -f "$path" || continue
+    while IFS= read -r line; do
+        case "$line" in
+            AGENTMIRROR_TOKEN=*) printf '%s' "${line#AGENTMIRROR_TOKEN=}"; exit 0 ;;
+            export\ AGENTMIRROR_TOKEN=*) printf '%s' "${line#export AGENTMIRROR_TOKEN=}"; exit 0 ;;
+        esac
+    done < "$path"
+done
+exit 1
+"#;
+
+#[cfg(windows)]
+fn read_token_from_wsl_script(distribution: &str, script: &str) -> Option<String> {
+    run_wsl(&["-d", distribution, "-e", "sh", "-c", script])
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| normalize_service_token(&output.stdout).ok())
+}
+
 #[tauri::command]
 pub fn read_wsl_service_token() -> Result<String, String> {
     #[cfg(windows)]
@@ -375,9 +411,17 @@ pub fn read_wsl_service_token() -> Result<String, String> {
             return Err("ubuntu_not_running".to_string());
         }
 
-        // The path is fixed and the shell script is constant; no user input is
-        // interpolated. `head` bounds captured output before it reaches Rust.
-        let output = run_wsl(&[
+        // Prefer the token from a running daemon: legacy systemd units may
+        // source AGENTMIRROR_TOKEN from a root-owned env file without writing
+        // the client token path. The script only returns that exact variable,
+        // bounded to 257 bytes and never logs it.
+        if let Some(token) = read_token_from_wsl_script(&ubuntu.name, RUNNING_SERVICE_TOKEN_SCRIPT)
+        {
+            return Ok(token);
+        }
+
+        // The normal client-owned token file remains the next source.
+        let token_file = run_wsl(&[
             "-d",
             &ubuntu.name,
             "-e",
@@ -386,10 +430,17 @@ pub fn read_wsl_service_token() -> Result<String, String> {
             "test -f \"$HOME/.config/agentmirror/token\" && head -c 257 \"$HOME/.config/agentmirror/token\"",
         ])
         .map_err(|_| "token_file_unavailable".to_string())?;
-        if !output.status.success() {
-            return Err("token_file_not_found".to_string());
+        if token_file.status.success() {
+            if let Ok(token) = normalize_service_token(&token_file.stdout) {
+                return Ok(token);
+            }
         }
-        normalize_service_token(&output.stdout)
+
+        // Last-resort compatibility for an existing systemd installation.
+        if let Some(token) = read_token_from_wsl_script(&ubuntu.name, SYSTEM_ENV_TOKEN_SCRIPT) {
+            return Ok(token);
+        }
+        Err("token_file_not_found".to_string())
     }
 
     #[cfg(not(windows))]
@@ -601,7 +652,8 @@ mod tests {
     use super::{
         find_ubuntu_distribution, first_ip, generate_service_token, install_script,
         normalize_service_token, parse_wsl_table, service_binary, service_probe_command,
-        service_start_args, WslEnvironmentStatus,
+        service_start_args, WslEnvironmentStatus, RUNNING_SERVICE_TOKEN_SCRIPT,
+        SYSTEM_ENV_TOKEN_SCRIPT,
     };
 
     #[test]
@@ -662,6 +714,14 @@ mod tests {
         assert_eq!(service_binary(Some("corral-core")), Some("corral-core"));
         assert_eq!(service_binary(Some("rm -rf /")), None);
         assert_eq!(service_binary(Some("agentmirrord --config")), None);
+    }
+
+    #[test]
+    fn legacy_token_scripts_are_bounded_and_do_not_log_values() {
+        assert!(RUNNING_SERVICE_TOKEN_SCRIPT.contains("/proc/$pid/environ"));
+        assert!(RUNNING_SERVICE_TOKEN_SCRIPT.contains("head -c 257"));
+        assert!(SYSTEM_ENV_TOKEN_SCRIPT.contains("/etc/agentmirror/*.env"));
+        assert!(SYSTEM_ENV_TOKEN_SCRIPT.contains("AGENTMIRROR_TOKEN="));
     }
 
     #[test]
