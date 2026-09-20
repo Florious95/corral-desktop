@@ -35,6 +35,7 @@
     "category": "DeveloperTool",
     "shortDescription": "Remote Agent CLI client",
     "longDescription": "Mirror and control Agent CLI sessions running in tmux.",
-    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"]
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
+    "resources": ["resources/*"]
   }
 }

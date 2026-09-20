@@ -59,6 +59,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             lock_devices_file,
             wsl::check_wsl_environment,
+            wsl::install_wsl_service,
             wsl::read_wsl_service_token,
             wsl::start_wsl_service,
             upload::upload_http,

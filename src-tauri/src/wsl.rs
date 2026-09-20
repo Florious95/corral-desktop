@@ -1,4 +1,14 @@
 use serde::Serialize;
+#[cfg(windows)]
+use std::path::Path;
+
+#[cfg(windows)]
+use tauri::{path::BaseDirectory, Manager};
+
+#[cfg(windows)]
+const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
+const AGENTMIRRORD_NAME: &str = "agentmirrord";
+const PROVIDERS_TSV: &str = "# comm-basename\tprovider-id\tdisplay-name\t[match]\n# match empty = basename only; path-segment = also hit when raw comm contains /<comm-basename>/ as a directory.\nclaude\tclaude_code\tClaude Code\ncodex\tcodex\tCodex\ncopilot\tcopilot\tCopilot\ngrok\tgrok\tGrok\ncursor-agent\tcursor\tCursor\tpath-segment\npi\tpi\tPi\n";
 
 /// Snapshot of the WSL 2 environment used by the local AgentMirror daemon.
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
@@ -118,6 +128,111 @@ fn run_wsl(args: &[&str]) -> Result<std::process::Output, String> {
         .map_err(|error| format!("wsl_unavailable: {error}"))
 }
 
+#[cfg(windows)]
+fn wsl_stdout(output: std::process::Output, failure: &str) -> Result<String, String> {
+    if !output.status.success() {
+        return Err(failure.to_string());
+    }
+    let value = String::from_utf8(output.stdout).map_err(|_| failure.to_string())?;
+    let value = value.trim();
+    (!value.is_empty() && !value.chars().any(char::is_control))
+        .then(|| value.to_string())
+        .ok_or_else(|| failure.to_string())
+}
+
+#[cfg(windows)]
+fn resource_is_usable(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.len() > 0)
+        .unwrap_or(false)
+}
+
+#[cfg(any(windows, test))]
+fn install_script() -> String {
+    format!(
+        r#"set -eu
+src="$1"
+dst="$HOME/.local/bin/{AGENTMIRRORD_NAME}"
+providers="$HOME/tools/nodeprobe/fixtures/providers.tsv"
+titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
+mkdir -p "$(dirname "$dst")" "$(dirname "$providers")"
+service_tmp="$dst.tmp.$$"
+providers_tmp="$providers.tmp.$$"
+trap 'rm -f "$service_tmp" "$providers_tmp"' EXIT
+install -m 0755 -- "$src" "$service_tmp"
+mv -f -- "$service_tmp" "$dst"
+umask 077
+printf '%s' {providers} > "$providers_tmp"
+mv -f -- "$providers_tmp" "$providers"
+touch "$titles"
+test -x "$dst"
+test -s "$providers"
+test -f "$titles"
+"#,
+        providers = shell_single_quote(PROVIDERS_TSV),
+    )
+}
+
+#[cfg(any(windows, test))]
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(windows)]
+fn install_wsl_service_windows(app: &tauri::AppHandle) -> Result<(), String> {
+    let resource = app
+        .path()
+        .resolve(AGENTMIRRORD_RESOURCE, BaseDirectory::Resource)
+        .map_err(|_| "agentmirrord_resource_unavailable".to_string())?;
+    if !resource_is_usable(&resource) {
+        return Err("agentmirrord_resource_unavailable".to_string());
+    }
+
+    let list_output = run_wsl(&["-l", "-v"])?;
+    if !list_output.status.success() {
+        return Err("ubuntu_not_installed".to_string());
+    }
+    let ubuntu = find_ubuntu_distribution(&list_output.stdout)
+        .ok_or_else(|| "ubuntu_not_installed".to_string())?;
+    let windows_path = resource
+        .to_str()
+        .ok_or_else(|| "agentmirrord_resource_unavailable".to_string())?;
+    let linux_path_output = run_wsl(&["-d", &ubuntu.name, "-e", "wslpath", "-u", windows_path])?;
+    let linux_path = wsl_stdout(linux_path_output, "agentmirrord_resource_unavailable")?;
+    if !linux_path.starts_with('/') || linux_path.contains("\n") {
+        return Err("agentmirrord_resource_unavailable".to_string());
+    }
+
+    let script = install_script();
+    let output = run_wsl(&[
+        "-d",
+        &ubuntu.name,
+        "-e",
+        "sh",
+        "-c",
+        &script,
+        "agentmirrord-install",
+        &linux_path,
+    ])?;
+    if !output.status.success() {
+        return Err("agentmirrord_install_failed".to_string());
+    }
+
+    let verify = run_wsl(&[
+        "-d",
+        &ubuntu.name,
+        "-e",
+        "sh",
+        "-lc",
+        "test -x \"$HOME/.local/bin/agentmirrord\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\"",
+    ])?;
+    if verify.status.success() {
+        Ok(())
+    } else {
+        Err("agentmirrord_install_verification_failed".to_string())
+    }
+}
+
 #[cfg(any(windows, test))]
 fn service_probe_command(service: &str) -> Option<&'static str> {
     match service {
@@ -210,6 +325,21 @@ fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
         service_running,
         wsl_ip,
     })
+}
+
+/// Install the bundled Linux daemon and its provider table into the Ubuntu home.
+#[tauri::command]
+pub fn install_wsl_service(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        return install_wsl_service_windows(&app);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("unsupported_platform: WSL2 is available on Windows only".to_string())
+    }
 }
 
 /// Return the local WSL 2/Ubuntu/tmux/agentmirrord state.
@@ -340,8 +470,8 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_ubuntu_distribution, first_ip, normalize_service_token, parse_wsl_table,
-        service_binary, service_probe_command, WslEnvironmentStatus,
+        find_ubuntu_distribution, first_ip, install_script, normalize_service_token,
+        parse_wsl_table, service_binary, service_probe_command, WslEnvironmentStatus,
     };
 
     #[test]
@@ -382,6 +512,17 @@ mod tests {
         assert!(parse_wsl_table(b"Ubuntu Stopped 2\n").is_none());
         assert!(parse_wsl_table(b"NAME STATE VERSION\n* Ubuntu Running\n").is_none());
         assert!(parse_wsl_table(b"* Ubuntu Running 1\n").is_none());
+    }
+
+    #[test]
+    fn bundled_install_script_is_atomic_and_contains_provider_defaults() {
+        let script = install_script();
+        assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
+        assert!(script.contains("mv -f -- \"$service_tmp\" \"$dst\""));
+        assert!(script.contains("cursor-agent\tcursor\tCursor\tpath-segment"));
+        assert!(script.contains("pi\tpi\tPi"));
+        assert!(script.contains("touch \"$titles\""));
+        assert!(script.contains("test -x \"$dst\""));
     }
 
     #[test]
