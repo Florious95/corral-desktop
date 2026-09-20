@@ -68,6 +68,9 @@ jobs:
       - name: Test Tauri backend
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: Verify bundled Linux WSL service
+        run: node scripts/verify-agentmirrord-resource.mjs
+
       - name: Build Windows installers
         run: npm run tauri build
 

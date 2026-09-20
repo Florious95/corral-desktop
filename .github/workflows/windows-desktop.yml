@@ -10,6 +10,7 @@ on:
       - '.gitmodules'
       - 'deps/corral-core'
       - 'src-tauri/**'
+      - 'scripts/verify-agentmirrord-resource.mjs'
       - 'src/**'
       - 'test/**'
       - 'native/**'
@@ -56,6 +57,9 @@ jobs:
 
       - name: Test Tauri backend
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Verify bundled Linux WSL service
+        run: node scripts/verify-agentmirrord-resource.mjs
 
       - name: Build Windows desktop application
         run: npm run tauri build -- --no-bundle
