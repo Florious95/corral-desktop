@@ -407,6 +407,48 @@ fn service_binary(command: Option<&str>) -> Option<&'static str> {
     }
 }
 
+#[cfg(any(windows, test))]
+fn service_start_args<'a>(distribution: &'a str, service: &'a str) -> [&'a str; 8] {
+    [
+        "-d",
+        distribution,
+        "-e",
+        "env",
+        "-u",
+        "AGENTMIRROR_TOKEN",
+        "nohup",
+        service,
+    ]
+}
+
+#[cfg(windows)]
+fn service_token_ready(distribution: &str) -> bool {
+    let output = run_wsl(&[
+        "-d",
+        distribution,
+        "-e",
+        "sh",
+        "-lc",
+        "test -s \"$HOME/.config/agentmirror/token\" && head -c 257 \"$HOME/.config/agentmirror/token\"",
+    ]);
+    output
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| normalize_service_token(&output.stdout).ok())
+        .is_some()
+}
+
+#[cfg(windows)]
+fn wait_for_service_token(distribution: &str) -> Result<(), String> {
+    for _ in 0..50 {
+        if service_token_ready(distribution) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err("service_token_not_ready".to_string())
+}
+
 /// Start a whitelisted session service in the Ubuntu WSL distribution.
 ///
 /// The service name is passed as a standalone argv element to `nohup`; no shell
@@ -435,29 +477,30 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
         // after a short grace period so a missing/runtime-broken Linux command
         // cannot be reported as a successful start.
         let mut child = std::process::Command::new("wsl.exe")
-            .args(["-d", &ubuntu.name, "-e", "nohup", service])
+            .args(service_start_args(&ubuntu.name, service))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
         std::thread::sleep(std::time::Duration::from_millis(200));
-        match child
+        let running = match child
             .try_wait()
             .map_err(|error| format!("wsl_service_start_failed: {error}"))?
         {
-            Some(_) => {
-                let running = run_wsl(&["-d", &ubuntu.name, "-e", "pgrep", "-x", service])
-                    .map(|output| output.status.success())
-                    .unwrap_or(false);
-                if running {
-                    Ok(())
-                } else {
-                    Err("service_start_failed".to_string())
-                }
-            }
-            None => Ok(()),
+            Some(_) => run_wsl(&["-d", &ubuntu.name, "-e", "pgrep", "-x", service])
+                .map(|output| output.status.success())
+                .unwrap_or(false),
+            None => true,
+        };
+        if !running {
+            return Err("service_start_failed".to_string());
         }
+
+        // The daemon generates and persists its pairing token only when the
+        // inherited AGENTMIRROR_TOKEN is absent. Wait for that file before
+        // returning so the frontend can authenticate without a race.
+        wait_for_service_token(&ubuntu.name)
     }
 
     #[cfg(not(windows))]
@@ -471,7 +514,8 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 mod tests {
     use super::{
         find_ubuntu_distribution, first_ip, install_script, normalize_service_token,
-        parse_wsl_table, service_binary, service_probe_command, WslEnvironmentStatus,
+        parse_wsl_table, service_binary, service_probe_command, service_start_args,
+        WslEnvironmentStatus,
     };
 
     #[test]
@@ -532,6 +576,23 @@ mod tests {
         assert_eq!(service_binary(Some("corral-core")), Some("corral-core"));
         assert_eq!(service_binary(Some("rm -rf /")), None);
         assert_eq!(service_binary(Some("agentmirrord --config")), None);
+    }
+
+    #[test]
+    fn service_start_clears_inherited_token_environment() {
+        assert_eq!(
+            service_start_args("Ubuntu", "agentmirrord"),
+            [
+                "-d",
+                "Ubuntu",
+                "-e",
+                "env",
+                "-u",
+                "AGENTMIRROR_TOKEN",
+                "nohup",
+                "agentmirrord",
+            ]
+        );
     }
 
     #[test]
