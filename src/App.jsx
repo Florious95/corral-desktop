@@ -18,6 +18,8 @@ import NewAgentDialog from './components/chrome/NewAgentDialog.jsx';
 import CloseAgentDialog from './components/chrome/CloseAgentDialog.jsx';
 import ContextMenu from './components/chrome/ContextMenu.jsx';
 import Toast from './components/chrome/Toast.jsx';
+import SettingsDialog from './components/chrome/SettingsDialog.jsx';
+import { loadSettings, saveSetting } from './core/settings.js';
 import { watchFullscreen } from './lib/fullscreen.js';
 import { createSurfaceGeometryWatcher } from './lib/surfaceGeometry.js';
 import { createInputAckGate, submitPaneEnter, ACK_TIMEOUT, ACK_CLEARED } from './term/inputAckGate.js';
@@ -37,6 +39,8 @@ import {
   reorderWorkspaceTabs,
   closeOtherWorkspaceTabs,
   closeRightWorkspaceTabs,
+  renameWorkspaceTab,
+  resetWorkspaceTabTitle,
   getAllWorkspaceSessions,
   smartOpenSession,
   closeWorkspacePane,
@@ -163,11 +167,43 @@ export default function App({ seedDevices } = {}) {
 
   const liveAgentKeysRef = useRef(new Set());
   const pendingPasteRef = useRef(new Map());
+
+  // Issue #191: 切换活跃会话/窗格/Tab时立即重置/清空状态栏提示，2500ms 自动消失
+  useEffect(() => {
+    if (activeKey || workspace.activeTabId) {
+      setToastMsg(null);
+    }
+  }, [activeKey, workspace.activeTabId]);
+
   const [selected, setSelected] = useState(() => LS.read('am.selected', 'all'));
   const [collapsed, setCollapsed] = useState(() => LS.read('am.collapsed', false));
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [spacesOpen, setSpacesOpen] = useState(() => LS.read('am.spacesOpen', true));
   const [agentsOpen, setAgentsOpen] = useState(() => LS.read('am.agentsOpen', true));
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState(() => loadSettings());
+
+  // Issue #195: 目录跟踪 (Directory Tracking)
+  useEffect(() => {
+    if (!settings.directoryTracking || !activeKey) return;
+    const currentAgent = agentByKey.get(activeKey);
+    if (!currentAgent?.spaceKey) return;
+
+    // 自动展开 Spaces 与 Agents，标记展开状态
+    setSpacesOpen(true);
+    setAgentsOpen(true);
+    const expanded = true;
+    setSelected(currentAgent.spaceKey);
+
+    const selector = `[data-space-key="${currentAgent.spaceKey}"], [data-agent-key="${currentAgent.key}"]`;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(selector);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+  }, [settings.directoryTracking, activeKey, agentByKey]);
 
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
@@ -854,6 +890,16 @@ export default function App({ seedDevices } = {}) {
     setWorkspace((prev) => closeRightWorkspaceTabs(prev, uid));
   }, []);
 
+  // Issue #194: 重命名 Tab 并锁定防覆盖 (isCustomTitle: true)
+  // 来自 tmux 的 list_delta 与 changed_sessions 窗口重命名 (window rename) 事件绝对不覆盖锁定标题
+  const handleRenameTab = useCallback((tabId, newName, isCustomTitle = true) => {
+    setWorkspace((prev) => renameWorkspaceTab(prev, tabId, newName, isCustomTitle));
+  }, []);
+
+  const handleResetTabTitle = useCallback((tabId) => {
+    setWorkspace((prev) => resetWorkspaceTabTitle(prev, tabId));
+  }, []);
+
   // Cmd+T 全局新建工作台快捷键
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
@@ -1049,6 +1095,8 @@ export default function App({ seedDevices } = {}) {
     <TerminalPane
       agent={agent}
       client={clientFor(agent)}
+      fontFamily={settings['terminal.fontFamily']}
+      fontSize={settings['terminal.fontSize']}
       focused={activeAgent ? agent.key === activeAgent.key : false}
       onText={(text) => handlePaneText(agent.key, text)}
       onKey={(key) => handlePaneKey(agent.key, key)}
@@ -1058,7 +1106,7 @@ export default function App({ seedDevices } = {}) {
       onPaste={(event) => handlePanePaste(agent.key, event)}
       onForceTextPaste={() => handlePaneForceText(agent.key)}
     />
-  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneBytes, handlePaneEnter, handlePaneCtrlV, handlePanePaste, handlePaneForceText]);
+  ), [clientFor, activeAgent, settings, dm, handlePaneText, handlePaneKey, handlePaneBytes, handlePaneEnter, handlePaneCtrlV, handlePanePaste, handlePaneForceText]);
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {
@@ -1195,6 +1243,13 @@ export default function App({ seedDevices } = {}) {
           color: 'var(--text)',
           onClick: () => { closeMenu(); handleReflowTab(menu.id); },
         },
+        tab?.isCustomTitle ? {
+          key: 'reset-title',
+          label: '恢复自动标题',
+          icon: icon(ReflowIcon),
+          color: 'var(--text)',
+          onClick: () => { closeMenu(); handleResetTabTitle(menu.id); },
+        } : null,
         {
           key: 'pin',
           label: isPinned ? '取消固定' : '固定到最左',
@@ -1226,7 +1281,7 @@ export default function App({ seedDevices } = {}) {
           disabled: tabIdx < 0 || tabIdx >= workspace.tabs.length - 1,
           onClick: () => { closeMenu(); handleCloseRightTabs(menu.id); },
         },
-      ];
+      ].filter(Boolean);
     }
 
     // pane
@@ -1342,6 +1397,7 @@ export default function App({ seedDevices } = {}) {
             deviceLabel={deviceLabel}
             anyDeviceOnline={anyDeviceOnline}
             onToggleDevices={() => setDevicesOpen((v) => !v)}
+            onOpenSettings={() => setSettingsOpen(true)}
             multiDevice={multiDevice}
           />
         </div>
@@ -1373,6 +1429,7 @@ export default function App({ seedDevices } = {}) {
               onSelectTab={handleSelectTab}
               onCloseTab={handleCloseTab}
               onCreateTab={handleCreateTab}
+              onRenameTab={handleRenameTab}
               onContextMenu={(e, tab) => openMenu(e, 'tab', tab.id || tab.uid)}
               onPointerDown={handleTabPointerDown}
             />
@@ -1464,6 +1521,13 @@ export default function App({ seedDevices } = {}) {
         loading={!!closePending}
         onConfirm={() => submitCloseAgent(closeConfirmAgent)}
         onCancel={() => { if (!closePending) setCloseConfirmAgent(null); }}
+      />
+
+      <SettingsDialog
+        open={settingsOpen}
+        settings={settings}
+        onUpdateSettings={(k, v) => setSettings((prev) => ({ ...prev, [k]: v }))}
+        onClose={() => setSettingsOpen(false)}
       />
 
       {/* 拖拽 GPU 预览浮层与吸附高亮（全屏视口级） */}

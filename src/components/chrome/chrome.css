@@ -251,6 +251,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tb-tab-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  line-height: 22px;
+  font-size: var(--fs-12);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+  color: var(--text);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.25));
+  outline: none;
+}
 .tb-tab-lamp {
   width: 6px;
   height: 6px;
@@ -975,6 +988,69 @@
 .app-root.is-fullscreen .tb-win-controls {
   top: 0;
   right: 0;
+}
+
+/* ---------- §4.10 设置中心抽屉/弹窗 (Settings Dialog) ---------- */
+.settings-dialog {
+  max-width: 440px;
+}
+.settings-section-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text-strong);
+  margin: 0 0 10px 0;
+}
+.settings-font-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.settings-preset-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--btn-secondary-bg, rgba(255, 255, 255, 0.08));
+  color: var(--text);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  cursor: pointer;
+}
+.settings-preset-btn:hover {
+  background: var(--hover-1);
+}
+.settings-font-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-font-size-row .chr-input {
+  width: 90px;
+}
+.settings-unit {
+  font-size: var(--fs-12);
+  color: var(--text-subtle);
+}
+.settings-toggle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.settings-toggle-title {
+  font-size: var(--fs-13);
+  color: var(--text);
+  font-weight: 500;
+}
+.settings-toggle-desc {
+  font-size: var(--fs-12);
+  color: var(--text-subtle);
+  padding-left: 24px;
 }
 
 

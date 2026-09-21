@@ -63,9 +63,40 @@ export default function TabBar({
   onSelectTab,
   onCloseTab,
   onCreateTab,
+  onRenameTab,
   onContextMenu,
   onPointerDown,
 }) {
+  const [editingTabKey, setEditingTabKey] = useState(null);
+  const [editingText, setEditingText] = useState('');
+
+  const handleTabDoubleClick = useCallback((e, tabKey, currentTitle) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditingTabKey(tabKey);
+    setEditingText(currentTitle || '');
+  }, []);
+
+  const handleCommitRename = useCallback((tabKey) => {
+    const trimmed = editingText.trim();
+    setEditingTabKey(null);
+    if (trimmed && onRenameTab) {
+      onRenameTab(tabKey, trimmed, true);
+    }
+  }, [editingText, onRenameTab]);
+
+  const handleInputKeyDown = useCallback((e, tabKey) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCommitRename(tabKey);
+    } else if (e.key === 'Escape' || e.key === 'Esc') {
+      e.preventDefault();
+      e.stopPropagation();
+      setEditingTabKey(null);
+      setEditingText('');
+    }
+  }, [handleCommitRename]);
   const { pinnedTabs, regularTabs } = useMemo(() => {
     const pinned = [];
     const regular = [];
@@ -294,17 +325,35 @@ export default function TabBar({
               data-tab-uid={tabKey}
               data-pinned="false"
               data-blank={isBlank ? 'true' : undefined}
+              data-title-locked={tab.isCustomTitle ? 'true' : undefined}
               data-tauri-drag-region="false"
               className={`tb-tab${isBlank ? ' is-blank' : ''}${isActive ? ' is-active' : ''}${isVisible ? ' is-visible' : ''}${isDragging ? ' is-dragging-source' : ''}`}
               title={subtitle}
               role="tab"
               aria-selected={isActive}
               onClick={() => onSelectTab && onSelectTab(tabKey)}
+              onDoubleClick={(e) => handleTabDoubleClick(e, tabKey, title)}
               onContextMenu={(e) => onContextMenu && onContextMenu(e, tab)}
               onPointerDown={(e) => onPointerDown && onPointerDown(e, tab, title)}
             >
               <StatusLamp status={finalStatus} />
-              <span className="tb-tab-name">{title}</span>
+              {editingTabKey === tabKey ? (
+                <input
+                  className="chr-tab-title-input tb-tab-title-input"
+                  type="text"
+                  autoFocus
+                  value={editingText}
+                  data-tauri-drag-region="false"
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setEditingText(e.target.value)}
+                  onKeyDown={(e) => handleInputKeyDown(e, tabKey)}
+                  onBlur={() => handleCommitRename(tabKey)}
+                />
+              ) : (
+                <span className="tb-tab-name">{title}</span>
+              )}
               <button
                 type="button"
                 className="tb-tab-close"

@@ -47,6 +47,7 @@ export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
   onText, onKey, onBytes, onEnter,
   onCtrlV, onPaste, onForceTextPaste,
+  fontFamily, fontSize,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -183,6 +184,8 @@ export default function TerminalPane({
       gate.noteSent(act.rows, act.cols);
     };
     view = new TerminalView(host, {
+      fontFamily,
+      fontSize,
       onResize: (rows, cols) => {
         const act = gate.settle(rows, cols);
         if (!isManualReflowing) {
@@ -469,6 +472,13 @@ export default function TerminalPane({
     if (focused) v.focus();
     else v.blur();
   }, [focused]);
+
+  // 动态响应终端字体与字号变更（Issue #193）
+  useEffect(() => {
+    if (viewRef.current && (fontFamily !== undefined || fontSize !== undefined)) {
+      viewRef.current.updateFont({ fontFamily, fontSize });
+    }
+  }, [fontFamily, fontSize]);
 
   return (
     <div

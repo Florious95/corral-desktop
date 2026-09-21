@@ -68,6 +68,7 @@ export default function Sidebar({
   deviceLabel,
   anyDeviceOnline,
   onToggleDevices,
+  onOpenSettings,
   multiDevice,
   allCount,
   allWorkingCount,
@@ -133,9 +134,18 @@ export default function Sidebar({
           <LayersIcon size={15} stroke="var(--icon-strong)" />
           <span className="sidebar-devices-label">{deviceLabel}</span>
           <span className={`sidebar-devices-dot${anyDeviceOnline ? ' is-online' : ''}`} />
-          <span className="sidebar-devices-gear">
+          <button
+            type="button"
+            className="chr-btn-reset sidebar-devices-gear"
+            title="设置"
+            aria-label="设置"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenSettings?.();
+            }}
+          >
             <GearIcon size={15} stroke="var(--icon)" />
-          </span>
+          </button>
         </div>
       </div>
     </aside>

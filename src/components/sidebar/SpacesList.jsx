@@ -10,6 +10,7 @@ function SpaceRow({
   selected,
   badge,
   badgeLocal,
+  spaceKey,
   onClick,
   onContextMenu,
   onNewAgent,
@@ -19,6 +20,7 @@ function SpaceRow({
   return (
     <div
       className={`spaces-row${selected ? ' is-selected' : ''}`}
+      data-space-key={spaceKey}
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
@@ -86,6 +88,7 @@ export default function SpacesList({
         count={allCount}
         workingCount={allWorkingCount}
         selected={selected === 'all'}
+        spaceKey="all"
         onClick={() => onSelect('all')}
         onContextMenu={(e) => e.preventDefault()}
       />
@@ -95,6 +98,7 @@ export default function SpacesList({
         count={favCount}
         workingCount={favWorkingCount}
         selected={selected === 'fav'}
+        spaceKey="fav"
         onClick={() => onSelect('fav')}
         onContextMenu={(e) => e.preventDefault()}
       />
@@ -110,6 +114,7 @@ export default function SpacesList({
             selected={isSameSpaceKey(selected, sp.key)}
             badge={multiDevice ? sp.deviceName : null}
             badgeLocal={sp.deviceLocal}
+            spaceKey={sp.key}
             onClick={() => onSelect(sp.key)}
             onContextMenu={(e) => onContextMenu(e, sp.key)}
             onNewAgent={onNewAgent ? () => onNewAgent(sp.key) : undefined}

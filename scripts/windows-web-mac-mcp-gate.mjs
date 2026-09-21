@@ -241,8 +241,38 @@ async function loadBrowserReceipt(path) {
   return receipt;
 }
 
+function assertIssueReceipt(receipt) {
+  if (!receipt?.issues && !receipt?.drag) return null;
+  const failures = [];
+  const issue = receipt.issues || {};
+  const viewport = issue.viewport;
+  if (viewport?.paddingIsFive === false) failures.push('VIEWPORT terminalpane padding is not exactly 5px on all sides');
+  if (viewport?.noOverflow === false) failures.push('VIEWPORT terminalpane has unexpected horizontal or vertical overflow');
+  if (issue.consoleErrors?.length || receipt.consoleErrors?.length) {
+    failures.push(`CONSOLE ${issue.consoleErrors?.length || receipt.consoleErrors?.length} browser errors observed`);
+  }
+  const drag = receipt.drag;
+  if (drag?.pointerCaptureReleased === false) failures.push('DRAG pointer capture was not released after pointerup');
+  if (Number.isFinite(drag?.maxWidthDelta) && drag.maxWidthDelta > 2) {
+    failures.push(`DRAG tab width jitter exceeded 2px (${drag.maxWidthDelta}px)`);
+  }
+  if (failures.length) fail('issue browser gate failed', { failures });
+  return {
+    ok: true,
+    checks: [
+      viewport ? 'viewport' : null,
+      issue.typography ? 'typography' : null,
+      issue.tabs ? 'tabs' : null,
+      issue.directoryTracking ? 'directoryTracking' : null,
+      issue.closeNotice ? 'closeNotice' : null,
+      drag ? 'drag' : null,
+    ].filter(Boolean),
+  };
+}
+
 function assertBrowserReceipt(receipt) {
   if (!receipt) return null;
+  assertIssueReceipt(receipt);
   const failures = [];
   const tab = receipt.tab;
   if (tab && tab.clipPx > 0) failures.push(`TAB active capsule is clipped by ${tab.clipPx}px`);
@@ -300,4 +330,4 @@ if (process.argv[1] && new URL(process.argv[1], 'file:').href === import.meta.ur
   });
 }
 
-export { assertBrowserReceipt, parseArgs, probeTmux, waitForGone };
+export { assertBrowserReceipt, assertIssueReceipt, parseArgs, probeTmux, waitForGone };

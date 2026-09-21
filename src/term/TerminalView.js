@@ -74,7 +74,8 @@ export class TerminalView {
     const {
       onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
       onPaste, onCtrlV, onForceTextPaste,
-      scrollback = 0, fontSize = 13, maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
+      scrollback = 0, fontSize = 13, fontFamily = 'ui-monospace, SF Mono, Menlo, monospace',
+      maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
       hideCursor = false, TerminalCtor = Terminal,
     } = opts;
     this.container = container;
@@ -96,7 +97,7 @@ export class TerminalView {
     this.term = new TerminalCtor({
       scrollback,
       fontSize,
-      fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
+      fontFamily,
       lineHeight: 1.25,
       customGlyphs: true,
       cursorBlink: !this.hideCursor,
@@ -571,6 +572,35 @@ export class TerminalView {
 
   setDark(isDark) {
     this.setTheme(isDark ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME);
+  }
+
+  /**
+   * 动态更新终端字体与字号，并即时重新 fit 计算行列（Issue #193）。
+   * @param {Object} [opts]
+   * @param {string} [opts.fontFamily]
+   * @param {number} [opts.fontSize]
+   */
+  updateFont({ fontFamily, fontSize } = {}) {
+    if (this._disposed || !this.term?.options) return;
+    let changed = false;
+    if (typeof fontFamily === 'string' && fontFamily.trim()) {
+      const trimmed = fontFamily.trim();
+      if (this.term.options.fontFamily !== trimmed) {
+        this.term.options.fontFamily = trimmed;
+        changed = true;
+      }
+    }
+    if (fontSize !== undefined && fontSize !== null) {
+      const clamped = Math.min(24, Math.max(10, Number(fontSize) || 13));
+      if (this.fontSize !== clamped || this.term.options.fontSize !== clamped) {
+        this.fontSize = clamped;
+        this.term.options.fontSize = clamped;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.fit({ immediate: true, sync: true });
+    }
   }
 
   dispose() {

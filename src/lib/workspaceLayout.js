@@ -816,6 +816,7 @@ export function serializeWorkspace(state) {
         id: String(t.id || t.uid || `tab-${idx + 1}`),
         uid: String(t.uid || t.id || `tab-${idx + 1}`),
         name: String(t.name || ''),
+        isCustomTitle: !!t.isCustomTitle,
         pinned: !!t.pinned,
         isBlank: isBlankTab(t),
         activeUid: t.activeUid ? String(t.activeUid) : null,
@@ -1029,6 +1030,7 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
             id: tabId,
             uid: tabId,
             name: String(t.name || ''),
+            isCustomTitle: !!t.isCustomTitle,
             root: sanitizedRoot,
             activeUid: activeUid ? String(activeUid) : null,
             pinned: !!t.pinned,
@@ -1060,6 +1062,7 @@ export function createWorkspaceTab(state, { id = null, name = '', root = null, a
     id: tabId,
     uid: tabId,
     name: name || '',
+    isCustomTitle: false,
     root: root ? sanitizeNode(root) : null,
     activeUid: activeUid ? String(activeUid) : null,
     pinned: !!pinned,
@@ -1342,3 +1345,49 @@ export function getAllWorkspaceSessions(state) {
   }
   return Array.from(set);
 }
+
+/**
+ * 重命名工作台 Tab 并锁定自定义标题防覆盖（Issue #194）。
+ * 用户自定义改名后，标记 isCustomTitle: true。
+ * 来自 tmux 的 list_delta 与 changed_sessions 窗口重命名 (window rename) 事件绝对不覆盖锁定的自定义标题。
+ */
+export function renameWorkspaceTab(state, tabIdOrUid, newName, isCustomTitle = true) {
+  if (!state || !Array.isArray(state.tabs)) return state;
+  const nameStr = String(newName || '').trim();
+  const nextTabs = state.tabs.map((t) => {
+    if ((t.id || t.uid) === tabIdOrUid || t.uid === tabIdOrUid) {
+      return {
+        ...t,
+        name: nameStr,
+        isCustomTitle: Boolean(isCustomTitle && nameStr),
+      };
+    }
+    return t;
+  });
+  return syncActiveTabFields({
+    ...state,
+    tabs: nextTabs,
+  });
+}
+
+/**
+ * 恢复自动标题 (Reset Title)：清除 isCustomTitle 锁定标记并清空自定义名称，恢复跟踪 tmux 窗口名。
+ */
+export function resetWorkspaceTabTitle(state, tabIdOrUid) {
+  if (!state || !Array.isArray(state.tabs)) return state;
+  const nextTabs = state.tabs.map((t) => {
+    if ((t.id || t.uid) === tabIdOrUid || t.uid === tabIdOrUid) {
+      return {
+        ...t,
+        name: '',
+        isCustomTitle: false,
+      };
+    }
+    return t;
+  });
+  return syncActiveTabFields({
+    ...state,
+    tabs: nextTabs,
+  });
+}
+

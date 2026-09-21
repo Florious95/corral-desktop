@@ -52,6 +52,7 @@ const AgentRow = memo(function AgentRow({
   return (
     <div
       className={`agents-row${isOpen ? ' is-open' : ''}${isActive ? ' is-active' : ''}`}
+      data-agent-key={ag.key}
       style={{
         top,
         opacity: isClosing ? 0 : 1,
