@@ -76,6 +76,19 @@ test('#195 directory tracking defaults off, persists, and scrolls the selected p
   assert.match(text, /expanded\s*[:=]\s*true|set.*Expanded/);
 });
 
+test('#204 manual Space selection is not overwritten by directory tracking rerenders', async () => {
+  const text = await allSource();
+  const trackingEffect = text.match(/Issue #195[\s\S]*?},\s*\[([^\]]+)\]\);/);
+  assert.ok(trackingEffect, 'directory tracking effect must remain observable');
+  const dependencies = trackingEffect[1];
+  assert.match(dependencies, /\bactiveKey\b/, 'tracking must follow active session changes');
+  assert.doesNotMatch(dependencies, /\bagentByKey\b/, 'workspace/listing refreshes must not re-select the active session Space');
+
+  const sidebarMount = text.match(/<Sidebar[\s\S]*?\n\s*\/>/);
+  assert.ok(sidebarMount, 'sidebar must be mounted by App');
+  assert.match(sidebarMount[0], /onSelect=\{setSelected\}/, 'manual Space clicks must own selected state');
+});
+
 test('#196 terminal viewport uses platform-specific outer spacing and fit measures the content box without overflow', async () => {
   const text = await allSource();
   const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
