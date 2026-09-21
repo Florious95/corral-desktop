@@ -25,6 +25,53 @@ export function textFromPasteEvent(event) {
   return event?.clipboardData?.getData('text/plain') || '';
 }
 
+/** Extract image attachment from a ClipboardEvent (ev.clipboardData) if present. */
+export async function imageFromPasteEvent(event) {
+  if (!event?.clipboardData) return null;
+  const items = event.clipboardData.items;
+  if (items && typeof items.length === 'number') {
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item && (item.kind === 'file' || !item.kind) && item.type && item.type.startsWith('image/')) {
+        const file = typeof item.getAsFile === 'function' ? item.getAsFile() : (item instanceof Blob ? item : null);
+        if (file) {
+          const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : null;
+          if (buffer) {
+            const bytes = new Uint8Array(buffer);
+            if (bytes.length > 0) {
+              return {
+                name: file.name || 'clipboard.png',
+                mime: file.type || item.type || 'image/png',
+                bytes,
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+  const files = event.clipboardData.files;
+  if (files && typeof files.length === 'number') {
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      if (file && file.type && file.type.startsWith('image/')) {
+        const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : null;
+        if (buffer) {
+          const bytes = new Uint8Array(buffer);
+          if (bytes.length > 0) {
+            return {
+              name: file.name || 'clipboard.png',
+              mime: file.type || 'image/png',
+              bytes,
+            };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /** Read image bytes through native capabilities only; never touch the Web Clipboard API. */
 export async function readClipboardImage({ nativeInvoke } = {}) {
   if (nativeInvoke) {
