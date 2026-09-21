@@ -33,6 +33,9 @@ export default function SettingsDialog({
   const [fontSize, setFontSize] = useState(
     settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE
   );
+  const [fontSizeInput, setFontSizeInput] = useState(
+    String(settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE)
+  );
   const [directoryTracking, setDirectoryTracking] = useState(
     settings?.directoryTracking !== undefined
       ? settings.directoryTracking
@@ -42,7 +45,9 @@ export default function SettingsDialog({
   useEffect(() => {
     if (!open) return;
     setFontFamily(settings?.['terminal.fontFamily'] || DEFAULT_FONT_FAMILY);
-    setFontSize(settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE);
+    const size = settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE;
+    setFontSize(size);
+    setFontSizeInput(String(size));
     setDirectoryTracking(
       settings?.directoryTracking !== undefined
         ? settings.directoryTracking
@@ -67,12 +72,26 @@ export default function SettingsDialog({
     onUpdateSettings?.('terminal.fontFamily', val);
   };
 
-  const handleFontSizeChange = (val) => {
-    const num = parseInt(val, 10);
+  const commitFontSize = (valToCommit) => {
+    const raw = valToCommit !== undefined ? valToCommit : fontSizeInput;
+    const num = parseInt(raw, 10);
     const clamped = Math.min(24, Math.max(10, Number.isNaN(num) ? DEFAULT_FONT_SIZE : num));
     setFontSize(clamped);
+    setFontSizeInput(String(clamped));
     saveSetting('terminal.fontSize', clamped);
     onUpdateSettings?.('terminal.fontSize', clamped);
+  };
+
+  const handleFontSizeChange = (val) => {
+    setFontSizeInput(val);
+    const num = parseInt(val, 10);
+    // 若键入的数值已经在 [10, 24] 合法范围内（如直接微调或直接贴入 16），即时联动生效；
+    // 未完成的中间输入（如敲入单个数字 1）保留在输入框中，不提前夹逼打断输入
+    if (!Number.isNaN(num) && num >= 10 && num <= 24) {
+      setFontSize(num);
+      saveSetting('terminal.fontSize', num);
+      onUpdateSettings?.('terminal.fontSize', num);
+    }
   };
 
   const handleTrackingChange = (checked) => {
@@ -129,8 +148,15 @@ export default function SettingsDialog({
                 max={24}
                 className="chr-input chr-setting-font-size"
                 aria-label="Terminal Font Size"
-                value={fontSize}
+                value={fontSizeInput}
                 onChange={(e) => handleFontSizeChange(e.target.value)}
+                onBlur={() => commitFontSize()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitFontSize();
+                  }
+                }}
               />
               <span className="settings-unit">px</span>
             </div>
