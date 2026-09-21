@@ -11,6 +11,7 @@ use tauri::{path::BaseDirectory, Manager};
 const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
 const PROVIDERS_TSV: &str = "# comm-basename\tprovider-id\tdisplay-name\t[match]\n# match empty = basename only; path-segment = also hit when raw comm contains /<comm-basename>/ as a directory.\nclaude\tclaude_code\tClaude Code\ncodex\tcodex\tCodex\ncopilot\tcopilot\tCopilot\ngrok\tgrok\tGrok\ncursor-agent\tcursor\tCursor\tpath-segment\npi\tpi\tPi\n";
+const PI_PROBE_SOURCE: &str = include_str!("../resources/agentmirror-probe.js");
 
 /// Snapshot of the WSL 2 environment used by the local AgentMirror daemon.
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
@@ -156,6 +157,13 @@ fn install_script() -> String {
 src="$1"
 dst="$HOME/.local/bin/{AGENTMIRRORD_NAME}"
 providers="$HOME/tools/nodeprobe/fixtures/providers.tsv"
+titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
+# Keep both paths: plugins is the AgentMirror compatibility path while
+# extensions is Pi's current auto-discovery path.
+probe_dir="$HOME/.pi/agent/plugins/agentmirror-probe"
+probe="$probe_dir/index.js"
+extensions_dir="$HOME/.pi/agent/extensions"
+extension="$extensions_dir/agentmirror-probe.js"
 stop_service() {{
     name="$1"
     if ! pgrep -x "$name" >/dev/null 2>&1; then
@@ -175,28 +183,70 @@ stop_service() {{
 # otherwise keep port 9900 occupied when the new daemon is started.
 stop_service agentmirrord
 stop_service corral-core
-titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
-mkdir -p "$(dirname "$dst")" "$(dirname "$providers")"
+mkdir -p "$(dirname "$dst")" "$(dirname "$providers")" "$probe_dir" "$extensions_dir"
+chmod 0755 "$HOME/.pi" "$HOME/.pi/agent" "$HOME/.pi/agent/plugins" "$probe_dir" "$extensions_dir"
 service_tmp="$dst.tmp.$$"
 providers_tmp="$providers.tmp.$$"
-trap 'rm -f "$service_tmp" "$providers_tmp"' EXIT
+probe_tmp="$probe.tmp.$$"
+extension_tmp="$extension.tmp.$$"
+trap 'rm -f "$service_tmp" "$providers_tmp" "$probe_tmp" "$extension_tmp"' EXIT
 install -m 0755 -- "$src" "$service_tmp"
 mv -f -- "$service_tmp" "$dst"
 umask 077
 printf '%s' {providers} > "$providers_tmp"
 mv -f -- "$providers_tmp" "$providers"
 touch "$titles"
+printf '%s' {probe_base64} | base64 -d > "$probe_tmp"
+test -s "$probe_tmp"
+chmod 0644 "$probe_tmp"
+mv -f -- "$probe_tmp" "$probe"
+printf '%s' {probe_base64} | base64 -d > "$extension_tmp"
+test -s "$extension_tmp"
+chmod 0644 "$extension_tmp"
+mv -f -- "$extension_tmp" "$extension"
 test -x "$dst"
 test -s "$providers"
 test -f "$titles"
+test -d "$probe_dir"
+test "$(stat -c '%a' "$probe_dir")" = 755
+test -f "$probe"
+test "$(stat -c '%a' "$probe")" = 644
+test -f "$extension"
+test "$(stat -c '%a' "$extension")" = 644
 "#,
         providers = shell_single_quote(PROVIDERS_TSV),
+        probe_base64 = base64_encode(PI_PROBE_SOURCE.as_bytes()),
     )
 }
 
 #[cfg(any(windows, test))]
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(any(windows, test))]
+fn base64_encode(value: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(value.len().div_ceil(3) * 4);
+    for chunk in value.chunks(3) {
+        let first = chunk[0];
+        let second = *chunk.get(1).unwrap_or(&0);
+        let third = *chunk.get(2).unwrap_or(&0);
+        output.push(ALPHABET[(first >> 2) as usize] as char);
+        output.push(ALPHABET[((first & 0x03) << 4 | (second >> 4)) as usize] as char);
+        output.push(if chunk.len() > 1 {
+            ALPHABET[((second & 0x0f) << 2 | (third >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            ALPHABET[(third & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    output
 }
 
 #[cfg(windows)]
@@ -727,7 +777,8 @@ mod tests {
     use super::{
         find_ubuntu_distribution, first_ip, generate_service_token, install_script,
         normalize_service_token, parse_wsl_table, service_binary, service_probe_command,
-        service_start_args, service_stop_args, WslEnvironmentStatus, RUNNING_SERVICE_TOKEN_SCRIPT,
+        service_start_args, service_stop_args, WslEnvironmentStatus, PI_PROBE_SOURCE,
+        RUNNING_SERVICE_TOKEN_SCRIPT,
         SERVICE_START_SCRIPT, SERVICE_STOP_SCRIPT, SYSTEM_ENV_TOKEN_SCRIPT,
     };
 
@@ -782,7 +833,20 @@ mod tests {
         assert!(script.contains("cursor-agent\tcursor\tCursor\tpath-segment"));
         assert!(script.contains("pi\tpi\tPi"));
         assert!(script.contains("touch \"$titles\""));
+        assert!(script.contains("probe_dir=\"$HOME/.pi/agent/plugins/agentmirror-probe\""));
+        assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
+        assert!(script.contains("printf '%s' "));
+        assert!(script.contains("| base64 -d > \"$probe_tmp\""));
+        assert!(script.contains("chmod 0644 \"$probe_tmp\""));
+        assert!(script.contains("test \"$(stat -c '%a' \"$probe_dir\")\" = 755"));
+        assert!(script.contains("test \"$(stat -c '%a' \"$probe\")\" = 644"));
+        assert!(PI_PROBE_SOURCE.contains("pi.on(\"agent_start\""));
         assert!(script.contains("test -x \"$dst\""));
+        let syntax = std::process::Command::new("sh")
+            .args(["-n", "-c", &script])
+            .status()
+            .expect("shell is available");
+        assert!(syntax.success(), "generated install script must parse");
     }
 
     #[test]

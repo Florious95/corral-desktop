@@ -46,6 +46,7 @@ cp "$BIN" "$APP/Contents/MacOS/AgentMirrorApp"
 sed "s/__VERSION__/$VERSION/g" \
   "$PACKAGE/Resources/Release-Info.plist" > "$APP/Contents/Info.plist"
 cp -R "$WEB_ROOT" "$APP/Contents/Resources/web"
+cp "$ROOT/src-tauri/resources/agentmirror-probe.js" "$APP/Contents/Resources/agentmirror-probe.js"
 if [[ -f "$ROOT/src-tauri/icons/icon.icns" ]]; then
   cp "$ROOT/src-tauri/icons/icon.icns" "$APP/Contents/Resources/AgentMirror.icns"
 fi
