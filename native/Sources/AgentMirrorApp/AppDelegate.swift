@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
+                // Keep the Pi probe in place before the WebView and daemon
+                // become visible. The installer owns only its exact files.
+                try PiProbeInstaller.install(resourceDirectory: Bundle.main.resourceURL)
                 // Migrate before constructing the WebView so a first page boot
                 // can only observe the completed private-file device list.
                 try await migrationDevices()

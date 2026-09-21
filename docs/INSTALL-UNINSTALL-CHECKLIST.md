@@ -14,7 +14,7 @@
 | **`token`** | `~/.config/agentmirror/token` | `0600` | 内部双向握手安全令牌 | 自动生成高熵随机令牌 | 物理删除 |
 | **`providers.tsv`** | `~/tools/nodeprobe/fixtures/providers.tsv` | `0600` | Agent 启动器白名单与模板 | 自动生成标准 6 大 Provider 配置 | 物理删除 |
 | **`titles.tsv`** | `~/tools/nodeprobe/fixtures/titles.tsv` | `0600` | 会话标题映射表 | 自动初始化为空配置 | 物理删除 |
-| **`pi 状态检测插件`** | `~/.pi/agent/plugins/agentmirror-probe` | `0755` | 捕获并上报 Pi 节点的实时健康、Working/Idle 状态 | 自动植入并验证可用性 | 完整清理插件目录，绝不残留 |
+| **`pi 状态检测插件`** | `~/.pi/agent/plugins/agentmirror-probe/index.js`（兼容路径） + `~/.pi/agent/extensions/agentmirror-probe.js`（Pi 自动发现） | 目录 `0755` / 文件 `0644` | 捕获并上报 Pi 节点的实时健康、Working/Idle 状态 | WSL 引导或 macOS 原生壳启动时原子写入并验证权限 | 仅删除 AgentMirror 自有探针路径，完整清理且绝不触碰用户插件 |
 
 ---
 
@@ -26,8 +26,8 @@
   - 检测 WSL 发行版存活状态（若为 `Stopped` 自动拉起唤醒）；
 - [ ] **Pi 状态检测插件自动植入**：
   - 检查目标用户的 Pi 插件目录（如 `~/.pi/agent/plugins`）；
-  - 自动将内置的 Pi 探针插件写入目标路径，赋予 `0755` 可执行权限；
-  - 验证 Pi CLI 能够正常识别并加载该插件，确保前端状态灯与工作状态上报真实有效；
+  - 自动将内置的 Pi 探针插件写入目标路径，目录 `0755`、文件 `0644`；同时写入 Pi 当前标准自动发现目录 `~/.pi/agent/extensions/`；
+  - 验证目标文件与权限就位，确保 Pi CLI 能够加载该扩展并让前端状态灯与工作状态上报真实有效；
 - [ ] **守护服务原子换包（Hot-Swap）**：
   - 先以 `TERM` / `KILL` 终止可能存在的旧版 `agentmirrord`；
   - 将安装包内置的最新 Linux 静态单文件原子拷贝至 `~/.local/bin/agentmirrord`（`chmod 0755`）；
@@ -50,8 +50,8 @@
 - [ ] **进程安全终结**：
   - 遍历所有 WSL 发行版，执行 `pkill -x agentmirrord` 彻底杀死运行中的后台服务，释放 `9900` 端口；
 - [ ] **Pi 状态检测插件彻底移除**：
-  - 物理删除 `~/.pi/agent/plugins/` 下所有由 AgentMirror 植入的探针文件与配置目录；
-  - 恢复 Pi 原生初始插件配置，不留下任何失效的钩子或僵尸路径；
+  - Windows NSIS 与 macOS `scripts/uninstall-pi-probe.sh` 仅物理删除 AgentMirror 自有 `~/.pi/agent/plugins/agentmirror-probe/`、兼容文件及 `~/.pi/agent/extensions/agentmirror-probe.js`；
+  - 清理中断安装留下的 `.agentmirror-probe.tmp-*`，恢复 Pi 原生初始插件配置，不留下任何失效钩子或僵尸路径；
 - [ ] **守护文件与配置物理销毁**：
   - 物理删除 `~/.local/bin/agentmirrord`；
   - 物理删除 `~/.config/agentmirror/token`；
