@@ -118,6 +118,7 @@ export default function App({ seedDevices } = {}) {
   const [dismissedUids, setDismissedUids] = useState(new Set());
   const [closeConfirmAgent, setCloseConfirmAgent] = useState(null);
   const lifecycleTimerRef = useRef(new Map());
+  const handledLifecycleNonceRef = useRef(null);
   const [capabilityRevision, setCapabilityRevision] = useState(0);
 
   const toastInputFail = (reason) => {
@@ -774,7 +775,8 @@ export default function App({ seedDevices } = {}) {
   }, [closePending]);
 
   useEffect(() => {
-    if (!lifecycleEvent) return;
+    if (!lifecycleEvent || handledLifecycleNonceRef.current === lifecycleEvent.nonce) return;
+    handledLifecycleNonceRef.current = lifecycleEvent.nonce;
     const { kind, deviceId, reqId, payload } = lifecycleEvent;
     if (kind === 'create_agent_result' && createPending?.deviceId === deviceId && createPending.reqId === reqId && !createPending.ref) {
       const timerKey = `create:${deviceId}:${reqId}`;
@@ -849,9 +851,8 @@ export default function App({ seedDevices } = {}) {
     const timerKey = `close:${closePending.deviceId}:${closePending.reqId}`;
     clearTimeout(lifecycleTimerRef.current.get(timerKey));
     lifecycleTimerRef.current.delete(timerKey);
-    // The listing disappearance effect owns the 190ms exit animation and
-    // removes the pane/subscription after it settles. Only resolve the request
-    // here, after the authoritative delta has arrived.
+    activeCloseRef.current = null;
+    closePendingRef.current = null;
     setClosePending(null);
     setToastMsg('Agent 已关闭');
   }, [closePending, agentByKey]);
