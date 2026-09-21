@@ -2,6 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { attachWebglRenderer } from '../src/term/webglRenderer.js';
 import { TerminalView } from '../src/term/TerminalView.js';
+import { setNativeEngineForTests, resetNativeEngineForTests } from '../src/core/nativeCapabilities.js';
+
+test('attachWebglRenderer: returns null immediately on Windows platform to prevent WebGL GPU memory bloat', async () => {
+  setNativeEngineForTests({ platform: 'windows' });
+  try {
+    let loadAddonCalled = false;
+    const term = { loadAddon: () => { loadAddonCalled = true; } };
+    const r = await attachWebglRenderer(term);
+    assert.equal(r, null, 'must return null on Windows to stay on lightweight DOM renderer');
+    assert.equal(loadAddonCalled, false, 'loadAddon must not be called on Windows');
+  } finally {
+    resetNativeEngineForTests();
+  }
+});
 
 test('attachWebglRenderer: importer 抛错则静默返回 null，不调用 loadAddon', async () => {
   let loaded = 0;

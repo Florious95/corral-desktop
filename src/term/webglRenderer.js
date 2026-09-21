@@ -3,6 +3,8 @@
  * 任何失败都返回 null，调用方继续用 DOM renderer（今天的行为）。
  */
 
+import { nativeCapabilities } from '../core/nativeCapabilities.js';
+
 /**
  * @param {{ loadAddon: Function }} term xterm instance
  * @param {() => Promise<{WebglAddon: new () => { dispose?: Function, onContextLoss?: Function }}>} [importer]
@@ -10,6 +12,10 @@
  */
 export async function attachWebglRenderer(term, importer = defaultImporter) {
   if (!term || typeof term.loadAddon !== 'function') return null;
+  // Windows WebView2 下禁用 WebGL，使用原生 DirectWrite DOM 渲染器，彻底消除 GPU 进程 1GB+ 纹理显存膨胀（Issue #198）
+  if (nativeCapabilities.platform === 'windows') {
+    return null;
+  }
   try {
     const mod = await importer();
     const Addon = mod && mod.WebglAddon;
