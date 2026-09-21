@@ -408,42 +408,30 @@ export default function App({ seedDevices } = {}) {
   ), [allAgents]);
   liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
 
-  const agentByKeyRef = useRef(agentByKey);
-  agentByKeyRef.current = agentByKey;
-  const prevActiveKeyRef = useRef(null);
-  const prevTrackingRef = useRef(false);
+  const activeSpaceKey = (activeKey && agentByKey.get(activeKey)?.spaceKey) || null;
 
   // Issue #195 & #204: 目录跟踪 (Directory Tracking)
-  // 仅在活跃会话跃迁变更 (activeKey 发生变化) 或设置开关刚被手动打开时跟踪目录；
-  // 当 activeKey 未变时（用户在右侧工作，并在左侧自由点击查看其他 Space 时），绝对不拦截、不覆写用户的 setSelected
+  // 依赖原生字符串标量 activeSpaceKey：
+  // 1. 冷启动异步 listing 到达时 activeSpaceKey 从 null 变为字符串，精准触发一次并定位到当前活跃会话目录；
+  // 2. 用户在左侧手动切换其他 Space 时，activeKey 与 activeSpaceKey 均未变，effect 绝不触发，严禁弹回；
+  // 3. 服务端常规 listing 刷新时标量未变，effect 绝不触发；仅在右侧切换 Tab 时精准响应。
   useEffect(() => {
-    const isTrackingEnabled = !!settings.directoryTracking;
-    const trackingJustEnabled = isTrackingEnabled && !prevTrackingRef.current;
-    const activeKeyChanged = activeKey !== prevActiveKeyRef.current;
-
-    prevTrackingRef.current = isTrackingEnabled;
-    prevActiveKeyRef.current = activeKey;
-
-    if (!isTrackingEnabled || !activeKey) return;
-    if (!activeKeyChanged && !trackingJustEnabled) return;
-
-    const currentAgent = (agentByKeyRef.current || agentByKey).get(activeKey);
-    if (!currentAgent?.spaceKey) return;
+    if (!settings.directoryTracking || !activeKey || !activeSpaceKey) return;
 
     // 自动展开 Spaces 与 Agents，标记展开状态
     setSpacesOpen(true);
     setAgentsOpen(true);
     const expanded = true;
-    setSelected(currentAgent.spaceKey);
+    setSelected(activeSpaceKey);
 
-    const selector = `[data-space-key="${currentAgent.spaceKey}"], [data-agent-key="${currentAgent.key}"]`;
+    const selector = `[data-space-key="${activeSpaceKey}"], [data-agent-key="${activeKey}"]`;
     requestAnimationFrame(() => {
       const el = document.querySelector(selector);
       if (el && typeof el.scrollIntoView === 'function') {
         el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
-  }, [settings.directoryTracking, activeKey]);
+  }, [settings.directoryTracking, activeKey, activeSpaceKey]);
 
   // 服务端删会话 → 标记 closing → CLOSE_MS 后真正卸载并剔出分裂列
   const prevAgents = useRef([]);
