@@ -184,27 +184,6 @@ export default function App({ seedDevices } = {}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState(() => loadSettings());
 
-  // Issue #195: 目录跟踪 (Directory Tracking)
-  useEffect(() => {
-    if (!settings.directoryTracking || !activeKey) return;
-    const currentAgent = agentByKey.get(activeKey);
-    if (!currentAgent?.spaceKey) return;
-
-    // 自动展开 Spaces 与 Agents，标记展开状态
-    setSpacesOpen(true);
-    setAgentsOpen(true);
-    const expanded = true;
-    setSelected(currentAgent.spaceKey);
-
-    const selector = `[data-space-key="${currentAgent.spaceKey}"], [data-agent-key="${currentAgent.key}"]`;
-    requestAnimationFrame(() => {
-      const el = document.querySelector(selector);
-      if (el && typeof el.scrollIntoView === 'function') {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    });
-  }, [settings.directoryTracking, activeKey, agentByKey]);
-
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const [pairingOpen, setPairingOpen] = useState(false);
@@ -427,6 +406,27 @@ export default function App({ seedDevices } = {}) {
     allAgents.filter((a) => a.fav && (a.state === 'working' || a.status === 'working')).length
   ), [allAgents]);
   liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
+
+  // Issue #195: 目录跟踪 (Directory Tracking)
+  useEffect(() => {
+    if (!settings.directoryTracking || !activeKey) return;
+    const currentAgent = agentByKey.get(activeKey);
+    if (!currentAgent?.spaceKey) return;
+
+    // 自动展开 Spaces 与 Agents，标记展开状态
+    setSpacesOpen(true);
+    setAgentsOpen(true);
+    const expanded = true;
+    setSelected(currentAgent.spaceKey);
+
+    const selector = `[data-space-key="${currentAgent.spaceKey}"], [data-agent-key="${currentAgent.key}"]`;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(selector);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+  }, [settings.directoryTracking, activeKey, agentByKey]);
 
   // 服务端删会话 → 标记 closing → CLOSE_MS 后真正卸载并剔出分裂列
   const prevAgents = useRef([]);
