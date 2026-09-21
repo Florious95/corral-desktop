@@ -224,34 +224,12 @@ export default function TerminalPane({
         return;
       }
     };
-    const onContextMenu = (ev) => {
-      const isWindows = nativeCapabilities.platform === 'windows';
-      if (!isWindows) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-
-      // Windows 终端行为：选中文本时右键复制并清空选中；无选中文本时右键快速粘贴
-      if (view.term.hasSelection()) {
-        const selection = view.term.getSelection();
-        if (selection && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(selection).catch(() => {});
-          view.term.clearSelection();
-        }
-      } else {
-        nativeCapabilities.clipboard.readText().then((text) => {
-          if (text && onTextRef.current) {
-            onTextRef.current(text);
-          }
-        }).catch(() => {});
-      }
-    };
     const onPasteEvent = (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       onPasteRef.current?.(ev);
     };
     host.addEventListener('keydown', onKeyDown, true);
-    host.addEventListener('contextmenu', onContextMenu, true);
     host.addEventListener('paste', onPasteEvent, true);
 
     // fetchOlder/acceptScrollback 直接读写这个对象上的 pendingScrollback / nextScrollbackLine。
@@ -482,7 +460,6 @@ export default function TerminalPane({
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
       host.removeEventListener('keydown', onKeyDown, true);
-      host.removeEventListener('contextmenu', onContextMenu, true);
       host.removeEventListener('paste', onPasteEvent, true);
       clearTimeout(g.timer);
       clearTimeout(flashTimer);

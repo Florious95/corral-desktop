@@ -60,7 +60,7 @@ import { getAgentFavKey, isAgentFav, toggleAgentFav } from './lib/favorites.js';
 import { isSameSpaceKey } from './lib/wslPath.js';
 import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
-  readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
+  readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent, readClipboardImage,
 } from './term/clipboard.js';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
