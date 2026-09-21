@@ -94,7 +94,7 @@ test('#196 terminal viewport uses platform-specific outer spacing and fit measur
   const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
   const paneRule = terminalCss.match(/\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
   const windowsRule = terminalCss.match(/\.app-root\.is-windows\s+\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
-  assert.match(paneRule, /padding\s*:\s*0(?:px)?\s*;/, 'macOS/default terminalpane must restore zero outer spacing');
+  assert.match(paneRule, /padding\s*:\s*0\s+5px\s*;/, 'macOS/default terminalpane must set horizontal 5px padding and zero vertical padding (padding: 0 5px)');
   assert.match(windowsRule, /padding\s*:\s*5px\s*;/, 'Windows terminalpane must reserve 5px on all sides');
   assert.match(text, /className=\{`app-root[\s\S]{0,360}is-windows/, 'app root must expose the native Windows platform class');
   assert.match(paneRule, /box-sizing\s*:\s*border-box\s*;/);
@@ -179,6 +179,18 @@ test('MCP issue gate rejects padding, overflow, console errors, and drag jitter'
     () => assertIssueReceipt({ drag: { maxWidthDelta: 3 } }),
     (error) => error.details?.failures?.some((failure) => failure.includes('jitter')),
   );
+});
+
+test('#196 terminal viewport exact platform margin invariant (macOS 0 5px, Windows 5px)', async () => {
+  const text = await allSource();
+  const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
+  const paneBlock = terminalCss.match(/\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
+  const windowsBlock = terminalCss.match(/\.app-root\.is-windows\s+\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
+
+  // macOS / default terminalpane: top/bottom 0, left/right 5px
+  assert.match(paneBlock, /padding\s*:\s*0\s+5px\s*;/);
+  // Windows terminalpane: 5px on all sides
+  assert.match(windowsBlock, /padding\s*:\s*5px\s*;/);
 });
 
 export { allSource };
