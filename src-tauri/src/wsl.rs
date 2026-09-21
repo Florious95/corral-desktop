@@ -483,22 +483,20 @@ fn generate_service_token() -> Result<String, String> {
 }
 
 #[cfg(any(windows, test))]
-fn service_start_args<'a>(
-    distribution: &'a str,
-    service: &'a str,
-    token: &'a str,
-) -> [&'a str; 11] {
+const SERVICE_START_SCRIPT: &str =
+    "exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
+
+#[cfg(any(windows, test))]
+fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a str) -> [&'a str; 9] {
     [
         "-d",
         distribution,
         "-e",
-        "env",
-        "-u",
-        "AGENTMIRROR_TOKEN",
+        "sh",
+        "-lc",
+        SERVICE_START_SCRIPT,
+        "--",
         service,
-        "-listen",
-        "0.0.0.0:9900",
-        "-token",
         token,
     ]
 }
@@ -612,6 +610,8 @@ fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), Stri
 /// WSL tears down orphaned background jobs when the launcher exits, so `nohup`
 /// alone cannot make the service survive a cold launch. The Windows launcher is
 /// detached from the GUI process while its Linux child remains foreground.
+/// The login shell loads the user's PATH so binaries installed under
+/// `~/.local/bin` are resolvable; service and token stay positional arguments.
 #[tauri::command]
 pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
@@ -666,7 +666,7 @@ mod tests {
         find_ubuntu_distribution, first_ip, generate_service_token, install_script,
         normalize_service_token, parse_wsl_table, service_binary, service_probe_command,
         service_start_args, WslEnvironmentStatus, RUNNING_SERVICE_TOKEN_SCRIPT,
-        SYSTEM_ENV_TOKEN_SCRIPT,
+        SERVICE_START_SCRIPT, SYSTEM_ENV_TOKEN_SCRIPT,
     };
 
     #[test]
@@ -745,13 +745,11 @@ mod tests {
                 "-d",
                 "Ubuntu",
                 "-e",
-                "env",
-                "-u",
-                "AGENTMIRROR_TOKEN",
+                "sh",
+                "-lc",
+                SERVICE_START_SCRIPT,
+                "--",
                 "agentmirrord",
-                "-listen",
-                "0.0.0.0:9900",
-                "-token",
                 "TOKEN123",
             ]
         );
