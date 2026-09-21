@@ -101,6 +101,7 @@ export default function TabBar({
     const pinned = [];
     const regular = [];
     for (const t of tabs) {
+      if (t.isImplicitBlank && isBlankTab(t)) continue;
       if (t.pinned) pinned.push(t);
       else regular.push(t);
     }
@@ -211,8 +212,6 @@ export default function TabBar({
       });
     }
   }, [activeTabId, activeUid, regularTabs, lockedTabWidth]);
-
-  if (tabs.length === 0) return null;
 
   return (
     <nav

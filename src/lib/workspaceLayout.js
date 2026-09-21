@@ -1014,6 +1014,7 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
     activeUid: null,
     pinned: false,
     isBlank: true,
+    isImplicitBlank: true,
   };
 
   const tabList = Array.isArray(tabs) && tabs.length > 0
@@ -1035,6 +1036,7 @@ export function createMultiWorkspace({ tabs = null, activeTabId = null } = {}) {
             activeUid: activeUid ? String(activeUid) : null,
             pinned: !!t.pinned,
             isBlank,
+            isImplicitBlank: t.isImplicitBlank === true || (tabId === 'tab-1' && !hasSession),
           };
         })
     : [initialTab];
@@ -1067,6 +1069,7 @@ export function createWorkspaceTab(state, { id = null, name = '', root = null, a
     activeUid: activeUid ? String(activeUid) : null,
     pinned: !!pinned,
     isBlank: computedIsBlank,
+    isImplicitBlank: false,
   };
 
   const newTabs = [...(state.tabs || []), newTab];

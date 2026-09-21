@@ -1,5 +1,9 @@
 use serde::Serialize;
 #[cfg(windows)]
+use std::io::{Read, Write};
+#[cfg(windows)]
+use std::net::{SocketAddr, TcpStream};
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 use std::path::Path;
@@ -10,6 +14,11 @@ use tauri::{path::BaseDirectory, Manager};
 #[cfg(windows)]
 const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
+const AGENTMIRRORD_VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(windows)]
+const SERVICE_READY_PORT: u16 = 9900;
+#[cfg(any(windows, test))]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const PROVIDERS_TSV: &str = "# comm-basename\tprovider-id\tdisplay-name\t[match]\n# match empty = basename only; path-segment = also hit when raw comm contains /<comm-basename>/ as a directory.\nclaude\tclaude_code\tClaude Code\ncodex\tcodex\tCodex\ncopilot\tcopilot\tCopilot\ngrok\tgrok\tGrok\ncursor-agent\tcursor\tCursor\tpath-segment\npi\tpi\tPi\n";
 const PI_PROBE_SOURCE: &str = include_str!("../resources/agentmirror-probe.js");
 
@@ -156,6 +165,7 @@ fn install_script() -> String {
         r#"set -eu
 src="$1"
 dst="$HOME/.local/bin/{AGENTMIRRORD_NAME}"
+version_file="$dst.version"
 providers="$HOME/tools/nodeprobe/fixtures/providers.tsv"
 titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
 # Keep both paths: plugins is the AgentMirror compatibility path while
@@ -164,6 +174,15 @@ probe_dir="$HOME/.pi/agent/plugins/agentmirror-probe"
 probe="$probe_dir/index.js"
 extensions_dir="$HOME/.pi/agent/extensions"
 extension="$extensions_dir/agentmirror-probe.js"
+if test -x "$dst" \
+    && test -f "$version_file" \
+    && test "$(cat "$version_file")" = "{AGENTMIRRORD_VERSION}" \
+    && test -s "$providers" \
+    && test -f "$titles" \
+    && test -f "$probe" \
+    && test -f "$extension"; then
+    exit 0
+fi
 stop_service() {{
     name="$1"
     if ! pgrep -x "$name" >/dev/null 2>&1; then
@@ -189,9 +208,13 @@ service_tmp="$dst.tmp.$$"
 providers_tmp="$providers.tmp.$$"
 probe_tmp="$probe.tmp.$$"
 extension_tmp="$extension.tmp.$$"
-trap 'rm -f "$service_tmp" "$providers_tmp" "$probe_tmp" "$extension_tmp"' EXIT
+version_tmp="$version_file.tmp.$$"
+trap 'rm -f "$service_tmp" "$providers_tmp" "$probe_tmp" "$extension_tmp" "$version_tmp"' EXIT
 install -m 0755 -- "$src" "$service_tmp"
 mv -f -- "$service_tmp" "$dst"
+printf '%s\n' "{AGENTMIRRORD_VERSION}" > "$version_tmp"
+chmod 0600 "$version_tmp"
+mv -f -- "$version_tmp" "$version_file"
 umask 077
 printf '%s' {providers} > "$providers_tmp"
 mv -f -- "$providers_tmp" "$providers"
@@ -295,7 +318,7 @@ fn install_wsl_service_windows(app: &tauri::AppHandle) -> Result<(), String> {
         "-e",
         "sh",
         "-lc",
-        "test -x \"$HOME/.local/bin/agentmirrord\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\"",
+        "test -x \"$HOME/.local/bin/agentmirrord\" && test \"$(cat \"$HOME/.local/bin/agentmirrord.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\"",
     ])?;
     if verify.status.success() {
         Ok(())
@@ -319,6 +342,16 @@ fn service_command_installed(distribution: &str, service: &str) -> bool {
         return false;
     };
     run_wsl(&["-d", distribution, "-e", "sh", "-lc", probe])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn bundled_service_current(distribution: &str) -> bool {
+    let probe = format!(
+        "test -x \"$HOME/.local/bin/{AGENTMIRRORD_NAME}\" && test \"$(cat \"$HOME/.local/bin/{AGENTMIRRORD_NAME}.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\""
+    );
+    run_wsl(&["-d", distribution, "-e", "sh", "-lc", &probe])
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
@@ -363,16 +396,10 @@ fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
     let tmux_installed = run_wsl(&["-d", &ubuntu.name, "-e", "which", "tmux"])
         .map(|output| output.status.success())
         .unwrap_or(false);
-    let service_installed = run_wsl(&[
-        "-d",
-        &ubuntu.name,
-        "-e",
-        "sh",
-        "-lc",
-        "command -v agentmirrord >/dev/null || command -v corral-core >/dev/null",
-    ])
-    .map(|output| output.status.success())
-    .unwrap_or(false);
+    // Only the bundled daemon satisfies the app contract. A legacy
+    // corral-core binary is intentionally treated as missing so the next
+    // startup installs agentmirrord instead of falling back into restart loops.
+    let service_installed = bundled_service_current(&ubuntu.name);
     let service_running = run_wsl(&[
         "-d",
         &ubuntu.name,
@@ -556,22 +583,6 @@ const SERVICE_START_SCRIPT: &str =
     "exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
 
 #[cfg(any(windows, test))]
-const SERVICE_STOP_SCRIPT: &str = r#"set -eu
-name="$1"
-if pgrep -x "$name" >/dev/null 2>&1; then
-    pkill -TERM -x "$name" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        if ! pgrep -x "$name" >/dev/null 2>&1; then
-            exit 0
-        fi
-        sleep 0.1
-    done
-    pkill -KILL -x "$name" 2>/dev/null || true
-fi
-! pgrep -x "$name" >/dev/null 2>&1
-"#;
-
-#[cfg(any(windows, test))]
 fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a str) -> [&'a str; 9] {
     [
         "-d",
@@ -583,20 +594,6 @@ fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a st
         "--",
         service,
         token,
-    ]
-}
-
-#[cfg(any(windows, test))]
-fn service_stop_args<'a>(distribution: &'a str, service: &'a str) -> [&'a str; 8] {
-    [
-        "-d",
-        distribution,
-        "-e",
-        "sh",
-        "-lc",
-        SERVICE_STOP_SCRIPT,
-        "--",
-        service,
     ]
 }
 
@@ -669,15 +666,43 @@ fn service_process_ready(distribution: &str, service: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(any(windows, test))]
+fn http_response_is_ready(response: &[u8]) -> bool {
+    response.starts_with(b"HTTP/1.1 200 ") || response.starts_with(b"HTTP/1.0 200 ")
+}
+
 #[cfg(windows)]
-fn wait_for_service_process(distribution: &str, service: &str) -> Result<(), String> {
-    // WSL cold starts can take over a second on a fresh distribution. Poll the
-    // Linux process instead of treating a successful wsl.exe spawn as ready.
-    for _ in 0..15 {
-        if service_process_ready(distribution, service) {
+fn service_http_ready() -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], SERVICE_READY_PORT));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, std::time::Duration::from_millis(40))
+    else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(40)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(40)));
+    if stream
+        .write_all(b"GET /pair/whoami HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = [0_u8; 512];
+    let Ok(read) = stream.read(&mut response) else {
+        return false;
+    };
+    http_response_is_ready(&response[..read])
+}
+
+#[cfg(windows)]
+fn wait_for_service_ready() -> Result<(), String> {
+    // Probe the real public endpoint immediately, then every 25ms. A process
+    // being present is not readiness; the first successful HTTP response is.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if service_http_ready() {
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(25));
     }
     Err("service_start_failed".to_string())
 }
@@ -694,11 +719,11 @@ fn service_token_ready(distribution: &str, expected: &str) -> bool {
 
 #[cfg(windows)]
 fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), String> {
-    for _ in 0..50 {
+    for _ in 0..40 {
         if service_token_ready(distribution, expected) {
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(25));
     }
     Err("service_token_not_ready".to_string())
 }
@@ -715,13 +740,10 @@ fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), Stri
 pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
     {
+        let _ = app;
         let Some(service) = service_binary(service_cmd.as_deref()) else {
             return Err("unsupported_service_command".to_string());
         };
-        // A direct start command must also self-heal upgrades. The frontend
-        // invokes install explicitly for visible progress, while this second
-        // guard covers callers that start the daemon directly.
-        install_wsl_service_windows(&app)?;
         let list_output = match run_wsl(&["-l", "-v"]) {
             Ok(output) if output.status.success() => output,
             Ok(_) | Err(_) => return Err("ubuntu_not_installed".to_string()),
@@ -729,37 +751,40 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
         let Some(ubuntu) = find_ubuntu_distribution(&list_output.stdout) else {
             return Err("ubuntu_not_installed".to_string());
         };
-        if !service_command_installed(&ubuntu.name, service) {
+        let installed = if service == AGENTMIRRORD_NAME {
+            bundled_service_current(&ubuntu.name)
+        } else {
+            service_command_installed(&ubuntu.name, service)
+        };
+        if !installed {
             return Err(format!(
-                "service_not_installed: {service} not found in WSL Ubuntu PATH"
+                "service_not_installed: {service} not found or out of date in WSL Ubuntu"
             ));
         }
         let token = ensure_wsl_service_token(&ubuntu.name)?;
-
-        // Always replace a possibly stale process before launching. The
-        // frontend also installs the bundled binary on every startup, but
-        // keeping this stop here makes direct command invocations safe too.
-        let stop = run_wsl(&service_stop_args(&ubuntu.name, service))
-            .map_err(|error| format!("wsl_service_stop_failed: {error}"))?;
-        if !stop.status.success() {
-            return Err("wsl_service_stop_failed".to_string());
+        if service_http_ready() {
+            return Ok(());
         }
 
-        // Keep the daemon in the foreground inside a detached wsl.exe process.
-        // WSL therefore keeps the Linux session alive after this function and
-        // the GUI process return.
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        let _child = std::process::Command::new("wsl.exe")
-            .args(service_start_args(&ubuntu.name, service, &token))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-            .spawn()
-            .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
-        wait_for_service_process(&ubuntu.name, service)?;
+        // Reuse an existing process while it is coming up. Never stop a
+        // healthy/starting daemon merely because the UI was reopened.
+        if !service_process_ready(&ubuntu.name, service) {
+            // Keep the daemon in the foreground inside a detached wsl.exe process.
+            // WSL therefore keeps the Linux session alive after this function and
+            // the GUI process return.
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            let _child = std::process::Command::new("wsl.exe")
+                .args(service_start_args(&ubuntu.name, service, &token))
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
+        }
 
+        wait_for_service_ready()?;
         // Ensure the token file is visible before returning so the frontend
         // can authenticate without a race.
         wait_for_service_token(&ubuntu.name, &token)
@@ -775,12 +800,25 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        find_ubuntu_distribution, first_ip, generate_service_token, install_script,
-        normalize_service_token, parse_wsl_table, service_binary, service_probe_command,
-        service_start_args, service_stop_args, WslEnvironmentStatus, PI_PROBE_SOURCE,
-        RUNNING_SERVICE_TOKEN_SCRIPT,
-        SERVICE_START_SCRIPT, SERVICE_STOP_SCRIPT, SYSTEM_ENV_TOKEN_SCRIPT,
+        find_ubuntu_distribution, first_ip, generate_service_token, http_response_is_ready,
+        install_script, normalize_service_token, parse_wsl_table, service_binary,
+        service_probe_command, service_start_args, WslEnvironmentStatus, CREATE_NO_WINDOW,
+        PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
+        SYSTEM_ENV_TOKEN_SCRIPT,
     };
+
+    #[test]
+    fn windows_launcher_has_no_window_flag() {
+        assert_eq!(CREATE_NO_WINDOW, 0x0800_0000);
+    }
+
+    #[test]
+    fn http_ready_requires_success_status() {
+        assert!(http_response_is_ready(b"HTTP/1.1 200 OK\r\n"));
+        assert!(http_response_is_ready(b"HTTP/1.0 200 OK\r\n"));
+        assert!(!http_response_is_ready(b"HTTP/1.1 503 Busy\r\n"));
+        assert!(!http_response_is_ready(b"garbage"));
+    }
 
     #[test]
     fn parses_running_ubuntu_from_wsl_table() {
@@ -825,6 +863,9 @@ mod tests {
     #[test]
     fn bundled_install_script_is_atomic_and_contains_provider_defaults() {
         let script = install_script();
+        assert!(script.contains("version_file=\"$dst.version\""));
+        assert!(script.contains("test \"$(cat \"$version_file\")\""));
+        assert!(script.contains("exit 0"));
         assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
         assert!(script.contains("mv -f -- \"$service_tmp\" \"$dst\""));
         assert!(script.contains("pkill -TERM -x \"$name\""));
@@ -842,6 +883,7 @@ mod tests {
         assert!(script.contains("test \"$(stat -c '%a' \"$probe\")\" = 644"));
         assert!(PI_PROBE_SOURCE.contains("pi.on(\"agent_start\""));
         assert!(script.contains("test -x \"$dst\""));
+        assert!(script.contains("mv -f -- \"$version_tmp\" \"$version_file\""));
         let syntax = std::process::Command::new("sh")
             .args(["-n", "-c", &script])
             .status()
@@ -882,21 +924,6 @@ mod tests {
                 "TOKEN123",
             ]
         );
-        assert_eq!(
-            service_stop_args("Ubuntu", "agentmirrord"),
-            [
-                "-d",
-                "Ubuntu",
-                "-e",
-                "sh",
-                "-lc",
-                SERVICE_STOP_SCRIPT,
-                "--",
-                "agentmirrord",
-            ]
-        );
-        assert!(SERVICE_STOP_SCRIPT.contains("pkill -TERM -x \"$name\""));
-        assert!(SERVICE_STOP_SCRIPT.contains("pkill -KILL -x \"$name\""));
     }
 
     #[test]
