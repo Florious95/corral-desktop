@@ -82,10 +82,10 @@ test('local zero-config pairing asks for a token, then persists it for QR handof
   assert.equal(dm.createPairingPayload(), null);
   assert.deepEqual(dm.createPairingDraft(), {
     v: 1,
-    url: 'ws://127.0.0.1:9900/ws',
+    url: 'ws://localhost:9900/ws',
     token: '',
     ts_authkey: '',
-    candidates: ['ws://127.0.0.1:9900/ws'],
+    candidates: ['ws://localhost:9900/ws'],
   });
   assert.equal(dm.savePairingToken('pair-token'), true);
   assert.equal(dm.createPairingPayload().token, 'pair-token');

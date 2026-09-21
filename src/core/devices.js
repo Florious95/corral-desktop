@@ -154,7 +154,13 @@ export class DeviceManager {
       ? opts.seedDevices
       : store.loadDevices(this.storage);
     this._devices = loaded
-      .map((d) => ({ ...d, checked: explicit ? checked.has(d.id) : true }));
+      .map((d) => ({
+        ...d,
+        url: d.id === 'local' && d.url === 'ws://127.0.0.1:9900/ws'
+          ? DEFAULT_LOCAL_DEVICE.url
+          : d.url,
+        checked: explicit ? checked.has(d.id) : true,
+      }));
     // Production opts in to keeping one trusted loopback target available;
     // tests remain isolated unless they explicitly request local discovery.
     if (opts.autoLocal === true && !this._devices.some((d) => isLocalUrl(d.url))) {
