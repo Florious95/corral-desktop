@@ -503,6 +503,7 @@ export default function App({ seedDevices } = {}) {
   const [wslEnvStatus, setWslEnvStatus] = useState(null);
   const [wslError, setWslError] = useState('');
   const wslHealedRef = useRef(false);
+  const wslStartPromiseRef = useRef(null);
 
   const syncLocalTokenAndConnect = useCallback(async () => {
     const localDevice = dm.devices.find((d) => isLocalUrl(d.url));
@@ -531,54 +532,52 @@ export default function App({ seedDevices } = {}) {
     return true;
   }, [dm]);
 
-  const checkAndHealWsl = useCallback(async () => {
-    if (nativeCapabilities.platform !== 'windows') return;
-    setWslState('checking');
-    setWslError('');
-    try {
-      const status = await nativeCapabilities.wsl.checkEnvironment();
-      setWslEnvStatus(status);
-      if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
-        setWslState('unready');
-        return;
-      }
-      // Always reinstall the bundled daemon. `service_installed` only tells us
-      // that some binary exists; it cannot prove that it matches this app
-      // version. The installer atomically replaces it and stops old daemon
-      // generations, so upgrades self-heal without a manual delete.
-      setWslState('installing');
+  const checkAndHealWsl = useCallback(() => {
+    if (nativeCapabilities.platform !== 'windows') return Promise.resolve(false);
+    if (wslStartPromiseRef.current) return wslStartPromiseRef.current;
+
+    const operation = (async () => {
+      setWslState('checking');
+      setWslError('');
       try {
-        await nativeCapabilities.wsl.installService();
-        status.service_installed = true;
-        status.service_running = false;
-        setWslEnvStatus((prev) => ({
-          ...(prev || status),
-          service_installed: true,
-          service_running: false,
-        }));
+        const status = await nativeCapabilities.wsl.checkEnvironment();
+        setWslEnvStatus(status);
+        if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
+          setWslState('unready');
+          return false;
+        }
+        // installService is only for first install or a bundled-version miss.
+        // The native installer writes a version marker and is otherwise skipped.
+        if (!status.service_installed) {
+          setWslState('installing');
+          await nativeCapabilities.wsl.installService();
+          status.service_installed = true;
+          setWslEnvStatus((prev) => ({
+            ...(prev || status),
+            service_installed: true,
+          }));
+        }
+
+        // startService is idempotent: an already-ready 9900 endpoint returns
+        // immediately; a starting daemon is polled natively at 25ms cadence.
+        setWslState('starting');
+        await nativeCapabilities.wsl.startService('agentmirrord');
+        if (!await syncLocalTokenAndConnect()) {
+          throw new Error('无法获取 WSL 会话服务配对令牌');
+        }
+        return true;
       } catch (err) {
         setWslState('error');
-        setWslError(err?.message || '安装 WSL 会话服务失败');
-        return;
+        setWslError(err?.message || 'WSL 检测异常');
+        return false;
       }
-      setWslState('starting');
-      try {
-        await nativeCapabilities.wsl.startService('agentmirrord');
-      } catch (err) {
-        try {
-          await nativeCapabilities.wsl.startService('corral-core');
-        } catch (e2) {
-          setWslState('error');
-          setWslError(e2?.message || '无法启动会话服务');
-          return;
-        }
-      }
-      await syncLocalTokenAndConnect();
-    } catch (err) {
-      setWslState('error');
-      setWslError(err?.message || 'WSL 检测异常');
-    }
-  }, [dm, syncLocalTokenAndConnect]);
+    })();
+
+    wslStartPromiseRef.current = operation.finally(() => {
+      wslStartPromiseRef.current = null;
+    });
+    return wslStartPromiseRef.current;
+  }, [syncLocalTokenAndConnect]);
 
   useEffect(() => {
     const isWin = nativeCapabilities.platform === 'windows';
@@ -595,37 +594,6 @@ export default function App({ seedDevices } = {}) {
       checkAndHealWsl();
     }
   }, [anyDeviceOnline, checkAndHealWsl, wslState]);
-
-  /* ——— WSL 2 启动期 1s 轮询自愈探测与 8s 超时看门狗保护 ——— */
-  useEffect(() => {
-    if (wslState !== 'starting') return;
-    if (anyDeviceOnline) {
-      setWslState('idle');
-      return;
-    }
-
-    const pollTimer = setInterval(async () => {
-      try {
-        const status = await nativeCapabilities.wsl.checkEnvironment();
-        setWslEnvStatus(status);
-        if (status?.service_running) {
-          await syncLocalTokenAndConnect();
-        }
-      } catch (_) {
-        // 轮询异常静默忽略，等待看门狗或下一次轮询
-      }
-    }, 1000);
-
-    const watchdogTimer = setTimeout(() => {
-      setWslState('error');
-      setWslError('会话服务启动超时（8秒内未就绪），请检查 WSL 服务运行状态');
-    }, 8000);
-
-    return () => {
-      clearInterval(pollTimer);
-      clearTimeout(watchdogTimer);
-    };
-  }, [wslState, anyDeviceOnline, dm]);
 
   /* ——— level2：选中某个 Space 才订二级状态流（一台设备同时只能订一个 cwd） ——— */
   useEffect(() => {

@@ -253,7 +253,7 @@ test('WslBootstrapCard renders respective guidance text and command hints for ev
   assert.doesNotMatch(cardJsx, /disabled=\{isLoading\}/);
 });
 
-test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre-branching', async () => {
+test('App.jsx integrates fast, idempotent WSL startup and single-flight connection', async () => {
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
 
   // 1. 引入组件与声明状态
@@ -261,21 +261,20 @@ test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre
   assert.match(appJsx, /const \[wslState, setWslState\] = useState\('idle'\)/);
   assert.match(appJsx, /const \[wslEnvStatus, setWslEnvStatus\] = useState\(null\)/);
 
-  // 2. 环境探测与全自动开箱即用分支（每次启动都覆盖安装并重启，避免复用旧 daemon）
+  // 2. 环境探测只在缺少或版本不匹配时安装，随后走幂等快速启动
   assert.match(appJsx, /const checkAndHealWsl = useCallback/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.checkEnvironment\(\)/);
-  assert.match(appJsx, /Always reinstall the bundled daemon/);
-  assert.match(appJsx, /setWslState\('installing'\);/);
-  assert.match(appJsx, /status\.service_running = false/);
+  assert.match(appJsx, /if \(!status\.service_installed\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.installService\(\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.startService\('agentmirrord'\)/);
+  assert.match(appJsx, /wslStartPromiseRef/);
+  assert.doesNotMatch(appJsx, /Always reinstall the bundled daemon/);
+  assert.doesNotMatch(appJsx, /startService\('corral-core'\)/);
 
-  // 3. 8 秒看门狗与 1 秒轮询保护
-  assert.match(appJsx, /setInterval\(async \(\) => {/);
-  assert.match(appJsx, /}, 1000\)/);
-  assert.match(appJsx, /setTimeout\(\(\) => {\s*setWslState\('error'\);\s*setWslError\('会话服务启动超时（8秒内未就绪），请检查 WSL 服务运行状态'\);\s*}, 8000\)/);
-  assert.match(appJsx, /clearInterval\(pollTimer\)/);
-  assert.match(appJsx, /clearTimeout\(watchdogTimer\)/);
+  // 3. 就绪探测由 native startService 高频探测，前端不再每秒傻轮询或 8s 误杀
+  assert.doesNotMatch(appJsx, /setInterval\(async \(\) => {/);
+  assert.doesNotMatch(appJsx, /}, 1000\)/);
+  assert.doesNotMatch(appJsx, /8000\)/);
 
   // 4. 条件渲染保护：仅在 Windows 且本地未连接且非 idle 时展示引导卡片
   assert.match(appJsx, /isWindows && !anyDeviceOnline && wslState !== 'idle'/);
@@ -288,93 +287,44 @@ test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre
   assert.match(appJsx, /dm\.connect\('local'\)/);
 });
 
-test('WSL auto-healing state machine automatically installs service when missing and enforces watchdog timeout', async () => {
-  // 仿真状态机测试
+test('WSL startup installs only when missing and never restarts a ready daemon', async () => {
   let currentState = 'idle';
-  let currentError = '';
   let installServiceCalled = false;
   let serviceStartedCalled = false;
 
-  const mockCheckAndHeal = async (envStatus, shouldFailInstall = false) => {
+  const mockCheckAndHeal = async (envStatus) => {
     currentState = 'checking';
-    currentError = '';
     const status = { ...envStatus };
     if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
       currentState = 'unready';
       return;
     }
-    currentState = 'installing';
-    installServiceCalled = true;
-    if (shouldFailInstall) {
-      currentState = 'error';
-      currentError = '安装 WSL 会话服务失败: bundled binary not found';
-      return;
+    if (!status.service_installed) {
+      currentState = 'installing';
+      installServiceCalled = true;
+      status.service_installed = true;
     }
-    status.service_installed = true;
-    status.service_running = false;
     currentState = 'starting';
     serviceStartedCalled = true;
   };
 
-  // 场景 A: service_installed 为 false 时，自动进入 installing 并触发 installService，完成后推进到 starting
+  await mockCheckAndHeal({
+    wsl_installed: true, ubuntu_installed: true, tmux_installed: true,
+    service_installed: false, service_running: false,
+  });
+  assert.equal(installServiceCalled, true);
+  assert.equal(serviceStartedCalled, true);
+  assert.equal(currentState, 'starting');
+
   installServiceCalled = false;
   serviceStartedCalled = false;
   await mockCheckAndHeal({
-    wsl_installed: true,
-    ubuntu_installed: true,
-    tmux_installed: true,
-    service_installed: false,
-    service_running: false,
+    wsl_installed: true, ubuntu_installed: true, tmux_installed: true,
+    service_installed: true, service_running: true,
   });
-  assert.equal(installServiceCalled, true);
-  assert.equal(currentState, 'starting');
+  assert.equal(installServiceCalled, false);
   assert.equal(serviceStartedCalled, true);
-
-  // 场景 B: 自动安装抛错时，转入 error 状态并展示友好原因
-  installServiceCalled = false;
-  serviceStartedCalled = false;
-  await mockCheckAndHeal(
-    {
-      wsl_installed: true,
-      ubuntu_installed: true,
-      tmux_installed: true,
-      service_installed: false,
-      service_running: false,
-    },
-    true
-  );
-  assert.equal(installServiceCalled, true);
-  assert.equal(currentState, 'error');
-  assert.match(currentError, /安装 WSL 会话服务失败/);
-  assert.equal(serviceStartedCalled, false);
-
-  // 场景 C: 已安装且正在运行的旧 daemon 也必须覆盖安装并重启
-  installServiceCalled = false;
-  serviceStartedCalled = false;
-  await mockCheckAndHeal({
-    wsl_installed: true,
-    ubuntu_installed: true,
-    tmux_installed: true,
-    service_installed: true,
-    service_running: true,
-  });
-  assert.equal(installServiceCalled, true);
   assert.equal(currentState, 'starting');
-  assert.equal(serviceStartedCalled, true);
-
-  // 场景 D: 8 秒看门狗超时，状态切入 error
-  let watchdogTimerFired = false;
-  const timeoutId = setTimeout(() => {
-    watchdogTimerFired = true;
-    currentState = 'error';
-    currentError = '会话服务启动超时（8秒内未就绪），请检查 WSL 服务运行状态';
-  }, 50);
-
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(watchdogTimerFired, true);
-  assert.equal(currentState, 'error');
-  assert.match(currentError, /会话服务启动超时/);
-  clearTimeout(timeoutId);
 });
 
 test('WSL end-to-end auto-healing flow from missing service to direct connect', async () => {
@@ -424,14 +374,12 @@ test('WSL end-to-end auto-healing flow from missing service to direct connect', 
     wslState = 'installing';
     await mockNative.wsl.installService();
   }
-  if (!status.service_running) {
-    wslState = 'starting';
-    await mockNative.wsl.startService('agentmirrord');
-    const token = await mockNative.wsl.readServiceToken();
-    if (token) {
-      mockDeviceManager.updateDevice('local', { token });
-      mockDeviceManager.connect('local');
-    }
+  wslState = 'starting';
+  await mockNative.wsl.startService('agentmirrord');
+  const token = await mockNative.wsl.readServiceToken();
+  if (token) {
+    mockDeviceManager.updateDevice('local', { token });
+    mockDeviceManager.connect('local');
   }
 
   assert.equal(step, 'started');
