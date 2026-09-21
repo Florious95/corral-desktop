@@ -408,10 +408,26 @@ export default function App({ seedDevices } = {}) {
   ), [allAgents]);
   liveAgentKeysRef.current = new Set(allAgents.map((a) => a.key));
 
-  // Issue #195: 目录跟踪 (Directory Tracking)
+  const agentByKeyRef = useRef(agentByKey);
+  agentByKeyRef.current = agentByKey;
+  const prevActiveKeyRef = useRef(null);
+  const prevTrackingRef = useRef(false);
+
+  // Issue #195 & #204: 目录跟踪 (Directory Tracking)
+  // 仅在活跃会话跃迁变更 (activeKey 发生变化) 或设置开关刚被手动打开时跟踪目录；
+  // 当 activeKey 未变时（用户在右侧工作，并在左侧自由点击查看其他 Space 时），绝对不拦截、不覆写用户的 setSelected
   useEffect(() => {
-    if (!settings.directoryTracking || !activeKey) return;
-    const currentAgent = agentByKey.get(activeKey);
+    const isTrackingEnabled = !!settings.directoryTracking;
+    const trackingJustEnabled = isTrackingEnabled && !prevTrackingRef.current;
+    const activeKeyChanged = activeKey !== prevActiveKeyRef.current;
+
+    prevTrackingRef.current = isTrackingEnabled;
+    prevActiveKeyRef.current = activeKey;
+
+    if (!isTrackingEnabled || !activeKey) return;
+    if (!activeKeyChanged && !trackingJustEnabled) return;
+
+    const currentAgent = (agentByKeyRef.current || agentByKey).get(activeKey);
     if (!currentAgent?.spaceKey) return;
 
     // 自动展开 Spaces 与 Agents，标记展开状态
@@ -427,7 +443,7 @@ export default function App({ seedDevices } = {}) {
         el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
-  }, [settings.directoryTracking, activeKey, agentByKey]);
+  }, [settings.directoryTracking, activeKey]);
 
   // 服务端删会话 → 标记 closing → CLOSE_MS 后真正卸载并剔出分裂列
   const prevAgents = useRef([]);
