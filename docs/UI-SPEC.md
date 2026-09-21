@@ -421,14 +421,20 @@ src/
 ```js
 /**
  * @param {boolean} open
- * @param {{v:number,url:string,token:string,ts_authkey:string,candidates:string[]}|null} payload
+ * @param {{v:number,url:string,token:string,ts_authkey:string,candidates:string[],host_id?:string,port?:number,name?:string}|null} payload
  * @param {() => void} onCancel
  * @param {(message:string) => void} [onCopied]
  * @param {(token:string) => void} [onSaveToken]
  */
 ```
 
-弹窗复用 `.chr-dialog` 外壳，宽 380px，包含 260px 高清 SVG 二维码（四模块 quiet zone、`shape-rendering:crispEdges`）、主机地址与扫码说明：`打开 AgentMirror 移动端，选择扫码连接并对准此二维码`。`Esc`、遮罩、关闭按钮均关闭。已有安全 Token 时直接渲染；本机 loopback 端点额外显示 `本机可达地址（局域网 / Tailscale）` 输入框（支持逗号分隔多个 Host/IP，默认尝试当前非 loopback hostname），禁止把 127.0.0.1 放入二维码；本机免密直连没有 Token 时显示密文输入框和 `移动端远程连接需要安全 Token` 提示，粘贴后立即动态生成二维码；`保存并复制配对信息` 同时安全保存 Token 并复制协议载荷。`复制配对链接 / Token` 只把协议 v1 单行 JSON 写入系统剪贴板，不在页面或 toast 回显 token。二维码字段严格为 `{v:1,url,token,ts_authkey,candidates}`，候选地址按协议过滤并将主地址置首。
+弹窗复用 `.chr-dialog` 外壳，宽 380px，包含 260px 高清 SVG 二维码（四模块 quiet zone、`shape-rendering:crispEdges`）、主机地址/主机唯一标识与扫码说明：`打开 AgentMirror 移动端，选择扫码连接并对准此二维码`。`Esc`、遮罩、关闭按钮均关闭。
+
+**移动端配对 Host ID 体系（2026-09-22 裁定，Issue #207）**：
+- 移动端配对彻底解耦 IP，核心绑定【主机唯一标识 Host ID + Token】。
+- 当载荷包含 `host_id` 时，弹窗直接呈现主机身份信息（如主机名、8 位短 ID 与端口），无需且不展示「本机可达地址」手动输入框，免除手动配置局域网/Tailscale IP 的繁琐与易错性。移动端扫码后由局域网广播自动对齐主机并填入 Token。
+- 兼容旧版：当载荷缺少 `host_id` 且为 loopback 端点时，回落保留可达地址输入框。
+- 本机免密直连没有 Token 时显示密文输入框和 `移动端远程连接需要安全 Token` 提示，粘贴后立即动态生成二维码；`保存并复制配对信息` 同时安全保存 Token 并复制协议载荷。`复制配对链接 / Token` 把协议单行 JSON 写入系统剪贴板，不在页面或 toast 回显 token。二维码字段支持 `{v:1,token,host_id,port,name,url,candidates,ts_authkey}`。
 
 ### 4.3 `chrome/AddDeviceDialog.jsx`
 

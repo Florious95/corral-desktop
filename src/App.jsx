@@ -1138,8 +1138,11 @@ export default function App({ seedDevices } = {}) {
     setDevices(dm.devices);
   }, [dm]);
 
-  const handlePairMobile = useCallback(() => {
+  const handlePairMobile = useCallback(async () => {
     setDevicesOpen(false);
+    if (typeof dm.fetchLocalHostIdentity === 'function') {
+      try { await dm.fetchLocalHostIdentity(); } catch {}
+    }
     setPairingPayload(dm.createPairingPayload() || dm.createPairingDraft());
     setPairingOpen(true);
   }, [dm]);

@@ -9,6 +9,15 @@ function targetLabel(url) {
   try { return new URL(url).host; } catch { return ''; }
 }
 
+function displayTarget(effectivePayload) {
+  if (effectivePayload?.host_id) {
+    const shortId = effectivePayload.host_id.slice(0, 8);
+    const name = effectivePayload.name ? `${effectivePayload.name} · ` : '';
+    return `${name}主机 ID: ${shortId}…`;
+  }
+  return targetLabel(effectivePayload?.url);
+}
+
 function browserReachableHost() {
   const host = globalThis.location?.hostname || '';
   if (!host || host.endsWith('.localhost') || isLocalUrl(`ws://${host}`)) return '';
@@ -59,12 +68,24 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
   const [hosts, setHosts] = useState('');
   const [copyState, setCopyState] = useState('');
   const configuredToken = typeof payload?.token === 'string' ? payload.token : '';
+  const hasHostId = Boolean(payload?.host_id);
   const loopback = isLocalUrl(payload?.url);
+  const showLegacyHostInput = loopback && !hasHostId;
   const editableToken = configuredToken.length === 0;
   const effectivePayload = useMemo(() => {
     if (!payload) return null;
     const effectiveToken = configuredToken || token.trim();
     if (!effectiveToken) return null;
+
+    if (hasHostId) {
+      try {
+        return buildPairingPayload({
+          ...payload,
+          token: effectiveToken,
+        });
+      } catch { return null; }
+    }
+
     const candidates = loopback ? reachableWsUrls(payload.url, hostValues(hosts)) : payload.candidates;
     if (loopback && candidates.length === 0) return null;
     try {
@@ -75,7 +96,7 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
         candidates,
       });
     } catch { return null; }
-  }, [payload, configuredToken, token, hosts, loopback]);
+  }, [payload, configuredToken, token, hosts, loopback, hasHostId]);
   const value = useMemo(() => {
     if (!effectivePayload) return '';
     try { return serializePairingPayload(effectivePayload); } catch { return ''; }
@@ -84,14 +105,14 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
   useEffect(() => {
     if (!open) return undefined;
     setToken(configuredToken);
-    setHosts(loopback ? browserReachableHost() : '');
+    setHosts(showLegacyHostInput ? browserReachableHost() : '');
     setCopyState('');
     const onKey = (e) => {
       if (e.key === 'Escape') onCancel();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onCancel, configuredToken, loopback]);
+  }, [open, onCancel, configuredToken, showLegacyHostInput]);
 
   if (!open) return null;
 
@@ -123,14 +144,18 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
           <div className="pair-head">
             <div>
               <div className="chr-dialog-title">配对移动端</div>
-              <div className="chr-dialog-sub">用手机扫描二维码，即可连接这台 Mac</div>
+              <div className="chr-dialog-sub">
+                {hasHostId
+                  ? '局域网已开启广播，用手机 App 扫描二维码即可快速匹配连接'
+                  : '用手机扫描二维码，即可连接这台 Mac'}
+              </div>
             </div>
             <button type="button" className="chr-btn-reset pair-close" aria-label="关闭" onClick={onCancel}>
               <XIcon size={15} strokeWidth={2} />
             </button>
           </div>
 
-          {loopback && (
+          {showLegacyHostInput && (
             <>
               <label className="chr-label pair-token-label" htmlFor="pair-host">本机可达地址（局域网 / Tailscale）</label>
               <input
@@ -165,7 +190,7 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
           {value ? (
             <>
               <PairingQr value={value} />
-              <div className="pair-target">{targetLabel(effectivePayload.url)}</div>
+              <div className="pair-target">{displayTarget(effectivePayload)}</div>
               <div className="pair-help">打开 AgentMirror 移动端，选择扫码连接并对准此二维码</div>
               <div className="pair-actions">
                 <button type="button" className="chr-btn-reset chr-btn" onClick={copy}>
@@ -178,8 +203,14 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
             </>
           ) : (
             <>
-              <div className="pair-empty">{loopback ? '移动端远程连接需要安全 Token 与可达地址' : '移动端远程连接需要安全 Token'}</div>
-              <div className="pair-help">{loopback ? '填写局域网或 Tailscale 地址，再粘贴安全配对 Token，即可生成二维码。' : '粘贴安全配对 Token 后，将立即生成二维码。'}</div>
+              <div className="pair-empty">{showLegacyHostInput ? '移动端远程连接需要安全 Token 与可达地址' : '移动端远程连接需要安全 Token'}</div>
+              <div className="pair-help">
+                {showLegacyHostInput
+                  ? '填写局域网或 Tailscale 地址，再粘贴安全配对 Token，即可生成二维码。'
+                  : (hasHostId
+                      ? '粘贴安全配对 Token 后，将立即生成绑定该主机标识的二维码。'
+                      : '粘贴安全配对 Token 后，将立即生成二维码。')}
+              </div>
               <div className="pair-actions">
                 <button type="button" className="chr-btn-reset chr-btn chr-btn-primary" onClick={onCancel}>
                   关闭
