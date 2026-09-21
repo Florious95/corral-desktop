@@ -213,6 +213,18 @@ test('web interaction matrix: fullscreen CSS removes outer inset and fills viewp
   assert.match(css, /\.app-root\.is-fullscreen\s*\{[\s\S]*?margin:\s*0/);
 });
 
+test('Issue #202 scrim animation is opacity-only and never transforms the full-screen backdrop', async () => {
+  const css = await source('components/chrome/chrome.css');
+  const tokens = await source('styles/tokens.css');
+  const scrimRule = css.match(/\.chr-scrim\s*\{([^}]*)\}/)?.[1] || '';
+  assert.doesNotMatch(scrimRule, /transform\s*:/, 'scrim must not transform or resize the full-screen backdrop');
+  const animationName = scrimRule.match(/animation\s*:\s*([a-zA-Z_-][a-zA-Z0-9_-]*)/)?.[1] || '';
+  assert.equal(animationName, 'scrimFadeIn', 'scrim must use the dedicated opacity-only fade animation');
+  const keyframes = tokens.match(new RegExp(`@keyframes\\s+${animationName}\\s*\\{([\\s\\S]*?)\\n\\s*\\}`))?.[1] || '';
+  assert.match(keyframes, /opacity\s*:/, 'scrim animation must animate opacity');
+  assert.doesNotMatch(keyframes, /transform\s*:|scale\s*\(|translate(?:X|Y|3d)?\s*\(/, 'scrim keyframes must not scale or translate');
+});
+
 test('web interaction matrix: drop controller implementation is pointer-event based and schedules one rAF', async () => {
   const drag = await source('lib/tabDrag.js');
   assert.match(drag, /setPointerCapture/);
