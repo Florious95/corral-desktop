@@ -100,6 +100,9 @@ test('web interaction matrix: horizontal and vertical two-pane geometry is gap-e
   assertNoOverlapAndCovered(vLayout, { x: 0, y: 0, w: 1000, h: 600 });
   assert.equal(vLayout.a.y, 0);
   assert.equal(vLayout.b.y, vLayout.a.h + 1);
+  assert.equal(vLayout.a.x, vLayout.b.x, 'vertical split panes must share the same left edge');
+  assert.equal(vLayout.a.w, vLayout.b.w, 'vertical split panes must share the same width');
+  assert.equal(vLayout.b.y + vLayout.b.h, 600, 'lower pane must reach the stage bottom without truncation');
 });
 
 test('web interaction matrix: three-pane nested binary tree has unique leaves and no cracks', () => {
@@ -189,10 +192,17 @@ test('web interaction matrix: split-pane and terminal host contracts preserve fu
   assert.match(split, /className="splitpanes terminal-stage"/);
   assert.match(split, /project\(effectiveRoot, effectiveRect, 1\)/);
   assert.match(split, /data-pane-uid/);
-  assert.match(paneCss, /\.terminalpane-host\s*\{[\s\S]*?position:\s*relative/);
-  assert.match(paneCss, /\.terminalpane-host > \.xterm\s*\{[\s\S]*?position:\s*absolute/);
+  assert.match(paneCss, /\.terminalpane-body\s*\{[\s\S]*?flex:\s*1;[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*8px 10px 0/);
+  assert.match(paneCss, /\.terminalpane-host\s*\{[\s\S]*?flex:\s*1;[\s\S]*?min-height:\s*0;[\s\S]*?position:\s*relative[\s\S]*?overflow:\s*hidden/);
+  assert.match(paneCss, /\.terminalpane-host > \.xterm\s*\{[\s\S]*?position:\s*absolute[\s\S]*?bottom:\s*0/);
+  assert.match(pane, /data-alignment=\"bottom-left\"/);
   assert.match(pane, /new ResizeObserver/);
   assert.match(pane, /view\.fit\(/);
+  const view = await source('term/TerminalView.js');
+  assert.match(view, /clientWidth/);
+  assert.match(view, /clientHeight/);
+  assert.match(view, /Math\.floor\s*\(\s*w\s*\/\s*cell\.w\)/);
+  assert.match(view, /Math\.floor\s*\(\s*h\s*\/\s*cell\.h\)/);
 });
 
 test('web interaction matrix: fullscreen CSS removes outer inset and fills viewport', async () => {

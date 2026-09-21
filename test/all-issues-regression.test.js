@@ -76,11 +76,14 @@ test('#195 directory tracking defaults off, persists, and scrolls the selected p
   assert.match(text, /expanded\s*[:=]\s*true|set.*Expanded/);
 });
 
-test('#196 terminal viewport reserves exactly 5px and fit measures the content box without overflow', async () => {
+test('#196 terminal viewport uses platform-specific outer spacing and fit measures the content box without overflow', async () => {
   const text = await allSource();
   const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
   const paneRule = terminalCss.match(/\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
-  assert.match(paneRule, /padding\s*:\s*5px\s*;/, 'terminalpane must reserve 5px on all sides');
+  const windowsRule = terminalCss.match(/\.app-root\.is-windows\s+\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(paneRule, /padding\s*:\s*0(?:px)?\s*;/, 'macOS/default terminalpane must restore zero outer spacing');
+  assert.match(windowsRule, /padding\s*:\s*5px\s*;/, 'Windows terminalpane must reserve 5px on all sides');
+  assert.match(text, /className=\{`app-root[\s\S]{0,360}is-windows/, 'app root must expose the native Windows platform class');
   assert.match(paneRule, /box-sizing\s*:\s*border-box\s*;/);
   assert.match(text, /clientWidth/);
   assert.match(text, /clientHeight/);
