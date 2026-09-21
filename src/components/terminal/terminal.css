@@ -163,6 +163,7 @@
   justify-content: center;
   text-align: center;
   background: var(--bg);
+  pointer-events: none;
 }
 
 .terminalpane-placeholder-box {

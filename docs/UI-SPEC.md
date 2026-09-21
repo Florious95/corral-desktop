@@ -707,7 +707,13 @@ src/
 
 **终端暗色模式高对比度可读性与键盘映射（2026-09-21 裁定）**：
 - 适配暗色模式终端配色方案（Tokyo Night / VS Code Dark+ 高对比度方案），在 WSL `#0f1115` 暗色底色下，主要前景色、光标以及 ANSI 16 色所有可读前景色严格满足 WCAG 2.1 AA 标准（对比度严格 >= 4.5:1），消除暗灰文字不可读问题。
-- **Windows 智能 Ctrl+V**：在 Windows 平台下按 `Ctrl+V` 时智能自适应剪贴板内容：若剪贴板含有图片，触发图片上传预览；若为纯文本或文件路径，直接贴入当前终端，避免因拦截导致丢字。
+- **终端点击物理聚焦与输入所有权（2026-09-21 裁定）**：
+  - `.terminalpane-placeholder` 声明 `pointer-events: none`，消除未就绪占位层对用户点击的屏障阻断；
+  - 窗格容器（`.terminalpane`）注册点击物理聚焦唤醒入口，无论点击的是新窗格还是已激活窗格（甚至从窗口外部切回），以及 46x44 避让模式下的留白区域，均能瞬时聚焦底层的真实 xterm `textarea`，彻底消灭终端焦点死锁（Focus Starvation）；
+  - 彻底拔除 `TerminalPane` 捕获阶段 `onKeyDown` 拦截器，键盘输入与控制键统一由 xterm 编码并交由 `NativeInputPump`；应用终端快捷键统一收口于 `TerminalView` 的 `term.attachCustomKeyEventHandler`；
+  - 统一建立单一干净的 `textarea` 原生 DOM `paste` 接缝：普通 paste 优先级严格为 **非空 text/plain ➔ image/* ➔ empty/unsupported**；
+  - 文本粘贴复用 `handlePaneText` 发送，一次手势一次发送，保留多行文本且绝不自动追加 Enter；
+  - 图片粘贴提取有效 bytes 后触发 `uploadAndPreview` 原生 HTTP 上传预览；图片-only 快捷键（macOS Ctrl+V）与纯文本快捷键（Windows Ctrl+Shift+V）各自职责明确、失败可见。
 - **终端快捷键与鼠标映射**：
   - 支持快捷键 `Ctrl+Shift+C` 复制终端选中文本；
   - 支持快捷键 `Ctrl+Shift+V` 强制纯文本粘贴；
@@ -716,7 +722,7 @@ src/
   - 统一通过 `normalizeCwd` 与 `isSameSpaceKey` 标准化工作区标识，解决 Linux POSIX 路径（`/mnt/c/...`）与 Windows 盘符路径（`C:\...`）等价判定；
   - `list_delta` 增量推送到达时，通过唯一 `ref` 精确匹配会话并原地更新会话名称，确保侧边栏会话名称随动刷新。
 
-**粘贴（裁定 2026-08-24，B 预贴修订；2026-09-21 图文粘贴全通道贯通裁定）**：DOM `paste` 事件优先处理文本；当文本为空且剪贴板携带图片数据（`image/*`）时，直接解析图片并触发 `uploadAndPreview` 原生 HTTP 上传预览，杜绝“图片请用 Ctrl+V”阻断提示；Ctrl+V 保持智能图文分流适配；图片字节经原生 `upload_http`
+**粘贴（裁定 2026-08-24，B 预贴修订；2026-09-21 输入回炉重写裁定）**：DOM `paste` 事件优先处理文本；当文本为空且剪贴板携带图片数据（`image/*`）时，直接解析图片并触发 `uploadAndPreview` 原生 HTTP 上传预览，杜绝“图片请用 Ctrl+V”阻断提示；Ctrl+V 在 Windows 下放行原生 paste 事件以保持标准文字优先流转，在 macOS 下保留图片专用上传通道；图片字节经原生 `upload_http`
 上传后只发 `attach_preview {ref,path}`，不发 `input.attachment_path`、`input.text` 或空 `input`，也不自动 Enter；图片留在远端 CLI 输入框，用户后续真实回车才提交。主区不再挂载底部图片条、图片加号或键位说明。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
 
 ### 6.3 终端输入

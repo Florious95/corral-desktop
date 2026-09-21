@@ -25,9 +25,24 @@ export function textFromPasteEvent(event) {
   return event?.clipboardData?.getData('text/plain') || '';
 }
 
-/** Extract image attachment from a ClipboardEvent (ev.clipboardData) if present. */
-export async function imageFromPasteEvent(event) {
-  if (!event?.clipboardData) return null;
+/**
+ * Extract synchronously available payload snapshot from a ClipboardEvent.
+ * Must be called synchronously in the event handler before any await tick,
+ * so browser clipboardData is not detached or cleared.
+ *
+ * @param {ClipboardEvent} event
+ * @returns {{ text: string, imageFile: File|Blob|null }}
+ */
+export function extractPasteEventSnapshot(event) {
+  if (!event || !event.clipboardData) {
+    return { text: '', imageFile: null };
+  }
+  const text = event.clipboardData.getData?.('text/plain') || '';
+  if (text.length > 0) {
+    return { text, imageFile: null };
+  }
+
+  let imageFile = null;
   const items = event.clipboardData.items;
   if (items && typeof items.length === 'number') {
     for (let i = 0; i < items.length; i += 1) {
@@ -35,41 +50,51 @@ export async function imageFromPasteEvent(event) {
       if (item && (item.kind === 'file' || !item.kind) && item.type && item.type.startsWith('image/')) {
         const file = typeof item.getAsFile === 'function' ? item.getAsFile() : (item instanceof Blob ? item : null);
         if (file) {
-          const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : null;
-          if (buffer) {
-            const bytes = new Uint8Array(buffer);
-            if (bytes.length > 0) {
-              return {
-                name: file.name || 'clipboard.png',
-                mime: file.type || item.type || 'image/png',
-                bytes,
-              };
-            }
-          }
+          imageFile = file;
+          break;
         }
       }
     }
   }
-  const files = event.clipboardData.files;
-  if (files && typeof files.length === 'number') {
-    for (let i = 0; i < files.length; i += 1) {
-      const file = files[i];
-      if (file && file.type && file.type.startsWith('image/')) {
-        const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : null;
-        if (buffer) {
-          const bytes = new Uint8Array(buffer);
-          if (bytes.length > 0) {
-            return {
-              name: file.name || 'clipboard.png',
-              mime: file.type || 'image/png',
-              bytes,
-            };
-          }
+  if (!imageFile) {
+    const files = event.clipboardData.files;
+    if (files && typeof files.length === 'number') {
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        if (file && file.type && file.type.startsWith('image/')) {
+          imageFile = file;
+          break;
         }
       }
     }
   }
-  return null;
+  return { text: '', imageFile };
+}
+
+/**
+ * Convert a File/Blob into an attachment payload { name, mime, bytes }.
+ *
+ * @param {File|Blob} file
+ * @returns {Promise<{ name: string, mime: string, bytes: Uint8Array }|null>}
+ */
+export async function fileToImageAttachment(file) {
+  if (!file) return null;
+  const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : null;
+  if (!buffer) return null;
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length === 0) return null;
+  return {
+    name: file.name || 'clipboard.png',
+    mime: file.type || 'image/png',
+    bytes,
+  };
+}
+
+/** Extract image attachment from a ClipboardEvent (ev.clipboardData) if present. */
+export async function imageFromPasteEvent(event) {
+  const snapshot = extractPasteEventSnapshot(event);
+  if (!snapshot.imageFile) return null;
+  return fileToImageAttachment(snapshot.imageFile);
 }
 
 /** Read image bytes through native capabilities only; never touch the Web Clipboard API. */

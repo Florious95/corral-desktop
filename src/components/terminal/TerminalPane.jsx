@@ -10,8 +10,6 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../core/binary.js';
 import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
-import { isCtrlV, isCtrlShiftV, isCtrlShiftC } from '../../term/clipboard.js';
-import { nativeCapabilities } from '../../core/nativeCapabilities.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../../core/presence.js';
 
 export { MOBILE_GRID, PRESENCE_MODE };
@@ -48,7 +46,7 @@ const SCROLLBACK_TIMEOUT_MS = 10000;
 export default function TerminalPane({
   agent, client, addr, subscribeBinary, focused = false, onResize,
   onText, onKey, onBytes, onEnter,
-  onCtrlV, onPaste,
+  onCtrlV, onPaste, onForceTextPaste,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -70,12 +68,31 @@ export default function TerminalPane({
   const onEnterRef = useRef(onEnter);
   const onCtrlVRef = useRef(onCtrlV);
   const onPasteRef = useRef(onPaste);
+  const onForceTextPasteRef = useRef(onForceTextPaste);
+  const pendingFocusRef = useRef(false);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onBytesRef.current = onBytes;
   onEnterRef.current = onEnter;
   onCtrlVRef.current = onCtrlV;
   onPasteRef.current = onPaste;
+  onForceTextPasteRef.current = onForceTextPaste;
+
+  // 窗格点击物理聚焦唤醒入口（裁决 §4.3, §4.4, §4.5）
+  const handlePaneMouseDown = useCallback((e) => {
+    // 只有主键（左键）有效点击可交互终端内容才同步请求聚焦
+    if (e.button !== 0) return;
+    // 排除项：点击历史面板及其文字、按钮、表单控件等不抢焦点
+    if (e.target?.closest?.('.terminalpane-history, button, input, select, textarea, [data-no-focus="true"]')) {
+      return;
+    }
+    const view = viewRef.current;
+    if (view) {
+      view.focus();
+    } else {
+      pendingFocusRef.current = true;
+    }
+  }, []);
 
   const target = addr || agent.ref;
 
@@ -186,6 +203,9 @@ export default function TerminalPane({
       hideCursor: agent.provider === 'cursor',
       onData: (data) => pump.onData(data),
       onBinary: (data) => pump.onBinary(data),
+      onPaste: (ev) => onPasteRef.current?.(ev),
+      onCtrlV: () => onCtrlVRef.current?.(),
+      onForceTextPaste: () => onForceTextPasteRef.current?.(),
     });
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
@@ -197,40 +217,6 @@ export default function TerminalPane({
       wheel.onWheel(ev);
     };
     host.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    const onKeyDown = (ev) => {
-      if (isCtrlShiftC(ev)) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const selection = view.term.getSelection();
-        if (selection && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(selection).catch(() => {});
-        }
-        return;
-      }
-      if (isCtrlShiftV(ev)) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        nativeCapabilities.clipboard.readText().then((text) => {
-          if (text && onTextRef.current) {
-            onTextRef.current(text);
-          }
-        }).catch(() => {});
-        return;
-      }
-      if (isCtrlV(ev)) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        Promise.resolve(onCtrlVRef.current?.()).catch(() => setHint('剪贴板读取失败'));
-        return;
-      }
-    };
-    const onPasteEvent = (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      onPasteRef.current?.(ev);
-    };
-    host.addEventListener('keydown', onKeyDown, true);
-    host.addEventListener('paste', onPasteEvent, true);
 
     // fetchOlder/acceptScrollback 直接读写这个对象上的 pendingScrollback / nextScrollbackLine。
     const g = {
@@ -396,6 +382,10 @@ export default function TerminalPane({
     // and trigger the first subscribe.
     viewRef.current = view;
     view.open();
+    if (focused || pendingFocusRef.current) {
+      view.focus();
+      pendingFocusRef.current = false;
+    }
 
     const ro = new ResizeObserver(() => {
       if (currentMode === PRESENCE_MODE.TAKEOVER) {
@@ -459,8 +449,6 @@ export default function TerminalPane({
       ro.disconnect();
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
-      host.removeEventListener('keydown', onKeyDown, true);
-      host.removeEventListener('paste', onPasteEvent, true);
       clearTimeout(g.timer);
       clearTimeout(flashTimer);
       pump.dispose();
@@ -469,6 +457,7 @@ export default function TerminalPane({
       view.dispose();
       viewRef.current = null;
       gRef.current = null;
+      pendingFocusRef.current = false;
       clientRef.current?.unsubscribe(target);
     };
     // client / subscribeBinary 走 ref，身份变化不重挂；要换连接实例请由 App 用 React key 强制重挂。
@@ -482,7 +471,11 @@ export default function TerminalPane({
   }, [focused]);
 
   return (
-    <div className="terminalpane" data-presence-mode={presenceMode}>
+    <div
+      className="terminalpane"
+      data-presence-mode={presenceMode}
+      onMouseDown={handlePaneMouseDown}
+    >
       <div className={`terminalpane-body${presenceMode === PRESENCE_MODE.TAKEOVER ? ' is-takeover' : ''}`}>
         {history && (
           <div className="terminalpane-history">

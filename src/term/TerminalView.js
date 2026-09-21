@@ -19,6 +19,8 @@ import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
 import { attachWebglRenderer } from './webglRenderer.js';
 import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
+import { isCtrlV, isCtrlShiftV, isCtrlShiftC, isCmdV } from './clipboard.js';
+import { nativeCapabilities } from '../core/nativeCapabilities.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -71,6 +73,7 @@ export class TerminalView {
   constructor(container, opts = {}) {
     const {
       onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
+      onPaste, onCtrlV, onForceTextPaste,
       scrollback = 0, fontSize = 13, maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
       hideCursor = false, TerminalCtor = Terminal,
     } = opts;
@@ -80,6 +83,9 @@ export class TerminalView {
     this.onData = onData || (() => {});
     this.onBinary = onBinary || (() => {});
     this.onWriteBackpressure = onWriteBackpressure || (() => {});
+    this.onPaste = onPaste || (() => {});
+    this.onCtrlV = onCtrlV || (() => {});
+    this.onForceTextPaste = onForceTextPaste || (() => {});
     this.maxPendingWriteBytes = Number.isInteger(maxPendingWriteBytes) && maxPendingWriteBytes > 0
       ? maxPendingWriteBytes : MAX_PENDING_WRITE_BYTES;
 
@@ -123,6 +129,47 @@ export class TerminalView {
     this._recovering = false;
     this._cursorAnchor = null;
     this._anchorObservers = null;
+    this._pasteListener = null;
+
+    // 应用终端快捷键统一由 term.attachCustomKeyEventHandler 守护（裁决 §5.1）
+    if (typeof this.term.attachCustomKeyEventHandler === 'function') {
+      const isWindows = nativeCapabilities.platform === 'windows';
+      this.term.attachCustomKeyEventHandler((event) => {
+        // Composition 期间放行，避免一次手势在 keydown/keypress/keyup 重复执行
+        if (event.isComposing || event.keyCode === 229) return true;
+        if (event.type !== 'keydown') return true;
+
+        // 1. Windows Ctrl+Shift+C: 复制当前终端选中文字，不发 PTY
+        if (isWindows && isCtrlShiftC(event)) {
+          if (typeof this.term.hasSelection === 'function' && this.term.hasSelection()) {
+            const selection = this.term.getSelection();
+            if (selection && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+              navigator.clipboard.writeText(selection).catch(() => {});
+            }
+          }
+          return false;
+        }
+
+        // 2. Windows Ctrl+Shift+V: 强制纯文本粘贴
+        if (isWindows && isCtrlShiftV(event)) {
+          this.onForceTextPaste();
+          return false;
+        }
+
+        // 3. macOS Ctrl+V: 图片专用快捷键
+        if (!isWindows && isCtrlV(event)) {
+          this.onCtrlV();
+          return false;
+        }
+
+        // 4. Windows Ctrl+V / macOS Cmd+V: 放行系统原生生成 paste 事件到 textarea，不被 xterm 编码为 0x16
+        if ((isWindows && isCtrlV(event)) || (!isWindows && isCmdV(event))) {
+          return false;
+        }
+
+        return true;
+      });
+    }
   }
 
   /** 挂载进容器并做一次 fit。 */
@@ -157,6 +204,16 @@ export class TerminalView {
       this._themeMql = window.matchMedia('(prefers-color-scheme: dark)');
       this._themeListener = (e) => this.setDark(e.matches);
       this._themeMql.addEventListener?.('change', this._themeListener);
+    }
+    // 单一 textarea 唯一 paste 接缝（裁决 §5.2）
+    const textarea = this.term.textarea;
+    if (textarea?.addEventListener) {
+      this._pasteListener = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.onPaste(ev);
+      };
+      textarea.addEventListener('paste', this._pasteListener, true);
     }
     this.fit();
     if (this.hideCursor) {
@@ -537,6 +594,10 @@ export class TerminalView {
     if (this._scrollDisposable) this._scrollDisposable.dispose();
     if (this._cursorMoveDisposable) this._cursorMoveDisposable.dispose();
     if (this._renderDisposable) this._renderDisposable.dispose();
+    if (this._pasteListener && this.term.textarea?.removeEventListener) {
+      this.term.textarea.removeEventListener('paste', this._pasteListener, true);
+      this._pasteListener = null;
+    }
     const textarea = this.term.textarea;
     for (const listener of this._compositionListeners || []) {
       textarea?.removeEventListener?.(listener.type, listener.sync);
