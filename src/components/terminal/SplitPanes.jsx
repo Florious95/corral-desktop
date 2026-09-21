@@ -159,7 +159,10 @@ export default function SplitPanes({
             }}
             inert={!isVisible}
             aria-hidden={!isVisible ? 'true' : undefined}
-            onMouseDown={() => {
+            onMouseDown={(e) => {
+              if (e.target?.closest?.('.pane-close-btn, [data-no-focus="true"]')) {
+                return;
+              }
               if (uid !== previewUid && onFocusPane) {
                 onFocusPane(uid);
               }

@@ -60,7 +60,12 @@ import { getAgentFavKey, isAgentFav, toggleAgentFav } from './lib/favorites.js';
 import { isSameSpaceKey } from './lib/wslPath.js';
 import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
-  readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent, readClipboardImage, imageFromPasteEvent,
+  readCtrlV,
+  readClipboardFiles,
+  formatClipboardFiles,
+  readClipboardImage,
+  extractPasteEventSnapshot,
+  fileToImageAttachment,
 } from './term/clipboard.js';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
@@ -960,90 +965,76 @@ export default function App({ seedDevices } = {}) {
   }, [dm, uidReady]);
 
   const handlePaneCtrlV = useCallback(async (uid) => {
-    const isWindows = nativeCapabilities.platform === 'windows';
-
-    // 1. 检查是否含有图片数据
-    let image = null;
+    if (!paneCanSend(uid)) return;
     try {
-      image = await readClipboardImage();
-    } catch {}
-    if (image) {
-      await handleAttachment(uid, image);
-      return;
+      const result = await readCtrlV();
+      if (result?.kind === 'image' && result.attachment) {
+        await handleAttachment(uid, result.attachment);
+        return;
+      }
+      setToastMsg('剪贴板中没有图片');
+    } catch (e) {
+      setToastMsg(e?.message || '读取剪贴板图片失败');
     }
+  }, [handleAttachment, paneCanSend]);
 
-    // 2. Windows 平台下以剪贴板最新数据为准，文本与文件路径直接粘贴入终端
+  const handlePaneForceText = useCallback(async (uid) => {
+    if (!paneCanSend(uid)) return;
+    const isWindows = nativeCapabilities.platform === 'windows';
     if (isWindows) {
-      let files = null;
       try {
-        files = await readClipboardFiles();
-      } catch {}
-      if (files?.length) {
-        try {
+        let files = null;
+        try { files = await readClipboardFiles(); } catch {}
+        if (files?.length) {
           const paths = formatClipboardFiles(files);
           if (paths && paneCanSend(uid)) {
             handlePaneText(uid, paths);
             return;
           }
-        } catch (e) {
-          setToastMsg(e?.message || '文件路径无法粘贴');
+        }
+        const text = await nativeCapabilities.clipboard.readText();
+        if (text && paneCanSend(uid)) {
+          handlePaneText(uid, text);
           return;
         }
+        if (!text) {
+          setToastMsg('剪贴板中没有文本');
+        }
+      } catch {
+        setToastMsg('读取剪贴板文本失败');
       }
-      let text = '';
-      try {
-        text = await nativeCapabilities.clipboard.readText();
-      } catch {}
-      if (text && paneCanSend(uid)) {
-        handlePaneText(uid, text);
-        return;
-      }
-      return;
     }
-
-    setToastMsg('Ctrl+V 仅支持图片，请使用 Cmd+V 粘贴文字');
-  }, [handleAttachment, handlePaneText, paneCanSend]);
+  }, [handlePaneText, paneCanSend]);
 
   const handlePanePaste = useCallback((uid, event) => {
-    const text = textFromPasteEvent(event);
+    // 1. 同步从 event 提取数据快照（不等待异步，防止 clipboardData 过期，裁决 §5.3）
+    const snapshot = extractPasteEventSnapshot(event);
     const previous = pendingPasteRef.current.get(uid) || Promise.resolve();
     const pendingPaste = previous.catch(() => {}).then(async () => {
-      let files = null;
-      try {
-        files = await readClipboardFiles();
-      } catch {
-        // A native reader error must not break ordinary browser text paste.
-      }
       if (!paneCanSend(uid)) return;
-      if (files?.length) {
-        try {
-          const paths = formatClipboardFiles(files);
-          if (paths) handlePaneText(uid, paths);
-        } catch (e) {
-          setToastMsg(e?.message || '文件路径无法粘贴');
-        }
-        return;
-      }
-      if (text) {
-        handlePaneText(uid, text);
+
+      // 优先级 1：非空文本 (text/plain)，复用 handlePaneText，绝不自动敲回车
+      if (snapshot.text) {
+        handlePaneText(uid, snapshot.text);
         return;
       }
 
-      // 文本与文件均为空时，检查是否含有图片数据并直接触发上传
-      let image = null;
-      try {
-        image = await imageFromPasteEvent(event);
-      } catch {}
-      if (!image) {
+      // 优先级 2：图片 (image/*)，解析 bytes 触发上传与预贴
+      if (snapshot.imageFile) {
+        let attachment = null;
         try {
-          image = await readClipboardImage();
+          attachment = await fileToImageAttachment(snapshot.imageFile);
         } catch {}
-      }
-      if (image) {
-        await handleAttachment(uid, image);
+        if (!paneCanSend(uid)) return;
+        if (attachment) {
+          await handleAttachment(uid, attachment);
+          return;
+        }
+        setToastMsg('图片数据读取失败');
         return;
       }
 
+      // 优先级 3：空或不支持的内容
       setToastMsg('剪贴板为空或内容无法粘贴');
     });
     pendingPasteRef.current.set(uid, pendingPaste);
@@ -1065,8 +1056,9 @@ export default function App({ seedDevices } = {}) {
       onEnter={() => handlePaneEnter(agent.key)}
       onCtrlV={() => handlePaneCtrlV(agent.key)}
       onPaste={(event) => handlePanePaste(agent.key, event)}
+      onForceTextPaste={() => handlePaneForceText(agent.key)}
     />
-  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneBytes, handlePaneEnter, handlePaneCtrlV, handlePanePaste]);
+  ), [clientFor, activeAgent, dm, handlePaneText, handlePaneKey, handlePaneBytes, handlePaneEnter, handlePaneCtrlV, handlePanePaste, handlePaneForceText]);
 
   /* ——— 设备 ——— */
   const handleAddDevice = useCallback(({ name, url, token }) => {
