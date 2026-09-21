@@ -481,17 +481,42 @@ export const nativeCapabilities = {
         };
       }
       if (env === 'tauri') {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const image = await invoke('read_clipboard_image');
-        const bytes = image?.bytes;
-        if (!image || (!Array.isArray(bytes) && !(bytes instanceof Uint8Array)) || bytes.length === 0) {
-          return null;
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const image = await invoke('read_clipboard_image');
+          const bytes = image?.bytes;
+          if (image && (Array.isArray(bytes) || bytes instanceof Uint8Array) && bytes.length > 0) {
+            return {
+              name: image.name || 'image',
+              mime: image.mime || 'image/png',
+              bytes: Uint8Array.from(bytes),
+            };
+          }
+        } catch {
+          // Native command not supported or failed on this platform, fall through
         }
-        return {
-          name: image.name || 'image',
-          mime: image.mime || 'image/png',
-          bytes: Uint8Array.from(bytes),
-        };
+      }
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.read) {
+        try {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            const imageType = item.types?.find((t) => t.startsWith('image/'));
+            if (imageType) {
+              const blob = await item.getType(imageType);
+              const buffer = await blob.arrayBuffer();
+              const bytes = new Uint8Array(buffer);
+              if (bytes.length > 0) {
+                return {
+                  name: 'clipboard.png',
+                  mime: imageType,
+                  bytes,
+                };
+              }
+            }
+          }
+        } catch {
+          // Permissions or no image available
+        }
       }
       return null;
     },
@@ -506,11 +531,15 @@ export const nativeCapabilities = {
         return files;
       }
       if (env === 'tauri') {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const files = await invoke('read_clipboard_files');
-        if (files == null) return [];
-        if (!Array.isArray(files)) throw new Error('剪贴板文件路径无效');
-        return files;
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const files = await invoke('read_clipboard_files');
+          if (files == null) return [];
+          if (!Array.isArray(files)) throw new Error('剪贴板文件路径无效');
+          return files;
+        } catch {
+          return [];
+        }
       }
       return [];
     },

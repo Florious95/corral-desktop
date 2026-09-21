@@ -57,6 +57,7 @@ import {
 } from './lib/workspaceLayout.js';
 import { TabDragController } from './lib/tabDrag.js';
 import { getAgentFavKey, isAgentFav, toggleAgentFav } from './lib/favorites.js';
+import { isSameSpaceKey } from './lib/wslPath.js';
 import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
   readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent,
@@ -335,7 +336,7 @@ export default function App({ seedDevices } = {}) {
   }), [workspaces, localById, dismissedUids]);
 
   const newAgentTarget = useMemo(
-    () => workspaces.find((w) => w.spaceKey === newAgentSpace) || null,
+    () => workspaces.find((w) => isSameSpaceKey(w.spaceKey, newAgentSpace)) || null,
     [workspaces, newAgentSpace],
   );
   const newAgentLaunchers = useMemo(
@@ -413,7 +414,7 @@ export default function App({ seedDevices } = {}) {
   }, [allAgents]);
 
   const matchSelected = useCallback(
-    (a) => (selected === 'all' ? true : selected === 'fav' ? a.fav : a.spaceKey === selected),
+    (a) => (selected === 'all' ? true : selected === 'fav' ? a.fav : isSameSpaceKey(a.spaceKey, selected)),
     [selected],
   );
 
@@ -611,7 +612,7 @@ export default function App({ seedDevices } = {}) {
   }, []);
 
   const openNewAgentDialog = useCallback((spaceKey) => {
-    const target = workspaces.find((w) => w.spaceKey === spaceKey);
+    const target = workspaces.find((w) => isSameSpaceKey(w.spaceKey, spaceKey));
     const anchor = target?.sessions?.find((session) => `${target.deviceId}::${session.ref}` === activeKey)
       || target?.sessions?.[0];
     if (!anchor?.ref) {
@@ -960,12 +961,18 @@ export default function App({ seedDevices } = {}) {
 
   const handlePaneCtrlV = useCallback(async (uid) => {
     const isWindows = nativeCapabilities.platform === 'windows';
-    const result = await readCtrlV();
-    if (result.kind === 'image') {
-      await handleAttachment(uid, result.attachment);
+
+    // 1. 检查是否含有图片数据
+    let image = null;
+    try {
+      image = await readClipboardImage();
+    } catch {}
+    if (image) {
+      await handleAttachment(uid, image);
       return;
     }
 
+    // 2. Windows 平台下以剪贴板最新数据为准，文本与文件路径直接粘贴入终端
     if (isWindows) {
       let files = null;
       try {

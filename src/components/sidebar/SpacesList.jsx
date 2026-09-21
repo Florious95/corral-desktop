@@ -1,5 +1,6 @@
 // Spaces 列表（UI-SPEC §5.2）。虚拟行 All Spaces / 收藏 置顶，其后是真实 workspace 行。
 import { FolderIcon, GridIcon, StarIcon, PlusIcon } from '../../lib/icons.jsx';
+import { isSameSpaceKey } from '../../lib/wslPath.js';
 
 function SpaceRow({
   icon,
@@ -106,7 +107,7 @@ export default function SpacesList({
             name={sp.name}
             count={sp.count}
             workingCount={workingCount}
-            selected={selected === sp.key}
+            selected={isSameSpaceKey(selected, sp.key)}
             badge={multiDevice ? sp.deviceName : null}
             badgeLocal={sp.deviceLocal}
             onClick={() => onSelect(sp.key)}

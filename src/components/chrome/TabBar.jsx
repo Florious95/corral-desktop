@@ -85,8 +85,8 @@ export default function TabBar({
   const scrollContainerRef = useRef(null);
   const regularTabRefs = useRef(new Map());
 
-  // Rare UI 弹性胶囊状态：保存当前激活项的 { left, scaleX, opacity }
-  const [capsuleStyle, setCapsuleStyle] = useState({ left: 0, scaleX: 1, opacity: 0 });
+  // Rare UI 弹性胶囊状态：保存当前激活项的 { left, width, scaleX, opacity }
+  const [capsuleStyle, setCapsuleStyle] = useState({ left: 0, width: 100, scaleX: 1, opacity: 0 });
 
   // 记录每个 regular tab 的当前真实测量宽度
   const measureCurrentTabWidth = useCallback((targetKey) => {
@@ -174,7 +174,8 @@ export default function TabBar({
     if (width > 0) {
       setCapsuleStyle({
         left: Math.round(left),
-        scaleX: Math.round((width / 100) * 1000) / 1000,
+        width: Math.round(width),
+        scaleX: 1,
         opacity: 1,
       });
     }
@@ -248,7 +249,7 @@ export default function TabBar({
           aria-hidden="true"
           style={{
             transform: `translate3d(${capsuleStyle.left}px, 0, 0) scaleX(${capsuleStyle.scaleX})`,
-            width: '100px',
+            width: `${capsuleStyle.width || 100}px`,
             opacity: capsuleStyle.opacity,
           }}
         />

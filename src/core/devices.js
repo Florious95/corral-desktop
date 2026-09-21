@@ -17,6 +17,7 @@ import { inferCanonicalProvider, normalizeProvider, DEFAULT_LAUNCHERS } from './
 import { uploadImage } from './upload.js';
 import { DEFAULT_LOCAL_DEVICE, isLocalUrl } from './local.js';
 import { buildPairingPayload } from './pairing.js';
+import { normalizeCwd, isSameSpaceKey, windowsToWsl } from '../lib/wslPath.js';
 import * as store from './store.js';
 
 const MODEL_DEBOUNCE_MS = 100;
@@ -172,6 +173,7 @@ export class DeviceManager {
     this._level2 = new Map();    // deviceId -> { cwd, seq, sessions: Map<ref, {...}>, lastSeen }
     this._listingFresh = new Map(); // deviceId -> boolean: 本代 listing 首帧是否已有效就绪
     this._launchers = new Map(); // deviceId -> auth_ack.agent_launchers
+    this._sessionDetails = new Map(); // uid -> { name, title, cwd, rows, cols, status, provider }
     this._connected = false;
     this._modelTimer = null;
   }
@@ -358,44 +360,66 @@ export class DeviceManager {
       const devStatus = this._status.get(d.id);
       const isReady = devStatus ? devStatus.state === ClientState.READY : (client.isReady !== false);
       const isFresh = isReady && (this._listingFresh.has(d.id) ? this._listingFresh.get(d.id) === true : true);
+
+      const workspaceGroups = new Map();
       for (const w of client.workspaces) {
-        const live = lvl && lvl.cwd === w.cwd ? lvl.sessions : null;
-        const sessions = (w.sessions || []).map((s) => {
+        const normWcwd = normalizeCwd(w.cwd);
+        let group = workspaceGroups.get(normWcwd);
+        if (!group) {
+          group = {
+            cwd: normWcwd,
+            sessionCount: w.session_count,
+            aggregateState: w.aggregate_state,
+            sessions: [],
+          };
+          workspaceGroups.set(normWcwd, group);
+        }
+        const live = lvl && normalizeCwd(lvl.cwd) === normWcwd ? lvl.sessions : null;
+        for (const s of w.sessions || []) {
           const uid = `${d.id}::${s.ref}`;
+          const detail = this._sessionDetails.get(uid);
           const x = live?.get(s.ref);
 
           // R1: 以 listing/list_delta 为全局单一真相源，绝不让旧 level2 压制全局状态
           // R4: 状态闭集归一化
-          const status = isFresh ? normalizeSessionStatus(s, x) : 'unknown';
-          const title = s.title || x?.title || '';
-          const provider = x?.provider !== undefined ? x.provider : s.provider;
+          const effectiveSession = s.status ? s : (detail || s);
+          const status = isFresh ? normalizeSessionStatus(effectiveSession, x) : 'unknown';
+          const title = s.title || detail?.title || x?.title || '';
+          const provider = x?.provider !== undefined ? x.provider : (s.provider || detail?.provider);
+          const name = detail?.name ?? s.name;
 
-          return {
+          group.sessions.push({
             uid,
             deviceId: d.id,
             deviceName: d.name,
             ref: s.ref,
-            name: s.name,
-            cwd: s.cwd,
-            rows: s.rows,
-            cols: s.cols,
+            name,
+            cwd: normalizeCwd(s.cwd || normWcwd),
+            rows: s.rows ?? detail?.rows,
+            cols: s.cols ?? detail?.cols,
             title,
             status,
             state: status,
             // level2 is newer than listing when it supplies a provider; if its
             // field is absent, retain the reliable listing DTO value.
-            provider: providerOf(s.name, provider),
-          };
-        });
+            provider: providerOf(name, provider),
+          });
+        }
+        if (w.session_count !== undefined) {
+          group.sessionCount = Math.max(group.sessionCount ?? 0, w.session_count);
+        }
+      }
+
+      for (const [normWcwd, group] of workspaceGroups) {
         out.push({
-          spaceKey: `${d.id}::${w.cwd}`,
+          spaceKey: `${d.id}::${normWcwd}`,
           deviceId: d.id,
           deviceName: d.name,
-          cwd: w.cwd,
+          cwd: normWcwd,
           label: '',
-          sessionCount: w.session_count ?? sessions.length,
-          aggregateState: aggregateState(sessions),
-          sessions,
+          sessionCount: group.sessionCount ?? group.sessions.length,
+          aggregateState: aggregateState(group.sessions),
+          sessions: group.sessions,
         });
       }
     }
@@ -405,7 +429,7 @@ export class DeviceManager {
   }
 
   space(spaceKey) {
-    return this.workspaces.find((w) => w.spaceKey === spaceKey);
+    return this.workspaces.find((w) => isSameSpaceKey(w.spaceKey, spaceKey));
   }
 
   agent(uid) {
@@ -554,10 +578,12 @@ export class DeviceManager {
     const sep = String(spaceKey).indexOf('::');
     if (sep < 0) return false;
     const deviceId = spaceKey.slice(0, sep);
-    const cwd = spaceKey.slice(sep + 2);
+    const rawCwd = spaceKey.slice(sep + 2);
+    const cwd = normalizeCwd(rawCwd);
     const client = this._clients.get(deviceId);
     if (!client || cwd.length === 0) return false;
-    if (this._level2.get(deviceId)?.cwd === cwd) return true; // already tracking: don't re-scan
+    const existing = this._level2.get(deviceId);
+    if (existing?.cwd === cwd || (existing?.cwd && normalizeCwd(existing.cwd) === cwd)) return true; // already tracking: don't re-scan
     this._level2.set(deviceId, { cwd, seq: null, sessions: new Map(), lastSeen: 0 });
     this._scheduleModel();
     return client.subscribeLevel2(cwd);
@@ -673,6 +699,46 @@ export class DeviceManager {
     this._scheduleModel();
   }
 
+  _recordListingSessions(deviceId, payload) {
+    for (const w of payload.workspaces || []) {
+      const canonicalCwd = normalizeCwd(w.cwd);
+      for (const s of w.sessions || []) {
+        const uid = `${deviceId}::${s.ref}`;
+        const canonicalSessionCwd = s.cwd ? normalizeCwd(s.cwd) : canonicalCwd;
+        this._sessionDetails.set(uid, {
+          ...s,
+          cwd: canonicalSessionCwd,
+        });
+      }
+    }
+  }
+
+  _recordDeltaSessions(deviceId, payload) {
+    for (const s of payload.added_sessions || []) {
+      const uid = `${deviceId}::${s.ref}`;
+      this._sessionDetails.set(uid, {
+        ...s,
+        cwd: s.cwd ? normalizeCwd(s.cwd) : s.cwd,
+      });
+    }
+    for (const s of payload.changed_sessions || []) {
+      const uid = `${deviceId}::${s.ref}`;
+      const existing = this._sessionDetails.get(uid);
+      const canonicalCwd = s.cwd ? normalizeCwd(s.cwd) : existing?.cwd;
+      this._sessionDetails.set(uid, {
+        ...existing,
+        ...s,
+        cwd: canonicalCwd || existing?.cwd || s.cwd,
+        name: s.name !== undefined ? s.name : existing?.name,
+        title: s.title !== undefined ? s.title : existing?.title,
+      });
+    }
+    for (const ref of payload.removed_refs || []) {
+      const uid = `${deviceId}::${ref}`;
+      this._sessionDetails.delete(uid);
+    }
+  }
+
   _onFrame(deviceId, type, payload) {
     switch (type) {
       case 'auth_ack':
@@ -687,9 +753,11 @@ export class DeviceManager {
         return;
       case 'listing':
         this._listingFresh.set(deviceId, true);
+        this._recordListingSessions(deviceId, payload);
         this._scheduleModel();
         return;
       case 'list_delta':
+        this._recordDeltaSessions(deviceId, payload);
         this._scheduleModel();
         return;
       case 'presence_update': {
@@ -714,7 +782,7 @@ export class DeviceManager {
       case 'level2_frame':
       case 'level2_heartbeat': {
         const lvl = this._level2.get(deviceId);
-        if (!lvl || lvl.cwd !== payload.workspace) return; // stale: we moved on
+        if (!lvl || normalizeCwd(lvl.cwd) !== normalizeCwd(payload.workspace)) return; // stale: we moved on
         const gap = lvl.seq !== null && payload.seq !== lvl.seq + 1;
         lvl.seq = payload.seq;
         lvl.lastSeen = Date.now();

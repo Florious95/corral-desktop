@@ -1,6 +1,7 @@
 // 侧栏容器（UI-SPEC §5.1）。宽度折叠动画在外层，内层固定 280px 保证折叠时内容不重排。
 import SpacesList from './SpacesList.jsx';
 import AgentsList from './AgentsList.jsx';
+import { isSameSpaceKey } from '../../lib/wslPath.js';
 import { SearchIcon, ChevronDown, LayersIcon, GearIcon } from '../../lib/icons.jsx';
 import './sidebar.css';
 
@@ -73,7 +74,7 @@ export default function Sidebar({
   favCount,
   favWorkingCount,
 }) {
-  const spaceName = spaces.find((s) => s.key === selected)?.name;
+  const spaceName = spaces.find((s) => isSameSpaceKey(s.key, selected))?.name;
   const agentsTitle =
     selected === 'fav' ? '收藏的 Agents' : spaceName ? `${spaceName} 的 Agents` : 'Agents';
 

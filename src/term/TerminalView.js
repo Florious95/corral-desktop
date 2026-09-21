@@ -18,6 +18,7 @@
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
 import { attachWebglRenderer } from './webglRenderer.js';
+import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -67,11 +68,12 @@ export class TerminalView {
    * @param {Function} [opts.TerminalCtor]  仅供单测注入 FakeTerminal；生产走 @xterm/xterm
    * @param {boolean} [opts.hideCursor=false] 隐藏远端停靠的硬件游标（Cursor TUI）
    */
-  constructor(container, {
-    onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
-    scrollback = 0, fontSize = 13, maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
-    hideCursor = false, TerminalCtor = Terminal,
-  } = {}) {
+  constructor(container, opts = {}) {
+    const {
+      onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
+      scrollback = 0, fontSize = 13, maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
+      hideCursor = false, TerminalCtor = Terminal,
+    } = opts;
     this.container = container;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
@@ -83,6 +85,8 @@ export class TerminalView {
 
     this.fontSize = fontSize;
     this.hideCursor = hideCursor === true;
+    this._customTheme = Boolean(opts.theme);
+    const theme = resolveTerminalTheme(opts);
     this.term = new TerminalCtor({
       scrollback,
       fontSize,
@@ -96,12 +100,7 @@ export class TerminalView {
       // 输入走 onData → 协议。远程 delta 负责回显，xterm 不本地 echo。
       disableStdin: false,
       allowProposedApi: true,
-      theme: {
-        background: '#fbfaf8',
-        foreground: '#3a3835',
-        cursor: '#3a3835',
-        selectionBackground: 'rgba(0,0,0,.12)',
-      },
+      theme,
     });
     this._lastDims = null;
     this._lastScrollLine = null;
@@ -154,6 +153,11 @@ export class TerminalView {
       this.onHistoryBoundary();
     };
     this.container.addEventListener('wheel', this._onWheel, { passive: true });
+    if (typeof window !== 'undefined' && window.matchMedia && !this._customTheme) {
+      this._themeMql = window.matchMedia('(prefers-color-scheme: dark)');
+      this._themeListener = (e) => this.setDark(e.matches);
+      this._themeMql.addEventListener?.('change', this._themeListener);
+    }
     this.fit();
     if (this.hideCursor) {
       this._syncCursorAnchor();
@@ -502,6 +506,16 @@ export class TerminalView {
 
   scrollToBottom() { this.term.scrollToBottom(); }
 
+  setTheme(theme) {
+    if (this.term && this.term.options) {
+      this.term.options.theme = theme;
+    }
+  }
+
+  setDark(isDark) {
+    this.setTheme(isDark ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME);
+  }
+
   dispose() {
     this._disposed = true;
     this._cancelWriteSchedule();
@@ -512,6 +526,11 @@ export class TerminalView {
     clearTimeout(this._gridTimer);
     try { this._webglAddon?.dispose(); } catch { /* already gone */ }
     this._webglAddon = null;
+    if (this._themeMql && this._themeListener) {
+      this._themeMql.removeEventListener?.('change', this._themeListener);
+      this._themeMql = null;
+      this._themeListener = null;
+    }
     if (this._onWheel && this.container) this.container.removeEventListener('wheel', this._onWheel);
     if (this._dataDisposable) this._dataDisposable.dispose();
     if (this._binaryDisposable) this._binaryDisposable.dispose();
