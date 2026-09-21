@@ -143,18 +143,31 @@ export default function SettingsDialog({
               <input
                 id="setting-font-size"
                 name="terminal.fontSize"
-                type="number"
-                min={10}
-                max={24}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 className="chr-input chr-setting-font-size"
                 aria-label="Terminal Font Size"
                 value={fontSizeInput}
-                onChange={(e) => handleFontSizeChange(e.target.value)}
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/[^0-9]/g, '');
+                  handleFontSizeChange(cleaned);
+                }}
                 onBlur={() => commitFontSize()}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     commitFontSize();
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const num = parseInt(fontSizeInput || fontSize, 10);
+                    const next = Math.min(24, (Number.isNaN(num) ? DEFAULT_FONT_SIZE : num) + 1);
+                    commitFontSize(next);
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const num = parseInt(fontSizeInput || fontSize, 10);
+                    const next = Math.max(10, (Number.isNaN(num) ? DEFAULT_FONT_SIZE : num) - 1);
+                    commitFontSize(next);
                   }
                 }}
               />
