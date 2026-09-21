@@ -91,3 +91,33 @@ export function wslToWindows(wslPath, distro = 'Ubuntu') {
 // 别名导出
 export const windowsToWslPath = windowsToWsl;
 export const wslToWindowsPath = wslToWindows;
+
+/**
+ * 统一标准化工作区路径（对齐 WSL POSIX 与 Windows 本地路径）
+ */
+export function normalizeCwd(cwd) {
+  if (!cwd || typeof cwd !== 'string') return '';
+  const converted = windowsToWsl(cwd);
+  return converted || cwd.trim();
+}
+
+/**
+ * 比较两个 spaceKey 是否指向同一工作区（支持 Windows 盘符与 WSL 路径跨格式等价判定）
+ * 格式：`${deviceId}::${cwd}` 或单字符串
+ */
+export function isSameSpaceKey(k1, k2) {
+  if (k1 === k2) return true;
+  if (!k1 || !k2) return false;
+  const sep1 = String(k1).indexOf('::');
+  const sep2 = String(k2).indexOf('::');
+  if (sep1 < 0 || sep2 < 0) {
+    return normalizeCwd(k1) === normalizeCwd(k2);
+  }
+  const dev1 = k1.slice(0, sep1);
+  const dev2 = k2.slice(0, sep2);
+  if (dev1 !== dev2) return false;
+  const cwd1 = k1.slice(sep1 + 2);
+  const cwd2 = k2.slice(sep2 + 2);
+  return normalizeCwd(cwd1) === normalizeCwd(cwd2);
+}
+

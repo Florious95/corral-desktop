@@ -370,6 +370,9 @@ src/
 - **钉选标签区**（`.tb-tabs-pinned`）：紧凑锚定最左侧，每个 pinned tab 固定宽 `28px`，居中渲染 Provider 图标或首字母 + 状态灯，带 title 悬浮说明与完整无障碍属性。右键支持取消固定或关闭。
 - **普通标签区**（`.tb-tabs-scroll`）：横向自适应滚动，支持鼠标滚轮左右滑动。
   - **等长布局与自适应缩短裁定（2026-09-19 裁定）**：所有普通未钉选工作台标签页（`.tb-tab:not(.tb-tab-pinned)`）采用弹性等分布局（`flex: 1 1 0px; width: 160px; max-width: 160px; min-width: 44px;`），宽度严格等长，彻底消除字数长短参差不齐现象；当标签页增多时等比自适应缩短变窄（160px → 120px → 90px → 最小安全宽度 44px），内部会话名通过 `text-overflow: ellipsis; overflow: hidden; white-space: nowrap;` 优雅截断省略；钉选标签（`.tb-tab-pinned`）保持固定 32px 紧凑图标宽度不参与压缩；新建加号按钮（`+`）与标签拖拽吸附系统完全兼容。
+  - **TabBar 胶囊边框细腻度与底边防截断（2026-09-21 裁定）**：
+    - 消除 `.tb-tabs-scroll` 滚动容器因固定高度/内边距导致的 1px 截断；滚动容器高度显式设为 `height: 28px; box-sizing: border-box; padding: 0 1px`，胶囊定位在 `top: 1px; height: 26px`，确保上下均有充足空间，底边绝不被截断；
+    - 胶囊采用精确测量宽度赋值与等比 1px 细边框，禁止非等比拉伸边框导致粗糙模糊，确保胶囊在任何时刻均为等比清晰细腻的 1px 边框；
   - 动态展示当前活跃会话名称（多窗格时标出窗格数如 `Session (2)`）+ 状态灯（`.tb-tab-lamp`）。
   - **状态灯规格**：Working 状态为绿灯微动脉冲（`animation: tb-lamp-pulse`，尊重 prefers-reduced-motion）；Idle 状态为温和中性灰小点；Unknown 状态为灰色空心圆圈。
   - Hover / Active 时显露右侧快速关闭按钮（`.tb-tab-close`，`<XIcon size={11} strokeWidth={2.2}/>`）。
@@ -701,6 +704,17 @@ src/
 **终端列回车与 `input_ack`（裁定 2026-08-22）**：xterm 把可打印段先 `input.text`，再发空 `input`（裸 Enter）。等上一段的 ack **必须有界**（5s，与本地发送 `pending` 超时一致）。超时返回 `{ok:false, reason:'ack_timeout'}`，toast「上一条未确认，回车未发出，再按一次强制发送」，**清掉 pending**，下一次回车立刻发出。设备状态变化（重连 / READY 迁移）清 `inputWaiters` / 早到 ack / `lastTextByUid`，在等的 waiter 以 `ack_cleared` 结掉。⛔ 不许无超时 `await` 把回车永久扣押。`ok:false` 仍不把失败旧缓冲再提交一次。
 
 **xterm 应答不上行（裁定 2026-08-23）**：我方是被动镜像，⛔ 不许替远端终端回答 OSC/CSI 查询。xterm 自动生成的 OSC（含 4/10/11/12）、DA（`CSI … c`）、CPR（`CSI … R`）、DSR（`CSI … n`）、DCS 在 `NativeInputPump` 中 **丢掉，不发 `input.text` / `input.keys` / `input.bytes`**。方向键是 `CSI A/B/C/D`（终字节大写），与 CPR 的 `R`、DA 的 `c` 分开。远端拿不到颜色应答会回落到默认主题，可接受。⛔ 修前 OSC 11 应答会变成输入行垃圾并可能打出 `esc`。
+
+**终端暗色模式高对比度可读性与键盘映射（2026-09-21 裁定）**：
+- 适配暗色模式终端配色方案（Tokyo Night / VS Code Dark+ 高对比度方案），在 WSL `#0f1115` 暗色底色下，主要前景色、光标以及 ANSI 16 色所有可读前景色严格满足 WCAG 2.1 AA 标准（对比度严格 >= 4.5:1），消除暗灰文字不可读问题。
+- **Windows 智能 Ctrl+V**：在 Windows 平台下按 `Ctrl+V` 时智能自适应剪贴板内容：若剪贴板含有图片，触发图片上传预览；若为纯文本或文件路径，直接贴入当前终端，避免因拦截导致丢字。
+- **终端快捷键与鼠标映射**：
+  - 支持快捷键 `Ctrl+Shift+C` 复制终端选中文本；
+  - 支持快捷键 `Ctrl+Shift+V` 强制纯文本粘贴；
+  - 支持 Windows 终端鼠标行为：终端区域右键点击若有选中内容快速复制，若无选中内容快速粘贴。
+- **WSL 路径映射与会话更名随动更新**：
+  - 统一通过 `normalizeCwd` 与 `isSameSpaceKey` 标准化工作区标识，解决 Linux POSIX 路径（`/mnt/c/...`）与 Windows 盘符路径（`C:\...`）等价判定；
+  - `list_delta` 增量推送到达时，通过唯一 `ref` 精确匹配会话并原地更新会话名称，确保侧边栏会话名称随动刷新。
 
 **粘贴（裁定 2026-08-24，B 预贴修订）**：Cmd+V 始终是文本：DOM `paste` 只读 `text/plain`，即使剪贴板含图片也不上传、不发
 `attachment_path`；图片-only 时提示「图片请用 Ctrl+V」。Ctrl+V 单独拦 keydown，图片字节经原生 `upload_http`

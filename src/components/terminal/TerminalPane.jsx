@@ -10,7 +10,8 @@ import { WheelAccumulator } from '../../term/wheelScroll.js';
 import { BINARY_KIND } from '../../core/binary.js';
 import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
-import { isCtrlV } from '../../term/clipboard.js';
+import { isCtrlV, isCtrlShiftV, isCtrlShiftC } from '../../term/clipboard.js';
+import { nativeCapabilities } from '../../core/nativeCapabilities.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../../core/presence.js';
 
 export { MOBILE_GRID, PRESENCE_MODE };
@@ -197,10 +198,52 @@ export default function TerminalPane({
     };
     host.addEventListener('wheel', onWheel, { capture: true, passive: false });
     const onKeyDown = (ev) => {
-      if (!isCtrlV(ev)) return;
+      if (isCtrlShiftC(ev)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const selection = view.term.getSelection();
+        if (selection && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(selection).catch(() => {});
+        }
+        return;
+      }
+      if (isCtrlShiftV(ev)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        nativeCapabilities.clipboard.readText().then((text) => {
+          if (text && onTextRef.current) {
+            onTextRef.current(text);
+          }
+        }).catch(() => {});
+        return;
+      }
+      if (isCtrlV(ev)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        Promise.resolve(onCtrlVRef.current?.()).catch(() => setHint('剪贴板读取失败'));
+        return;
+      }
+    };
+    const onContextMenu = (ev) => {
+      const isWindows = nativeCapabilities.platform === 'windows';
+      if (!isWindows) return;
       ev.preventDefault();
       ev.stopPropagation();
-      Promise.resolve(onCtrlVRef.current?.()).catch(() => setHint('图片读取失败'));
+
+      // Windows 终端行为：选中文本时右键复制并清空选中；无选中文本时右键快速粘贴
+      if (view.term.hasSelection()) {
+        const selection = view.term.getSelection();
+        if (selection && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(selection).catch(() => {});
+          view.term.clearSelection();
+        }
+      } else {
+        nativeCapabilities.clipboard.readText().then((text) => {
+          if (text && onTextRef.current) {
+            onTextRef.current(text);
+          }
+        }).catch(() => {});
+      }
     };
     const onPasteEvent = (ev) => {
       ev.preventDefault();
@@ -208,6 +251,7 @@ export default function TerminalPane({
       onPasteRef.current?.(ev);
     };
     host.addEventListener('keydown', onKeyDown, true);
+    host.addEventListener('contextmenu', onContextMenu, true);
     host.addEventListener('paste', onPasteEvent, true);
 
     // fetchOlder/acceptScrollback 直接读写这个对象上的 pendingScrollback / nextScrollbackLine。
@@ -438,6 +482,7 @@ export default function TerminalPane({
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
       host.removeEventListener('keydown', onKeyDown, true);
+      host.removeEventListener('contextmenu', onContextMenu, true);
       host.removeEventListener('paste', onPasteEvent, true);
       clearTimeout(g.timer);
       clearTimeout(flashTimer);

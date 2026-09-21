@@ -2,12 +2,22 @@ import { nativeCapabilities } from '../core/nativeCapabilities.js';
 import { windowsToWsl } from '../lib/wslPath.js';
 
 export function isCtrlV(ev) {
-  return !!ev && ev.type === 'keydown' && ev.ctrlKey && !ev.metaKey && !ev.altKey
+  return !!ev && ev.type === 'keydown' && ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey
     && (ev.key === 'v' || ev.key === 'V');
 }
 
+export function isCtrlShiftV(ev) {
+  return !!ev && ev.type === 'keydown' && ev.ctrlKey && !ev.metaKey && !ev.altKey && !!ev.shiftKey
+    && (ev.key === 'v' || ev.key === 'V');
+}
+
+export function isCtrlShiftC(ev) {
+  return !!ev && ev.type === 'keydown' && ev.ctrlKey && !ev.metaKey && !ev.altKey && !!ev.shiftKey
+    && (ev.key === 'c' || ev.key === 'C');
+}
+
 export function isCmdV(ev) {
-  return !!ev && ev.type === 'keydown' && ev.metaKey && !ev.ctrlKey && !ev.altKey
+  return !!ev && ev.type === 'keydown' && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey
     && (ev.key === 'v' || ev.key === 'V');
 }
 
@@ -68,6 +78,10 @@ export function formatClipboardFiles(paths) {
 
 /** Ctrl+V is image-only: text is deliberately reported as a loud no-op. */
 export async function readCtrlV({ nativeInvoke } = {}) {
-  const image = await readClipboardImage({ nativeInvoke });
-  return image ? { kind: 'image', attachment: image } : { kind: 'empty' };
+  try {
+    const image = await readClipboardImage({ nativeInvoke });
+    return image ? { kind: 'image', attachment: image } : { kind: 'empty' };
+  } catch {
+    return { kind: 'empty' };
+  }
 }
