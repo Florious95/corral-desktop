@@ -22,6 +22,7 @@
         "decorations": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "additionalBrowserArgs": "--renderer-process-limit=1 --enable-features=msLowEndDeviceMode,msMemoryCoordinatorPriorityControl --disable-features=Translate,OptimizationHints,MediaRouter,msWebOOUI,msPdfOOUI,msSmartScreenProtection --js-flags=\"--max-old-space-size=64\"",
         "trafficLightPosition": { "x": 18, "y": 20 }
       }
     ],
