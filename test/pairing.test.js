@@ -132,3 +132,96 @@ test('index declares an empty data favicon so the browser makes no 404 request',
   const index = await readFile(INDEX, 'utf8');
   assert.match(index, /<link rel="icon" href="data:,"\s*\/>/);
 });
+
+test('#207 pairing payload builder and parser support host_id identity decoupling', () => {
+  const hostPayload = buildPairingPayload({
+    host_id: 'XM2Y6OKHNORVVDUXZI7K6TKVYE',
+    token: 'pair-token-secret',
+    port: 9900,
+    name: 'MacBook-Pro.local',
+  });
+  assert.equal(hostPayload.v, 1);
+  assert.equal(hostPayload.host_id, 'XM2Y6OKHNORVVDUXZI7K6TKVYE');
+  assert.equal(hostPayload.token, 'pair-token-secret');
+  assert.equal(hostPayload.port, 9900);
+  assert.equal(hostPayload.name, 'MacBook-Pro.local');
+  assert.equal(hostPayload.url, '');
+  assert.deepEqual(hostPayload.candidates, []);
+
+  // Serializes and parses back cleanly
+  const raw = serializePairingPayload(hostPayload);
+  const parsed = parsePairingPayload(raw);
+  assert.deepEqual(parsed, hostPayload);
+});
+
+test('#207 buildPairingPayload rejects when neither valid ws URL nor host_id is provided', () => {
+  assert.throws(
+    () => buildPairingPayload({ token: 'pair-token' }),
+    /pairing payload requires a valid host_id or ws:\/\/ URL/,
+  );
+  assert.throws(
+    () => buildPairingPayload({ url: 'http://not-ws', token: 'pair-token' }),
+    /pairing payload requires a valid host_id or ws:\/\/ URL/,
+  );
+  assert.throws(
+    () => buildPairingPayload({ host_id: 'XM2Y6OKHNORVVDUXZI7K6TKVYE' }),
+    /pairing token required/,
+  );
+});
+
+test('#207 DeviceManager fetches local host identity from /pair/whoami and seeds pairing payload', async () => {
+  const fakeWhoami = {
+    v: 1,
+    host_id: 'XM2Y6OKHNORVVDUXZI7K6TKVYE',
+    name: 'MacBook-Pro.local',
+    port: 9900,
+    addresses: ['192.168.31.116'],
+  };
+  let requestedUrl = null;
+  const mockFetch = async (url) => {
+    requestedUrl = url;
+    return {
+      ok: true,
+      json: async () => fakeWhoami,
+    };
+  };
+
+  const dm = new DeviceManager({
+    storage: storage(),
+    autoLocal: true,
+    fetchImpl: mockFetch,
+    seedDevices: [{
+      id: 'local',
+      name: 'Local',
+      url: 'ws://127.0.0.1:9900/ws',
+      token: 'local-token-xyz',
+    }],
+  });
+
+  const identity = await dm.fetchLocalHostIdentity();
+  assert.equal(requestedUrl, 'http://127.0.0.1:9900/pair/whoami');
+  assert.deepEqual(identity, {
+    host_id: 'XM2Y6OKHNORVVDUXZI7K6TKVYE',
+    name: 'MacBook-Pro.local',
+    port: 9900,
+  });
+
+  const payload = dm.createPairingPayload();
+  assert.equal(payload.host_id, 'XM2Y6OKHNORVVDUXZI7K6TKVYE');
+  assert.equal(payload.name, 'MacBook-Pro.local');
+  assert.equal(payload.port, 9900);
+  assert.equal(payload.token, 'local-token-xyz');
+
+  const draft = dm.createPairingDraft();
+  assert.equal(draft.host_id, 'XM2Y6OKHNORVVDUXZI7K6TKVYE');
+  assert.equal(draft.name, 'MacBook-Pro.local');
+  assert.equal(draft.port, 9900);
+});
+
+test('#207 PairingDialog source code distinguishes host_id mode and removes manual IP for host_id payload', async () => {
+  const dialog = await readFile(DIALOG, 'utf8');
+  assert.match(dialog, /hasHostId\s*=\s*Boolean\(payload\?\.host_id\)/);
+  assert.match(dialog, /showLegacyHostInput\s*=\s*loopback\s*&&\s*!hasHostId/);
+  assert.match(dialog, /displayTarget/);
+  assert.match(dialog, /主机 ID:/);
+});

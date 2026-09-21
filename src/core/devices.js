@@ -174,6 +174,7 @@ export class DeviceManager {
     this._listingFresh = new Map(); // deviceId -> boolean: 本代 listing 首帧是否已有效就绪
     this._launchers = new Map(); // deviceId -> auth_ack.agent_launchers
     this._sessionDetails = new Map(); // uid -> { name, title, cwd, rows, cols, status, provider }
+    this._localHostIdentity = null; // { host_id, name, port } from /pair/whoami
     this._connected = false;
     this._modelTimer = null;
   }
@@ -314,14 +315,22 @@ export class DeviceManager {
   /**
    * Explicitly hand pairing material to the QR modal. Prefer a reachable
    * non-loopback device, then fall back to a configured loopback entry.
-   * @returns {{v:number,url:string,token:string,ts_authkey:string,candidates:string[]}|null}
+   * If local host identity is known, binds host_id and metadata (Issue #207).
+   * @returns {{v:number,url:string,token:string,ts_authkey:string,candidates:string[],host_id?:string,port?:number,name?:string}|null}
    */
   createPairingPayload() {
     const withToken = this._devices.filter((d) => typeof d.token === 'string' && d.token.length > 0);
     const source = withToken.find((d) => !isLocalUrl(d.url)) || withToken[0];
     if (!source) return null;
+    const identity = isLocalUrl(source.url) ? this._localHostIdentity : null;
     try {
-      return buildPairingPayload({ url: source.url, token: source.token });
+      return buildPairingPayload({
+        url: source.url,
+        token: source.token,
+        host_id: identity?.host_id,
+        name: identity?.name,
+        port: identity?.port,
+      });
     } catch {
       return null;
     }
@@ -331,7 +340,68 @@ export class DeviceManager {
   createPairingDraft() {
     const source = this._devices.find((d) => isLocalUrl(d.url)) || this._devices[0];
     if (!source) return null;
-    return { v: 1, url: source.url, token: '', ts_authkey: '', candidates: [source.url] };
+    const identity = isLocalUrl(source.url) ? this._localHostIdentity : null;
+    return {
+      v: 1,
+      url: source.url,
+      token: '',
+      ts_authkey: '',
+      candidates: [source.url],
+      ...(identity ? {
+        host_id: identity.host_id,
+        name: identity.name,
+        port: identity.port,
+      } : {}),
+    };
+  }
+
+  setLocalHostIdentity(identity) {
+    if (!identity || typeof identity !== 'object') {
+      this._localHostIdentity = null;
+      return;
+    }
+    this._localHostIdentity = {
+      host_id: typeof identity.host_id === 'string' ? identity.host_id.trim() : '',
+      name: typeof identity.name === 'string' ? identity.name.trim() : '',
+      port: Number(identity.port) || 9900,
+    };
+  }
+
+  getLocalHostIdentity() {
+    return this._localHostIdentity;
+  }
+
+  /**
+   * Eagerly or on-demand fetch local daemon identity from /pair/whoami (Issue #207).
+   */
+  async fetchLocalHostIdentity() {
+    const localDevice = this._devices.find((d) => isLocalUrl(d.url)) || this._devices[0];
+    if (!localDevice) return null;
+    const fetchFn = this.fetchImpl || globalThis.fetch;
+    if (typeof fetchFn !== 'function') return null;
+
+    try {
+      let whoamiUrl = 'http://127.0.0.1:9900/pair/whoami';
+      if (localDevice.url) {
+        try {
+          const u = new URL(localDevice.url);
+          const host = u.hostname === 'localhost' ? '127.0.0.1' : (u.hostname || '127.0.0.1');
+          const port = u.port || '9900';
+          whoamiUrl = `http://${host}:${port}/pair/whoami`;
+        } catch {}
+      }
+
+      const res = await fetchFn(whoamiUrl);
+      if (!res || !res.ok) return null;
+      const data = await res.json();
+      if (data && data.host_id) {
+        this.setLocalHostIdentity(data);
+        return this._localHostIdentity;
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   /** Persist a manually supplied secure token for the next pairing handoff. */
