@@ -693,7 +693,7 @@ src/
 - **列头**（设计稿把 `title/iconEl/statusEl` 算了但没渲染，这里补上——分裂列不标名字没法用）：
   `height:34px; flex:none; display:flex; align-items:center; gap:8px; padding:0 40px 0 12px; border-bottom:1px solid var(--border-hairline)`；
   `<ProviderIcon size={17}/>` + title（`--fs-125`/600/`var(--text-secondary)`/省略号）+ 8px 状态点（规格同 §5.3）+ 设备徽章（仅 `multiDevice`）。
-- **终端区**：`flex:1; min-height:0; padding:5px; box-sizing:border-box; background:var(--bg)`。该 5px CSS 安全边距由 macOS Swift 壳与 Windows Tauri 无额外物理 inset 地承载，避免交通灯、系统边框与 xterm 网格重叠。
+- **终端区**：`flex:1; min-height:0; box-sizing:border-box; background:var(--bg)`。**平台差异化视口边距（2026-09-22 裁定，Issue #196）**：macOS 默认/base `.terminalpane` 保持 `padding: 0;`（消除单窗格与分屏底部空洞感，保持紧凑原生贴合）；Windows 端 `.app-root.is-windows .terminalpane` 保持 `padding: 5px;`，防止 Windows CLI 文本碰触系统边框。全屏遮罩（`.chr-scrim`）采用纯净透明度渐变动画 `scrimFadeIn`，杜绝任何 scale / translate 几何缩放与平移抖动（2026-09-22 裁定，Issue #202）。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight:1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。

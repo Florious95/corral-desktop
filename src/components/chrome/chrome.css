@@ -552,7 +552,7 @@
   background: var(--scrim);
   -webkit-backdrop-filter: var(--scrim-blur);
   backdrop-filter: var(--scrim-blur);
-  animation: menuIn var(--d-hover) ease-out;
+  animation: scrimFadeIn var(--d-hover) ease-out;
 }
 /* 定位与入场动画分离：menuIn 的 transform 会覆盖居中用的 translate(-50%,-50%)，
    居中放外层、动画放内层，避免入场时卡片跳到右下角。 */

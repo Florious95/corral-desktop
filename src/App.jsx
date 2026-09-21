@@ -1365,7 +1365,7 @@ export default function App({ seedDevices } = {}) {
   const isWindows = nativeCapabilities.platform === 'windows';
 
   return (
-    <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}`}>
+    <div className={`app-root${collapsed ? ' is-collapsed' : ''}${nativeFullscreen ? ' is-fullscreen' : ''}${isWindows ? ' is-windows' : ''}`}>
       <div className="app-body">
         <div className={`app-left${collapsed ? ' is-collapsed' : ''}`}>
           <TitleBar

@@ -99,15 +99,20 @@
 
 .splitpanes-empty-sub { font-size: var(--fs-115) }
 
-/* ——— TerminalPane（UI-SPEC §6.2） ——— */
+/* ——— TerminalPane（UI-SPEC §6.2，2026-09-22 平台差异化边距裁定） ——— */
 
 .terminalpane {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 5px;
+  padding: 0;
   box-sizing: border-box;
+}
+
+/* Windows 平台预留 5px 安全边距，防止终端文本碰触系统边框（Issue #196） */
+.app-root.is-windows .terminalpane {
+  padding: 5px;
 }
 
 .terminalpane-body {
