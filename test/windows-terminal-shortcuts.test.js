@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isCtrlV, isCtrlShiftV, isCtrlShiftC, isCmdV, readClipboardImage } from '../src/term/clipboard.js';
+import { isCtrlV, isCtrlShiftV, isCtrlShiftC, isCmdV, readClipboardImage, imageFromPasteEvent } from '../src/term/clipboard.js';
 import {
   nativeCapabilities,
   setNativeEngineForTests,
@@ -150,4 +150,77 @@ test('handlePaneCtrlV image pipeline successfully resolves image and dispatches 
   } finally {
     resetNativeEngineForTests();
   }
+});
+
+test('imageFromPasteEvent extracts image bytes from ClipboardEvent DataTransfer items', async () => {
+  const fakePng = new Uint8Array([137, 80, 78, 71]);
+  const fakeFile = {
+    name: 'user-paste.png',
+    type: 'image/png',
+    arrayBuffer: async () => fakePng.buffer,
+  };
+  const event = {
+    clipboardData: {
+      items: [
+        { kind: 'string', type: 'text/plain' },
+        { kind: 'file', type: 'image/png', getAsFile: () => fakeFile },
+      ],
+      files: [],
+    },
+  };
+
+  const image = await imageFromPasteEvent(event);
+  assert.ok(image, 'image must be extracted from event.clipboardData');
+  assert.equal(image.name, 'user-paste.png');
+  assert.equal(image.mime, 'image/png');
+  assert.deepEqual([...image.bytes], [137, 80, 78, 71]);
+});
+
+test('imageFromPasteEvent returns null when only text is present in ClipboardEvent', async () => {
+  const event = {
+    clipboardData: {
+      items: [
+        { kind: 'string', type: 'text/plain' },
+      ],
+      files: [],
+    },
+  };
+
+  const image = await imageFromPasteEvent(event);
+  assert.equal(image, null);
+});
+
+test('handlePanePaste consumes ClipboardEvent image and dispatches handleAttachment directly', async () => {
+  const fakePng = new Uint8Array([137, 80, 78, 71]);
+  const event = {
+    clipboardData: {
+      getData: () => '',
+      items: [
+        {
+          kind: 'file',
+          type: 'image/png',
+          getAsFile: () => ({
+            name: 'pasted-screenshot.png',
+            type: 'image/png',
+            arrayBuffer: async () => fakePng.buffer,
+          }),
+        },
+      ],
+    },
+  };
+
+  let attached = null;
+  const handleAttachment = async (_uid, img) => {
+    attached = img;
+  };
+
+  // Simulate handlePanePaste logic: text is empty, files empty, image extracted from event
+  const image = await imageFromPasteEvent(event);
+  assert.ok(image, 'image extracted from event');
+  await handleAttachment('dev-1::pane-1', image);
+
+  assert.ok(attached, 'handleAttachment must be invoked directly without Ctrl+V toast');
+  assert.equal(attached.name, 'pasted-screenshot.png');
+  assert.equal(attached.mime, 'image/png');
+  assert.deepEqual([...attached.bytes], [137, 80, 78, 71]);
 });

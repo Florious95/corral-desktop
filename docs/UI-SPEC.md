@@ -716,9 +716,8 @@ src/
   - 统一通过 `normalizeCwd` 与 `isSameSpaceKey` 标准化工作区标识，解决 Linux POSIX 路径（`/mnt/c/...`）与 Windows 盘符路径（`C:\...`）等价判定；
   - `list_delta` 增量推送到达时，通过唯一 `ref` 精确匹配会话并原地更新会话名称，确保侧边栏会话名称随动刷新。
 
-**粘贴（裁定 2026-08-24，B 预贴修订）**：Cmd+V 始终是文本：DOM `paste` 只读 `text/plain`，即使剪贴板含图片也不上传、不发
-`attachment_path`；图片-only 时提示「图片请用 Ctrl+V」。Ctrl+V 单独拦 keydown，图片字节经原生 `upload_http`
-上传后只发 `attach_preview {ref,path}`，不发 `input.attachment_path`、`input.text` 或空 `input`，也不自动 Enter；图片留在远端 CLI 输入框，用户后续真实回车才提交。Ctrl+V 纯文本响亮提示无图片且不发帧。主区不再挂载底部图片条、图片加号或键位说明。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
+**粘贴（裁定 2026-08-24，B 预贴修订；2026-09-21 图文粘贴全通道贯通裁定）**：DOM `paste` 事件优先处理文本；当文本为空且剪贴板携带图片数据（`image/*`）时，直接解析图片并触发 `uploadAndPreview` 原生 HTTP 上传预览，杜绝“图片请用 Ctrl+V”阻断提示；Ctrl+V 保持智能图文分流适配；图片字节经原生 `upload_http`
+上传后只发 `attach_preview {ref,path}`，不发 `input.attachment_path`、`input.text` 或空 `input`，也不自动 Enter；图片留在远端 CLI 输入框，用户后续真实回车才提交。主区不再挂载底部图片条、图片加号或键位说明。原生 HTTP 不经过 WebView，故不放宽 loopback `connect-src`。
 
 ### 6.3 终端输入
 

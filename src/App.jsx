@@ -60,7 +60,7 @@ import { getAgentFavKey, isAgentFav, toggleAgentFav } from './lib/favorites.js';
 import { isSameSpaceKey } from './lib/wslPath.js';
 import { nativeCapabilities } from './core/nativeCapabilities.js';
 import {
-  readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent, readClipboardImage,
+  readCtrlV, readClipboardFiles, formatClipboardFiles, textFromPasteEvent, readClipboardImage, imageFromPasteEvent,
 } from './term/clipboard.js';
 
 /** 关闭动画时长（token --d-close），行消失后延迟卸载 */
@@ -1024,8 +1024,27 @@ export default function App({ seedDevices } = {}) {
         }
         return;
       }
-      if (text) handlePaneText(uid, text);
-      else setToastMsg('图片请用 Ctrl+V');
+      if (text) {
+        handlePaneText(uid, text);
+        return;
+      }
+
+      // 文本与文件均为空时，检查是否含有图片数据并直接触发上传
+      let image = null;
+      try {
+        image = await imageFromPasteEvent(event);
+      } catch {}
+      if (!image) {
+        try {
+          image = await readClipboardImage();
+        } catch {}
+      }
+      if (image) {
+        await handleAttachment(uid, image);
+        return;
+      }
+
+      setToastMsg('剪贴板为空或内容无法粘贴');
     });
     pendingPasteRef.current.set(uid, pendingPaste);
     pendingPaste.then(
@@ -1033,7 +1052,7 @@ export default function App({ seedDevices } = {}) {
       () => { if (pendingPasteRef.current.get(uid) === pendingPaste) pendingPasteRef.current.delete(uid); },
     );
     return pendingPaste;
-  }, [handlePaneText, paneCanSend]);
+  }, [handleAttachment, handlePaneText, paneCanSend]);
 
   const renderPane = useCallback((agent) => (
     <TerminalPane
