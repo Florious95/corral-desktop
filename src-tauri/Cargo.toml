@@ -1,6 +1,6 @@
 [package]
 name = "agentmirror-desktop"
-version = "0.1.3"
+version = "0.1.4"
 description = "AgentMirror desktop client"
 authors = ["AgentMirror contributors"]
 license = "Apache-2.0"
