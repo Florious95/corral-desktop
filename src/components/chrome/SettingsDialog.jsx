@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
@@ -16,31 +16,15 @@ const COMMON_FONTS = [
   'Consolas, "Courier New", monospace',
   'monospace',
 ];
+const primaryFont = (font) => font.split(',')[0].trim().replace(/["']/g, '').toLowerCase();
 
-/**
- * 设置中心抽屉/弹窗（Issue #193, #195）
- * 支持配置终端外观（字体族、字号）与目录跟踪开关。
- */
-export default function SettingsDialog({
-  open,
-  settings,
-  onUpdateSettings,
-  onClose,
-}) {
-  const [fontFamily, setFontFamily] = useState(
-    settings?.['terminal.fontFamily'] || DEFAULT_FONT_FAMILY
-  );
-  const [fontSize, setFontSize] = useState(
-    settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE
-  );
-  const [fontSizeInput, setFontSizeInput] = useState(
-    String(settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE)
-  );
-  const [directoryTracking, setDirectoryTracking] = useState(
-    settings?.directoryTracking !== undefined
-      ? settings.directoryTracking
-      : DEFAULT_DIRECTORY_TRACKING
-  );
+/** 设置即时生效；数字输入保留未完成的中间态，失焦 / Enter 才夹逼。 */
+export default function SettingsDialog({ open, settings, onUpdateSettings, onClose }) {
+  const dialogRef = useRef(null);
+  const [fontFamily, setFontFamily] = useState(settings?.['terminal.fontFamily'] || DEFAULT_FONT_FAMILY);
+  const [fontSize, setFontSize] = useState(settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE);
+  const [fontSizeInput, setFontSizeInput] = useState(String(fontSize));
+  const [directoryTracking, setDirectoryTracking] = useState(settings?.directoryTracking ?? DEFAULT_DIRECTORY_TRACKING);
 
   useEffect(() => {
     if (!open) return;
@@ -48,159 +32,218 @@ export default function SettingsDialog({
     const size = settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE;
     setFontSize(size);
     setFontSizeInput(String(size));
-    setDirectoryTracking(
-      settings?.directoryTracking !== undefined
-        ? settings.directoryTracking
-        : DEFAULT_DIRECTORY_TRACKING
-    );
+    setDirectoryTracking(settings?.directoryTracking ?? DEFAULT_DIRECTORY_TRACKING);
   }, [open, settings]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
+    const previousFocus = document.activeElement;
+    dialogRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
-  const handleFontFamilyChange = (val) => {
-    setFontFamily(val);
-    saveSetting('terminal.fontFamily', val);
-    onUpdateSettings?.('terminal.fontFamily', val);
+  const handleFontFamilyChange = (value) => {
+    setFontFamily(value);
+    saveSetting('terminal.fontFamily', value);
+    onUpdateSettings?.('terminal.fontFamily', value);
   };
 
-  const commitFontSize = (valToCommit) => {
-    const raw = valToCommit !== undefined ? valToCommit : fontSizeInput;
-    const num = parseInt(raw, 10);
-    const clamped = Math.min(24, Math.max(10, Number.isNaN(num) ? DEFAULT_FONT_SIZE : num));
-    setFontSize(clamped);
-    setFontSizeInput(String(clamped));
-    saveSetting('terminal.fontSize', clamped);
-    onUpdateSettings?.('terminal.fontSize', clamped);
+  const commitFontSize = (value = fontSizeInput) => {
+    const size = clampFontSize(value);
+    setFontSize(size);
+    setFontSizeInput(String(size));
+    saveSetting('terminal.fontSize', size);
+    onUpdateSettings?.('terminal.fontSize', size);
   };
 
-  const handleFontSizeChange = (val) => {
-    setFontSizeInput(val);
-    const num = parseInt(val, 10);
-    // 若键入的数值已经在 [10, 24] 合法范围内（如直接微调或直接贴入 16），即时联动生效；
-    // 未完成的中间输入（如敲入单个数字 1）保留在输入框中，不提前夹逼打断输入
-    if (!Number.isNaN(num) && num >= 10 && num <= 24) {
-      setFontSize(num);
-      saveSetting('terminal.fontSize', num);
-      onUpdateSettings?.('terminal.fontSize', num);
+  const handleFontSizeChange = (value) => {
+    setFontSizeInput(value);
+    const size = parseInt(value, 10);
+    // “1”或空值仍可继续输入，不能提前变成 10 / 默认值。
+    if (!Number.isNaN(size) && size >= 10 && size <= 24) {
+      setFontSize(size);
+      saveSetting('terminal.fontSize', size);
+      onUpdateSettings?.('terminal.fontSize', size);
     }
   };
 
-  const handleTrackingChange = (checked) => {
-    setDirectoryTracking(checked);
-    saveSetting('directoryTracking', checked);
-    onUpdateSettings?.('directoryTracking', checked);
+  const handleDialogKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    } else if (event.key === 'Tab') {
+      const controls = dialogRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled)');
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
   };
 
   return (
     <>
       <div className="chr-scrim" onClick={onClose} />
       <div className="chr-dialog-pos">
-        <div className="chr-dialog settings-dialog" role="dialog" aria-modal="true" aria-label="设置">
-          <div className="chr-dialog-title">设置</div>
-          <div className="chr-dialog-sub">配置终端外观与工作区行为</div>
-
-          <section className="settings-section">
-            <h4 className="settings-section-title">终端外观 (Terminal Typography)</h4>
-
-            <label className="chr-label" htmlFor="setting-font-family">
-              字体族 (Font Family)
-            </label>
-            <input
-              id="setting-font-family"
-              name="terminal.fontFamily"
-              className="chr-input chr-setting-font-family"
-              aria-label="Terminal Font Family"
-              value={fontFamily}
-              onChange={(e) => handleFontFamilyChange(e.target.value)}
-              placeholder="如 Cascadia Code, JetBrains Mono, monospace"
-            />
-            <div className="settings-font-presets">
-              {COMMON_FONTS.map((font) => (
-                <button
-                  key={font}
-                  type="button"
-                  className="chr-btn-reset settings-preset-btn"
-                  onClick={() => handleFontFamilyChange(font)}
-                >
-                  {font.split(',')[0]}
-                </button>
-              ))}
+        <div
+          ref={dialogRef}
+          className="chr-dialog settings-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-title"
+          aria-describedby="settings-description"
+          tabIndex={-1}
+          onKeyDown={handleDialogKeyDown}
+        >
+          <header className="settings-header">
+            <div>
+              <h2 id="settings-title">设置</h2>
+              <p id="settings-description">微调终端外观，让工作区更顺手。</p>
             </div>
+            <button type="button" className="chr-btn-reset settings-close" aria-label="关闭设置" onClick={onClose}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="m4.5 4.5 7 7m0-7-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </header>
 
-            <label className="chr-label" htmlFor="setting-font-size" style={{ marginTop: 14 }}>
-              字号 (Font Size, 10px ~ 24px)
-            </label>
-            <div className="settings-font-size-row">
-              <input
-                id="setting-font-size"
-                name="terminal.fontSize"
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                className="chr-input chr-setting-font-size"
-                aria-label="Terminal Font Size"
-                value={fontSizeInput}
-                onChange={(e) => {
-                  const cleaned = e.target.value.replace(/[^0-9]/g, '');
-                  handleFontSizeChange(cleaned);
-                }}
-                onBlur={() => commitFontSize()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commitFontSize();
-                  } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    const num = parseInt(fontSizeInput || fontSize, 10);
-                    const next = Math.min(24, (Number.isNaN(num) ? DEFAULT_FONT_SIZE : num) + 1);
-                    commitFontSize(next);
-                  } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    const num = parseInt(fontSizeInput || fontSize, 10);
-                    const next = Math.max(10, (Number.isNaN(num) ? DEFAULT_FONT_SIZE : num) - 1);
-                    commitFontSize(next);
-                  }
-                }}
-              />
-              <span className="settings-unit">px</span>
-            </div>
-          </section>
-
-          <section className="settings-section" style={{ marginTop: 18 }}>
-            <h4 className="settings-section-title">侧边栏联动</h4>
-            <div className="settings-toggle-row">
-              <label className="settings-checkbox-label">
+          <div className="settings-body">
+            <section className="settings-section" aria-labelledby="settings-typography-title">
+              <h3 className="settings-section-title" id="settings-typography-title">终端外观</h3>
+              <div className="settings-card">
+                <div className="settings-field-heading">
+                  <span id="settings-font-label" className="settings-label">字体</span>
+                  <span className="settings-hint">使用本机已安装的字体</span>
+                </div>
+                <div className="settings-font-presets" role="group" aria-labelledby="settings-font-label">
+                  {COMMON_FONTS.map((font) => (
+                    <button
+                      key={font}
+                      type="button"
+                      className="chr-btn-reset settings-preset-btn"
+                      style={{ fontFamily: font }}
+                      aria-pressed={primaryFont(fontFamily || DEFAULT_FONT_FAMILY) === primaryFont(font)}
+                      onClick={() => handleFontFamilyChange(font)}
+                    >
+                      {font.split(',')[0]}
+                    </button>
+                  ))}
+                </div>
+                <label className="settings-custom-label" htmlFor="setting-font-family">自定义字体栈</label>
                 <input
-                  type="checkbox"
+                  id="setting-font-family"
+                  name="terminal.fontFamily"
+                  className="chr-input chr-setting-font-family"
+                  aria-label="Terminal Font Family"
+                  value={fontFamily}
+                  onChange={(event) => handleFontFamilyChange(event.target.value)}
+                  placeholder="如 Menlo, Monaco, monospace"
+                  spellCheck={false}
+                />
+
+                <div className="settings-size-field">
+                  <div className="settings-field-heading">
+                    <label className="settings-label" htmlFor="setting-font-size">字号</label>
+                    <span className="settings-hint">10–24 px</span>
+                  </div>
+                  <div className="settings-font-size-row">
+                    <input
+                      type="range"
+                      min="10"
+                      max="24"
+                      step="1"
+                      className="settings-size-slider"
+                      aria-label="终端字号滑块"
+                      value={fontSize}
+                      style={{ '--settings-range-progress': `${((fontSize - 10) / 14) * 100}%` }}
+                      onChange={(event) => commitFontSize(event.target.value)}
+                    />
+                    <div className="settings-stepper">
+                      <button type="button" className="chr-btn-reset settings-step" aria-label="减小字号" disabled={fontSize <= 10} onClick={() => commitFontSize(fontSize - 1)}>−</button>
+                      <input
+                        id="setting-font-size"
+                        name="terminal.fontSize"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="chr-setting-font-size"
+                        aria-label="Terminal Font Size"
+                        value={fontSizeInput}
+                        onChange={(event) => handleFontSizeChange(event.target.value.replace(/[^0-9]/g, ''))}
+                        onBlur={() => commitFontSize()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            commitFontSize();
+                          } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            const size = parseInt(fontSizeInput || fontSize, 10);
+                            commitFontSize((Number.isNaN(size) ? DEFAULT_FONT_SIZE : size) + (event.key === 'ArrowUp' ? 1 : -1));
+                          }
+                        }}
+                      />
+                      <span className="settings-unit">px</span>
+                      <button type="button" className="chr-btn-reset settings-step" aria-label="增大字号" disabled={fontSize >= 24} onClick={() => commitFontSize(fontSize + 1)}>+</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-preview" role="region" aria-label="终端字体预览">
+                  <div className="settings-preview-heading"><span>即时预览</span><span>{fontSize} px</span></div>
+                  <div className="settings-preview-sample" style={{ fontFamily: fontFamily || DEFAULT_FONT_FAMILY, fontSize }}>
+                    <span><span className="settings-preview-prompt" aria-hidden="true">❯ </span>Aa Bb 012345 · 清晰可见</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="settings-section" aria-labelledby="settings-workspace-title">
+              <h3 className="settings-section-title" id="settings-workspace-title">工作区行为</h3>
+              <div className="settings-card settings-tracking-card">
+                <div className="settings-tracking-copy">
+                  <label className="settings-label" htmlFor="setting-dir-tracking">目录跟踪</label>
+                  <p id="settings-tracking-description" className="settings-hint">切换 Agent 时，自动定位并展开左侧目录。</p>
+                </div>
+                <button
+                  type="button"
                   id="setting-dir-tracking"
                   name="directoryTracking"
-                  className="chr-setting-dir-tracking"
+                  className="chr-btn-reset settings-switch chr-setting-dir-tracking"
+                  role="switch"
                   aria-label="目录跟踪 (Directory Tracking)"
-                  checked={directoryTracking}
-                  onChange={(e) => handleTrackingChange(e.target.checked)}
-                />
-                <span className="settings-toggle-title">目录跟踪</span>
-              </label>
-              <div className="settings-toggle-desc">
-                当前选中的 CLI，左侧菜单自动跳转并展开对应目录
+                  aria-describedby="settings-tracking-description"
+                  aria-checked={directoryTracking}
+                  onClick={() => {
+                    const checked = !directoryTracking;
+                    setDirectoryTracking(checked);
+                    saveSetting('directoryTracking', checked);
+                    onUpdateSettings?.('directoryTracking', checked);
+                  }}
+                >
+                  <span className="settings-switch-knob" />
+                </button>
               </div>
-            </div>
-          </section>
-
-          <div className="chr-dialog-actions" style={{ marginTop: 22 }}>
-            <button type="button" className="chr-btn chr-btn-primary" onClick={onClose}>
-              完成
-            </button>
+            </section>
           </div>
+
+          <footer className="settings-footer">
+            <span className="settings-save-note">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              修改即时保存
+            </span>
+            <button type="button" className="chr-btn-reset chr-btn chr-btn-primary settings-done" onClick={onClose}>完成</button>
+          </footer>
         </div>
       </div>
     </>
