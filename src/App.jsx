@@ -410,8 +410,8 @@ export default function App({ seedDevices } = {}) {
 
   const agentByKeyRef = useRef(agentByKey);
   agentByKeyRef.current = agentByKey;
-  const prevActiveKeyRef = useRef(activeKey);
-  const prevTrackingRef = useRef(settings.directoryTracking);
+  const prevActiveKeyRef = useRef(null);
+  const prevTrackingRef = useRef(false);
 
   // Issue #195 & #204: 目录跟踪 (Directory Tracking)
   // 仅在活跃会话跃迁变更 (activeKey 发生变化) 或设置开关刚被手动打开时跟踪目录；

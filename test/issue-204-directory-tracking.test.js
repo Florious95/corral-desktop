@@ -10,8 +10,8 @@ test('#204 App.jsx source contract: directory tracking only triggers on activeKe
   const appSource = await readFile(join(root, 'src/App.jsx'), 'utf8');
 
   // Verify ref declarations exist
-  assert.match(appSource, /const\s+prevActiveKeyRef\s*=\s*useRef\s*\(\s*activeKey\s*\);/, 'prevActiveKeyRef must be initialized with activeKey');
-  assert.match(appSource, /const\s+prevTrackingRef\s*=\s*useRef\s*\(\s*settings\.directoryTracking\s*\);/, 'prevTrackingRef must track settings.directoryTracking');
+  assert.match(appSource, /const\s+prevActiveKeyRef\s*=\s*useRef\s*\(\s*null\s*\);/, 'prevActiveKeyRef must be initialized with null');
+  assert.match(appSource, /const\s+prevTrackingRef\s*=\s*useRef\s*\(\s*false\s*\);/, 'prevTrackingRef must be initialized with false');
 
   // Verify effect dependencies
   const trackingEffect = appSource.match(/Issue #195[\s\S]*?},\s*\[([^\]]+)\]\);/);
@@ -40,9 +40,9 @@ test('#204 behavioral simulation: manual directory selection is preserved across
     ['agent-2', { key: 'agent-2', spaceKey: 'space-B', title: 'Agent B' }],
   ]);
 
-  // Ref holders
-  const prevActiveKeyRef = { current: activeKey };
-  const prevTrackingRef = { current: directoryTracking };
+  // Ref holders initialized to null and false as per Tester requirement
+  const prevActiveKeyRef = { current: null };
+  const prevTrackingRef = { current: false };
   const agentByKeyRef = { current: agentCatalog };
 
   function runDirectoryTrackingEffect() {
@@ -65,10 +65,9 @@ test('#204 behavioral simulation: manual directory selection is preserved across
     scrollTarget = currentAgent.spaceKey;
   }
 
-  // Initial render with tracking enabled: activeKey is 'agent-1', prevActiveKeyRef is 'agent-1'
+  // Initial render with tracking enabled: activeKey is 'agent-1', prevActiveKeyRef is null
   runDirectoryTrackingEffect();
-  // On mount with prevActiveKeyRef = useRef(activeKey), it doesn't overwrite initial selected
-  assert.equal(selected, 'all');
+  assert.equal(selected, 'space-A', 'Initial mount with tracking enabled tracks to active agent directory space-A');
 
   // 1. User switches tab to 'agent-2'
   activeKey = 'agent-2';
