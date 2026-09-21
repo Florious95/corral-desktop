@@ -156,6 +156,25 @@ fn install_script() -> String {
 src="$1"
 dst="$HOME/.local/bin/{AGENTMIRRORD_NAME}"
 providers="$HOME/tools/nodeprobe/fixtures/providers.tsv"
+stop_service() {{
+    name="$1"
+    if ! pgrep -x "$name" >/dev/null 2>&1; then
+        return 0
+    fi
+    pkill -TERM -x "$name" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if ! pgrep -x "$name" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    pkill -KILL -x "$name" 2>/dev/null || true
+    ! pgrep -x "$name" >/dev/null 2>&1
+}}
+# Stop both generations before replacing the executable. The legacy name can
+# otherwise keep port 9900 occupied when the new daemon is started.
+stop_service agentmirrord
+stop_service corral-core
 titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
 mkdir -p "$(dirname "$dst")" "$(dirname "$providers")"
 service_tmp="$dst.tmp.$$"
@@ -487,6 +506,22 @@ const SERVICE_START_SCRIPT: &str =
     "exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
 
 #[cfg(any(windows, test))]
+const SERVICE_STOP_SCRIPT: &str = r#"set -eu
+name="$1"
+if pgrep -x "$name" >/dev/null 2>&1; then
+    pkill -TERM -x "$name" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if ! pgrep -x "$name" >/dev/null 2>&1; then
+            exit 0
+        fi
+        sleep 0.1
+    done
+    pkill -KILL -x "$name" 2>/dev/null || true
+fi
+! pgrep -x "$name" >/dev/null 2>&1
+"#;
+
+#[cfg(any(windows, test))]
 fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a str) -> [&'a str; 9] {
     [
         "-d",
@@ -498,6 +533,20 @@ fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a st
         "--",
         service,
         token,
+    ]
+}
+
+#[cfg(any(windows, test))]
+fn service_stop_args<'a>(distribution: &'a str, service: &'a str) -> [&'a str; 8] {
+    [
+        "-d",
+        distribution,
+        "-e",
+        "sh",
+        "-lc",
+        SERVICE_STOP_SCRIPT,
+        "--",
+        service,
     ]
 }
 
@@ -613,12 +662,16 @@ fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), Stri
 /// The login shell loads the user's PATH so binaries installed under
 /// `~/.local/bin` are resolvable; service and token stay positional arguments.
 #[tauri::command]
-pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
+pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
     {
         let Some(service) = service_binary(service_cmd.as_deref()) else {
             return Err("unsupported_service_command".to_string());
         };
+        // A direct start command must also self-heal upgrades. The frontend
+        // invokes install explicitly for visible progress, while this second
+        // guard covers callers that start the daemon directly.
+        install_wsl_service_windows(&app)?;
         let list_output = match run_wsl(&["-l", "-v"]) {
             Ok(output) if output.status.success() => output,
             Ok(_) | Err(_) => return Err("ubuntu_not_installed".to_string()),
@@ -632,6 +685,15 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
             ));
         }
         let token = ensure_wsl_service_token(&ubuntu.name)?;
+
+        // Always replace a possibly stale process before launching. The
+        // frontend also installs the bundled binary on every startup, but
+        // keeping this stop here makes direct command invocations safe too.
+        let stop = run_wsl(&service_stop_args(&ubuntu.name, service))
+            .map_err(|error| format!("wsl_service_stop_failed: {error}"))?;
+        if !stop.status.success() {
+            return Err("wsl_service_stop_failed".to_string());
+        }
 
         // Keep the daemon in the foreground inside a detached wsl.exe process.
         // WSL therefore keeps the Linux session alive after this function and
@@ -655,7 +717,7 @@ pub fn start_wsl_service(service_cmd: Option<String>) -> Result<(), String> {
 
     #[cfg(not(windows))]
     {
-        let _ = service_cmd;
+        let _ = (app, service_cmd);
         Err("unsupported_platform: WSL2 is available on Windows only".to_string())
     }
 }
@@ -665,8 +727,8 @@ mod tests {
     use super::{
         find_ubuntu_distribution, first_ip, generate_service_token, install_script,
         normalize_service_token, parse_wsl_table, service_binary, service_probe_command,
-        service_start_args, WslEnvironmentStatus, RUNNING_SERVICE_TOKEN_SCRIPT,
-        SERVICE_START_SCRIPT, SYSTEM_ENV_TOKEN_SCRIPT,
+        service_start_args, service_stop_args, WslEnvironmentStatus, RUNNING_SERVICE_TOKEN_SCRIPT,
+        SERVICE_START_SCRIPT, SERVICE_STOP_SCRIPT, SYSTEM_ENV_TOKEN_SCRIPT,
     };
 
     #[test]
@@ -714,6 +776,9 @@ mod tests {
         let script = install_script();
         assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
         assert!(script.contains("mv -f -- \"$service_tmp\" \"$dst\""));
+        assert!(script.contains("pkill -TERM -x \"$name\""));
+        assert!(script.contains("stop_service agentmirrord"));
+        assert!(script.contains("stop_service corral-core"));
         assert!(script.contains("cursor-agent\tcursor\tCursor\tpath-segment"));
         assert!(script.contains("pi\tpi\tPi"));
         assert!(script.contains("touch \"$titles\""));
@@ -753,6 +818,21 @@ mod tests {
                 "TOKEN123",
             ]
         );
+        assert_eq!(
+            service_stop_args("Ubuntu", "agentmirrord"),
+            [
+                "-d",
+                "Ubuntu",
+                "-e",
+                "sh",
+                "-lc",
+                SERVICE_STOP_SCRIPT,
+                "--",
+                "agentmirrord",
+            ]
+        );
+        assert!(SERVICE_STOP_SCRIPT.contains("pkill -TERM -x \"$name\""));
+        assert!(SERVICE_STOP_SCRIPT.contains("pkill -KILL -x \"$name\""));
     }
 
     #[test]

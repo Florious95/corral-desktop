@@ -261,10 +261,12 @@ test('App.jsx integrates WSL auto-healing state machine, watchdog timer, and pre
   assert.match(appJsx, /const \[wslState, setWslState\] = useState\('idle'\)/);
   assert.match(appJsx, /const \[wslEnvStatus, setWslEnvStatus\] = useState\(null\)/);
 
-  // 2. 环境探测与全自动开箱即用分支（未安装 service 自动切 installing 并调用 installService，安装后切 starting 启动服务）
+  // 2. 环境探测与全自动开箱即用分支（每次启动都覆盖安装并重启，避免复用旧 daemon）
   assert.match(appJsx, /const checkAndHealWsl = useCallback/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.checkEnvironment\(\)/);
-  assert.match(appJsx, /if \(!status\.service_installed\) {\s*setWslState\('installing'\);/);
+  assert.match(appJsx, /Always reinstall the bundled daemon/);
+  assert.match(appJsx, /setWslState\('installing'\);/);
+  assert.match(appJsx, /status\.service_running = false/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.installService\(\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.startService\('agentmirrord'\)/);
 
@@ -301,20 +303,17 @@ test('WSL auto-healing state machine automatically installs service when missing
       currentState = 'unready';
       return;
     }
-    if (!status.service_installed) {
-      currentState = 'installing';
-      installServiceCalled = true;
-      if (shouldFailInstall) {
-        currentState = 'error';
-        currentError = '安装 WSL 会话服务失败: bundled binary not found';
-        return;
-      }
-      status.service_installed = true;
+    currentState = 'installing';
+    installServiceCalled = true;
+    if (shouldFailInstall) {
+      currentState = 'error';
+      currentError = '安装 WSL 会话服务失败: bundled binary not found';
+      return;
     }
-    if (!status.service_running) {
-      currentState = 'starting';
-      serviceStartedCalled = true;
-    }
+    status.service_installed = true;
+    status.service_running = false;
+    currentState = 'starting';
+    serviceStartedCalled = true;
   };
 
   // 场景 A: service_installed 为 false 时，自动进入 installing 并触发 installService，完成后推进到 starting
@@ -349,7 +348,7 @@ test('WSL auto-healing state machine automatically installs service when missing
   assert.match(currentError, /安装 WSL 会话服务失败/);
   assert.equal(serviceStartedCalled, false);
 
-  // 场景 C: service_installed 为 true 时，直接进入 starting 并尝试启动
+  // 场景 C: 已安装且正在运行的旧 daemon 也必须覆盖安装并重启
   installServiceCalled = false;
   serviceStartedCalled = false;
   await mockCheckAndHeal({
@@ -357,9 +356,9 @@ test('WSL auto-healing state machine automatically installs service when missing
     ubuntu_installed: true,
     tmux_installed: true,
     service_installed: true,
-    service_running: false,
+    service_running: true,
   });
-  assert.equal(installServiceCalled, false);
+  assert.equal(installServiceCalled, true);
   assert.equal(currentState, 'starting');
   assert.equal(serviceStartedCalled, true);
 

@@ -1,6 +1,6 @@
 {
   "name": "agentmirror-desktop",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "AgentMirror macOS desktop client — mirrors tmux-hosted Agent CLI sessions over WebSocket (protocol v1)",

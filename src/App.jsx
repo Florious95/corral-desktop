@@ -495,41 +495,38 @@ export default function App({ seedDevices } = {}) {
         setWslState('unready');
         return;
       }
-      if (!status.service_installed) {
-        setWslState('installing');
+      // Always reinstall the bundled daemon. `service_installed` only tells us
+      // that some binary exists; it cannot prove that it matches this app
+      // version. The installer atomically replaces it and stops old daemon
+      // generations, so upgrades self-heal without a manual delete.
+      setWslState('installing');
+      try {
+        await nativeCapabilities.wsl.installService();
+        status.service_installed = true;
+        status.service_running = false;
+        setWslEnvStatus((prev) => ({
+          ...(prev || status),
+          service_installed: true,
+          service_running: false,
+        }));
+      } catch (err) {
+        setWslState('error');
+        setWslError(err?.message || '安装 WSL 会话服务失败');
+        return;
+      }
+      setWslState('starting');
+      try {
+        await nativeCapabilities.wsl.startService('agentmirrord');
+      } catch (err) {
         try {
-          await nativeCapabilities.wsl.installService();
-          status.service_installed = true;
-          setWslEnvStatus((prev) => ({ ...(prev || status), service_installed: true }));
-        } catch (err) {
+          await nativeCapabilities.wsl.startService('corral-core');
+        } catch (e2) {
           setWslState('error');
-          setWslError(err?.message || '安装 WSL 会话服务失败');
+          setWslError(e2?.message || '无法启动会话服务');
           return;
         }
       }
-      if (!status.service_running) {
-        setWslState('starting');
-        try {
-          await nativeCapabilities.wsl.startService('agentmirrord');
-        } catch (err) {
-          try {
-            await nativeCapabilities.wsl.startService('corral-core');
-          } catch (e2) {
-            setWslState('error');
-            setWslError(e2?.message || '无法启动会话服务');
-            return;
-          }
-        }
-        await syncLocalTokenAndConnect();
-      } else {
-        setWslState('starting');
-        const ok = await syncLocalTokenAndConnect();
-        if (!ok) {
-          setWslState('error');
-          setWslError('无法获取 WSL 会话服务配对令牌，请检查 ~/.config/agentmirror/token');
-          return;
-        }
-      }
+      await syncLocalTokenAndConnect();
     } catch (err) {
       setWslState('error');
       setWslError(err?.message || 'WSL 检测异常');
