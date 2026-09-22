@@ -16,7 +16,7 @@ const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
 #[cfg(windows)]
 const NODEPROBE_RESOURCE: &str = "resources/nodeprobe-linux-amd64";
 #[cfg(any(windows, test))]
-const NODEPROBE_SHA256: &str = "b9b869f8d6cfeafc101f95a284c406cd7c3071efee3d8996808a7815c03bd7ef";
+const NODEPROBE_SHA256: &str = "61d6dd99e7d7135e20b885b00724fb1359c1643c634857702239a092faa4e958";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
 // The bundle revision is part of the WSL marker so upgrading the embedded
 // daemon cannot silently reuse a same-semver binary without /pair/whoami.
