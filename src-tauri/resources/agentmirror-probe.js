@@ -1,6 +1,6 @@
-// AgentMirror Pi activity probe.
-// Installed by the desktop lifecycle into ~/.pi/agent/plugins/ and the
-// standard ~/.pi/agent/extensions/ discovery path.
+// Pi 0.84.4 extension: publish one atomic, per-process lifecycle record.
+// Load with: pi --extension /path/to/nodeprobe-pi-activity.js
+// Set NODEPROBE_PI_ACTIVITY_DIR to a private local directory shared with nodeprobe.
 
 import { createServer } from "node:net";
 import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -14,11 +14,27 @@ const seat = process.env.NODEPROBE_PI_SEAT || String(pid);
 const path = dir ? join(dir, `${pid}.json`) : undefined;
 const socketPath = dir ? join(dir, `${pid}.sock`) : undefined;
 const schemaVersion = 2;
-let instanceId = dir ? randomUUID() : undefined;
-let activity = "idle";
-let sessionName;
-let heartbeat;
-let server;
+
+// Pi can discover the same extension more than once in one process. Module
+// scope is not a singleton in that case (for example, a query-string import
+// or a duplicate auto-discovery path evaluates this file twice). Keep channel
+// ownership in the process-global registry so one PID can have one listener.
+const registryKey = Symbol.for("agentmirror.nodeprobe.pi.activity.channels");
+const registry = globalThis[registryKey] || (globalThis[registryKey] = new Map());
+const stateKey = `${pid}\0${dir || ""}`;
+let state = registry.get(stateKey);
+if (!state) {
+  state = {
+    instanceId: dir ? randomUUID() : undefined,
+    activity: "idle",
+    sessionName: undefined,
+    heartbeat: undefined,
+    server: undefined,
+    startPromise: undefined,
+    stopPromise: undefined,
+  };
+  registry.set(stateKey, state);
+}
 
 function currentRecord() {
   return {
@@ -26,11 +42,11 @@ function currentRecord() {
     provider: "pi",
     pid,
     seat,
-    activity,
-    session_name: sessionName ?? null,
+    activity: state.activity,
+    session_name: state.sessionName ?? null,
     updated_at_ms: Date.now(),
     socket_path: socketPath,
-    instance_id: instanceId,
+    instance_id: state.instanceId,
   };
 }
 
@@ -43,59 +59,108 @@ function publish() {
   renameSync(tmp, path);
 }
 
-function startChannel() {
-  if (!socketPath || server) return;
-  instanceId = randomUUID();
-  try {
-    unlinkSync(socketPath);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  server = createServer((socket) => {
-    socket.on("error", () => {});
-    let input = "";
-    socket.on("data", (chunk) => {
-      input += chunk.toString();
-      const newline = input.indexOf("\n");
-      if (newline === -1) return;
-      try {
-        const request = JSON.parse(input.slice(0, newline));
-        if (typeof request.challenge !== "string") return socket.destroy();
-        socket.end(JSON.stringify({ challenge: request.challenge, ...currentRecord() }) + "\n");
-      } catch {
-        socket.destroy();
-      }
+async function startChannel() {
+  if (!socketPath) return;
+  if (state.startPromise) return state.startPromise;
+  // A restart must finish the old listener before unlinking/rebinding the
+  // pathname. Otherwise a second server can retain an unlinked listener
+  // while a new server owns the visible pathname.
+  if (state.stopPromise) await state.stopPromise;
+  if (state.server) return;
+  if (state.startPromise) return state.startPromise;
+
+  state.startPromise = (async () => {
+    try {
+      unlinkSync(socketPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+
+    const candidate = createServer((socket) => {
+      socket.on("error", () => {});
+      let input = "";
+      socket.on("data", (chunk) => {
+        input += chunk.toString();
+        const newline = input.indexOf("\n");
+        if (newline === -1) return;
+        try {
+          const request = JSON.parse(input.slice(0, newline));
+          if (typeof request.challenge !== "string") return socket.destroy();
+          socket.end(JSON.stringify({ challenge: request.challenge, ...currentRecord() }) + "\n");
+        } catch {
+          socket.destroy();
+        }
+      });
     });
+    state.server = candidate;
+    state.instanceId = randomUUID();
+    await new Promise((resolve, reject) => {
+      let ready = false;
+      candidate.on("error", (error) => {
+        if (!ready) {
+          state.server = undefined;
+          reject(error);
+        }
+      });
+      candidate.listen(socketPath, () => {
+        try {
+          chmodSync(socketPath, 0o600);
+          ready = true;
+          resolve();
+        } catch (error) {
+          state.server = undefined;
+          candidate.close(() => reject(error));
+        }
+      });
+    });
+  })().finally(() => {
+    state.startPromise = undefined;
   });
-  server.on("error", () => {});
-  server.listen(socketPath, () => chmodSync(socketPath, 0o600));
+  return state.startPromise;
 }
 
 async function stopChannel() {
-  if (!server) return;
-  await new Promise((resolve) => server.close(resolve));
-  server = undefined;
-  try {
-    if (socketPath) unlinkSync(socketPath);
-  } catch {}
+  if (state.stopPromise) return state.stopPromise;
+  state.stopPromise = (async () => {
+    if (state.startPromise) {
+      try {
+        await state.startPromise;
+      } catch {}
+    }
+    const active = state.server;
+    if (!active) {
+      try {
+        unlinkSync(socketPath);
+      } catch {}
+      return;
+    }
+    await new Promise((resolve) => active.close(resolve));
+    if (state.server === active) state.server = undefined;
+    try {
+      unlinkSync(socketPath);
+    } catch {}
+  })().finally(() => {
+    state.stopPromise = undefined;
+  });
+  return state.stopPromise;
 }
 
 export default function (pi) {
   pi.on("session_start", async (_event, ctx) => {
-    startChannel();
-    sessionName = ctx.sessionManager.getSessionName();
-    activity = "idle";
+    await startChannel();
+    state.sessionName = ctx.sessionManager.getSessionName();
+    state.activity = "idle";
     publish();
-    if (!heartbeat) heartbeat = setInterval(publish, 1000).unref();
+    if (!state.heartbeat) state.heartbeat = setInterval(publish, 1000).unref();
   });
 
   pi.on("session_info_changed", async (event) => {
-    sessionName = event.name;
+    state.sessionName = event.name;
     publish();
   });
 
   pi.on("agent_start", async () => {
-    activity = "working";
+    state.activity = "working";
     publish();
   });
 
@@ -105,7 +170,7 @@ export default function (pi) {
   });
 
   pi.on("tool_execution_start", async () => {
-    activity = "working";
+    state.activity = "working";
     publish();
   });
 
@@ -114,14 +179,14 @@ export default function (pi) {
   });
 
   pi.on("agent_settled", async () => {
-    activity = "idle";
+    state.activity = "idle";
     publish();
   });
 
   pi.on("session_shutdown", async () => {
-    if (heartbeat) clearInterval(heartbeat);
-    heartbeat = undefined;
-    activity = "idle";
+    if (state.heartbeat) clearInterval(state.heartbeat);
+    state.heartbeat = undefined;
+    state.activity = "idle";
     publish();
     await stopChannel();
     try {
