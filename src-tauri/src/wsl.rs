@@ -486,8 +486,16 @@ exit 1
 "#;
 
 #[cfg(windows)]
+fn run_wsl_as_root(distribution: &str, script: &str) -> Result<std::process::Output, String> {
+    // WSL's configured default user is not guaranteed to own the daemon's
+    // 0600 token file. Read inside the distro as root and return only the
+    // bounded token bytes to the caller.
+    run_wsl(&["-d", distribution, "-u", "root", "-e", "sh", "-lc", script])
+}
+
+#[cfg(windows)]
 fn read_token_from_wsl_script(distribution: &str, script: &str) -> Option<String> {
-    run_wsl(&["-d", distribution, "-e", "sh", "-c", script])
+    run_wsl_as_root(distribution, script)
         .ok()
         .filter(|output| output.status.success())
         .and_then(|output| normalize_service_token(&output.stdout).ok())
@@ -519,15 +527,8 @@ pub fn read_wsl_service_token() -> Result<String, String> {
         }
 
         // The normal client-owned token file remains the next source.
-        let token_file = run_wsl(&[
-            "-d",
-            &ubuntu.name,
-            "-e",
-            "sh",
-            "-lc",
-            "test -f \"$HOME/.config/agentmirror/token\" && head -c 257 \"$HOME/.config/agentmirror/token\"",
-        ])
-        .map_err(|_| "token_file_unavailable".to_string())?;
+        let token_file = run_wsl_as_root(&ubuntu.name, TOKEN_READ_SCRIPT)
+            .map_err(|_| "token_file_unavailable".to_string())?;
         if token_file.status.success() {
             if let Ok(token) = normalize_service_token(&token_file.stdout) {
                 return Ok(token);
@@ -605,9 +606,34 @@ fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a st
     ]
 }
 
-#[cfg(windows)]
-const TOKEN_READ_SCRIPT: &str =
-    "if test -f \"$HOME/.config/agentmirror/token\"; then head -c 257 \"$HOME/.config/agentmirror/token\"; fi";
+#[cfg(any(windows, test))]
+const TOKEN_READ_SCRIPT: &str = r#"set -eu
+read_token() {
+    path="$1"
+    if test -s "$path"; then
+        head -c 257 "$path"
+        exit 0
+    fi
+}
+
+# Prefer the configured HOME, then the home of the running daemon's UID.
+read_token "$HOME/.config/agentmirror/token"
+for name in agentmirrord corral-core; do
+    for pid in $(pgrep -x "$name" 2>/dev/null || true); do
+        uid=$(awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null || true)
+        home=$(awk -F: -v uid="$uid" '$3 == uid {print $6; exit}' /etc/passwd 2>/dev/null || true)
+        test -n "$home" || continue
+        read_token "$home/.config/agentmirror/token"
+    done
+done
+
+# Finally cover distros whose service user is not present in /proc anymore.
+read_token "/root/.config/agentmirror/token"
+for path in /home/*/.config/agentmirror/token; do
+    read_token "$path"
+done
+exit 1
+"#;
 
 #[cfg(windows)]
 const TOKEN_WRITE_SCRIPT: &str = r#"set -eu
@@ -625,7 +651,7 @@ test -s "$path"
 
 #[cfg(windows)]
 fn read_wsl_service_token_for_start(distribution: &str) -> Result<Option<String>, String> {
-    let output = run_wsl(&["-d", distribution, "-e", "sh", "-lc", TOKEN_READ_SCRIPT])
+    let output = run_wsl_as_root(distribution, TOKEN_READ_SCRIPT)
         .map_err(|_| "token_file_unavailable".to_string())?;
     if !output.status.success() {
         return Err("token_file_unavailable".to_string());
@@ -717,7 +743,7 @@ fn wait_for_service_ready() -> Result<(), String> {
 
 #[cfg(windows)]
 fn service_token_ready(distribution: &str, expected: &str) -> bool {
-    let output = run_wsl(&["-d", distribution, "-e", "sh", "-lc", TOKEN_READ_SCRIPT]);
+    let output = run_wsl_as_root(distribution, TOKEN_READ_SCRIPT);
     output
         .ok()
         .filter(|output| output.status.success())
@@ -812,7 +838,7 @@ mod tests {
         install_script, normalize_service_token, parse_wsl_table, service_binary,
         service_probe_command, service_start_args, WslEnvironmentStatus, CREATE_NO_WINDOW,
         PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
-        SYSTEM_ENV_TOKEN_SCRIPT,
+        SYSTEM_ENV_TOKEN_SCRIPT, TOKEN_READ_SCRIPT,
     };
 
     #[test]
@@ -914,6 +940,14 @@ mod tests {
         assert!(RUNNING_SERVICE_TOKEN_SCRIPT.contains("head -c 257"));
         assert!(SYSTEM_ENV_TOKEN_SCRIPT.contains("/etc/agentmirror/*.env"));
         assert!(SYSTEM_ENV_TOKEN_SCRIPT.contains("AGENTMIRROR_TOKEN="));
+        assert!(TOKEN_READ_SCRIPT.contains("$HOME/.config/agentmirror/token"));
+        assert!(TOKEN_READ_SCRIPT.contains("/proc/$pid/status"));
+        assert!(TOKEN_READ_SCRIPT.contains("/home/*/.config/agentmirror/token"));
+        let syntax = std::process::Command::new("sh")
+            .args(["-n", "-c", TOKEN_READ_SCRIPT])
+            .status()
+            .expect("shell is available");
+        assert!(syntax.success(), "token read script must parse");
     }
 
     #[test]
