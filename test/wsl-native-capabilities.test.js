@@ -267,6 +267,7 @@ test('App.jsx integrates fast, idempotent WSL startup and single-flight connecti
   assert.match(appJsx, /if \(!status\.service_installed\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.installService\(\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.startService\('agentmirrord'\)/);
+  assert.match(appJsx, /if \(nativeCapabilities\.platform !== 'windows'\) dm\.connectAll\(\);/);
   assert.match(appJsx, /wslStartPromiseRef/);
   assert.doesNotMatch(appJsx, /Always reinstall the bundled daemon/);
   assert.doesNotMatch(appJsx, /startService\('corral-core'\)/);

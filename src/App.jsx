@@ -283,7 +283,10 @@ export default function App({ seedDevices } = {}) {
   useEffect(() => {
     if (started.current) return; // StrictMode 双挂载不重连
     started.current = true;
-    dm.connectAll();
+    // Windows local auth is provisioned by the WSL bootstrap below. Do not
+    // let an empty local token create the anonymous compatibility client: it
+    // opens the socket and sends `list` before the daemon can authenticate.
+    if (nativeCapabilities.platform !== 'windows') dm.connectAll();
     setDevices(dm.devices);
     setWorkspaces(dm.workspaces);
   }, [dm]);
