@@ -545,7 +545,10 @@ export default function App({ seedDevices } = {}) {
       try {
         const status = await nativeCapabilities.wsl.checkEnvironment();
         setWslEnvStatus(status);
-        if (!status.wsl_installed || !status.ubuntu_installed || !status.tmux_installed) {
+        // WSL/Ubuntu are hard prerequisites; tmux is not a reason to stop
+        // before the daemon/token path runs. The bundled daemon owns the
+        // session dependency and the native start path reports its real error.
+        if (!status.wsl_installed || !status.ubuntu_installed) {
           setWslState('unready');
           return false;
         }

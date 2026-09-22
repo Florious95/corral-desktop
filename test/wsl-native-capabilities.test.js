@@ -265,6 +265,7 @@ test('App.jsx integrates fast, idempotent WSL startup and single-flight connecti
   assert.match(appJsx, /const checkAndHealWsl = useCallback/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.checkEnvironment\(\)/);
   assert.match(appJsx, /if \(!status\.service_installed\)/);
+  assert.doesNotMatch(appJsx, /!status\.tmux_installed/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.installService\(\)/);
   assert.match(appJsx, /nativeCapabilities\.wsl\.startService\('agentmirrord'\)/);
   assert.match(appJsx, /if \(nativeCapabilities\.platform !== 'windows'\) dm\.connectAll\(\);/);
