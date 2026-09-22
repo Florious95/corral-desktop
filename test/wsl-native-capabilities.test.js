@@ -134,6 +134,8 @@ test('native token bridge prefers the registered fresh-install pairing command',
   assert.match(source, /invoke\('get_wsl_pairing_token'\)/);
   assert.match(source, /invoke\('read_wsl_service_token'\)/);
   assert.match(rust, /pub fn get_wsl_pairing_token\(\)/);
+  assert.match(rust, /let verify_script = format!\(/);
+  assert.doesNotMatch(rust, /let verify = run_wsl\(\[[\s\S]*\{AGENTMIRRORD_VERSION\}/);
   assert.match(commands, /wsl::get_wsl_pairing_token/);
 });
 
