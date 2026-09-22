@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import {
@@ -127,6 +128,15 @@ test('nativeCapabilities.wsl.readServiceToken returns null in mock environment',
   assert.equal(token, null);
 });
 
+test('bundles the Linux nodeprobe capability binary with its accepted digest', async () => {
+  const resource = await readFile(new URL('../src-tauri/resources/nodeprobe-linux-amd64', import.meta.url));
+  assert.equal(resource.byteLength, 642216);
+  assert.equal(
+    createHash('sha256').update(resource).digest('hex'),
+    '3db0975d4580c3b00b9a43647f52d2aab94996891da65ae77b75d09c903606b0'
+  );
+});
+
 test('native token bridge prefers the registered fresh-install pairing command', async () => {
   const source = await readFile(new URL('../src/core/nativeCapabilities.js', import.meta.url), 'utf8');
   const rust = await readFile(new URL('../src-tauri/src/wsl.rs', import.meta.url), 'utf8');
@@ -135,6 +145,8 @@ test('native token bridge prefers the registered fresh-install pairing command',
   assert.match(source, /invoke\('read_wsl_service_token'\)/);
   assert.match(rust, /pub fn get_wsl_pairing_token\(\)/);
   assert.match(rust, /let verify_script = format!\(/);
+  assert.ok(rust.includes('test -x \\\"$HOME/.local/bin/nodeprobe\\\"'));
+  assert.match(rust, /NODEPROBE_SHA256/);
   assert.doesNotMatch(rust, /let verify = run_wsl\(\[[\s\S]*\{AGENTMIRRORD_VERSION\}/);
   assert.match(commands, /wsl::get_wsl_pairing_token/);
 });
