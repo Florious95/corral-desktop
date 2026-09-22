@@ -13,6 +13,10 @@ use tauri::{path::BaseDirectory, Manager};
 
 #[cfg(windows)]
 const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
+#[cfg(windows)]
+const NODEPROBE_RESOURCE: &str = "resources/nodeprobe-linux-amd64";
+#[cfg(any(windows, test))]
+const NODEPROBE_SHA256: &str = "3db0975d4580c3b00b9a43647f52d2aab94996891da65ae77b75d09c903606b0";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
 // The bundle revision is part of the WSL marker so upgrading the embedded
 // daemon cannot silently reuse a same-semver binary without /pair/whoami.
@@ -166,7 +170,9 @@ fn install_script() -> String {
     format!(
         r#"set -eu
 src="$1"
+nodeprobe_src="$2"
 dst="$HOME/.local/bin/{AGENTMIRRORD_NAME}"
+nodeprobe_dst="$HOME/.local/bin/nodeprobe"
 version_file="$dst.version"
 providers="$HOME/tools/nodeprobe/fixtures/providers.tsv"
 titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
@@ -179,6 +185,8 @@ extension="$extensions_dir/agentmirror-probe.js"
 if test -x "$dst" \
     && test -f "$version_file" \
     && test "$(cat "$version_file")" = "{AGENTMIRRORD_VERSION}" \
+    && test -x "$nodeprobe_dst" \
+    && test "$(sha256sum "$nodeprobe_dst" | awk '{{print $1}}')" = "{NODEPROBE_SHA256}" \
     && test -s "$providers" \
     && test -f "$titles" \
     && test -f "$probe" \
@@ -207,13 +215,16 @@ stop_service corral-core
 mkdir -p "$(dirname "$dst")" "$(dirname "$providers")" "$probe_dir" "$extensions_dir"
 chmod 0755 "$HOME/.pi" "$HOME/.pi/agent" "$HOME/.pi/agent/plugins" "$probe_dir" "$extensions_dir"
 service_tmp="$dst.tmp.$$"
+nodeprobe_tmp="$nodeprobe_dst.tmp.$$"
 providers_tmp="$providers.tmp.$$"
 probe_tmp="$probe.tmp.$$"
 extension_tmp="$extension.tmp.$$"
 version_tmp="$version_file.tmp.$$"
-trap 'rm -f "$service_tmp" "$providers_tmp" "$probe_tmp" "$extension_tmp" "$version_tmp"' EXIT
+trap 'rm -f "$service_tmp" "$nodeprobe_tmp" "$providers_tmp" "$probe_tmp" "$extension_tmp" "$version_tmp"' EXIT
 install -m 0755 -- "$src" "$service_tmp"
 mv -f -- "$service_tmp" "$dst"
+install -m 0755 -- "$nodeprobe_src" "$nodeprobe_tmp"
+mv -f -- "$nodeprobe_tmp" "$nodeprobe_dst"
 printf '%s\n' "{AGENTMIRRORD_VERSION}" > "$version_tmp"
 chmod 0600 "$version_tmp"
 mv -f -- "$version_tmp" "$version_file"
@@ -230,6 +241,7 @@ test -s "$extension_tmp"
 chmod 0644 "$extension_tmp"
 mv -f -- "$extension_tmp" "$extension"
 test -x "$dst"
+test -x "$nodeprobe_dst"
 test -s "$providers"
 test -f "$titles"
 test -d "$probe_dir"
@@ -280,8 +292,15 @@ fn install_wsl_service_windows(app: &tauri::AppHandle) -> Result<(), String> {
         .path()
         .resolve(AGENTMIRRORD_RESOURCE, BaseDirectory::Resource)
         .map_err(|_| "agentmirrord_resource_unavailable".to_string())?;
+    let nodeprobe_resource = app
+        .path()
+        .resolve(NODEPROBE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|_| "nodeprobe_resource_unavailable".to_string())?;
     if !resource_is_usable(&resource) {
         return Err("agentmirrord_resource_unavailable".to_string());
+    }
+    if !resource_is_usable(&nodeprobe_resource) {
+        return Err("nodeprobe_resource_unavailable".to_string());
     }
 
     let list_output = run_wsl(&["-l", "-v"])?;
@@ -298,6 +317,22 @@ fn install_wsl_service_windows(app: &tauri::AppHandle) -> Result<(), String> {
     if !linux_path.starts_with('/') || linux_path.contains("\n") {
         return Err("agentmirrord_resource_unavailable".to_string());
     }
+    let nodeprobe_windows_path = nodeprobe_resource
+        .to_str()
+        .ok_or_else(|| "nodeprobe_resource_unavailable".to_string())?;
+    let nodeprobe_path_output = run_wsl(&[
+        "-d",
+        &ubuntu.name,
+        "-e",
+        "wslpath",
+        "-u",
+        nodeprobe_windows_path,
+    ])?;
+    let nodeprobe_linux_path =
+        wsl_stdout(nodeprobe_path_output, "nodeprobe_resource_unavailable")?;
+    if !nodeprobe_linux_path.starts_with('/') || nodeprobe_linux_path.contains("\n") {
+        return Err("nodeprobe_resource_unavailable".to_string());
+    }
 
     let script = install_script();
     let output = run_wsl(&[
@@ -309,13 +344,14 @@ fn install_wsl_service_windows(app: &tauri::AppHandle) -> Result<(), String> {
         &script,
         "agentmirrord-install",
         &linux_path,
+        &nodeprobe_linux_path,
     ])?;
     if !output.status.success() {
         return Err("agentmirrord_install_failed".to_string());
     }
 
     let verify_script = format!(
-        "test -x \"$HOME/.local/bin/agentmirrord\" && test \"$(cat \"$HOME/.local/bin/agentmirrord.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\""
+        "test -x \"$HOME/.local/bin/agentmirrord\" && test -x \"$HOME/.local/bin/nodeprobe\" && test \"$(sha256sum \"$HOME/.local/bin/nodeprobe\" | awk '{{print $1}}')\" = \"{NODEPROBE_SHA256}\" && test \"$(cat \"$HOME/.local/bin/agentmirrord.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\""
     );
     let verify = run_wsl(&[
         "-d",
@@ -354,7 +390,7 @@ fn service_command_installed(distribution: &str, service: &str) -> bool {
 #[cfg(windows)]
 fn bundled_service_current(distribution: &str) -> bool {
     let probe = format!(
-        "test -x \"$HOME/.local/bin/{AGENTMIRRORD_NAME}\" && test \"$(cat \"$HOME/.local/bin/{AGENTMIRRORD_NAME}.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\""
+        "test -x \"$HOME/.local/bin/{AGENTMIRRORD_NAME}\" && test -x \"$HOME/.local/bin/nodeprobe\" && test \"$(sha256sum \"$HOME/.local/bin/nodeprobe\" | awk '{{print $1}}')\" = \"{NODEPROBE_SHA256}\" && test \"$(cat \"$HOME/.local/bin/{AGENTMIRRORD_NAME}.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\""
     );
     run_wsl(&["-d", distribution, "-e", "sh", "-lc", &probe])
         .map(|output| output.status.success())
@@ -857,7 +893,7 @@ mod tests {
         find_ubuntu_distribution, first_ip, generate_service_token, http_response_is_ready,
         install_script, normalize_service_token, parse_wsl_table, service_binary,
         service_probe_command, service_start_args, WslEnvironmentStatus, CREATE_NO_WINDOW,
-        PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
+        NODEPROBE_SHA256, PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
         SYSTEM_ENV_TOKEN_SCRIPT, TOKEN_READ_SCRIPT,
     };
 
@@ -923,6 +959,8 @@ mod tests {
         assert!(script.contains("test \"$(cat \"$version_file\")\""));
         assert!(script.contains("exit 0"));
         assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
+        assert!(script.contains("install -m 0755 -- \"$nodeprobe_src\" \"$nodeprobe_tmp\""));
+        assert!(script.contains("mv -f -- \"$nodeprobe_tmp\" \"$nodeprobe_dst\""));
         assert!(script.contains("mv -f -- \"$service_tmp\" \"$dst\""));
         assert!(script.contains("pkill -TERM -x \"$name\""));
         assert!(script.contains("stop_service agentmirrord"));
@@ -939,6 +977,8 @@ mod tests {
         assert!(script.contains("test \"$(stat -c '%a' \"$probe\")\" = 644"));
         assert!(PI_PROBE_SOURCE.contains("pi.on(\"agent_start\""));
         assert!(script.contains("test -x \"$dst\""));
+        assert!(script.contains("test -x \"$nodeprobe_dst\""));
+        assert!(script.contains(NODEPROBE_SHA256));
         assert!(script.contains("mv -f -- \"$version_tmp\" \"$version_file\""));
         let syntax = std::process::Command::new("sh")
             .args(["-n", "-c", &script])
