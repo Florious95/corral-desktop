@@ -16,7 +16,7 @@ const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
 #[cfg(windows)]
 const NODEPROBE_RESOURCE: &str = "resources/nodeprobe-linux-amd64";
 #[cfg(any(windows, test))]
-const NODEPROBE_SHA256: &str = "3db0975d4580c3b00b9a43647f52d2aab94996891da65ae77b75d09c903606b0";
+const NODEPROBE_SHA256: &str = "b9b869f8d6cfeafc101f95a284c406cd7c3071efee3d8996808a7815c03bd7ef";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
 // The bundle revision is part of the WSL marker so upgrading the embedded
 // daemon cannot silently reuse a same-semver binary without /pair/whoami.
@@ -139,9 +139,17 @@ fn first_ip(output: &[u8]) -> Option<String> {
         .map(|ip| ip.to_string())
 }
 
+#[cfg(any(windows, test))]
+fn hidden_command(program: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
 #[cfg(windows)]
 fn run_wsl(args: &[&str]) -> Result<std::process::Output, String> {
-    std::process::Command::new("wsl.exe")
+    hidden_command("wsl.exe")
         .args(args)
         .output()
         .map_err(|error| format!("wsl_unavailable: {error}"))
@@ -231,9 +239,9 @@ printf '%s\n' "{AGENTMIRRORD_VERSION}" > "$version_tmp"
 chmod 0600 "$version_tmp"
 mv -f -- "$version_tmp" "$version_file"
 umask 077
-printf '%s' {providers} > "$providers_tmp"
+printf '%s' {providers} | tr -d '\r' > "$providers_tmp"
 mv -f -- "$providers_tmp" "$providers"
-printf '%s' {titles} > "$titles_tmp"
+printf '%s' {titles} | tr -d '\r' > "$titles_tmp"
 mv -f -- "$titles_tmp" "$titles"
 printf '%s' {probe_base64} | base64 -d > "$probe_tmp"
 test -s "$probe_tmp"
@@ -262,7 +270,7 @@ test "$(stat -c '%a' "$extension")" = 644
 
 #[cfg(any(windows, test))]
 fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    format!("'{}'", value.replace('\r', "").replace('\'', "'\\''"))
 }
 
 #[cfg(any(windows, test))]
@@ -867,7 +875,7 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
             // the GUI process return.
             const DETACHED_PROCESS: u32 = 0x0000_0008;
             const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-            let _child = std::process::Command::new("wsl.exe")
+            let _child = hidden_command("wsl.exe")
                 .args(service_start_args(&ubuntu.name, service, &token))
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -893,8 +901,9 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        find_ubuntu_distribution, first_ip, generate_service_token, http_response_is_ready,
-        install_script, normalize_service_token, parse_wsl_table, service_binary,
+        find_ubuntu_distribution, first_ip, generate_service_token, hidden_command,
+        http_response_is_ready, install_script, normalize_service_token, parse_wsl_table,
+        service_binary,
         service_probe_command, service_start_args, WslEnvironmentStatus, CREATE_NO_WINDOW,
         NODEPROBE_SHA256, PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
         SYSTEM_ENV_TOKEN_SCRIPT, TITLES_TSV, TOKEN_READ_SCRIPT,
@@ -970,6 +979,7 @@ mod tests {
         assert!(script.contains("stop_service corral-core"));
         assert!(script.contains("cursor-agent\tcursor\tCursor\tpath-segment"));
         assert!(script.contains("pi\tpi\tPi"));
+        assert!(script.contains("printf '%s' ") && script.contains("| tr -d '\\r' > \"$titles_tmp\""));
         assert!(script.contains("test -s \"$titles\""));
         assert!(script.contains("mv -f -- \"$titles_tmp\" \"$titles\""));
         assert!(script.contains("probe_dir=\"$HOME/.pi/agent/plugins/agentmirror-probe\""));
@@ -985,9 +995,10 @@ mod tests {
         assert!(script.contains(NODEPROBE_SHA256));
         assert!(script.contains("test -s \"$titles\""));
         assert!(!script.contains("touch \"$titles\""));
+        assert!(!TITLES_TSV.contains('\r'));
         assert!(!TITLES_TSV.is_empty());
         assert!(script.contains("mv -f -- \"$version_tmp\" \"$version_file\""));
-        let syntax = std::process::Command::new("sh")
+        let syntax = hidden_command("sh")
             .args(["-n", "-c", &script])
             .status()
             .expect("shell is available");
@@ -1012,7 +1023,7 @@ mod tests {
         assert!(TOKEN_READ_SCRIPT.contains("$HOME/.config/agentmirror/token"));
         assert!(TOKEN_READ_SCRIPT.contains("/proc/$pid/status"));
         assert!(TOKEN_READ_SCRIPT.contains("/home/*/.config/agentmirror/token"));
-        let syntax = std::process::Command::new("sh")
+        let syntax = hidden_command("sh")
             .args(["-n", "-c", TOKEN_READ_SCRIPT])
             .status()
             .expect("shell is available");
