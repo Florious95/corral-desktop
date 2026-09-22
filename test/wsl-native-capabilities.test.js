@@ -130,10 +130,10 @@ test('nativeCapabilities.wsl.readServiceToken returns null in mock environment',
 
 test('bundles the Linux nodeprobe capability binary with its accepted digest', async () => {
   const resource = await readFile(new URL('../src-tauri/resources/nodeprobe-linux-amd64', import.meta.url));
-  assert.equal(resource.byteLength, 756760);
+  assert.equal(resource.byteLength, 1108816);
   assert.equal(
     createHash('sha256').update(resource).digest('hex'),
-    'b9b869f8d6cfeafc101f95a284c406cd7c3071efee3d8996808a7815c03bd7ef'
+    '61d6dd99e7d7135e20b885b00724fb1359c1643c634857702239a092faa4e958'
   );
 });
 
