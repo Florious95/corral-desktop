@@ -314,13 +314,16 @@ fn install_wsl_service_windows(app: &tauri::AppHandle) -> Result<(), String> {
         return Err("agentmirrord_install_failed".to_string());
     }
 
+    let verify_script = format!(
+        "test -x \"$HOME/.local/bin/agentmirrord\" && test \"$(cat \"$HOME/.local/bin/agentmirrord.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\""
+    );
     let verify = run_wsl(&[
         "-d",
         &ubuntu.name,
         "-e",
         "sh",
         "-lc",
-        "test -x \"$HOME/.local/bin/agentmirrord\" && test \"$(cat \"$HOME/.local/bin/agentmirrord.version\" 2>/dev/null)\" = \"{AGENTMIRRORD_VERSION}\" && test -s \"$HOME/tools/nodeprobe/fixtures/providers.tsv\" && test -f \"$HOME/tools/nodeprobe/fixtures/titles.tsv\"",
+        &verify_script,
     ])?;
     if verify.status.success() {
         Ok(())
