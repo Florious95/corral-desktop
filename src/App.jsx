@@ -1070,10 +1070,12 @@ export default function App({ seedDevices } = {}) {
     return pendingPaste;
   }, [handleAttachment, handlePaneText, paneCanSend]);
 
-  const renderPane = useCallback((agent) => (
+  const renderPane = useCallback((agent, dimensions) => (
     <TerminalPane
       agent={agent}
       client={clientFor(agent)}
+      containerWidth={dimensions?.containerWidth}
+      containerHeight={dimensions?.containerHeight}
       fontFamily={settings['terminal.fontFamily']}
       fontSize={settings['terminal.fontSize']}
       focused={activeAgent ? agent.key === activeAgent.key : false}

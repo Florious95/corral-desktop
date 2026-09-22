@@ -2,27 +2,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('TerminalPane implements 500ms auto-takeover timeout to prevent single-desktop deadlocks', async () => {
+test('TerminalPane eliminates 500ms blind wait and defaults immediately to takeover on initial mount', async () => {
   const terminalPaneJsx = await readFile(
     new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url),
     'utf8',
   );
 
-  // 1. 定义与声明 takeoverTimer 与 triggerTakeover
-  assert.match(terminalPaneJsx, /let takeoverTimer = null;/);
-  assert.match(terminalPaneJsx, /const triggerTakeover = \(\) => \{/);
+  // 1. 彻底拔除 500ms 盲等定时器，杜绝二次弹跳 (Issue #211)
+  assert.doesNotMatch(terminalPaneJsx, /takeoverTimer = setTimeout/);
+  assert.doesNotMatch(terminalPaneJsx, /let takeoverTimer = null;/);
 
-  // 2. UNKNOWN 态下开启 500ms 探测超时
-  assert.match(terminalPaneJsx, /if\s*\(currentMode === PRESENCE_MODE\.UNKNOWN\)\s*\{/);
-  assert.match(terminalPaneJsx, /takeoverTimer = setTimeout\(\(\) => \{/);
-  assert.match(terminalPaneJsx, /triggerTakeover\(\);/);
-  assert.match(terminalPaneJsx, /500\);/);
-
-  // 3. 移动端 presence 广播到来或断开时清除定时器
-  assert.match(terminalPaneJsx, /if\s*\(takeoverTimer\)\s*\{\s*clearTimeout\(takeoverTimer\);\s*takeoverTimer = null;\s*\}/);
-
-  // 4. 组件卸载 cleanup 时清除定时器防泄漏
-  assert.match(terminalPaneJsx, /return\s*\(\)\s*=>\s*\{[\s\S]*clearTimeout\(takeoverTimer\);/);
+  // 2. 初始状态在移动端未活跃时直接进入 TAKEOVER 模式并纯数学投影几何
+  assert.match(terminalPaneJsx, /currentMode = isMobileActive \? PRESENCE_MODE\.AVOIDANCE : PRESENCE_MODE\.TAKEOVER/);
+  assert.match(terminalPaneJsx, /setPresenceMode\(currentMode\)/);
+  assert.match(terminalPaneJsx, /computeGridDimensions/);
+  assert.match(terminalPaneJsx, /initialCols/);
+  assert.match(terminalPaneJsx, /initialRows/);
 });
 
 test('terminal.css and TerminalPane implement dual-mode CSS decoupling for desktop takeover', async () => {
@@ -54,34 +49,16 @@ test('terminal.css and TerminalPane implement dual-mode CSS decoupling for deskt
   assert.match(terminalPaneJsx, /className=\{`terminalpane-body\$\{presenceMode === PRESENCE_MODE\.TAKEOVER \? ' is-takeover' : ''\}`\}/);
 });
 
-test('auto-takeover timer logic transitions state machine cleanly in isolation', async () => {
-  let mode = 'unknown';
-  let timer = null;
+test('auto-takeover logic enters takeover immediately without 500ms delay', async () => {
+  let isMobileActive = false;
+  let mode = isMobileActive ? 'avoidance' : 'takeover';
   let settledGrid = null;
 
-  const triggerTakeover = () => {
-    if (mode !== 'takeover') {
-      mode = 'takeover';
-      settledGrid = { rows: 45, cols: 135 };
-    }
-  };
-
-  // 模拟初订进入 UNKNOWN
-  if (mode === 'unknown') {
-    timer = setTimeout(() => {
-      if (mode === 'unknown') {
-        triggerTakeover();
-      }
-    }, 50); // 压缩到 50ms 测试
+  if (mode === 'takeover') {
+    settledGrid = { rows: 45, cols: 135 };
   }
 
-  assert.equal(mode, 'unknown');
-  assert.equal(settledGrid, null);
-
-  // 等待定时器触发
-  await new Promise((resolve) => setTimeout(resolve, 80));
-
-  // 验证超时后成功晋级接管态并全屏重排
+  // 验证无移动端在线时立即进入接管态并设定目标网格，零延迟
   assert.equal(mode, 'takeover');
   assert.deepEqual(settledGrid, { rows: 45, cols: 135 });
 });

@@ -21,6 +21,7 @@ import { attachWebglRenderer } from './webglRenderer.js';
 import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
 import { isCtrlV, isCtrlShiftV, isCtrlShiftC, isCmdV } from './clipboard.js';
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
+import { getFontMetrics } from './fontMetrics.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -91,10 +92,19 @@ export class TerminalView {
       ? maxPendingWriteBytes : MAX_PENDING_WRITE_BYTES;
 
     this.fontSize = fontSize;
+    this.fontFamily = fontFamily;
     this.hideCursor = hideCursor === true;
     this._customTheme = Boolean(opts.theme);
+    const initialCols = opts.initialCols || (opts.cols ?? null);
+    const initialRows = opts.initialRows || (opts.rows ?? null);
+    this.initialCols = initialCols;
+    this.initialRows = initialRows;
+    this._cellMetrics = opts.cellMetrics || null;
+
     const theme = resolveTerminalTheme(opts);
     this.term = new TerminalCtor({
+      cols: initialCols || 80,
+      rows: initialRows || 24,
       scrollback,
       fontSize,
       fontFamily,
@@ -216,7 +226,20 @@ export class TerminalView {
       };
       textarea.addEventListener('paste', this._pasteListener, true);
     }
-    this.fit();
+    if (this.initialCols && this.initialRows && !this._hasFit) {
+      this._hasFit = true;
+      const cell = this._cell();
+      this.lastFit = {
+        container_width_px: this.container.clientWidth || 0,
+        container_height_px: this.container.clientHeight || 0,
+        cell_width_px: cell.w,
+        derived_cols: this.initialCols,
+        derived_rows: this.initialRows,
+      };
+      this._commitGrid(this.initialCols, this.initialRows, { reportDelay: false });
+    } else {
+      this.fit();
+    }
     if (this.hideCursor) {
       this._syncCursorAnchor();
       const textarea = this.term.textarea;
@@ -517,7 +540,7 @@ export class TerminalView {
     return Math.min(this.term.cols, col);
   }
 
-  /** 全屏快照：清屏重建；只为裸 LF 补隐含 CR，⛔ 不 trim、不按行拆。 */
+  /** 全屏快照：清屏重建；只为裸 LF 补隐含 CR，同步原子写入，⛔ 不 trim、不按行拆。 */
   writeSnapshot(u8) {
     const data = withImplicitCr(u8);
     this._recovering = false;
@@ -525,11 +548,7 @@ export class TerminalView {
     this._writeQueue.length = 0;
     this._writeHead = 0;
     this._queuedWriteBytes = 0;
-    if (this._writeInFlight) {
-      this._writeQueue.push({ kind: 'snapshot', data });
-      this._queuedWriteBytes = data.byteLength;
-      return;
-    }
+    this._writeInFlight = false;
     this._write('snapshot', data);
   }
 
@@ -599,6 +618,7 @@ export class TerminalView {
       }
     }
     if (changed) {
+      this._cellMetrics = null;
       this.fit({ immediate: true, sync: true });
     }
   }
@@ -652,15 +672,26 @@ export class TerminalView {
     }, 120);
   }
 
-  /** 单元格实际渲染尺寸；首帧渲染前退化成按字号估算。 */
+  /** 单元格实际渲染尺寸；优先直读常驻字体度量缓存（O(1) 纯数学除法，彻底消除 Layout Thrashing）。 */
   _cell() {
-    const screen = this.term.element && this.term.element.querySelector('.xterm-screen');
+    if (this._cellMetrics) return this._cellMetrics;
+    const metrics = getFontMetrics({
+      fontFamily: this.term.options?.fontFamily || this.fontFamily,
+      fontSize: this.fontSize,
+      lineHeight: 1.25,
+    });
+    // 兼容 FakeTerminal 测试替身注入的 screen 元素模拟
+    const screen = this.term.element && this.term.element.querySelector?.('.xterm-screen');
     if (screen) {
-      const r = screen.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        return { w: r.width / this.term.cols, h: r.height / this.term.rows };
+      const r = screen.getBoundingClientRect?.();
+      if (r && r.width > 0 && r.height > 0) {
+        const m = { w: r.width / this.term.cols, h: r.height / this.term.rows };
+        this._cellMetrics = m;
+        return m;
       }
     }
-    return { w: this.fontSize * 0.6, h: Math.round(this.fontSize * 1.25) };
+    const m = { w: metrics.cellWidth, h: metrics.cellHeight };
+    this._cellMetrics = m;
+    return m;
   }
 }
