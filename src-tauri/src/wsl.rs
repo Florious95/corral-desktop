@@ -633,8 +633,7 @@ fn generate_service_token() -> Result<String, String> {
 }
 
 #[cfg(any(windows, test))]
-const SERVICE_START_SCRIPT: &str =
-    "exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
+const SERVICE_START_SCRIPT: &str = "export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\" NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\"; test -s \"$NODEPROBE_FIXTURES\" && test -s \"$NODEPROBE_PROVIDERS\"; exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
 
 #[cfg(any(windows, test))]
 fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a str) -> [&'a str; 9] {
@@ -1022,6 +1021,10 @@ mod tests {
 
     #[test]
     fn service_start_has_explicit_token_and_listen_flags() {
+        assert!(SERVICE_START_SCRIPT.contains("export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\""));
+        assert!(SERVICE_START_SCRIPT.contains("NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\""));
+        assert!(SERVICE_START_SCRIPT.contains("test -s \"$NODEPROBE_FIXTURES\""));
+        assert!(SERVICE_START_SCRIPT.contains("test -s \"$NODEPROBE_PROVIDERS\""));
         assert_eq!(
             service_start_args("Ubuntu", "agentmirrord", "TOKEN123"),
             [
