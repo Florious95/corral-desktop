@@ -18,6 +18,7 @@ import { uploadImage } from './upload.js';
 import { DEFAULT_LOCAL_DEVICE, isLocalUrl } from './local.js';
 import { buildPairingPayload } from './pairing.js';
 import { normalizeCwd, isSameSpaceKey, windowsToWsl } from '../lib/wslPath.js';
+import { safeRandomUUID } from '../lib/uuid.js';
 import * as store from './store.js';
 
 const MODEL_DEBOUNCE_MS = 100;
@@ -137,6 +138,7 @@ export class DeviceManager {
     this.backoff = opts.backoff;
     this.nativeInvoke = opts.nativeInvoke;
     this.fetchImpl = opts.fetchImpl;
+    this.cryptoImpl = opts.cryptoImpl;
     this.modelDebounceMs = opts.modelDebounceMs ?? MODEL_DEBOUNCE_MS;
 
     this.onModelChange = opts.onModelChange || (() => {});
@@ -198,7 +200,7 @@ export class DeviceManager {
 
   /** @returns {string} the new deviceId */
   addDevice({ name, url, token }) {
-    const id = globalThis.crypto.randomUUID();
+    const id = safeRandomUUID(this.cryptoImpl);
     this._devices.push({ id, name, url, token, checked: true });
     this._persistDevices();
     if (this._connected) this._spawn(id);
