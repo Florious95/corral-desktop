@@ -14,7 +14,9 @@ use tauri::{path::BaseDirectory, Manager};
 #[cfg(windows)]
 const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
-const AGENTMIRRORD_VERSION: &str = env!("CARGO_PKG_VERSION");
+// The bundle revision is part of the WSL marker so upgrading the embedded
+// daemon cannot silently reuse a same-semver binary without /pair/whoami.
+const AGENTMIRRORD_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+whoami-v1");
 #[cfg(windows)]
 const SERVICE_READY_PORT: u16 = 9900;
 #[cfg(any(windows, test))]
@@ -702,7 +704,22 @@ fn service_process_ready(distribution: &str, service: &str) -> bool {
 
 #[cfg(any(windows, test))]
 fn http_response_is_ready(response: &[u8]) -> bool {
-    response.starts_with(b"HTTP/1.1 200 ") || response.starts_with(b"HTTP/1.0 200 ")
+    // Readiness proves that the listener is serving HTTP, not that this
+    // endpoint exists in every compatible daemon generation. A legacy daemon
+    // may return 404 for /pair/whoami while /ws and auth are available.
+    let Some(line) = response.split(|byte| *byte == b'\r' || *byte == b'\n').next() else {
+        return false;
+    };
+    let mut fields = line.split(|byte| *byte == b' ' || *byte == b'\t');
+    let Some(version) = fields.next() else {
+        return false;
+    };
+    let Some(status) = fields.next() else {
+        return false;
+    };
+    matches!(version, b"HTTP/1.0" | b"HTTP/1.1")
+        && status.len() == 3
+        && status.iter().all(u8::is_ascii_digit)
 }
 
 #[cfg(windows)]
@@ -847,10 +864,12 @@ mod tests {
     }
 
     #[test]
-    fn http_ready_requires_success_status() {
+    fn http_ready_requires_an_http_status_line() {
         assert!(http_response_is_ready(b"HTTP/1.1 200 OK\r\n"));
-        assert!(http_response_is_ready(b"HTTP/1.0 200 OK\r\n"));
-        assert!(!http_response_is_ready(b"HTTP/1.1 503 Busy\r\n"));
+        assert!(http_response_is_ready(b"HTTP/1.0 404 Not Found\r\n"));
+        assert!(http_response_is_ready(b"HTTP/1.1 503 Busy\r\n"));
+        assert!(http_response_is_ready(b"HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(!http_response_is_ready(b"HTTP/1.1 nope\r\n"));
         assert!(!http_response_is_ready(b"garbage"));
     }
 
