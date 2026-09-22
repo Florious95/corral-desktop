@@ -11,6 +11,7 @@ import { BINARY_KIND } from '../../core/binary.js';
 import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../../core/presence.js';
+import { computeGridDimensions } from '../../term/fontMetrics.js';
 
 export { MOBILE_GRID, PRESENCE_MODE };
 
@@ -48,6 +49,7 @@ export default function TerminalPane({
   onText, onKey, onBytes, onEnter,
   onCtrlV, onPaste, onForceTextPaste,
   fontFamily, fontSize,
+  containerWidth, containerHeight,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -125,6 +127,26 @@ export default function TerminalPane({
       clearTimeout(flashTimer);
       flashTimer = setTimeout(() => setHint(''), 2500);
     };
+    // 1. 首帧几何前置纯数学投影（彻底消灭 80x24 与 46x44 盲订）：
+    const isWin = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent || '');
+    const paddingX = 10;
+    const paddingY = isWin ? 10 : 0;
+    const effectiveW = host.clientWidth || (containerWidth ? Math.max(0, containerWidth - paddingX) : 0);
+    const effectiveH = host.clientHeight || (containerHeight ? Math.max(0, containerHeight - paddingY) : 0);
+
+    let initialCols = null;
+    let initialRows = null;
+    if (effectiveW > 0 && effectiveH > 0) {
+      const grid = computeGridDimensions({
+        width: effectiveW,
+        height: effectiveH,
+        fontFamily,
+        fontSize,
+      });
+      initialCols = grid.cols;
+      initialRows = grid.rows;
+    }
+
     const pump = new NativeInputPump({
       sendText: (text) => onTextRef.current?.(text),
       sendKey: (key) => onKeyRef.current?.(key),
@@ -135,7 +157,16 @@ export default function TerminalPane({
     const gate = new SameWidthController();
     let firstSub = true;
     let lastSubscribe = null;
-    let currentMode = PRESENCE_MODE.UNKNOWN;
+
+    // 默认进入 TAKEOVER 模式，首订携带最终真实尺寸，彻底消除 500ms 盲等与二次弹跳
+    const initialPresence = clientRef.current?.getPresence?.();
+    const isMobileActive = initialPresence && initialPresence.hasMobile === true;
+    let currentMode = isMobileActive ? PRESENCE_MODE.AVOIDANCE : PRESENCE_MODE.TAKEOVER;
+    setPresenceMode(currentMode);
+    if (!isMobileActive && initialCols && initialRows) {
+      gate.settle(initialRows, initialCols);
+    }
+
     let isManualReflowing = false;
     let view;
     const sendIfNeeded = (act, reason, { force = false } = {}) => {
@@ -186,6 +217,8 @@ export default function TerminalPane({
     view = new TerminalView(host, {
       fontFamily,
       fontSize,
+      initialCols: currentMode === PRESENCE_MODE.TAKEOVER ? initialCols : null,
+      initialRows: currentMode === PRESENCE_MODE.TAKEOVER ? initialRows : null,
       onResize: (rows, cols) => {
         const act = gate.settle(rows, cols);
         if (!isManualReflowing) {
@@ -290,7 +323,6 @@ export default function TerminalPane({
     const attach = subRef.current || (c && typeof c.onBinary === 'function' ? (fn) => c.onBinary(fn) : null);
     const off = attach ? attach(handleBinary) : null;
 
-    let takeoverTimer = null;
     const triggerTakeover = () => {
       if (currentMode !== PRESENCE_MODE.TAKEOVER) {
         currentMode = PRESENCE_MODE.TAKEOVER;
@@ -313,31 +345,12 @@ export default function TerminalPane({
       }
     };
 
-    // 保守握手初订：若 presence 未知或手机在线，以 46x44 手机尺寸初订，绝不提前以桌面大尺寸挤掉手机
-    const initialPresence = clientRef.current?.getPresence?.();
-    if (initialPresence && initialPresence.hasMobile === false) {
-      currentMode = PRESENCE_MODE.TAKEOVER;
-      setPresenceMode(PRESENCE_MODE.TAKEOVER);
-    } else {
-      currentMode = initialPresence?.hasMobile ? PRESENCE_MODE.AVOIDANCE : PRESENCE_MODE.UNKNOWN;
-      setPresenceMode(currentMode);
+    if (isMobileActive) {
       view.setFixedGrid(MOBILE_GRID, { sync: true });
-      // 若当前为 UNKNOWN 态，开启 500ms 单桌面端探测超时：若超时未收到移动端在线信号，自动晋级 TAKEOVER 铺满全屏
-      if (currentMode === PRESENCE_MODE.UNKNOWN) {
-        takeoverTimer = setTimeout(() => {
-          if (currentMode === PRESENCE_MODE.UNKNOWN) {
-            triggerTakeover();
-          }
-        }, 500);
-      }
     }
 
     // 监听多端 presence 广播：动静双模流转，消除死循环与重复发送 (R2)
     const offPresence = clientRef.current?.onPresence?.((evt) => {
-      if (takeoverTimer) {
-        clearTimeout(takeoverTimer);
-        takeoverTimer = null;
-      }
       // 若断开连接，立即将模式降级为 UNKNOWN 并锁定 46x44 (R3)
       if (evt.disconnected) {
         currentMode = PRESENCE_MODE.UNKNOWN;
@@ -408,10 +421,6 @@ export default function TerminalPane({
       // R4 (P1): 手动“适应当前窗口”必须严格遵守当前 presence：
       // 当手机在线 (has_mobile: true) 或状态未知 (unknown) 时，严禁下发桌面大尺寸抢占！
       // 只允许在当前 46x44 尺寸上发一次强制 subscribe 恢复快照与对齐
-      if (takeoverTimer) {
-        clearTimeout(takeoverTimer);
-        takeoverTimer = null;
-      }
       if (currentMode === PRESENCE_MODE.AVOIDANCE) {
         gate.settle(MOBILE_GRID.rows, MOBILE_GRID.cols);
         sendIfNeeded({ type: 'subscribe', rows: MOBILE_GRID.rows, cols: MOBILE_GRID.cols }, 'reflow_mobile_recover', { force: true });
@@ -442,10 +451,6 @@ export default function TerminalPane({
     }
 
     return () => {
-      if (takeoverTimer) {
-        clearTimeout(takeoverTimer);
-        takeoverTimer = null;
-      }
       if (typeof window !== 'undefined') {
         window.removeEventListener('terminal:reflow', handleReflow);
       }

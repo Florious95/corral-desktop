@@ -169,7 +169,7 @@ export default function SplitPanes({
             }}
             onContextMenu={(e) => onPaneMenu && onPaneMenu(e, uid)}
           >
-            {renderPane ? renderPane(agent) : null}
+            {renderPane ? renderPane(agent, { containerWidth: currentRect.w, containerHeight: currentRect.h }) : null}
             {isVisible && visibleUids.length > 1 && onClosePane && (
               <button
                 type="button"
