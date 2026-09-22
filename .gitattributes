@@ -1,0 +1,3 @@
+* text eol=lf
+src-tauri/resources/agentmirrord-linux-amd64 -text
+src-tauri/resources/nodeprobe-linux-amd64 -text

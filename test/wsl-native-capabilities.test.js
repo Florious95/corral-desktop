@@ -130,10 +130,10 @@ test('nativeCapabilities.wsl.readServiceToken returns null in mock environment',
 
 test('bundles the Linux nodeprobe capability binary with its accepted digest', async () => {
   const resource = await readFile(new URL('../src-tauri/resources/nodeprobe-linux-amd64', import.meta.url));
-  assert.equal(resource.byteLength, 642216);
+  assert.equal(resource.byteLength, 756760);
   assert.equal(
     createHash('sha256').update(resource).digest('hex'),
-    '3db0975d4580c3b00b9a43647f52d2aab94996891da65ae77b75d09c903606b0'
+    'b9b869f8d6cfeafc101f95a284c406cd7c3071efee3d8996808a7815c03bd7ef'
   );
 });
 
@@ -165,6 +165,9 @@ test('native token bridge prefers the registered fresh-install pairing command',
   assert.match(rust, /let verify_script = format!\(/);
   assert.ok(rust.includes('test -x \\\"$HOME/.local/bin/nodeprobe\\\"'));
   assert.match(rust, /NODEPROBE_SHA256/);
+  assert.match(rust, /fn hidden_command\(program: &str\)/);
+  assert.match(rust, /command\.creation_flags\(CREATE_NO_WINDOW\)/);
+  assert.match(rust, /hidden_command\("wsl\.exe"\)/);
   assert.doesNotMatch(rust, /let verify = run_wsl\(\[[\s\S]*\{AGENTMIRRORD_VERSION\}/);
   assert.match(commands, /wsl::get_wsl_pairing_token/);
 });
