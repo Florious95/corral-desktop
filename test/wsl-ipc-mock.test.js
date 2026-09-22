@@ -87,7 +87,11 @@ test('Issue 217 Tier 1: hot runner is fail-closed and never targets system insta
   assert.match(script, /Fail-closed/);
   assert.match(script, /Program Files/);
   assert.match(script, /Refusing a non-disposable test root/);
-  assert.match(script, /Refusing to run an executable outside the disposable test root/);
+  assert.match(script, /Tauri resources directory not found/);
+  assert.match(script, /sourceResourcesPath/);
+  assert.match(script, /portableResourcesPath/);
+  assert.match(script, /Copy-Item -LiteralPath \$sourceExe -Destination \$portableExe/);
+  assert.match(script, /Get-ChildItem -LiteralPath \$sourceResources/);
   assert.match(script, /WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS/);
   assert.match(script, /windows-5090-startup-receipt\.mjs/);
   assert.match(script, /Stop-ExactServicePids/);
