@@ -14,7 +14,9 @@ use tauri::{path::BaseDirectory, Manager};
 #[cfg(windows)]
 const AGENTMIRRORD_RESOURCE: &str = "resources/agentmirrord-linux-amd64";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
-const AGENTMIRRORD_VERSION: &str = env!("CARGO_PKG_VERSION");
+// The bundle revision is part of the WSL marker so upgrading the embedded
+// daemon cannot silently reuse a same-semver binary without /pair/whoami.
+const AGENTMIRRORD_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+whoami-v1");
 #[cfg(windows)]
 const SERVICE_READY_PORT: u16 = 9900;
 #[cfg(any(windows, test))]
