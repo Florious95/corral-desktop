@@ -43,8 +43,16 @@ function Get-SessionCount {
 }
 
 function Has-Session {
-    & wsl.exe --distribution $Distro --exec tmux has-session -t $Session 2>$null
-    $LASTEXITCODE -eq 0
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & wsl.exe --distribution $Distro --exec tmux has-session -t $Session 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    $exitCode -eq 0
 }
 
 if ($Create) {
