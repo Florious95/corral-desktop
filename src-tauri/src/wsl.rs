@@ -25,7 +25,8 @@ const AGENTMIRRORD_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+whoami-v
 const SERVICE_READY_PORT: u16 = 9900;
 #[cfg(any(windows, test))]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const PROVIDERS_TSV: &str = "# comm-basename\tprovider-id\tdisplay-name\t[match]\n# match empty = basename only; path-segment = also hit when raw comm contains /<comm-basename>/ as a directory.\nclaude\tclaude_code\tClaude Code\ncodex\tcodex\tCodex\ncopilot\tcopilot\tCopilot\ngrok\tgrok\tGrok\ncursor-agent\tcursor\tCursor\tpath-segment\npi\tpi\tPi\n";
+const PROVIDERS_TSV: &str = include_str!("../resources/nodeprobe-providers.tsv");
+const TITLES_TSV: &str = include_str!("../resources/nodeprobe-titles.tsv");
 const PI_PROBE_SOURCE: &str = include_str!("../resources/agentmirror-probe.js");
 
 /// Snapshot of the WSL 2 environment used by the local AgentMirror daemon.
@@ -188,7 +189,7 @@ if test -x "$dst" \
     && test -x "$nodeprobe_dst" \
     && test "$(sha256sum "$nodeprobe_dst" | awk '{{print $1}}')" = "{NODEPROBE_SHA256}" \
     && test -s "$providers" \
-    && test -f "$titles" \
+    && test -s "$titles" \
     && test -f "$probe" \
     && test -f "$extension"; then
     exit 0
@@ -217,10 +218,11 @@ chmod 0755 "$HOME/.pi" "$HOME/.pi/agent" "$HOME/.pi/agent/plugins" "$probe_dir" 
 service_tmp="$dst.tmp.$$"
 nodeprobe_tmp="$nodeprobe_dst.tmp.$$"
 providers_tmp="$providers.tmp.$$"
+titles_tmp="$titles.tmp.$$"
 probe_tmp="$probe.tmp.$$"
 extension_tmp="$extension.tmp.$$"
 version_tmp="$version_file.tmp.$$"
-trap 'rm -f "$service_tmp" "$nodeprobe_tmp" "$providers_tmp" "$probe_tmp" "$extension_tmp" "$version_tmp"' EXIT
+trap 'rm -f "$service_tmp" "$nodeprobe_tmp" "$providers_tmp" "$titles_tmp" "$probe_tmp" "$extension_tmp" "$version_tmp"' EXIT
 install -m 0755 -- "$src" "$service_tmp"
 mv -f -- "$service_tmp" "$dst"
 install -m 0755 -- "$nodeprobe_src" "$nodeprobe_tmp"
@@ -231,7 +233,8 @@ mv -f -- "$version_tmp" "$version_file"
 umask 077
 printf '%s' {providers} > "$providers_tmp"
 mv -f -- "$providers_tmp" "$providers"
-touch "$titles"
+printf '%s' {titles} > "$titles_tmp"
+mv -f -- "$titles_tmp" "$titles"
 printf '%s' {probe_base64} | base64 -d > "$probe_tmp"
 test -s "$probe_tmp"
 chmod 0644 "$probe_tmp"
@@ -243,7 +246,7 @@ mv -f -- "$extension_tmp" "$extension"
 test -x "$dst"
 test -x "$nodeprobe_dst"
 test -s "$providers"
-test -f "$titles"
+test -s "$titles"
 test -d "$probe_dir"
 test "$(stat -c '%a' "$probe_dir")" = 755
 test -f "$probe"
@@ -252,6 +255,7 @@ test -f "$extension"
 test "$(stat -c '%a' "$extension")" = 644
 "#,
         providers = shell_single_quote(PROVIDERS_TSV),
+        titles = shell_single_quote(TITLES_TSV),
         probe_base64 = base64_encode(PI_PROBE_SOURCE.as_bytes()),
     )
 }
@@ -894,7 +898,7 @@ mod tests {
         install_script, normalize_service_token, parse_wsl_table, service_binary,
         service_probe_command, service_start_args, WslEnvironmentStatus, CREATE_NO_WINDOW,
         NODEPROBE_SHA256, PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
-        SYSTEM_ENV_TOKEN_SCRIPT, TOKEN_READ_SCRIPT,
+        SYSTEM_ENV_TOKEN_SCRIPT, TITLES_TSV, TOKEN_READ_SCRIPT,
     };
 
     #[test]
@@ -967,7 +971,8 @@ mod tests {
         assert!(script.contains("stop_service corral-core"));
         assert!(script.contains("cursor-agent\tcursor\tCursor\tpath-segment"));
         assert!(script.contains("pi\tpi\tPi"));
-        assert!(script.contains("touch \"$titles\""));
+        assert!(script.contains("test -s \"$titles\""));
+        assert!(script.contains("mv -f -- \"$titles_tmp\" \"$titles\""));
         assert!(script.contains("probe_dir=\"$HOME/.pi/agent/plugins/agentmirror-probe\""));
         assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
         assert!(script.contains("printf '%s' "));
@@ -979,6 +984,9 @@ mod tests {
         assert!(script.contains("test -x \"$dst\""));
         assert!(script.contains("test -x \"$nodeprobe_dst\""));
         assert!(script.contains(NODEPROBE_SHA256));
+        assert!(script.contains("test -s \"$titles\""));
+        assert!(!script.contains("touch \"$titles\""));
+        assert!(!TITLES_TSV.is_empty());
         assert!(script.contains("mv -f -- \"$version_tmp\" \"$version_file\""));
         let syntax = std::process::Command::new("sh")
             .args(["-n", "-c", &script])

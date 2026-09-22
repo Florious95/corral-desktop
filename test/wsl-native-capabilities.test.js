@@ -137,6 +137,24 @@ test('bundles the Linux nodeprobe capability binary with its accepted digest', a
   );
 });
 
+test('bundles the canonical nodeprobe providers corpus', async () => {
+  const corpus = await readFile(new URL('../src-tauri/resources/nodeprobe-providers.tsv', import.meta.url));
+  assert.equal(corpus.byteLength, 501);
+  assert.equal(
+    createHash('sha256').update(corpus).digest('hex'),
+    'c9e02d01821df7d7afe2292fefb211cefea7e3abecde8b35bd9ffa2a0721ee7e'
+  );
+});
+
+test('bundles the canonical nodeprobe titles corpus', async () => {
+  const corpus = await readFile(new URL('../src-tauri/resources/nodeprobe-titles.tsv', import.meta.url));
+  assert.equal(corpus.byteLength, 1332);
+  assert.equal(
+    createHash('sha256').update(corpus).digest('hex'),
+    'cff45d25492fdfe9689330c630c80bad20a1f27243e5aae1d93bc57de0a22b58'
+  );
+});
+
 test('native token bridge prefers the registered fresh-install pairing command', async () => {
   const source = await readFile(new URL('../src/core/nativeCapabilities.js', import.meta.url), 'utf8');
   const rust = await readFile(new URL('../src-tauri/src/wsl.rs', import.meta.url), 'utf8');
