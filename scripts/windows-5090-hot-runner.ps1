@@ -4,6 +4,8 @@ param(
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
     [string]$ExecutablePath,
 
+    [string]$ResourcesPath,
+
     [Parameter(Mandatory = $true)]
     [ValidateScript({
         if (-not (Test-Path -LiteralPath $_ -PathType Container)) {
@@ -46,18 +48,38 @@ if (-not $AllowTestCleanup) {
     throw 'Fail-closed: pass -AllowTestCleanup only for the independently packaged test bundle.'
 }
 
-$resolvedExe = [System.IO.Path]::GetFullPath($ExecutablePath)
+$sourceExe = [System.IO.Path]::GetFullPath($ExecutablePath)
 $resolvedRoot = [System.IO.Path]::GetFullPath($TestRunRoot).TrimEnd('\') + '\'
 $resolvedArtifacts = [System.IO.Path]::GetFullPath($ArtifactDir)
-if (-not $resolvedExe.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to run an executable outside the disposable test root: $resolvedExe"
-}
+$repoRoot = Split-Path -Parent $PSScriptRoot
 if ($resolvedRoot -notmatch '(?i)agentmirror[-_](?:e2e|test)[-_]') {
     throw "Refusing a non-disposable test root: $resolvedRoot"
 }
 if ($resolvedRoot -match '(?i)\\(?:Program Files|Program Files \(x86\))(?:\\|$)') {
     throw "Refusing to use a system installation path: $resolvedRoot"
 }
+if ($sourceExe -match '(?i)\\(?:Program Files|Program Files \(x86\))(?:\\|$)') {
+    throw "Refusing a system executable source: $sourceExe"
+}
+$resourceCandidates = @()
+if ($ResourcesPath) {
+    $resourceCandidates += [System.IO.Path]::GetFullPath($ResourcesPath)
+}
+$resourceCandidates += @(
+    (Join-Path (Split-Path -Parent $sourceExe) 'resources'),
+    (Join-Path $repoRoot 'src-tauri\resources'),
+    (Join-Path (Split-Path -Parent (Split-Path -Parent $sourceExe)) 'resources')
+)
+$sourceResources = $resourceCandidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
+    Select-Object -First 1
+if (-not $sourceResources) {
+    throw 'Tauri resources directory not found beside the executable, repository, or build output.'
+}
+$portableExe = Join-Path $resolvedRoot (Split-Path -Leaf $sourceExe)
+$portableResources = Join-Path $resolvedRoot 'resources'
+$sourceExeIsPortable = $sourceExe.Equals($portableExe, [System.StringComparison]::OrdinalIgnoreCase)
+$resourcesArePortable = $sourceResources.Equals($portableResources, [System.StringComparison]::OrdinalIgnoreCase)
 New-Item -ItemType Directory -Path $resolvedArtifacts -Force | Out-Null
 $receiptPath = Join-Path $resolvedArtifacts 'windows-5090-hot-runner.json'
 $cdpReceipt = Join-Path $resolvedArtifacts 'windows-5090-startup-receipt.json'
@@ -97,7 +119,10 @@ $preexistingServicePids = @()
 $final = [ordered]@{
     schema = 'agentmirror.windows-5090.hot-runner.v1'
     runId = $runId
-    executablePath = $resolvedExe
+    sourceExecutablePath = $sourceExe
+    portableExecutablePath = $portableExe
+    sourceResourcesPath = $sourceResources
+    portableResourcesPath = $portableResources
     testRunRoot = $resolvedRoot.TrimEnd('\')
     artifactDir = $resolvedArtifacts
     serviceDistro = $ServiceDistro
@@ -118,13 +143,26 @@ try {
         throw "Refusing to touch a pre-existing WSL service (PIDs: $($preexistingServicePids -join ','))."
     }
 
+    # Stage the executable and Tauri resources side by side. Tauri resolves
+    # `resources/*` relative to the executable's resource directory.
+    if (-not $resourcesArePortable) {
+        if (Test-Path -LiteralPath $portableResources) {
+            Remove-Item -LiteralPath $portableResources -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $portableResources -Force | Out-Null
+        Get-ChildItem -LiteralPath $sourceResources -Force |
+            Copy-Item -Destination $portableResources -Recurse -Force
+    }
+    if (-not $sourceExeIsPortable) {
+        Copy-Item -LiteralPath $sourceExe -Destination $portableExe -Force
+    }
+
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = (($oldWebViewArgs, "--remote-debugging-port=$DebugPort") | Where-Object { $_ }) -join ' '
     $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $resolvedRoot 'webview2'
-    $appProcess = Start-Process -FilePath $resolvedExe -WorkingDirectory (Split-Path -Parent $resolvedExe) -PassThru
+    $appProcess = Start-Process -FilePath $portableExe -WorkingDirectory $resolvedRoot -PassThru
     $processStartUtc = $appProcess.StartTime.ToUniversalTime().ToString('o')
     $final.process = [ordered]@{ pid = $appProcess.Id; startUtc = $processStartUtc }
 
-    $repoRoot = Split-Path -Parent $PSScriptRoot
     $nodeScript = Join-Path $repoRoot 'scripts/windows-5090-startup-receipt.mjs'
     $cdpProcess = Start-Process -FilePath 'node' -ArgumentList @(
         $nodeScript, '--debug-port', $DebugPort, '--output', $cdpReceipt,
