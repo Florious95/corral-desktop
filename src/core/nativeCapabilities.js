@@ -858,7 +858,13 @@ export const nativeCapabilities = {
       if (platform === 'windows' && env === 'tauri') {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
-          const token = await invoke('read_wsl_service_token');
+          let token;
+          try {
+            token = await invoke('get_wsl_pairing_token');
+          } catch (_) {
+            // Older installed shells expose the pre-alias command name.
+            token = await invoke('read_wsl_service_token');
+          }
           return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null;
         } catch (_) {
           return null;
