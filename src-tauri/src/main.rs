@@ -61,6 +61,7 @@ fn main() {
             wsl::check_wsl_environment,
             wsl::install_wsl_service,
             wsl::read_wsl_service_token,
+            wsl::get_wsl_pairing_token,
             wsl::start_wsl_service,
             upload::upload_http,
             upload::read_clipboard_image,

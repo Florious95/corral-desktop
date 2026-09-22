@@ -127,6 +127,16 @@ test('nativeCapabilities.wsl.readServiceToken returns null in mock environment',
   assert.equal(token, null);
 });
 
+test('native token bridge prefers the registered fresh-install pairing command', async () => {
+  const source = await readFile(new URL('../src/core/nativeCapabilities.js', import.meta.url), 'utf8');
+  const rust = await readFile(new URL('../src-tauri/src/wsl.rs', import.meta.url), 'utf8');
+  const commands = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
+  assert.match(source, /invoke\('get_wsl_pairing_token'\)/);
+  assert.match(source, /invoke\('read_wsl_service_token'\)/);
+  assert.match(rust, /pub fn get_wsl_pairing_token\(\)/);
+  assert.match(commands, /wsl::get_wsl_pairing_token/);
+});
+
 test('nativeCapabilities.wsl.readServiceToken supports testEngineOverride', async () => {
   resetNativeEngineForTests();
 

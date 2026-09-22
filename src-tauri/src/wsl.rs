@@ -547,6 +547,14 @@ pub fn read_wsl_service_token() -> Result<String, String> {
     }
 }
 
+/// Compatibility command name used by fresh-install Windows bundles.
+/// Keep the original command registered too because older desktop bundles
+/// invoke `read_wsl_service_token`.
+#[tauri::command]
+pub fn get_wsl_pairing_token() -> Result<String, String> {
+    read_wsl_service_token()
+}
+
 #[cfg(any(windows, test))]
 fn service_binary(command: Option<&str>) -> Option<&'static str> {
     match command.unwrap_or("agentmirrord") {
