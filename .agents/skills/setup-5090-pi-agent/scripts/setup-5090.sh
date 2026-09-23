@@ -236,12 +236,14 @@ remove_personal_auth() {
     "$HOME/.config/openai/auth.json" "$HOME/.config/openai/credentials.json"; do
     rm -rf -- "$path"
   done
-  for config_dir in "$HOME/.cursor" "$HOME/.claude" "$HOME/.config/cursor" "$HOME/.config/claude" "$HOME/.config/xai" "$HOME/.config/openai"; do
+  for config_dir in "$AGENT_DIR" "$HOME/.cursor" "$HOME/.claude" "$HOME/.config/cursor" "$HOME/.config/claude" "$HOME/.config/xai" "$HOME/.config/openai"; do
     if [[ -d "$config_dir" ]]; then
       find "$config_dir" -type f \( \
-        -iname 'auth.json' -o -iname 'models-store.json' -o \
-        -iname 'credentials.json' -o -iname 'oauth.json' -o \
-        -iname 'token.json' -o -iname 'tokens.json' \
+        -iname 'auth.json' -o -iname 'auth.*' -o \
+        -iname 'models-store.json' -o -iname 'credentials.json' -o \
+        -iname '*credential*' -o -iname 'oauth.json' -o \
+        -iname '*oauth*' -o -iname 'token.json' -o \
+        -iname 'tokens.json' -o -iname '*token*' \
       \) -delete 2>/dev/null || true
     fi
   done
@@ -359,11 +361,15 @@ done < <(find "$AGENT_DIR" -type f \( \
   -iname 'credentials.json' -o -iname 'oauth.json' -o \
   -iname 'token.json' -o -iname 'tokens.json' \
 \) -print0)
-while IFS= read -r -d '' candidate; do
-  if grep -IqE 'sk-[A-Za-z0-9]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{20,}|(OPENAI|XAI|ANTHROPIC)_API_KEY[[:space:]]*=' "$candidate"; then
-    fail 'personal subscription literal found in synced Pi files'
-  fi
-done < <(find "$AGENT_DIR" -type f ! -path "$ENV_PATH" -print0)
+for scan_root in "$AGENT_DIR" "$HOME/.cursor" "$HOME/.claude" "$HOME/.config/cursor" "$HOME/.config/claude" "$HOME/.config/xai" "$HOME/.config/openai"; do
+  [[ -d "$scan_root" ]] || continue
+  while IFS= read -r -d '' candidate; do
+    if [[ "$candidate" == "$ENV_PATH" ]]; then continue; fi
+    if grep -IqE 'sk-[A-Za-z0-9]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{20,}|(OPENAI|XAI|ANTHROPIC)_API_KEY[[:space:]]*=' "$candidate"; then
+      fail 'personal subscription literal found in synced Pi files'
+    fi
+  done < <(find "$scan_root" -type f -print0)
+done
 for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
   grep -Fq 'unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY' "$startup_file" \
     || fail 'single-egress unset hook missing'
