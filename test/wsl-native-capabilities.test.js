@@ -168,7 +168,7 @@ test('native token bridge prefers the registered fresh-install pairing command',
   const commands = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.match(source, /invoke\('get_wsl_pairing_token'\)/);
   assert.match(source, /invoke\('read_wsl_service_token'\)/);
-  assert.match(rust, /pub fn get_wsl_pairing_token\(\)/);
+  assert.match(rust, /pub async fn get_wsl_pairing_token\(\)/);
   assert.match(rust, /let verify_script = format!\(/);
   assert.ok(rust.includes('test -x \\\"$HOME/.local/bin/nodeprobe\\\"'));
   assert.match(rust, /NODEPROBE_SHA256/);

@@ -992,3 +992,7 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 - React 保留 Tab 和业务交互。N1 的系统标题栏是装配起点，最终标题栏/安全留白须在 F2/I1 与既有布局同候选验收，不擅自改变 header 几何。
 - `GlassChrome` 在 macOS 26+ 挂载公共 `NSGlassEffectView`/`NSGlassEffectContainerView`，旧系统、减少透明度或提高对比度时降级为实底并保留清晰边界；终端/canvas 保持实底。WK 背景实际穿透未通过交付面验证前，不声明玻璃合成验收完成。
 - bundle 页面限定 `agentmirror://app/index.html`，只对可信主 frame 暴露 `native` handler；服务由 I1 注入，未配置返回不可用。页面重载换代并取消 pending。资源响应使用 `HTTPURLResponse` 的白名单 MIME、200/206/416 状态与单范围流式传输；实际候选 `.app` 仍须按交付面验收。
+
+### Windows WSL 启动响应（2026-09-23，Issue #243）
+
+检查、安装、启动和读取 token 的原生 IPC 均异步分派到阻塞线程池，不占用窗口消息循环。每次 WSL 查询最多等待 30 秒并仅终止本次 launcher；启动 readiness 最多 10 秒，launcher 提前退出立即报错。仍需真实 HTTP readiness 和 token 就绪才进入连接流程，等待期间窗口保持响应。
