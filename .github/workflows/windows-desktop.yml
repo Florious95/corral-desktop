@@ -49,6 +49,16 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Parse isolated Windows acceptance runner
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          $tokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/windows-5090-client-e2e-gate.ps1'),
+            [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+
       - name: Run frontend tests
         continue-on-error: true
         run: npm test
