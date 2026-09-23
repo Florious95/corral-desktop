@@ -737,6 +737,7 @@ src/
   - 文本粘贴复用 `handlePaneText` 发送，一次手势一次发送，保留多行文本且绝不自动追加 Enter；
   - 图片粘贴提取有效 bytes 后触发 `uploadAndPreview` 原生 HTTP 上传预览；图片-only 快捷键（macOS Ctrl+V）与纯文本快捷键（Windows Ctrl+Shift+V）各自职责明确、失败可见。
 - **终端快捷键与鼠标映射**：
+  - TUI 开启鼠标跟踪时，左键按下、连续拖动、释放按 xterm 生成的 SGR/X10 字节直达 PTY；无按键移动、右/中键与滚轮不走此通道。Windows 按 Shift、macOS 按 Option 强制本地选区（沿用 xterm 平台原生语义），无鼠标模式时正常框选（2026-09-23，Issue #258）。
   - 支持快捷键 `Ctrl+Shift+C` 复制终端选中文本；
   - 支持快捷键 `Ctrl+Shift+V` 强制纯文本粘贴；
   - 终端区域右键点击保持标准上下文冒泡（UI-SPEC §4.5 窗格菜单），坚决禁止捕获阶段暴力拦截阻断右键菜单或静默向 PTY 灌入剪贴板文本（2026-09-21 裁定）。

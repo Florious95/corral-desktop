@@ -129,14 +129,14 @@ function mapCsi(seq) {
 }
 
 /**
- * 鼠标协议分类：只把左键（SGR button 0）作为可直通 PTY 的点击。
- * 右键/中键、滚轮与移动报告都拦截；滚轮仍由 scroll_wheel 独立处理。
- * SGR 的修饰位（4/8/16）仍保留左键语义，X10 的 release code 3 不带按键归属，故不转发。
+ * 左键按下/释放及按住移动直通 PTY，保留修饰位（4/8/16）与 motion 位（32）。
+ * 右键/中键、无按键移动与滚轮仍拦截；滚轮由 scroll_wheel 独立处理。
+ * X10 release code 3 的按键归属由 NativeInputPump 跟踪。
  * @returns {'silent'|'click'}
  */
 export function classifyMouseBtn(btn) {
   if (!Number.isFinite(btn)) return 'silent';
-  if (btn >= 32) return 'silent';
+  if (btn >= 64) return 'silent';
   return (btn & 3) === 0 ? 'click' : 'silent';
 }
 
