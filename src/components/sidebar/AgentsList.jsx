@@ -1,5 +1,5 @@
 // Agents 列表（UI-SPEC §5.3）。行高 54px、绝对定位 + top 过渡，收藏置顶靠 top 重排。
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from './ProviderIcon.jsx';
 import { StarIcon, CheckIcon } from '../../lib/icons.jsx';
 import { AGENT_ROW_HEIGHT as ROW, sortAgents, visibleWindow } from './agentWindow.js';
