@@ -686,15 +686,20 @@ src/
 
 - **同父平铺常驻体系**：
   - 容器：`<div class="splitpanes terminal-stage">`，`position:relative; flex:1; min-height:0; min-width:0; overflow:hidden`。
-  - **核心保障**：所有的 `TerminalPane` 作为同一 DOM 父容器下的直接子组件，通过 `absolute` 定位投影（纯函数 `project(root, rect, gap=1)` 计算 `{x, y, w, h}`）；
+  - **核心保障**：所有的 `TerminalPane` 作为同一 DOM 父容器下的直接子组件，通过 `absolute` 定位投影（纯函数 `projectLayout(root, rect, gap=6)` 计算 `{x, y, w, h}`）；
   - 无论分屏怎么切分、重排或前后台切换，React `key={uid}` 与组件在 DOM 树中的层级永远保持不变，**彻底杜绝组件 Unmount、零 xterm 重建、零闪屏**。
+  - **分屏物理间隙与调节手柄（2026-09-23 裁定，Issue #271 / #272）**：
+    - 多分屏各窗格之间统一保留 **6px**（`SPLIT_GAP_PX = 6`）物理间隙，透出底层高质感背景；
+    - 6px 间隙直接作为同父可交互拖拽手柄（`.split-resizer`），左右分界处显示 `col-resize`（宽 6px），上下分界处显示 `row-resize`（高 6px），拥有微动效 Hover 高光；
+    - 拖拽过程基于 `setPointerCapture` 与单 rAF 进行 60fps 纯 DOM 视觉预览，零存储风暴；在鼠标松开时原子提交新比例并持久化至 `am.workspace.v2`（活动 Tab `root`）；
+    - 严格遵循叶级最小安全尺寸约束（宽度 ≥ 120px，高度 ≥ 60px），杜绝窗格无限压瘪；窗口伸缩时按用户手调比例等比放缩，绝不被窗口 Resize 冲毁覆盖。
 - **后台常驻机制**：
   - 合法宿主 UID 是已固化 Tab 的全部叶子加上当前 root 叶子（含 `previewUid`）；预览尚未写入 `tabs` 时也必须挂载 TerminalPane；
   - 已打开且未关闭的会话宿主常驻于 DOM 中，切换到后台时保留最后的非零尺寸矩形，施加 `visibility:hidden; pointer-events:none; inert; aria-hidden:true`；
   - 重新切回可见时直接恢复 `visibility:visible`，仅在几何发生真实改变时触发 120ms 防抖的 xterm `fit()`。
   - 仅在 Tab 明确关闭或服务端确认删除时，才真正卸载该组件并完整清理 xterm / 监听器 / 资源。
 - **窗格结构与关闭钮**：
-  - `.pane-host`：`position:absolute; box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden; border-left:1px solid var(--border); border-top:1px solid var(--border)`。
+  - `.pane-host`：`position:absolute; box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden`；单窗格全屏无外边框，多分屏状态（`[data-multi-pane="true"]`）带有 `1px solid var(--border)` 及 `border-radius:var(--r-8)` 卡片外框。
   - 处于多窗格分屏状态时（`visibleUids.length > 1`），窗格右上角悬浮显露关闭此分屏按钮（`.pane-close-btn`，`<XIcon size={12} strokeWidth={2.2}/>`）。
 - **空态**（`visibleUids.length === 0`）：
   - 绝对定位覆盖层 `.splitpanes-empty`，居中提示：第一行 `从左侧选择一个 Agent`，第二行 `<span style="font-size:var(--fs-115)">点击打开、或右键在右侧分屏展示</span>`。
@@ -720,12 +725,11 @@ src/
   **2026-09-23（macOS 实测回归 & Issue #277 符号回退）**：macOS 同样取消额外行距。首屏投影与实际渲染共用行高；布局读取 xterm 渲染器已计算的精确字符格尺寸，不跨 DOM/WebGL 渲染器缓存，也不从整幅画布的整数宽度反推单格；切换后按最终渲染单元格重新计算列数，避免右侧空白随窗格宽度累积。终端保留用户正文选定字体，内嵌离线 `AgentMirror Symbols` 符号字体（覆盖 U+1F5AB 🖫 等杂项磁盘/存储符号），并追加平台符号字体（macOS Apple Symbols/Apple Color Emoji，Windows Segoe UI Symbol/Segoe UI Emoji）及 Symbols Nerd Font Mono/JetBrainsMono Nerd Font Mono 后备，彻底消除底栏符号与 Git Diff 状态的中空方块（tofu）；不替换 PTY 字符、不联网下载字体。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: macOS/Windows 为 1.0，其余平台 1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  首次几何就绪后立即完成首订；后续连续窗口拖拽的 `fit()` 目标 cols/rows 在 **120ms 静止后** `term.resize`（明确完成边界见下文）（裁定 2026-09-17）。首帧立刻落到格子。
+  首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：
   - 彻底拔除 500ms 盲等与 46x44 盲建：由 `SplitPanes` 预先投影物理像素，结合全局离屏常驻字体度量缓存（`fontMetrics.js`）纯数学直接得出目标 `initialCols / initialRows` 并注入构造函数，发起的首帧网络 `subscribe` 直接携带最终尺寸一步到位拉起远端目标几何，彻底消灭二次 resize 导致的 CLI 输入框弹跳；
-  - 拖拽 Resize 视觉 60fps 跟随与网络 PTY 120ms 节流解耦：本地容器与视口 60fps 实时跟随鼠标刷新，PTY 几何仍由唯一 `subscribe` 通道提交，连续变动维持 120ms 尾随防抖；
+  - 拖拽 Resize 视觉 60fps 跟随与网络 PTY 120ms 节流解耦：本地容器与视口 60fps 实时跟随鼠标刷新，网络 PTY `resize` 维持单一 120ms 尾随防抖；
   - macOS 原生窗口在尺寸/屏幕变化时立即失效拖拽命中图；最新窗口几何静止至少 120ms 后合并通知 WKWebView，最多一条在途通知。前端每次重新 arm 前仅发送一次 disarm；原生同尺寸 generation/DPR 变化也必须重新 arm，禁止退回旧命中图。拒绝旧报告只清空命中图，不虚增原生 generation（2026-09-23，Issue #251）。
-  - **macOS 已完成排布（2026-09-23）**：分屏树提交、原生窗口拖拽结束、进入/退出全屏完成属于明确结束边界。舞台先提交最终子窗格矩形，再同步 flush 最终 grid 与唯一 subscribe，并取消旧的 120ms 尾随计时；未完成的连续 resize 仍合并，避让/隐藏窗格不抢占 PTY。原生完成信号独立于标题栏命中图的 120ms 通知。诊断使用单调时钟记录 fit→grid_commit→subscribe→snapshot→parse_done→render，render 指 xterm 渲染回调，不能冒充系统实际呈现或完整业务稳定。
   - 首帧快照单微任务原子上屏：首帧快照到达时，在同一个微任务中同步完成快照写入与 `setReady(true)` 状态更新，保证内容上屏与加载占位卸载严格在同一帧呈现，零白屏闪烁。
   **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就用最新几何重发 `subscribe`（不再紧跟同尺寸网络 `resize`）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
@@ -759,12 +763,6 @@ src/
 ### 6.3 终端输入
 
 终端列直接承接 xterm 的键盘输入和粘贴事件；可识别的命名键走 `input.keys`，其他有意输入序列由桌面薄 adapter 以非空 RFC 4648 base64 `input.bytes` 直达 PTY；主区不挂载额外的底部图片条。
-
-**2026-09-23（macOS，#266/#279）**：普通文本与 IME 已提交文本在当前输入回调内发出，不等待 32ms 合并计时；不完整转义序列仍保留原组包期限。输入后的首个回流跳过客户端额外的 rAF 等待，仍遵守 xterm 单写入、字节顺序及积压恢复；后台输出继续合并，不猜测或本地伪造 PTY 回显。文本后的 Enter 仍按原 ack 契约排序。诊断沿用默认关闭的几何环形日志，仅记录输入长度/请求号与单调时间，不记录文本。底边验收必须同时检查窗格间落差、host→screen 底隙以及 viewport→触底窗格/画布底隙；只证明所有窗格一起上移后仍平齐不算通过。字符正常下降部空间、窗框边线和窗口外阴影与终端 padding 分开取证，禁止通过裁字或负边距掩盖。
-
-触底的可见 macOS 窗格用 CSS `bottom: 0` 直接锚定舞台底边，不依赖 ResizeObserver→React 的上一帧像素高度；内部 xterm 继续底锚。顶部/中间窗格与后台常驻窗格保留投影高度，PTY 网格仍走原尺寸管线。这样窗口连续拉伸、投影尚未提交时，底部窗格和终端画布也同时贴底、平齐。
-
-**2026-09-23（macOS 后台绘制）**：非活动 Tab 的常驻窗格保持挂载、投影尺寸和终端缓冲区，但通过 `content-visibility: hidden` 停止子树绘制，让 xterm 原生 IntersectionObserver 暂停 WebGL。单独 `visibility: hidden` 仍会绘制后台输出，不满足此约束。恢复可见后由 xterm 刷新当前缓冲区；不丢输入输出、不取消会话订阅、不销毁/重建渲染上下文。空闲无输出、非焦点终端不得持续绘制。
 
 ---
 

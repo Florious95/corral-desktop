@@ -190,7 +190,7 @@ test('web interaction matrix: split-pane and terminal host contracts preserve fu
   const paneCss = await source('components/terminal/terminal.css');
   const pane = await source('components/terminal/TerminalPane.jsx');
   assert.match(split, /className="splitpanes terminal-stage"/);
-  assert.match(split, /project\(effectiveRoot, effectiveRect, 1\)/);
+  assert.match(split, /projectLayout\(\s*currentTree,\s*effectiveRect,\s*SPLIT_GAP_PX\s*\)/);
   assert.match(split, /data-pane-uid/);
   assert.match(paneCss, /\.terminalpane-body\s*\{[\s\S]*?flex:\s*1;[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*8px 10px 0/);
   assert.match(paneCss, /\.terminalpane-host\s*\{[\s\S]*?flex:\s*1;[\s\S]*?min-height:\s*0;[\s\S]*?position:\s*relative[\s\S]*?overflow:\s*hidden/);

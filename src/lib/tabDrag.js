@@ -9,7 +9,7 @@
  * 5. 原子 Drop 提交：仅在 pointerup 瞬间原子提交树拓扑变更；终端实例保持平铺绝对定位保活（零 Unmount）。
  */
 
-import { project, findLeaf, dropNode, getLeaves } from './workspaceLayout.js';
+import { project, findLeaf, dropNode, getLeaves, SPLIT_GAP_PX } from './workspaceLayout.js';
 
 export const HOLD_DELAY_MS = 180;
 export const TOLERANCE_PX = 6;
@@ -159,7 +159,7 @@ export function hitTestLeafPanes({ x, y, sourceUid, stageRect, leafRects, root =
         if (effectiveRoot) {
           const candidateTree = dropNode(effectiveRoot, sourceUid, uid, edge);
           if (candidateTree) {
-            const projected = project(candidateTree, stageRect, 1);
+            const projected = project(candidateTree, stageRect, SPLIT_GAP_PX);
             previewRect = projected[sourceUid] || null;
 
             // 统一在真实候选树校验每一个叶子的最终尺寸（w >= 120 且 h >= 60），并确保无遗漏
@@ -410,7 +410,7 @@ export class TabDragController {
       const root = this.getRoot ? this.getRoot() : null;
       if (root) {
         // 物理碰撞检测：严格使用当前真实物理 root 的各个叶子矩形（真实屏幕 DOM 位置）进行悬停命中
-        const localMap = project(root, { x: 0, y: 0, w: r.width, h: r.height }, 1);
+        const localMap = project(root, { x: 0, y: 0, w: r.width, h: r.height }, SPLIT_GAP_PX);
         this.cachedLeafRects = Object.entries(localMap).map(([uid, lr]) => ({
           uid,
           rect: {

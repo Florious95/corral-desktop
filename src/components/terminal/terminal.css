@@ -10,6 +10,7 @@
   min-width: 0;
   position: relative;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .pane-host {
@@ -18,8 +19,13 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-left: 1px solid var(--border);
-  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* 多分屏状态下带有卡片边框与圆角，透出 6px 底层间隙 (Issue #271) */
+[data-multi-pane="true"] .pane-host {
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
 }
 
 .pane-host.is-active {
@@ -34,6 +40,7 @@
   pointer-events: none;
   z-index: 4;
   border: 1px solid var(--input-focus);
+  border-radius: var(--r-8);
   box-sizing: border-box;
 }
 
@@ -46,6 +53,42 @@
    suspend the invisible WebGL surface. visibility:hidden alone still draws. */
 .terminal-stage[data-platform="macos"] > .pane-host.is-hidden {
   content-visibility: hidden;
+}
+
+/* ——— Split Resizer Handle (Issue #271 / #272) ——— */
+
+.split-resizer {
+  position: absolute;
+  z-index: 10;
+  box-sizing: border-box;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.split-resizer[data-axis="x"] {
+  cursor: col-resize;
+  width: 6px;
+}
+
+.split-resizer[data-axis="y"] {
+  cursor: row-resize;
+  height: 6px;
+}
+
+.split-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transition: background-color var(--d-hover), opacity var(--d-hover);
+  opacity: 0;
+  background-color: var(--input-focus);
+}
+
+.split-resizer:hover::after,
+.split-resizer.is-dragging::after {
+  opacity: 1;
 }
 
 .pane-close-btn {
