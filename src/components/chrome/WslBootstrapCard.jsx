@@ -55,7 +55,6 @@ export default function WslBootstrapCard({
       title = '端口 9900 冲突或健康检查失败 (502)';
       subtitle = '本机 9900 端口被旧转发或适配层占用，或网关返回 HTTP 502，请检查残留进程后重试。';
       commandHint = 'wsl -d Ubuntu -e lsof -nP -iTCP:9900';
-    }
     } else if (envStatus && !envStatus.service_installed) {
       subtitle = 'WSL 2 中未安装 Agent 会话服务，请在 Ubuntu 中安装 agentmirrord：';
       commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
