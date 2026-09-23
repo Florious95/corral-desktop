@@ -235,6 +235,7 @@ export class TerminalView {
         window.__AGENTMIRROR_TEST_HOOKS__.activeTerminal = this.term;
       };
       textarea.addEventListener('focus', this._testFocus);
+      if (textarea.ownerDocument?.activeElement === textarea) this._testFocus();
     }
     if (textarea?.addEventListener) {
       this._pasteListener = (ev) => {
@@ -595,7 +596,10 @@ export class TerminalView {
     if (this.hideCursor) this.term.write(HIDE_CURSOR);
   }
 
-  focus() { try { this.term.focus(); } catch { /* 已 dispose */ } }
+  focus() {
+    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1') this._testFocus?.();
+    try { this.term.focus(); } catch { /* 已 dispose */ }
+  }
 
   blur() { try { this.term.blur(); } catch { /* 已 dispose */ } }
 
