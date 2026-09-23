@@ -1,4 +1,4 @@
-export const AGENT_ROW_HEIGHT = 54;
+export const AGENT_ROW_HEIGHT = 34;
 export const AGENT_OVERSCAN = 4;
 
 export function visibleWindow(total, scrollTop, viewportHeight) {

@@ -624,30 +624,30 @@ src/
  * @param {string} emptyHint                空态第二行文案
  */
 ```
-内部状态：`vpH`（可视高度，初值 108）。
+内部状态：`vpH`（可视高度，初值 68）。
 
-**行高 54px，绝对定位 + top 过渡，是这套列表的灵魂，不要改成普通流式布局。**
+**行高 34px，绝对定位 + top 过渡，是这套列表的灵魂，不要改成普通流式布局。**
 
-- **外层**（挂 `ref`，被 `ResizeObserver` 观测）：`padding:0 10px; flex:1; min-height:108px; overflow:hidden; box-sizing:border-box`。
+- **外层**（挂 `ref`，被 `ResizeObserver` 观测）：`padding:0 10px; flex:1; min-height:68px; overflow:hidden; box-sizing:border-box`。
 - **量化视口**：
   ```js
-  const h = Math.max(108, Math.floor(el.clientHeight / 54) * 54);
+  const h = Math.max(68, Math.floor(el.clientHeight / 34) * 34);
   ```
   只在变化时 `setVpH(h)`。中层 `<div style={{height:vpH, overflowY:'auto'}}>` —— 保证永远只露出整数行，不出现半行。
-- **轨道**：`position:relative; height:{agents.length * 54}px`。
-- **排序**：`sorted = [...agents].sort((a,b)=>(b.fav?1:0)-(a.fav?1:0))`（稳定排序，收藏置顶）。**DOM 顺序仍用 `agents` 原序**，只把 `top = sorted.indexOf(ag) * 54` 写进样式 —— 这样 React key 不动，重排走 `top` 过渡。
-- **行样式（会话行纯净精简，Issue #254）**：
+- **轨道**：`position:relative; height:{agents.length * 34}px`。
+- **排序**：`sorted = [...agents].sort((a,b)=>(b.fav?1:0)-(a.fav?1:0))`（稳定排序，收藏置顶）。**DOM 顺序仍用 `agents` 原序**，只把 `top = sorted.indexOf(ag) * 34` 写进样式 —— 这样 React key 不动，重排走 `top` 过渡。
+- **行样式（会话行纯净精简与垂直收紧，Issue #254 / #280）**：
   ```
-  position:absolute; left:0; right:0; top:{top}px; height:54px; box-sizing:border-box;
+  position:absolute; left:0; right:0; top:{top}px; height:34px; box-sizing:border-box;
   border:2px solid transparent; background-clip:padding-box;
-  display:flex; align-items:center; padding:0 12px;
-  border-radius:var(--r-9); cursor:pointer;
+  display:flex; align-items:center; padding:6px 12px;
+  border-radius:var(--r-8); cursor:pointer;
   background-color:{openKeys.includes(key) ? var(--sel-bg) : transparent};
   opacity:{closing?0:1}; transform:scale({closing?0.94:1});
   transition:background-color var(--d-hover),opacity var(--d-row),transform var(--d-row),top var(--d-reorder) var(--ease);
   animation:rowIn var(--d-chevron) ease-out;
   ```
-  hover `background-color:var(--hover-5)`。
+  hover `background-color:var(--hover-5)`。单行卡片上下留白收紧至 6px 比例（卡片可视高 30px），与 18px Provider 图标紧密贴合。
 - **三大核心视觉要素（彻底剔除重复 Provider 文本与工程/目录名）**：
   - **核心 1：工作状态指示点**（`.agents-dot`），`8px` 圆，`border-radius:var(--r-pill); flex:none`：
     | state | 样式 | title |

@@ -1,10 +1,10 @@
-// Agents 列表（UI-SPEC §5.3）。行高 54px、绝对定位 + top 过渡，收藏置顶靠 top 重排。
+// Agents 列表（UI-SPEC §5.3）。行高 34px、绝对定位 + top 过渡，收藏置顶靠 top 重排。
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from './ProviderIcon.jsx';
 import { StarIcon, CheckIcon } from '../../lib/icons.jsx';
 import { AGENT_ROW_HEIGHT as ROW, sortAgents, visibleWindow } from './agentWindow.js';
 
-const MIN_H = 108;
+const MIN_H = ROW * 2;
 
 const STATE_TITLE = {
   working: '运行中',
@@ -43,7 +43,7 @@ const AgentRow = memo(function AgentRow({
 }) {
   return (
     <div
-      className={`agents-row${isOpen ? ' is-open' : ''}${isActive ? ' is-active' : ''}`}
+      className={`agents-row agents-item${isOpen ? ' is-open' : ''}${isActive ? ' is-active' : ''}`}
       data-agent-key={ag.key}
       style={{
         top,
@@ -110,7 +110,7 @@ export default function AgentsList({
   const [vpH, setVpH] = useState(MIN_H);
   const [scrollTop, setScrollTop] = useState(0);
 
-  // 视口高度量化到 54 的整数倍：永远只露出整数行，不出现半行
+  // 视口高度量化到 ROW (34px) 的整数倍：永远只露出整数行，不出现半行
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return undefined;

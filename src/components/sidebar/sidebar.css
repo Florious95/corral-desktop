@@ -263,7 +263,7 @@
   color: var(--badge-local-fg);
 }
 
-/* —— Agents 列表：54px 绝对定位行 —— */
+/* —— Agents 列表：34px 绝对定位行（收紧上下留白，Issue #280） —— */
 .agents-host {
   padding: 0 10px;
   flex: 1;
@@ -281,14 +281,14 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 54px;
+  height: 34px;
   box-sizing: border-box;
   border: 2px solid transparent;
   background-clip: padding-box;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  border-radius: var(--r-9);
+  padding: 6px 12px;
+  border-radius: var(--r-8);
   cursor: pointer;
   background-color: transparent;
   user-select: none;
@@ -317,6 +317,12 @@
 }
 .agents-row.is-open:hover:not(.is-active) {
   background-color: var(--hover-2);
+}
+
+/* Issue #280: .agents-item 紧凑卡片别名 */
+.agents-item {
+  height: 34px;
+  padding: 6px 12px;
 }
 .agents-row-main {
   flex: 1;
