@@ -18,9 +18,9 @@ const NODEPROBE_RESOURCE: &str = "resources/nodeprobe-linux-amd64";
 #[cfg(any(windows, test))]
 const NODEPROBE_SHA256: &str = "61d6dd99e7d7135e20b885b00724fb1359c1643c634857702239a092faa4e958";
 const AGENTMIRRORD_NAME: &str = "agentmirrord";
-// The bundle revision is part of the WSL marker so upgrading the embedded
-// daemon cannot silently reuse a same-semver binary without /pair/whoami.
-const AGENTMIRRORD_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+whoami-v1");
+// Force same-semver installations to replace the daemon with the reconciled
+// Pi capability; the older +whoami-v1 marker accepted a different extension.
+const AGENTMIRRORD_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+pi-c28855ea-v1");
 #[cfg(windows)]
 const SERVICE_READY_PORT: u16 = 9900;
 #[cfg(any(windows, test))]

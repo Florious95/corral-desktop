@@ -1,0 +1,30 @@
+{
+  "binary": {
+    "path": "/home/alaudalancy/.local/bin/nodeprobe",
+    "sha256": "61d6dd99e7d7135e20b885b00724fb1359c1643c634857702239a092faa4e958",
+    "size": 1108816
+  },
+  "corpora": [
+    {
+      "base_blob": "690e651f445793a36ed1cb6e6f6143e6ce5c989e",
+      "path": "tools/nodeprobe/fixtures/titles.tsv",
+      "sha256": "cff45d25492fdfe9689330c630c80bad20a1f27243e5aae1d93bc57de0a22b58"
+    },
+    {
+      "base_blob": "c1166ceabc6ae4e3075fb741c89759da6fcc7844",
+      "path": "tools/nodeprobe/fixtures/providers.tsv",
+      "sha256": "c9e02d01821df7d7afe2292fefb211cefea7e3abecde8b35bd9ffa2a0721ee7e"
+    }
+  ],
+  "pi_extension": {
+    "path": "/home/alaudalancy/.pi/agent/extensions/nodeprobe-pi-activity.js",
+    "sha256": "c28855ea4ac6f411044fb9a8066c2e5c3e5580197c1ae412e88d23d07467b714",
+    "size": 6844,
+    "source_path": "src-tauri/resources/nodeprobe-pi-activity.js",
+    "source_commit": "ccf8324ebe29e35038412ffad03157e269029232",
+    "source_tree": "6c5e782393741fe229216320fd14e2b5d1100231"
+  },
+  "platform": "linux/amd64",
+  "source_commit": "a7185aa2b93460ac9fd289c0de63d7767f8ef749",
+  "source_tree": "28e3aab4fac89374c0ac4b8c80ba7f13aaae2c75"
+}

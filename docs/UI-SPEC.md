@@ -992,3 +992,9 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 - React 保留 Tab 和业务交互。N1 的系统标题栏是装配起点，最终标题栏/安全留白须在 F2/I1 与既有布局同候选验收，不擅自改变 header 几何。
 - `GlassChrome` 在 macOS 26+ 挂载公共 `NSGlassEffectView`/`NSGlassEffectContainerView`，旧系统、减少透明度或提高对比度时降级为实底并保留清晰边界；终端/canvas 保持实底。WK 背景实际穿透未通过交付面验证前，不声明玻璃合成验收完成。
 - bundle 页面限定 `agentmirror://app/index.html`，只对可信主 frame 暴露 `native` handler；服务由 I1 注入，未配置返回不可用。页面重载换代并取消 pending。资源响应使用 `HTTPURLResponse` 的白名单 MIME、200/206/416 状态与单范围流式传输；实际候选 `.app` 仍须按交付面验收。
+
+### Windows 探针资源一致性（2026-09-23，Issue #241）
+
+桌面分发的 daemon、nodeprobe、Pi 扩展与两份 corpus 必须符合 daemon 实际内嵌的同一份 accepted manifest；构建门禁拒绝任一哈希或大小漂移。同步更新 WSL bundle revision，使同版本重装也会替换旧能力清单的 daemon，禁止靠兼容多个插件 hash 掩盖资源错配。
+
+Provider 分类由已验真的 nodeprobe 与 canonical corpus 负责。删除旧 Go provider table 的桌面注入补丁和字符串标识断言；它们对应的上游模块已移除，不作为新 daemon 的交付要求。

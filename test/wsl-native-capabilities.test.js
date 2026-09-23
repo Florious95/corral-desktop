@@ -139,7 +139,6 @@ test('bundles the Linux nodeprobe capability binary with its accepted digest', a
 
 test('bundles a daemon with host-wide tmux socket discovery', async () => {
   const daemon = await readFile(new URL('../src-tauri/resources/agentmirrord-linux-amd64', import.meta.url));
-  assert.ok(daemon.includes(Buffer.from('AgentMirror embedded providers.tsv v1')));
   assert.ok(daemon.includes(Buffer.from('tmux_uid_directory')));
   assert.ok(!daemon.includes(Buffer.from('other_uid_directory')));
 });
