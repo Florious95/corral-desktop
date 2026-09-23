@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/Florious95/corral-core",
+  "commit": "a472d4437885060bc0eaf1838c9149e5242948cb",
+  "tree": "aeba55d8ed2c9a5695b47eb76ad51ef27864ca7e",
+  "source_pr": "https://github.com/Florious95/corral-core/pull/105",
+  "go_version": "go version go1.27.1 darwin/arm64",
+  "target": "linux/amd64",
+  "build": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false -ldflags=\"-s -w\" -o agentmirrord-linux-amd64 ./cmd/agentmirrord",
+  "sha256": "aa8ac12fab9ee95768099f44fd624c6b518983afbd52495ee84e55e11a192447",
+  "size": 23048352
+}
