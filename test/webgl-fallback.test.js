@@ -92,7 +92,7 @@ test('TerminalView.open in node falls back when addon cannot init', async () => 
   const view = new TerminalView(container, { TerminalCtor: FakeTerminal });
   view.open();
   assert.equal(view.term.opts.customGlyphs, true);
-  assert.equal(view.term.opts.lineHeight, 1.25);
+  assert.equal(view.term.opts.lineHeight, 1);
   view.writeSnapshot(new Uint8Array([65]));
   assert.equal(view.term.writes.length, 1);
   await view.readyWebgl;

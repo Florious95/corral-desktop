@@ -21,7 +21,7 @@ import { attachWebglRenderer } from './webglRenderer.js';
 import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
 import { isCtrlV, isCtrlShiftV, isCtrlC, isCtrlShiftC, isCmdV } from './clipboard.js';
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
-import { getFontMetrics } from './fontMetrics.js';
+import { getFontMetrics, terminalLineHeight } from './fontMetrics.js';
 import { geomTrace, isGeomTraceEnabled } from './geomTrace.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
@@ -54,6 +54,10 @@ function withImplicitCr(bytes) {
   }
   return normalized;
 }
+
+// Keep the chosen text font; use the installed Nerd Font for terminal icons.
+const terminalFontFamily = (family) => `${family}, ${nativeCapabilities.platform === 'windows'
+  ? '"Segoe UI Symbol", "Segoe UI Emoji"' : '"Apple Symbols", "Apple Color Emoji"'}, "Symbols Nerd Font Mono", "JetBrainsMono Nerd Font Mono"`;
 
 export class TerminalView {
   /**
@@ -98,8 +102,8 @@ export class TerminalView {
 
     this.fontSize = fontSize;
     this.fontFamily = fontFamily;
-    // Windows uses the DOM renderer: extra leading separates box-drawing rows.
-    this.lineHeight = nativeCapabilities.platform === 'windows' ? 1 : 1.25;
+    // Native terminal cells have no extra leading between rows.
+    this.lineHeight = terminalLineHeight(nativeCapabilities.platform);
     this.hideCursor = hideCursor === true;
     this._customTheme = Boolean(opts.theme);
     const initialCols = opts.initialCols || (opts.cols ?? null);
@@ -114,7 +118,7 @@ export class TerminalView {
       rows: initialRows || 24,
       scrollback,
       fontSize,
-      fontFamily,
+      fontFamily: terminalFontFamily(fontFamily),
       lineHeight: this.lineHeight,
       customGlyphs: true,
       cursorBlink: !this.hideCursor,
@@ -646,9 +650,9 @@ export class TerminalView {
     let changed = false;
     if (typeof fontFamily === 'string' && fontFamily.trim()) {
       const trimmed = fontFamily.trim();
-      if (this.term.options.fontFamily !== trimmed) {
+      if (this.fontFamily !== trimmed) {
         this.fontFamily = trimmed;
-        this.term.options.fontFamily = trimmed;
+        this.term.options.fontFamily = terminalFontFamily(trimmed);
         changed = true;
       }
     }
@@ -724,26 +728,17 @@ export class TerminalView {
     }, 120);
   }
 
-  /** 单元格实际渲染尺寸；优先直读常驻字体度量缓存（O(1) 纯数学除法，彻底消除 Layout Thrashing）。 */
+  /** Read the renderer's computed cell size without measuring DOM or caching across renderers. */
   _cell() {
     if (this._cellMetrics) return this._cellMetrics;
+    // xterm 6 exposes exact WebGL advances here; screen width is rounded as a whole.
+    const cell = this.term._core?._renderService?.dimensions?.css?.cell;
+    if (cell?.width > 0 && cell?.height > 0) return { w: cell.width, h: cell.height };
     const metrics = getFontMetrics({
       fontFamily: this.term.options?.fontFamily || this.fontFamily,
       fontSize: this.fontSize,
       lineHeight: this.lineHeight,
     });
-    // 兼容 FakeTerminal 测试替身注入的 screen 元素模拟
-    const screen = this.term.element && this.term.element.querySelector?.('.xterm-screen');
-    if (screen) {
-      const r = screen.getBoundingClientRect?.();
-      if (r && r.width > 0 && r.height > 0) {
-        const m = { w: r.width / this.term.cols, h: r.height / this.term.rows };
-        this._cellMetrics = m;
-        return m;
-      }
-    }
-    const m = { w: metrics.cellWidth, h: metrics.cellHeight };
-    this._cellMetrics = m;
-    return m;
+    return { w: metrics.cellWidth, h: metrics.cellHeight };
   }
 }

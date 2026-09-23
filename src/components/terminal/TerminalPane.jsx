@@ -11,7 +11,7 @@ import { BINARY_KIND } from '../../core/binary.js';
 import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/scrollback.js';
 import { parseAnsi } from './ansi.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../../core/presence.js';
-import { computeGridDimensions } from '../../term/fontMetrics.js';
+import { computeGridDimensions, terminalLineHeight } from '../../term/fontMetrics.js';
 import { nativeCapabilities } from '../../core/nativeCapabilities.js';
 
 export { MOBILE_GRID, PRESENCE_MODE };
@@ -140,6 +140,7 @@ export default function TerminalPane({
       const grid = computeGridDimensions({
         width: effectiveW,
         height: effectiveH,
+        lineHeight: terminalLineHeight(nativeCapabilities.platform),
         fontFamily,
         fontSize,
       });
