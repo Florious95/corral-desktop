@@ -163,6 +163,10 @@ export default function SplitPanes({
         const currentRect = isVisible
           ? layout[uid]
           : (lastRects.current.get(uid) || { x: 0, y: 0, w: effectiveRect.w, h: effectiveRect.h });
+        // CSS follows the viewport before ResizeObserver/React commits its new
+        // projection. Keep the outer bottom edge anchored during that interval.
+        const anchorBottom = isVisible && nativeCapabilities.platform === 'macos'
+          && currentRect.y + currentRect.h === effectiveRect.h;
         const isActive = uid === activeUid;
         const agent = agentByKey?.get?.(uid) || (panes && panes.find((p) => p.key === uid)) || {
           key: uid,
@@ -180,7 +184,8 @@ export default function SplitPanes({
               left: `${currentRect.x}px`,
               top: `${currentRect.y}px`,
               width: `${currentRect.w}px`,
-              height: `${currentRect.h}px`,
+              height: anchorBottom ? undefined : `${currentRect.h}px`,
+              bottom: anchorBottom ? 0 : undefined,
               visibility: isVisible ? 'visible' : 'hidden',
               pointerEvents: isVisible ? 'auto' : 'none',
             }}

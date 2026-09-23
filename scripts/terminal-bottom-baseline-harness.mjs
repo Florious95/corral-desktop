@@ -27,10 +27,12 @@ export function collectTerminalBaselines() {
       cursorRow: buffer.cursorY, cursorBottom: s.y + (buffer.cursorY + 1) * cellHeight,
       screenBottomDevicePixels: s.bottom * dpr };
   });
-  const bottom = Math.max(...panes.map((p) => p.host.bottom));
+  const bottom = panes.length ? Math.max(...panes.map((p) => p.host.bottom)) : null;
   const touchingBottom = panes.filter((p) => Math.abs(p.host.bottom - bottom) < 0.01);
   const edges = touchingBottom.map((p) => p.screenBottomDevicePixels);
   return { dpr, viewport: { width: innerWidth, height: innerHeight }, panes,
     bottomPaneCount: touchingBottom.length,
+    viewportBottomGap: bottom === null ? null : innerHeight - bottom,
+    bottomScreenGapsDevicePixels: touchingBottom.map(p => (innerHeight - p.screen.bottom) * dpr),
     bottomSpreadDevicePixels: edges.length ? Math.max(...edges) - Math.min(...edges) : null };
 }

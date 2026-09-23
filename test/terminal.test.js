@@ -265,6 +265,32 @@ test('delta burst is coalesced into one ordered complete xterm write', async () 
   view.dispose();
 });
 
+test('macOS input echo skips frame batching while keeping writes single-flight', async () => {
+  setNativeEngineForTests({ platform: 'macos' });
+  const { view } = makeView();
+  const callbacks = [];
+  view.term.write = (data, callback) => { view.term.writes.push(data); callbacks.push(callback); };
+  try {
+    view.open();
+    view.term.emitData('a');
+    view.writeDelta(new Uint8Array([65]));
+    assert.equal(view.term.writes.length, 1, 'the first echo enters xterm immediately');
+    view.term.emitData('b');
+    view.writeDelta(new Uint8Array([66]));
+    assert.equal(view.term.writes.length, 1, 'an unfinished parse still owns the writer');
+    callbacks.shift()();
+    assert.equal(view.term.writes.length, 2, 'pending input echo follows the completed parse without a frame wait');
+    callbacks.shift()();
+    view.writeDelta(new Uint8Array([67]));
+    assert.equal(view.term.writes.length, 2, 'unsolicited output retains batching');
+    await sleep(0);
+    assert.deepEqual(view.term.writes.map(d => [...d]), [[65], [66], [67]]);
+  } finally {
+    view.dispose();
+    resetNativeEngineForTests();
+  }
+});
+
 test('delta backlog overflow requests snapshot recovery instead of silently dropping', async () => {
   const recoveries = [];
   const { view } = makeView({
