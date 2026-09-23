@@ -86,7 +86,9 @@ copy_tree() {
     relative=${source_file#"$source"/}
     basename=${relative##*/}
     case "$basename" in
-      .DS_Store|.env|auth.json|trust.json|mcp.json|*token*|*credential*|*.pem|*.key|*.p12|*.secret)
+      # Basename deny-list for personal subscription and credential material.
+      # Documentation containing words such as "cursor" remains copyable.
+      .DS_Store|.env|auth.json|models-store.json|trust.json|mcp.json|credentials.json|credentials.*|*cursor*auth*|*claude*auth*|*xai*auth*|*openai*auth*|*oauth*|*token*|*credential*|*.pem|*.key|*.p12|*.secret)
         continue
         ;;
     esac
@@ -217,13 +219,50 @@ umask 077
 AGENT_DIR="$HOME/.pi/agent"
 BACKUP="$HOME/.cache/setup-5090-pi-agent-$(date +%Y%m%d%H%M%S)-backup"
 mkdir -p "$AGENT_DIR" "$HOME/.agents" "$BACKUP"
+
+# Personal subscription stores are never copied into the payload or backup.
+# Remove known stores on the target so repeated runs cannot leave them behind.
+remove_personal_auth() {
+  local path config_dir
+  for path in \
+    "$AGENT_DIR/auth.json" "$AGENT_DIR/models-store.json" \
+    "$AGENT_DIR/credentials.json" "$AGENT_DIR/oauth.json" \
+    "$AGENT_DIR/token.json" "$AGENT_DIR/tokens.json" \
+    "$HOME/.cursor/auth.json" "$HOME/.cursor/credentials.json" \
+    "$HOME/.config/cursor/auth.json" "$HOME/.config/cursor/credentials.json" \
+    "$HOME/.claude/auth.json" "$HOME/.claude/credentials.json" \
+    "$HOME/.config/claude/auth.json" "$HOME/.config/claude/credentials.json" \
+    "$HOME/.config/xai/auth.json" "$HOME/.config/xai/credentials.json" \
+    "$HOME/.config/openai/auth.json" "$HOME/.config/openai/credentials.json"; do
+    rm -rf -- "$path"
+  done
+  for config_dir in "$HOME/.cursor" "$HOME/.claude" "$HOME/.config/cursor" "$HOME/.config/claude" "$HOME/.config/xai" "$HOME/.config/openai"; do
+    if [[ -d "$config_dir" ]]; then
+      find "$config_dir" -type f \( \
+        -iname 'auth.json' -o -iname 'models-store.json' -o \
+        -iname 'credentials.json' -o -iname 'oauth.json' -o \
+        -iname 'token.json' -o -iname 'tokens.json' \
+      \) -delete 2>/dev/null || true
+    fi
+  done
+}
+remove_personal_auth
 for path in extensions skills settings.json models.json AGENTS.md env; do
   if [[ -e "$AGENT_DIR/$path" ]]; then cp -a -- "$AGENT_DIR/$path" "$BACKUP/"; fi
 done
 if [[ -d "$HOME/.agents/skills" ]]; then cp -a -- "$HOME/.agents/skills" "$BACKUP/global-skills"; fi
-for path in .bashrc .profile; do
-  [[ -f "$HOME/$path" ]] && cp -p -- "$HOME/$path" "$BACKUP/$path"
-done
+# Existing managed trees predate this gate; prune known auth stores and
+# credential-shaped literals from the private backup as well.
+find "$BACKUP" -type f \( \
+  -iname 'auth.json' -o -iname 'models-store.json' -o \
+  -iname 'credentials.json' -o -iname 'oauth.json' -o \
+  -iname 'token.json' -o -iname 'tokens.json' \
+\) -delete 2>/dev/null || true
+while IFS= read -r -d '' backup_file; do
+  if grep -IqE 'sk-[A-Za-z0-9]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{20,}|(OPENAI|XAI|ANTHROPIC)_API_KEY[[:space:]]*=' "$backup_file"; then
+    rm -f -- "$backup_file"
+  fi
+done < <(find "$BACKUP" -type f -print0)
 
 PAYLOAD="$REMOTE_PAYLOAD/payload"
 [[ -d "$PAYLOAD/extensions" ]] || fail 'extension payload missing'
@@ -261,7 +300,13 @@ def adapt(item):
         return mac_prefix.sub(lambda match: root + "/" + match.group(1), item)
     return item
 
-path.write_text(json.dumps(adapt(value), indent=2, ensure_ascii=False) + "\\n")
+adapted = adapt(value)
+# Force Pi's default route to the Team Agent provider; official provider
+# credentials are deliberately absent and official API env vars are unset.
+if path.name == "settings.json" and isinstance(adapted, dict):
+    adapted["defaultProvider"] = "team-agent"
+    adapted["defaultModel"] = "gpt-5.6-luna"
+path.write_text(json.dumps(adapted, indent=2, ensure_ascii=False) + "\n")
 PY
   fi
 done
@@ -279,13 +324,52 @@ HOOK_END='# setup-5090-pi-agent: end'
 ensure_hook() {
   local file=$1
   touch "$file"
-  if ! grep -Fq "$HOOK_START" "$file"; then
-    printf '\n%s\nif [ -f "$HOME/.pi/agent/env" ]; then . "$HOME/.pi/agent/env"; fi\n%s\n' \
-      "$HOOK_START" "$HOOK_END" >> "$file"
-  fi
+  python3 - "$file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+start = "# setup-5090-pi-agent: begin"
+end = "# setup-5090-pi-agent: end"
+block = (start + "\n"
+         "unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY\n"
+         "if [ -f \"$HOME/.pi/agent/env\" ]; then . \"$HOME/.pi/agent/env\"; fi\n"
+         "unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY\n"
+         + end + "\n")
+text = path.read_text() if path.exists() else ""
+pattern = re.compile(r"(?ms)^" + re.escape(start) + r"\n.*?^" + re.escape(end) + r"\n?")
+if pattern.search(text):
+    text = pattern.sub(block, text, count=1)
+else:
+    text = text.rstrip("\n") + "\n\n" + block
+path.write_text(text)
+PY
 }
 ensure_hook "$HOME/.bashrc"
 ensure_hook "$HOME/.profile"
+
+# Purge any pre-existing personal stores again in case a managed directory
+# contained one, then enforce the hard exclusion and literal-content gates.
+remove_personal_auth
+while IFS= read -r -d '' forbidden; do
+  fail 'forbidden credential file remains under .pi/agent'
+done < <(find "$AGENT_DIR" -type f \( \
+  -iname 'auth.json' -o -iname 'models-store.json' -o \
+  -iname 'credentials.json' -o -iname 'oauth.json' -o \
+  -iname 'token.json' -o -iname 'tokens.json' \
+\) -print0)
+while IFS= read -r -d '' candidate; do
+  if grep -IqE 'sk-[A-Za-z0-9]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{20,}|(OPENAI|XAI|ANTHROPIC)_API_KEY[[:space:]]*=' "$candidate"; then
+    fail 'personal subscription literal found in synced Pi files'
+  fi
+done < <(find "$AGENT_DIR" -type f ! -path "$ENV_PATH" -print0)
+for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
+  grep -Fq 'unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY' "$startup_file" \
+    || fail 'single-egress unset hook missing'
+done
+[[ ! -e "$AGENT_DIR/auth.json" && ! -e "$AGENT_DIR/models-store.json" ]] \
+  || fail 'forbidden Pi auth store remains'
 
 # Resolve nvm if present, then install the official Pi package for this user.
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
@@ -301,7 +385,7 @@ printf 'Pi install: pass\n'
 # is sourced explicitly so this also validates the credential path.
 MODEL_CHECK="$HOME/.cache/setup-5090-pi-agent-models.$$.out"
 chmod 600 "$MODEL_CHECK" 2>/dev/null || true
-if ( . "$ENV_PATH"; pi --list-models >"$MODEL_CHECK" 2>/dev/null ); then
+if ( unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY; . "$ENV_PATH"; unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY; pi --list-models >"$MODEL_CHECK" 2>/dev/null ); then
   rm -f -- "$MODEL_CHECK"
   printf 'Pi model discovery: pass\n'
 else
@@ -314,7 +398,7 @@ if [[ -n "$SMOKE_SESSION" ]]; then
   if tmux has-session -t "$SMOKE_SESSION" 2>/dev/null; then
     fail "smoke session already exists: $SMOKE_SESSION"
   fi
-  tmux new-session -d -s "$SMOKE_SESSION" "bash -lc 'source \"$ENV_PATH\"; exec pi'"
+  tmux new-session -d -s "$SMOKE_SESSION" "bash -lc 'unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY; source \"$ENV_PATH\"; unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY; exec pi'"
   tmux has-session -t "$SMOKE_SESSION" 2>/dev/null || fail 'smoke session did not stay alive'
   printf 'Pi smoke session: pass (%s)\n' "$SMOKE_SESSION"
 fi
