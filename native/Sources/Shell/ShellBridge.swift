@@ -65,6 +65,8 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var ready = false
     private var sequence = 0
     private var stateDeduper = WindowStateDeduper()
+    private var stateTask: Task<Void, Never>?
+    private var stateChange = 0
 
     static let windowMethods: Set<String> = [
         "bootstrap", "window.getState", "window.isFullscreen", "window.setFullscreen",
@@ -80,6 +82,8 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     init(services: (any ShellServiceHandling)?) { self.services = services }
 
     func reset() {
+        stateTask?.cancel()
+        stateTask = nil
         let old = pending
         pending.removeAll()
         for (id, request) in old {
@@ -232,19 +236,35 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     func emitWindowState() {
-        guard ready, let owner, owner.acceptsMessages,
-              let state = WindowStateSnapshot(windowState: owner.windowState),
-              stateDeduper.shouldEmit(state) else { return }
-        sequence += 1
-        let event: [String: Any] = ["v": 1, "epoch": epoch, "event": "window.state",
-                                    "seq": sequence, "payload": owner.windowState]
+        guard ready, owner?.acceptsMessages == true else { return }
+        stateChange += 1
+        guard stateTask == nil else { return }
         let eventEpoch = epoch
-        Task { @MainActor [weak self, weak owner] in
-            guard let self, self.epoch == eventEpoch, owner?.acceptsMessages == true else { return }
-            _ = try? await owner?.webView.callAsyncJavaScript(
-                "window.dispatchEvent(new CustomEvent('agentmirror:native', {detail: event}))",
-                arguments: ["event": event], in: nil, contentWorld: .page
-            )
+        // Native hit maps are invalidated synchronously. Only their replacement
+        // metadata crosses WK after geometry settles, with one delivery in flight.
+        stateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.epoch == eventEpoch { self.stateTask = nil } }
+            while !Task.isCancelled {
+                let change = self.stateChange
+                do { try await Task.sleep(for: .milliseconds(120)) }
+                catch { return }
+                guard self.epoch == eventEpoch, let owner = self.owner,
+                      owner.acceptsMessages else { return }
+                if change != self.stateChange { continue }
+                let payload = owner.windowState
+                if let state = WindowStateSnapshot(windowState: payload),
+                   self.stateDeduper.shouldEmit(state) {
+                    self.sequence += 1
+                    let event: [String: Any] = ["v": 1, "epoch": eventEpoch, "event": "window.state",
+                                                "seq": self.sequence, "payload": payload]
+                    _ = try? await owner.webView.callAsyncJavaScript(
+                        "window.dispatchEvent(new CustomEvent('agentmirror:native', {detail: event}))",
+                        arguments: ["event": event], in: nil, contentWorld: .page
+                    )
+                }
+                if change == self.stateChange { return }
+            }
         }
     }
 }
