@@ -144,8 +144,9 @@
   max-height: none;
 }
 
-/* 接管模式（Takeover）：单桌面端全屏自适应撑满整个视口，解除左下角 414px 物理底锚 */
-.terminalpane-host.is-takeover > .xterm {
+/* macOS keeps the intrinsic terminal grid bottom-anchored in takeover too.
+   A 100%-height root leaves the unused fraction of a cell below its screen. */
+.terminalpane:not([data-platform="macos"]) .terminalpane-host.is-takeover > .xterm {
   position: relative;
   width: 100%;
   height: 100%;

@@ -12,6 +12,7 @@ import { fetchOlder, acceptScrollback } from '../../../deps/corral-core/web/js/s
 import { parseAnsi } from './ansi.js';
 import { MOBILE_GRID, PRESENCE_MODE } from '../../core/presence.js';
 import { computeGridDimensions } from '../../term/fontMetrics.js';
+import { nativeCapabilities } from '../../core/nativeCapabilities.js';
 
 export { MOBILE_GRID, PRESENCE_MODE };
 
@@ -495,6 +496,7 @@ export default function TerminalPane({
   return (
     <div
       className="terminalpane"
+      data-platform={nativeCapabilities.platform}
       data-presence-mode={presenceMode}
       onMouseDown={handlePaneMouseDown}
     >
