@@ -1,8 +1,20 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import './terminal.css';
 import { XIcon } from '../../lib/icons.jsx';
-import { project, migrateLegacyPanes, getLeaves } from '../../lib/workspaceLayout.js';
+import {
+  projectLayout,
+  updateNodeRatio,
+  migrateLegacyPanes,
+  getLeaves,
+  computeSplitRatioFromCoord,
+  computeSplitRatioFromDelta,
+  SPLIT_GAP_PX,
+  MIN_PANE_W,
+  MIN_PANE_H,
+} from '../../lib/workspaceLayout.js';
 import { nativeCapabilities } from '../../core/nativeCapabilities.js';
+
+export { SPLIT_GAP_PX, MIN_PANE_W, MIN_PANE_H };
 
 /**
  * 同父平铺常驻分屏舞台（TerminalStage / SplitPanes，UI-SPEC §6.1，2026-09-15 裁定）
@@ -15,24 +27,28 @@ import { nativeCapabilities } from '../../core/nativeCapabilities.js';
  * @param {Object|null} [props.root]                  二叉分屏树 root
  * @param {Array<{uid: string, pinned: boolean}>} [props.tabs] 全局 Tab 列表
  * @param {string|null} [props.activeUid]             当前焦点会话 uid
+ * @param {string|null} [props.activeTabId]           当前选中的工作台 Tab id
  * @param {string|null} [props.previewUid]            虚空预览槽会话 uid
  * @param {Map<string, Object>} [props.agentByKey]    会话数据映射表
- * @param {(agent: Object) => JSX.Element} props.renderPane 渲染终端内容
+ * @param {(agent: Object, dims?: { containerWidth: number, containerHeight: number }) => JSX.Element} props.renderPane 渲染终端内容
  * @param {(uid: string) => void} [props.onFocusPane] 聚焦窗格
  * @param {(e: React.MouseEvent, uid: string) => void} [props.onPaneMenu] 右键菜单
  * @param {(uid: string) => void} [props.onClosePane] 关闭此分屏
+ * @param {({ tabId: string, path: string, ratio: number }) => void} [props.onSplitResize] 比例调整回调
  * @param {Array} [props.panes]                       旧接口兼容备用
  */
 export default function SplitPanes({
   root = null,
   tabs = [],
   activeUid = null,
+  activeTabId = null,
   previewUid = null,
   agentByKey = new Map(),
   renderPane,
   onFocusPane,
   onPaneMenu,
   onClosePane,
+  onSplitResize,
   panes = [],
   stageRef: externalStageRef,
 }) {
@@ -41,6 +57,24 @@ export default function SplitPanes({
   const [rect, setRect] = useState(() => ({ x: 0, y: 0, w: 0, h: 0 }));
   const resizeSettled = useRef(false);
 
+  // 局部 60fps 拖拽暂态树与手柄交互状态 (Issue #272)
+  const [localPreviewRoot, setLocalPreviewRoot] = useState(null);
+  const [activeResizerPath, setActiveResizerPath] = useState(null);
+  const resizerDragRef = useRef(null);
+
+  // 终止并清理当前拖拽手柄状态（供取消、失焦、Resize、Escape 或跨 Tab 切出时安全复位）
+  const cancelDrag = useCallback(() => {
+    const drag = resizerDragRef.current;
+    if (!drag) return;
+    if (drag.rafId) cancelAnimationFrame(drag.rafId);
+    try {
+      drag.targetElement?.releasePointerCapture(drag.pointerId);
+    } catch {}
+    resizerDragRef.current = null;
+    setActiveResizerPath(null);
+    setLocalPreviewRoot(null);
+  }, []);
+
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
@@ -48,7 +82,13 @@ export default function SplitPanes({
     const updateRect = () => {
       const w = el.clientWidth || el.offsetWidth || 0;
       const h = el.clientHeight || el.offsetHeight || 0;
-      setRect((prev) => (prev.w === w && prev.h === h ? prev : { x: 0, y: 0, w, h }));
+      setRect((prev) => {
+        if (prev.w === w && prev.h === h) return prev;
+        if (resizerDragRef.current) {
+          cancelDrag();
+        }
+        return { x: 0, y: 0, w, h };
+      });
     };
 
     updateRect();
@@ -72,7 +112,7 @@ export default function SplitPanes({
       window.removeEventListener('resize', updateRect);
       window.removeEventListener('agentmirror:window-resize-settled', handleResizeSettled);
     };
-  }, []);
+  }, [cancelDrag]);
 
   // 兼容旧接口：若未传 root，则通过 legacy panes 数组迁移构建
   const effectiveRoot = useMemo(() => {
@@ -88,8 +128,19 @@ export default function SplitPanes({
     return (rect.w > 0 && rect.h > 0) ? rect : { x: 0, y: 0, w: 1000, h: 600 };
   }, [rect]);
 
-  // 纯几何投影计算可见叶子的坐标
-  const layout = useMemo(() => project(effectiveRoot, effectiveRect, 1), [effectiveRoot, effectiveRect]);
+  // 纯几何投影计算可见叶子的坐标与分割手柄（统一 6px 间隙，Issue #271 / #272）
+  const isDraggingStale = Boolean(
+    resizerDragRef.current && (
+      (resizerDragRef.current.startTabId && activeTabId && resizerDragRef.current.startTabId !== activeTabId) ||
+      (resizerDragRef.current.startRoot && effectiveRoot && resizerDragRef.current.startRoot !== effectiveRoot) ||
+      (resizerDragRef.current.startPreviewUid !== previewUid)
+    )
+  );
+  const currentTree = (localPreviewRoot && !isDraggingStale) ? localPreviewRoot : effectiveRoot;
+  const { panes: layout, resizers } = useMemo(
+    () => projectLayout(currentTree, effectiveRect, SPLIT_GAP_PX),
+    [currentTree, effectiveRect]
+  );
   const visibleUids = useMemo(() => Object.keys(layout), [layout]);
 
   // A committed split tree is final. Viewport changes retain their observer
@@ -139,6 +190,203 @@ export default function SplitPanes({
       lastRects.current.set(uid, layout[uid]);
     }
   }
+
+  // 外部 root / Tab / preview 发生突变时，即刻清理活动拖拽手势与本地预览（消除过期残留）
+  useEffect(() => {
+    const drag = resizerDragRef.current;
+    if (!drag) return;
+    const currentActiveId = activeTabId || tabs.find((t) => t.root === effectiveRoot)?.id;
+    if (
+      (drag.startTabId && currentActiveId && drag.startTabId !== currentActiveId) ||
+      (drag.startRoot && effectiveRoot && drag.startRoot !== effectiveRoot) ||
+      (drag.startPreviewUid !== previewUid)
+    ) {
+      cancelDrag();
+    }
+  }, [effectiveRoot, activeTabId, previewUid, tabs, cancelDrag]);
+
+  // 全局按键 / 窗口失焦 / 窗口 Resize 即时取消手势与复原
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && resizerDragRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelDrag();
+      }
+    };
+    const handleBlur = () => {
+      if (resizerDragRef.current) {
+        cancelDrag();
+      }
+    };
+    const handleWindowResize = () => {
+      if (resizerDragRef.current) {
+        cancelDrag();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, [cancelDrag]);
+
+  // 手柄拖拽交互处理（轴向真实对齐、消除吸中、零强制重排、递归叶窗格保护，Issue #271 / #272 R4 终审）
+  const handleResizerPointerDown = useCallback((e, resizer) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    const isX = resizer.axis === 'x';
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startCoord = isX ? startX : startY;
+    const startFirstPx = isX
+      ? (resizer.rect.x - resizer.parentRect.x)
+      : (resizer.rect.y - resizer.parentRect.y);
+
+    const stageEl = stageRef.current;
+    const stageRect = stageEl
+      ? stageEl.getBoundingClientRect()
+      : { left: 0, top: 0, width: effectiveRect.w, height: effectiveRect.h };
+
+    const startTabId = activeTabId || tabs.find((t) => t.root === effectiveRoot)?.id || 'tab-1';
+
+    resizerDragRef.current = {
+      pointerId: e.pointerId,
+      isX,
+      startX,
+      startY,
+      startCoord,
+      startFirstPx,
+      stageLeft: stageRect.left,
+      stageTop: stageRect.top,
+      startTabId,
+      startRoot: effectiveRoot,
+      startPreviewUid: previewUid,
+      resizer,
+      startRatio: resizer.ratio,
+      currentRatio: resizer.ratio,
+      currentFirstPx: startFirstPx,
+      baseRoot: effectiveRoot,
+      targetElement: e.currentTarget,
+      rafId: null,
+    };
+    setActiveResizerPath(resizer.path);
+  }, [effectiveRoot, activeTabId, previewUid, tabs]);
+
+  const handleResizerPointerMove = useCallback((e) => {
+    const drag = resizerDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 跨 Tab 身份栅栏与外部 root 漂移校验
+    const currentActiveId = activeTabId || tabs.find((t) => t.root === effectiveRoot)?.id;
+    if (drag.startTabId && currentActiveId && drag.startTabId !== currentActiveId) {
+      cancelDrag();
+      return;
+    }
+    if (drag.startRoot && effectiveRoot && drag.startRoot !== effectiveRoot) {
+      cancelDrag();
+      return;
+    }
+
+    const currentCoord = drag.isX ? e.clientX : e.clientY;
+    const { ratio, firstPx, changed } = computeSplitRatioFromDelta(
+      drag.resizer,
+      currentCoord,
+      drag.startCoord,
+      drag.startFirstPx,
+      drag.startRatio,
+      SPLIT_GAP_PX
+    );
+
+    // 轴向整数像素尺寸相对于当前预览未变化时，无视觉变更，绝不调度 rAF；
+    // 若移回按下时的初始坐标（firstPx === startFirstPx），即时将预览恢复更新回起点状态（Issue #272 R5 闭环）
+    if (firstPx === drag.currentFirstPx) return;
+    drag.currentRatio = ratio;
+    drag.currentFirstPx = firstPx;
+
+    if (drag.rafId) cancelAnimationFrame(drag.rafId);
+    drag.rafId = requestAnimationFrame(() => {
+      if (!resizerDragRef.current) return;
+      const parts = drag.resizer.path.startsWith('root.')
+        ? drag.resizer.path.slice(5).split('.')
+        : drag.resizer.path === 'root'
+        ? []
+        : drag.resizer.path.split('.');
+      const updated = (firstPx === drag.startFirstPx)
+        ? drag.baseRoot
+        : updateNodeRatio(drag.baseRoot, parts, ratio);
+      setLocalPreviewRoot(updated);
+    });
+  }, [activeTabId, tabs, effectiveRoot, cancelDrag]);
+
+  const handleResizerPointerUp = useCallback((e) => {
+    const drag = resizerDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    if (drag.rafId) cancelAnimationFrame(drag.rafId);
+
+    const { resizer, startRatio, startTabId, startRoot } = drag;
+
+    // 1. 跨 Tab 身份栅栏与根树漂移校验
+    const currentActiveId = activeTabId || tabs.find((t) => t.root === effectiveRoot)?.id;
+    if (startTabId && currentActiveId && startTabId !== currentActiveId) {
+      cancelDrag();
+      return;
+    }
+    if (startRoot && effectiveRoot && startRoot !== effectiveRoot) {
+      cancelDrag();
+      return;
+    }
+
+    // 2. pointerup 松手终态坐标参与最后一次整数尺寸计算
+    const isX = drag.isX;
+    const clientCoord = isX ? e.clientX : e.clientY;
+    const { ratio: finalRatio, changed } = (typeof clientCoord === 'number' && !Number.isNaN(clientCoord))
+      ? computeSplitRatioFromDelta(
+          drag.resizer,
+          clientCoord,
+          drag.startCoord,
+          drag.startFirstPx,
+          drag.startRatio,
+          SPLIT_GAP_PX
+        )
+      : { ratio: drag.currentRatio, changed: drag.currentRatio !== startRatio };
+
+    resizerDragRef.current = null;
+    setActiveResizerPath(null);
+    setLocalPreviewRoot(null);
+
+    // 3. 只有整数像素尺寸产生真实变化（changed === true 且 finalRatio !== startRatio）才提交持久化
+    if (changed && finalRatio !== startRatio && onSplitResize) {
+      onSplitResize({
+        tabId: startTabId,
+        path: resizer.path,
+        ratio: finalRatio,
+        startRoot,
+      });
+    }
+  }, [effectiveRoot, onSplitResize, activeTabId, tabs, cancelDrag]);
+
+  const handleResizerPointerCancel = useCallback((e) => {
+    cancelDrag();
+  }, [cancelDrag]);
 
   const isEmpty = visibleUids.length === 0;
 
@@ -220,6 +468,34 @@ export default function SplitPanes({
           </div>
         );
       })}
+
+      {visibleUids.length > 1 && resizers.map((r) => (
+        <div
+          key={r.path}
+          className={`split-resizer${(activeResizerPath === r.path && !isDraggingStale) ? ' is-dragging' : ''}`}
+          data-axis={r.axis}
+          data-resizer-path={r.path}
+          role="separator"
+          aria-orientation={r.axis === 'x' ? 'vertical' : 'horizontal'}
+          aria-valuenow={Math.round(r.ratio * 100)}
+          aria-valuemin={10}
+          aria-valuemax={90}
+          aria-label={`调节分屏比例 (${r.axis === 'x' ? '左右' : '上下'})`}
+          tabIndex={-1}
+          style={{
+            position: 'absolute',
+            left: `${r.rect.x}px`,
+            top: `${r.rect.y}px`,
+            width: `${r.rect.w}px`,
+            height: `${r.rect.h}px`,
+          }}
+          onPointerDown={(e) => handleResizerPointerDown(e, r)}
+          onPointerMove={handleResizerPointerMove}
+          onPointerUp={handleResizerPointerUp}
+          onPointerCancel={handleResizerPointerCancel}
+          onLostPointerCapture={handleResizerPointerCancel}
+        />
+      ))}
     </div>
   );
 }

@@ -7,6 +7,9 @@
 
 export const STORAGE_KEY = 'am.workspace.v1';
 export const MULTI_WORKSPACE_STORAGE_KEY = 'am.workspace.v2';
+export const SPLIT_GAP_PX = 6;
+export const MIN_PANE_W = 120;
+export const MIN_PANE_H = 60;
 const MAX_READ_BYTES = 256 * 1024; // 256 KiB
 const MAX_NODES = 512;
 const MAX_DEPTH = 128;
@@ -218,28 +221,73 @@ export function dropNode(root, sourceUid, targetUid, edge = 'right') {
 }
 
 /**
- * 纯数学几何投影：将二叉分屏树投影为屏幕绝对像素矩形 Map
+ * 递归计算子树满足内部所有叶子最小尺寸约束所必需的最小外框尺寸（Issue #272 精修）
  *
- * 切分规则（UI-SPEC §4 & 顾问报告 §4）：
+ * 遵循递归叶子下限与数量/比例推演（单叶宽 >= MIN_PANE_W (120px)，单叶高 >= MIN_PANE_H (60px)）
+ * 无论分屏嵌套多深，任何方向上的叶子窗格均不能被压缩低于阈值。
+ *
+ * @param {Object|null} node
+ * @param {'x'|'y'} axis
+ * @param {number} [gap=SPLIT_GAP_PX]
+ * @returns {number}
+ */
+export function getSubtreeMinSize(node, axis, gap = SPLIT_GAP_PX) {
+  if (!node) return 0;
+  const minLeaf = axis === 'x' ? MIN_PANE_W : MIN_PANE_H;
+  if (node.kind === 'leaf') return minLeaf;
+  if (node.kind === 'split') {
+    const minFirst = getSubtreeMinSize(node.first, axis, gap);
+    const minSecond = getSubtreeMinSize(node.second, axis, gap);
+    if (node.axis === axis) {
+      const countBased = minFirst + gap + minSecond;
+      const r = (Number.isFinite(node.ratio) && node.ratio > 0 && node.ratio < 1) ? node.ratio : 0.5;
+      const ratioBased = Math.max(
+        Math.ceil(minFirst / r),
+        Math.ceil(minSecond / (1 - r))
+      ) + gap;
+      return Math.max(countBased, ratioBased);
+    }
+    return Math.max(minFirst, minSecond);
+  }
+  return minLeaf;
+}
+
+/**
+ * 纯数学几何投影：将二叉分屏树投影为屏幕绝对像素矩形 Map 及分屏拖动手柄列表
+ *
+ * 切分规则（UI-SPEC §4 & 顾问报告 §4，Issue #271 / #272）：
  * usable = size - gap;
  * first = Math.floor(usable * ratio);
  * second = usable - first;
  * 第二块起点 = x + first + gap;
+ * 间隙手柄 = { x: x + first, w: gap } 或 { y: y + first, h: gap };
  * 余数全部归第二块，零裂缝、零重叠。
  *
  * @param {Object|null} node
  * @param {{ x: number, y: number, w: number, h: number }} rect
- * @param {number} [gap=1]
- * @returns {Record<string, { x: number, y: number, w: number, h: number }>}
+ * @param {number} [gap=SPLIT_GAP_PX]
+ * @returns {{
+ *   panes: Record<string, { x: number, y: number, w: number, h: number }>,
+ *   resizers: Array<{
+ *     path: string,
+ *     axis: 'x' | 'y',
+ *     ratio: number,
+ *     rect: { x: number, y: number, w: number, h: number },
+ *     parentRect: { x: number, y: number, w: number, h: number },
+ *     minFirst: number,
+ *     minSecond: number,
+ *   }>
+ * }}
  */
-export function project(node, rect, gap = 1) {
-  const result = {};
-  if (!node || !rect || rect.w <= 0 || rect.h <= 0) return result;
+export function projectLayout(node, rect, gap = SPLIT_GAP_PX) {
+  const panes = {};
+  const resizers = [];
+  if (!node || !rect || rect.w <= 0 || rect.h <= 0) return { panes, resizers };
 
-  function recurse(n, r) {
+  function recurse(n, r, path = 'root') {
     if (!n || r.w <= 0 || r.h <= 0) return;
     if (n.kind === 'leaf') {
-      result[n.uid] = { x: r.x, y: r.y, w: r.w, h: r.h };
+      panes[n.uid] = { x: r.x, y: r.y, w: r.w, h: r.h };
       return;
     }
     if (n.kind === 'split') {
@@ -247,21 +295,191 @@ export function project(node, rect, gap = 1) {
       const size = isX ? r.w : r.h;
       const usable = Math.max(0, size - gap);
       const ratio = (Number.isFinite(n.ratio) && n.ratio > 0 && n.ratio < 1) ? n.ratio : 0.5;
-      const firstSize = Math.floor(usable * ratio);
-      const secondSize = usable - firstSize;
+
+      const minFirst = getSubtreeMinSize(n.first, n.axis, gap);
+      const minSecond = getSubtreeMinSize(n.second, n.axis, gap);
+
+      let firstSize = Math.floor(usable * ratio);
+      let secondSize = usable - firstSize;
+
+      // 避免浮点数或 4 位小数四舍五入下切导致叶窗格低于门限（如 119px，严格保证 >= 120px / 60px）
+      if (usable >= minFirst + minSecond) {
+        if (firstSize < minFirst) {
+          firstSize = minFirst;
+          secondSize = usable - firstSize;
+        } else if (secondSize < minSecond) {
+          secondSize = minSecond;
+          firstSize = usable - secondSize;
+        }
+      }
+
+      let firstRect;
+      let resizerRect;
+      let secondRect;
 
       if (isX) {
-        recurse(n.first, { x: r.x, y: r.y, w: firstSize, h: r.h });
-        recurse(n.second, { x: r.x + firstSize + gap, y: r.y, w: secondSize, h: r.h });
+        firstRect = { x: r.x, y: r.y, w: firstSize, h: r.h };
+        resizerRect = { x: r.x + firstSize, y: r.y, w: gap, h: r.h };
+        secondRect = { x: r.x + firstSize + gap, y: r.y, w: secondSize, h: r.h };
       } else {
-        recurse(n.first, { x: r.x, y: r.y, w: r.w, h: firstSize });
-        recurse(n.second, { x: r.x, y: r.y + firstSize + gap, w: r.w, h: secondSize });
+        firstRect = { x: r.x, y: r.y, w: r.w, h: firstSize };
+        resizerRect = { x: r.x, y: r.y + firstSize, w: r.w, h: gap };
+        secondRect = { x: r.x, y: r.y + firstSize + gap, w: r.w, h: secondSize };
       }
+
+      resizers.push({
+        path,
+        axis: n.axis,
+        ratio,
+        rect: resizerRect,
+        parentRect: { x: r.x, y: r.y, w: r.w, h: r.h },
+        minFirst,
+        minSecond,
+      });
+
+      recurse(n.first, firstRect, `${path}.first`);
+      recurse(n.second, secondRect, `${path}.second`);
     }
   }
 
   recurse(node, rect);
-  return result;
+  return { panes, resizers };
+}
+
+export function project(node, rect, gap = 1) {
+  return projectLayout(node, rect, gap).panes;
+}
+
+/**
+ * 基于轴向起始像素与相对位移计算新的 split 比例（Issue #272 & R4 终审）
+ *
+ * 核心保障（严格遵循 architecture.md:31）：
+ * 1. 消除鼠标抓取点吸中问题：使用 firstPx = startFirstPx + (currentCoord - startCoord)；
+ * 2. 轴向垂直移动时（如 X 轴分割仅在 Y 轴移动），delta = 0，严格保持 startFirstPx 与 startRatio，零浮点漂移；
+ * 3. 基于最终整数像素尺寸变化决定是否变更/提交，消除硬编码阈值；
+ * 4. (firstPx + 0.5) / usable 内部取值 + 极限边界定向取整，避免 4 位小数舍入导致 119px。
+ *
+ * @param {Object} resizer - projectLayout 输出的 resizer 对象
+ * @param {number} currentCoord - 当前指针轴向坐标（e.clientX 或 e.clientY）
+ * @param {number} startCoord - 按下时指针轴向坐标（startX 或 startY）
+ * @param {number} startFirstPx - 按下时第一块的整数像素尺寸
+ * @param {number} startRatio - 按下时的初始比例
+ * @param {number} [gap=SPLIT_GAP_PX]
+ * @returns {{ ratio: number, firstPx: number, changed: boolean }}
+ */
+export function computeSplitRatioFromDelta(resizer, currentCoord, startCoord, startFirstPx, startRatio, gap = SPLIT_GAP_PX) {
+  if (!resizer || !resizer.parentRect) {
+    return { ratio: startRatio ?? 0.5, firstPx: startFirstPx ?? 0, changed: false };
+  }
+
+  const isX = resizer.axis === 'x';
+  const parentSize = isX ? resizer.parentRect.w : resizer.parentRect.h;
+  const usable = Math.max(0, parentSize - gap);
+  if (usable <= 0) {
+    return { ratio: startRatio ?? 0.5, firstPx: 0, changed: false };
+  }
+
+  const minFirst = resizer.minFirst || (isX ? MIN_PANE_W : MIN_PANE_H);
+  const minSecond = resizer.minSecond || (isX ? MIN_PANE_W : MIN_PANE_H);
+
+  // 舞台极窄、不足以满足全部叶子最小尺寸约束时（无可行调节空间），严格保留原始 ratio，绝不能强制按下限截断提交（Issue #272 R5 闭环）
+  if (usable < minFirst + minSecond) {
+    return {
+      ratio: startRatio ?? 0.5,
+      firstPx: startFirstPx ?? (usable > 0 ? Math.floor(usable * (startRatio ?? 0.5)) : 0),
+      changed: false,
+    };
+  }
+
+  const pointerDelta = currentCoord - startCoord;
+  const targetFirst = Math.round(startFirstPx + pointerDelta);
+  const maxFirst = usable - minSecond;
+  const clampedFirst = Math.max(minFirst, Math.min(maxFirst, targetFirst));
+
+  // 关键：若最终整数像素尺寸与起始尺寸完全一致，严格保持初始比例，零变更！
+  if (clampedFirst === startFirstPx) {
+    return { ratio: startRatio, firstPx: startFirstPx, changed: false };
+  }
+
+  let roundedRatio;
+  if (clampedFirst <= minFirst) {
+    // 左/上极限：向上取整，保证 Math.floor(usable * ratio) 严格 >= minFirst（绝非 119px）
+    roundedRatio = Math.ceil((minFirst / usable) * 10000) / 10000;
+  } else if (clampedFirst >= maxFirst) {
+    // 右/下极限：向下取整，保证 usable - Math.floor(usable * ratio) 严格 >= minSecond
+    roundedRatio = Math.floor((maxFirst / usable) * 10000) / 10000;
+  } else {
+    // 区间内部 (firstPx + 0.5) / usable
+    const rawRatio = (clampedFirst + 0.5) / usable;
+    roundedRatio = Math.round(rawRatio * 10000) / 10000;
+    if (Math.floor(usable * roundedRatio) < clampedFirst) {
+      roundedRatio = Math.ceil((clampedFirst / usable) * 10000) / 10000;
+    } else if (Math.floor(usable * roundedRatio) > clampedFirst) {
+      roundedRatio = Math.floor((clampedFirst / usable) * 10000) / 10000;
+    }
+  }
+
+  const finalRatio = Math.max(0.01, Math.min(0.99, roundedRatio));
+  return {
+    ratio: finalRatio,
+    firstPx: clampedFirst,
+    changed: finalRatio !== startRatio,
+  };
+}
+
+/**
+ * 根据拖拽指针坐标与手柄几何纯数值计算新的 split 比例（Issue #272 精修）
+ *
+ * 核心保障：
+ * 1. 全程纯数值相对偏移计算，绝对不触发 DOM 强制重排（Zero Layout Thrashing）；
+ * 2. 避免 4 位小数四舍五入下切导致像素比最小门限小 1px（如 119.99px -> 119px，严格保证 >= 120px / 60px）；
+ * 3. 供 pointermove 与 pointerup（松手终态坐标参与最后计算）公用。
+ *
+ * @param {Object} resizer - projectLayout 输出的 resizer 对象
+ * @param {number} clientCoord - e.clientX (x轴) 或 e.clientY (y轴)
+ * @param {number} stageCoord - 舞台容器的 stageLeft 或 stageTop
+ * @param {number} [gap=SPLIT_GAP_PX]
+ * @returns {number}
+ */
+export function computeSplitRatioFromCoord(resizer, clientCoord, stageCoord, gap = SPLIT_GAP_PX) {
+  if (!resizer || !resizer.parentRect) return 0.5;
+  const isX = resizer.axis === 'x';
+  const parentSize = isX ? resizer.parentRect.w : resizer.parentRect.h;
+  const usable = Math.max(0, parentSize - gap);
+  if (usable <= 0) return 0.5;
+
+  const parentOffset = isX ? resizer.parentRect.x : resizer.parentRect.y;
+  const pos = clientCoord - stageCoord - parentOffset;
+  const targetFirst = pos - Math.floor(gap / 2);
+
+  const minFirst = resizer.minFirst || (isX ? MIN_PANE_W : MIN_PANE_H);
+  const minSecond = resizer.minSecond || (isX ? MIN_PANE_W : MIN_PANE_H);
+
+  if (usable < minFirst + minSecond) {
+    const sumMin = minFirst + minSecond;
+    return sumMin > 0 ? Math.round((minFirst / sumMin) * 10000) / 10000 : 0.5;
+  }
+
+  const maxFirst = usable - minSecond;
+  const clampedFirst = Math.max(minFirst, Math.min(maxFirst, targetFirst));
+
+  let roundedRatio;
+  if (clampedFirst <= minFirst) {
+    // 左/上极限：向上取整，保证 Math.floor(usable * ratio) 严格 >= minFirst（绝非 119px）
+    roundedRatio = Math.ceil((minFirst / usable) * 10000) / 10000;
+  } else if (clampedFirst >= maxFirst) {
+    // 右/下极限：向下取整，保证 usable - Math.floor(usable * ratio) 严格 >= minSecond
+    roundedRatio = Math.floor((maxFirst / usable) * 10000) / 10000;
+  } else {
+    roundedRatio = Math.round((clampedFirst / usable) * 10000) / 10000;
+    if (Math.floor(usable * roundedRatio) < minFirst) {
+      roundedRatio = Math.ceil((minFirst / usable) * 10000) / 10000;
+    } else if (usable - Math.floor(usable * roundedRatio) < minSecond) {
+      roundedRatio = Math.floor((maxFirst / usable) * 10000) / 10000;
+    }
+  }
+
+  return Math.max(0.01, Math.min(0.99, roundedRatio));
 }
 
 /* ——— 状态转换 Actions ——— */
@@ -1261,6 +1479,81 @@ export function splitSessionInActiveTab(state, targetUid, sessionUid, edge = 'ri
   const updatedTab = { ...currentTab, root: nextRoot, activeUid: sessionUid, isBlank: false };
   const updatedTabs = tabs.map((t) => ((t.id || t.uid) === (currentTab.id || currentTab.uid) ? updatedTab : t));
   return syncActiveTabFields({ ...state, previewUid: null, tabs: updatedTabs });
+}
+
+/**
+ * 递归根据路径更新 split 树节点的 ratio
+ * @param {Object|null} node
+ * @param {string[]} pathParts - e.g. ["first", "second"]
+ * @param {number} ratio
+ * @returns {Object|null}
+ */
+export function updateNodeRatio(node, pathParts, ratio) {
+  if (!node || node.kind !== 'split') return node;
+  if (!pathParts || pathParts.length === 0) {
+    return {
+      ...node,
+      ratio: Math.round(ratio * 10000) / 10000,
+    };
+  }
+  const [head, ...tail] = pathParts;
+  if (head === 'first') {
+    return {
+      ...node,
+      first: updateNodeRatio(node.first, tail, ratio),
+    };
+  }
+  if (head === 'second') {
+    return {
+      ...node,
+      second: updateNodeRatio(node.second, tail, ratio),
+    };
+  }
+  return node;
+}
+
+/**
+ * 更新活动工作台或指定工作台特定路径分屏比例（Issue #272）
+ * @param {Object} state - 当前多工作台状态
+ * @param {Object} params
+ * @param {string} [params.tabId] - 目标 Tab id（可选，默认 activeTabId）
+ * @param {string} params.path - split 节点路径（如 "root", "root.first"）
+ * @param {number} params.ratio - 新比率 (0, 1)
+ * @returns {Object}
+ */
+export function updateSplitRatio(state, { tabId, path, ratio, startRoot }) {
+  if (!state || !path || !Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
+    return state;
+  }
+
+  const tabs = state.tabs || [];
+  const targetId = tabId || state.activeTabId || (tabs[0]?.id || tabs[0]?.uid);
+  const currentTab = tabs.find((t) => (t.id || t.uid) === targetId);
+  if (!currentTab || !currentTab.root) return state;
+
+  // 根树漂移保护：若传入了 startRoot 快照且当前树已被外部拓扑变更替换，坚决拒绝污染新树
+  if (startRoot && currentTab.root !== startRoot) {
+    return state;
+  }
+
+  const parts = path.startsWith('root.') ? path.slice(5).split('.') : path === 'root' ? [] : path.split('.');
+  const newRoot = updateNodeRatio(currentTab.root, parts, ratio);
+  if (newRoot === currentTab.root) return state;
+
+  const updatedTabs = tabs.map((t) => {
+    if ((t.id || t.uid) === targetId) {
+      return {
+        ...t,
+        root: newRoot,
+      };
+    }
+    return t;
+  });
+
+  return syncActiveTabFields({
+    ...state,
+    tabs: updatedTabs,
+  });
 }
 
 /**

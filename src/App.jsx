@@ -44,6 +44,7 @@ import {
   getAllWorkspaceSessions,
   smartOpenSession,
   closeWorkspacePane,
+  updateSplitRatio,
   removeSessionFromWorkspace,
   focusWorkspacePane,
   getLeaves,
@@ -936,6 +937,16 @@ export default function App({ seedDevices } = {}) {
     setWorkspace((prev) => closeWorkspacePane(prev, uid));
   }, []);
 
+  const handleSplitResize = useCallback(({ tabId, path, ratio, startRoot }) => {
+    setWorkspace((prev) => {
+      // 跨 Tab 误写阻断：若传入了 tabId，必须与当前活动的 activeTabId 一致，否则丢弃
+      if (tabId && prev.activeTabId && tabId !== prev.activeTabId) {
+        return prev;
+      }
+      return updateSplitRatio(prev, { tabId, path, ratio, startRoot });
+    });
+  }, []);
+
   const handleFocusPane = useCallback((uid) => {
     setWorkspace((prev) => {
       if (prev?.previewUid && prev.previewUid === uid) {
@@ -988,7 +999,6 @@ export default function App({ seedDevices } = {}) {
     if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
     const sent = dm.input(uid, text);
     if (!sent) { setToastMsg('未发送'); return }
-    geomTrace('input_send', { ref: uid, req_id: sent.reqId, device_id: sent.deviceId });
     ackGate.current.noteText(uid, sent);
   }, [dm, uidReady]);
 
@@ -1474,10 +1484,12 @@ export default function App({ seedDevices } = {}) {
                 root={workspace.root}
                 tabs={workspace.tabs}
                 activeUid={workspace.activeUid}
+                activeTabId={workspace.activeTabId}
                 previewUid={workspace.previewUid}
                 agentByKey={agentByKey}
                 onFocusPane={handleFocusPane}
                 onClosePane={handleClosePane}
+                onSplitResize={handleSplitResize}
                 onPaneMenu={(e, key) => openMenu(e, 'pane', key)}
                 renderPane={renderPane}
               />

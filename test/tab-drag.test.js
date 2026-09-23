@@ -114,12 +114,12 @@ test('tabDrag: hitTestLeafPanes edge suction, self rejection, and minimum size p
   // 1. Outside stage -> null
   assert.equal(hitTestLeafPanes({ x: 500, y: 10, sourceUid: 'tab-x', stageRect, leafRects }), null);
 
-  // 2. Over pane-1 right edge (x: 450, y: 300) -> edge 'right' (1:1:1 equal column balance)
+  // 2. Over pane-1 right edge (x: 450, y: 300) -> edge 'right' (1:1:1 equal column balance with 6px gap)
   const hitRight = hitTestLeafPanes({ x: 450, y: 300, sourceUid: 'tab-x', stageRect, leafRects });
   assert.equal(hitRight.type, 'edge');
   assert.equal(hitRight.targetUid, 'pane-1');
   assert.equal(hitRight.edge, 'right');
-  assert.deepEqual(hitRight.previewRect, { x: 334, y: 40, w: 332, h: 600 });
+  assert.deepEqual(hitRight.previewRect, { x: 337, y: 40, w: 328, h: 600 });
 
   // 3. Self-drop rejection: dragging pane-1 into pane-1 -> center (no-op)
   const selfHit = hitTestLeafPanes({ x: 450, y: 300, sourceUid: 'pane-1', stageRect, leafRects });
@@ -307,8 +307,8 @@ test('tabDrag: physical hit testing uses real DOM coordinates and preview reflec
   // 1. Physical hit testing uses actual visible DOM coordinates on screen
   const targetLeaf = controller.cachedLeafRects.find((l) => l.uid === 'pane-B');
   assert.ok(targetLeaf);
-  assert.equal(targetLeaf.rect.x, 500);
-  assert.equal(targetLeaf.rect.w, 500);
+  assert.equal(targetLeaf.rect.x, 503);
+  assert.equal(targetLeaf.rect.w, 497);
 
   // 2. Pointing to pane-B's physical top edge (x: 750, y: 50) triggers edge 'top'
   // and previewRect reflects the post-removal expansion to full width 1000px!
@@ -326,7 +326,7 @@ test('tabDrag: physical hit testing uses real DOM coordinates and preview reflec
   assert.equal(hit.targetUid, 'pane-B');
   assert.equal(hit.edge, 'top');
   assert.equal(hit.previewRect.w, 1000);
-  assert.equal(hit.previewRect.h, 299);
+  assert.equal(hit.previewRect.h, 297);
 
   controller.dispose();
 });
@@ -366,7 +366,7 @@ test('tabDrag: three-pane C | (D | B) hit testing on middle pane D right edge tr
   // B: x=750..1000
   const leafD = controller.cachedLeafRects.find((l) => l.uid === 'D');
   assert.ok(leafD);
-  assert.equal(leafD.rect.x, 500);
+  assert.equal(leafD.rect.x, 503);
 
   // Dragging C to D's right 90% edge (x=730, y=300)
   const hit = hitTestLeafPanes({
@@ -384,7 +384,7 @@ test('tabDrag: three-pane C | (D | B) hit testing on middle pane D right edge tr
   assert.equal(hit.edge, 'right');
 
   // Preview rect is exactly what dropNode produces for C
-  const actual = project(dropNode(root, 'C', 'D', 'right'), stageRect, 1)['C'];
+  const actual = project(dropNode(root, 'C', 'D', 'right'), stageRect, 6)['C'];
   assert.deepEqual(hit.previewRect, actual);
 
   controller.dispose();
@@ -575,7 +575,7 @@ test('advisor probe R3b: closing source must not resurrect an unlisted leaf on r
 
 test('advisor probe R4: moving visible source preview equals actual projected candidate', () => {
   const root = { kind: 'split', axis: 'x', ratio: 0.5, first: leafNode('dev::A'), second: leafNode('dev::B') };
-  const layout = project(root, testStage, 1);
+  const layout = project(root, testStage, 6);
   const hit = hitTestLeafPanes({
     x: 750,
     y: 50,
@@ -583,7 +583,7 @@ test('advisor probe R4: moving visible source preview equals actual projected ca
     stageRect: testStage,
     leafRects: Object.entries(layout).map(([uid, rect]) => ({ uid, rect })),
   });
-  const actual = project(dropNode(root, 'dev::A', hit.targetUid, hit.edge), testStage, 1)['dev::A'];
+  const actual = project(dropNode(root, 'dev::A', hit.targetUid, hit.edge), testStage, 6)['dev::A'];
   assert.deepEqual(hit.previewRect, actual);
 });
 
