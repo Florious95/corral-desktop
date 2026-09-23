@@ -47,9 +47,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 顶栏高度 38px，原生红绿灯中心在 y=16px；按钮高 26px，top 设为 3px 使中心点 3 + 13 = 16px 像素级精确共线 */
-  align-self: flex-start;
-  margin-top: 3px;
+  /* 顶栏高度 38px，展开/折叠侧栏按钮垂直绝对居中，与 TabBar 标签胶囊(高 26px)在中心线 y=19px 严格对齐共线 (Issue #270) */
+  align-self: center;
   cursor: pointer;
   color: var(--icon-titlebar);
   background: none;
@@ -92,6 +91,9 @@
 }
 .tb-session-header.is-sidebar-collapsed {
   padding-left: 0;
+}
+.tb-session-header.is-sidebar-collapsed.is-windows {
+  padding-left: 8px;
 }
 
 /* ---------- §4.1.1 TabBar (2026-09-15 裁定) ---------- */
