@@ -717,7 +717,8 @@ src/
   `<ProviderIcon size={17}/>` + title（`--fs-125`/600/`var(--text-secondary)`/省略号）+ 8px 状态点（规格同 §5.3）+ 设备徽章（仅 `multiDevice`）。
 - **终端区**：`flex:1; min-height:0; box-sizing:border-box; background:var(--bg)`。**终端视口边距（2026-09-22 裁定，Issue #196 & #233）**：各平台 `.terminalpane` 统一保持 `padding: 0 5px;`（上下 0 消除单窗格与分屏底部空洞感，彻底回退 Windows 平台上下 5px 留白偏差；左右 5px 保留舒适文本安全距离，防止文字贴边）。全屏遮罩（`.chr-scrim`）采用纯净透明度渐变动画 `scrimFadeIn`，杜绝任何 scale / translate 几何缩放与平移抖动（2026-09-22 裁定，Issue #202）。
   **2026-09-23（Issue #239）**：Windows DOM 渲染器取消字符行之间的额外 leading，渲染与字体度量回退共用行高；外层 padding 不负责字符行内的制表符接缝。
-  xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: Windows DOM 为 1.0，其余平台 1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
+  **2026-09-23（macOS 实测回归）**：macOS 同样取消额外行距。首屏投影与实际渲染共用行高；布局读取 xterm 渲染器已计算的精确字符格尺寸，不跨 DOM/WebGL 渲染器缓存，也不从整幅画布的整数宽度反推单格；切换后按最终渲染单元格重新计算列数，避免右侧空白随窗格宽度累积。终端保留用户正文选定字体，追加平台符号字体（macOS Apple Symbols/Apple Color Emoji，Windows Segoe UI Symbol/Segoe UI Emoji）及 Symbols Nerd Font Mono/JetBrainsMono Nerd Font Mono 后备；不替换 PTY 字符、不联网下载字体。
+  xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: macOS/Windows 为 1.0，其余平台 1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   首次几何就绪后立即完成首订；后续连续窗口拖拽的 `fit()` 目标 cols/rows 在 **120ms 静止后** `term.resize`（明确完成边界见下文）（裁定 2026-09-17）。首帧立刻落到格子。
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：

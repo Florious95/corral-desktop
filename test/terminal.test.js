@@ -23,6 +23,7 @@ class FakeTerminal {
   constructor(opts) {
     this.opts = opts;
     this.options = { fontFamily: opts.fontFamily, fontSize: opts.fontSize };
+    this._core = { _renderService: { dimensions: { css: { cell: { width: 8, height: 16 } } } } };
     this.cols = 80;
     this.rows = 24;
     this.writes = [];
@@ -81,12 +82,13 @@ function makeView(overrides = {}) {
   return { view, container, calls, wheel: (deltaY) => wheelHandlers.forEach((fn) => fn({ deltaY })) };
 }
 
-test('Windows DOM rows have no extra leading and fallback grid uses the same cell height', () => {
-  for (const [platform, lineHeight, rows] of [['windows', 1, 20], ['macos', 1.25, 16]]) {
+test('native terminal rows have no extra leading and fallback grid uses the same cell height', () => {
+  for (const [platform, lineHeight, rows] of [['windows', 1, 20], ['macos', 1, 20]]) {
     setNativeEngineForTests({ platform });
     const { view, container } = makeView();
     try {
       view.term.element = null;
+      view.term._core = null;
       container.clientHeight = 260;
       view.fit();
       assert.equal(view.term.opts.lineHeight, lineHeight);
@@ -109,10 +111,13 @@ test('字体预设 2↔6、3↔4 每次切换都触发终端更新', () => {
   for (const [left, right] of [[1, 5], [2, 3]]) {
     for (const family of [left, right, left]) {
       view.updateFont({ fontFamily: TERMINAL_FONT_FAMILIES[family] });
-      assert.equal(view.term.options.fontFamily, TERMINAL_FONT_FAMILIES[family]);
+      assert.ok(view.term.options.fontFamily.startsWith(TERMINAL_FONT_FAMILIES[family]));
+      assert.ok(view.term.options.fontFamily.includes("Symbols Nerd Font Mono"));
       assert.equal(view.fontFamily, TERMINAL_FONT_FAMILIES[family]);
       assert.equal(fitCalls.length, 1, `font ${family + 1} should trigger a fit`);
       fitCalls.length = 0;
+      view.updateFont({ fontFamily: TERMINAL_FONT_FAMILIES[family] });
+      assert.equal(fitCalls.length, 0, 'reapplying the chosen font must not resize for its fallback suffix');
     }
   }
   view.dispose();
@@ -384,5 +389,18 @@ test('onBinary 把 X10 原始二进制 code units 交给调用方', () => {
   const report = String.fromCharCode(0x1b, 0x5b, 0x4d, 0x20, 0xc8, 0xc9);
   view.term.emitBinary(report);
   assert.deepEqual(got, [report]);
+  view.dispose();
+});
+
+test('fit follows changed renderer metrics without DOM measurement or a stale cell cache', () => {
+  const { view, calls } = makeView();
+  view.term.element.querySelector = () => { throw new Error('fit must not measure DOM'); };
+  view.fit({ immediate: true, sync: true });
+  assert.equal(view.cols, 100);
+  view.term._core._renderService.dimensions.css.cell = { width: 7.5, height: 15 };
+  view.fit({ immediate: true, sync: true });
+  assert.equal(view.cols, 106);
+  assert.equal(view.rows, 26);
+  assert.deepEqual(calls.resize.at(-1), [26, 106]);
   view.dispose();
 });

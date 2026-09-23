@@ -7,6 +7,11 @@
  * `element.getBoundingClientRect()`.
  */
 
+// Keep pre-open projection and the renderer on the same character spacing.
+export function terminalLineHeight(platform) {
+  return platform === 'macos' || platform === 'windows' ? 1 : 1.25;
+}
+
 const metricsCache = new Map();
 
 /**

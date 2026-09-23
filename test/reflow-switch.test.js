@@ -53,6 +53,7 @@ function makeView() {
   const reports = [];
   const view = new TerminalView(container, {
     TerminalCtor: FakeTerminal,
+    cellMetrics: { w: 8, h: 16 },
     onResize: (rows, cols) => reports.push([rows, cols]),
   });
   return { view, container, reports };
