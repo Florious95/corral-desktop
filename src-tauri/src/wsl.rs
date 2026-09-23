@@ -643,7 +643,7 @@ fn generate_service_token() -> Result<String, String> {
 }
 
 #[cfg(any(windows, test))]
-const SERVICE_START_SCRIPT: &str = "export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\" NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\" AGENTMIRROR_NODEPROBE_PI_EXTENSION=\"$HOME/.pi/agent/extensions/nodeprobe-pi-activity.js\"; test -s \"$NODEPROBE_FIXTURES\" && test -s \"$NODEPROBE_PROVIDERS\" && test -s \"$AGENTMIRROR_NODEPROBE_PI_EXTENSION\"; exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
+const SERVICE_START_SCRIPT: &str = "export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\" NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\" AGENTMIRROR_NODEPROBE_PI_EXTENSION=\"$HOME/.pi/agent/extensions/nodeprobe-pi-activity.js\"; test -s \"$NODEPROBE_FIXTURES\" && test -s \"$NODEPROBE_PROVIDERS\" && test -s \"$AGENTMIRROR_NODEPROBE_PI_EXTENSION\"; exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 127.0.0.1:9900 -token \"$2\"";
 
 #[cfg(any(windows, test))]
 fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a str) -> [&'a str; 9] {
@@ -1050,6 +1050,8 @@ mod tests {
 
     #[test]
     fn service_start_has_explicit_token_and_listen_flags() {
+        assert!(SERVICE_START_SCRIPT.contains("-listen 127.0.0.1:9900"));
+        assert!(!SERVICE_START_SCRIPT.contains("0.0.0.0"));
         assert!(SERVICE_START_SCRIPT.contains("export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\""));
         assert!(SERVICE_START_SCRIPT.contains("NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\""));
         assert!(SERVICE_START_SCRIPT.contains("AGENTMIRROR_NODEPROBE_PI_EXTENSION=\"$HOME/.pi/agent/extensions/nodeprobe-pi-activity.js\""));
