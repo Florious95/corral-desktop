@@ -27,7 +27,7 @@ const SERVICE_READY_PORT: u16 = 9900;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const PROVIDERS_TSV: &str = include_str!("../resources/nodeprobe-providers.tsv");
 const TITLES_TSV: &str = include_str!("../resources/nodeprobe-titles.tsv");
-const PI_PROBE_SOURCE: &str = include_str!("../resources/agentmirror-probe.js");
+const PI_PROBE_SOURCE: &str = include_str!("../resources/nodeprobe-pi-activity.js");
 
 /// Snapshot of the WSL 2 environment used by the local AgentMirror daemon.
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
@@ -185,12 +185,11 @@ nodeprobe_dst="$HOME/.local/bin/nodeprobe"
 version_file="$dst.version"
 providers="$HOME/tools/nodeprobe/fixtures/providers.tsv"
 titles="$HOME/tools/nodeprobe/fixtures/titles.tsv"
-# Keep both paths: plugins is the AgentMirror compatibility path while
-# extensions is Pi's current auto-discovery path.
+# Keep the compatibility plugin path and the canonical Pi extension path.
 probe_dir="$HOME/.pi/agent/plugins/agentmirror-probe"
 probe="$probe_dir/index.js"
 extensions_dir="$HOME/.pi/agent/extensions"
-extension="$extensions_dir/agentmirror-probe.js"
+extension="$extensions_dir/nodeprobe-pi-activity.js"
 if test -x "$dst" \
     && test -f "$version_file" \
     && test "$(cat "$version_file")" = "{AGENTMIRRORD_VERSION}" \
@@ -199,7 +198,8 @@ if test -x "$dst" \
     && test -s "$providers" \
     && test -s "$titles" \
     && test -f "$probe" \
-    && test -f "$extension"; then
+    && test -f "$extension" \
+    && test ! -e "$extensions_dir/agentmirror-probe.js"; then
     exit 0
 fi
 stop_service() {{
@@ -251,6 +251,8 @@ printf '%s' {probe_base64} | base64 -d > "$extension_tmp"
 test -s "$extension_tmp"
 chmod 0644 "$extension_tmp"
 mv -f -- "$extension_tmp" "$extension"
+# Remove the pre-#212 misnamed extension so Pi cannot load two copies.
+rm -f -- "$extensions_dir/agentmirror-probe.js"
 test -x "$dst"
 test -x "$nodeprobe_dst"
 test -s "$providers"
@@ -641,7 +643,7 @@ fn generate_service_token() -> Result<String, String> {
 }
 
 #[cfg(any(windows, test))]
-const SERVICE_START_SCRIPT: &str = "export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\" NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\"; test -s \"$NODEPROBE_FIXTURES\" && test -s \"$NODEPROBE_PROVIDERS\"; exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
+const SERVICE_START_SCRIPT: &str = "export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\" NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\" AGENTMIRROR_NODEPROBE_PI_EXTENSION=\"$HOME/.pi/agent/extensions/nodeprobe-pi-activity.js\"; test -s \"$NODEPROBE_FIXTURES\" && test -s \"$NODEPROBE_PROVIDERS\" && test -s \"$AGENTMIRROR_NODEPROBE_PI_EXTENSION\"; exec env -u AGENTMIRROR_TOKEN \"$1\" -listen 0.0.0.0:9900 -token \"$2\"";
 
 #[cfg(any(windows, test))]
 fn service_start_args<'a>(distribution: &'a str, service: &'a str, token: &'a str) -> [&'a str; 9] {
@@ -753,31 +755,36 @@ fn service_process_ready(distribution: &str, service: &str) -> bool {
 }
 
 #[cfg(any(windows, test))]
+fn http_status_code(response: &[u8]) -> Option<u16> {
+    let line = response
+        .split(|byte| *byte == b'\r' || *byte == b'\n')
+        .next()?;
+    let mut fields = line.split(|byte| *byte == b' ' || *byte == b'\t');
+    let version = fields.next()?;
+    let status = fields.next()?;
+    if !matches!(version, b"HTTP/1.0" | b"HTTP/1.1")
+        || status.len() != 3
+        || !status.iter().all(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    std::str::from_utf8(status).ok()?.parse().ok()
+}
+
+#[cfg(any(windows, test))]
 fn http_response_is_ready(response: &[u8]) -> bool {
     // Readiness proves that the listener is serving HTTP, not that this
     // endpoint exists in every compatible daemon generation. A legacy daemon
     // may return 404 for /pair/whoami while /ws and auth are available.
-    let Some(line) = response.split(|byte| *byte == b'\r' || *byte == b'\n').next() else {
-        return false;
-    };
-    let mut fields = line.split(|byte| *byte == b' ' || *byte == b'\t');
-    let Some(version) = fields.next() else {
-        return false;
-    };
-    let Some(status) = fields.next() else {
-        return false;
-    };
-    matches!(version, b"HTTP/1.0" | b"HTTP/1.1")
-        && status.len() == 3
-        && status.iter().all(u8::is_ascii_digit)
+    http_status_code(response).is_some()
 }
 
 #[cfg(windows)]
-fn service_http_ready() -> bool {
+fn service_http_status() -> Option<u16> {
     let address = SocketAddr::from(([127, 0, 0, 1], SERVICE_READY_PORT));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, std::time::Duration::from_millis(40))
     else {
-        return false;
+        return None;
     };
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(40)));
     let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(40)));
@@ -785,13 +792,18 @@ fn service_http_ready() -> bool {
         .write_all(b"GET /pair/whoami HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .is_err()
     {
-        return false;
+        return None;
     }
     let mut response = [0_u8; 512];
     let Ok(read) = stream.read(&mut response) else {
-        return false;
+        return None;
     };
-    http_response_is_ready(&response[..read])
+    http_status_code(&response[..read])
+}
+
+#[cfg(windows)]
+fn service_http_ready() -> bool {
+    service_http_status().is_some_and(|status| status < 500)
 }
 
 #[cfg(windows)]
@@ -800,10 +812,11 @@ fn wait_for_service_ready() -> Result<(), String> {
     // being present is not readiness; the first successful HTTP response is.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        if service_http_ready() {
-            return Ok(());
+        match service_http_status() {
+            Some(502) => return Err("service_port_occupied_502".to_string()),
+            Some(status) if status < 500 => return Ok(()),
+            _ => std::thread::sleep(std::time::Duration::from_millis(25)),
         }
-        std::thread::sleep(std::time::Duration::from_millis(25));
     }
     Err("service_start_failed".to_string())
 }
@@ -862,6 +875,9 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
                 "service_not_installed: {service} not found or out of date in WSL Ubuntu"
             ));
         }
+        if service_http_status() == Some(502) {
+            return Err("service_port_occupied_502".to_string());
+        }
         let token = ensure_wsl_service_token(&ubuntu.name)?;
         if service_http_ready() {
             return Ok(());
@@ -902,8 +918,8 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
 mod tests {
     use super::{
         find_ubuntu_distribution, first_ip, generate_service_token, hidden_command,
-        http_response_is_ready, install_script, normalize_service_token, parse_wsl_table,
-        service_binary,
+        http_response_is_ready, http_status_code, install_script, normalize_service_token,
+        parse_wsl_table, service_binary,
         service_probe_command, service_start_args, WslEnvironmentStatus, CREATE_NO_WINDOW,
         NODEPROBE_SHA256, PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
         SYSTEM_ENV_TOKEN_SCRIPT, TITLES_TSV, TOKEN_READ_SCRIPT,
@@ -919,6 +935,7 @@ mod tests {
         assert!(http_response_is_ready(b"HTTP/1.1 200 OK\r\n"));
         assert!(http_response_is_ready(b"HTTP/1.0 404 Not Found\r\n"));
         assert!(http_response_is_ready(b"HTTP/1.1 503 Busy\r\n"));
+        assert_eq!(http_status_code(b"HTTP/1.1 502 Bad Gateway\r\n"), Some(502));
         assert!(http_response_is_ready(b"HTTP/1.1 401 Unauthorized\r\n"));
         assert!(!http_response_is_ready(b"HTTP/1.1 nope\r\n"));
         assert!(!http_response_is_ready(b"garbage"));
@@ -983,6 +1000,7 @@ mod tests {
         assert!(script.contains("test -s \"$titles\""));
         assert!(script.contains("mv -f -- \"$titles_tmp\" \"$titles\""));
         assert!(script.contains("probe_dir=\"$HOME/.pi/agent/plugins/agentmirror-probe\""));
+        assert!(script.contains("extension=\"$extensions_dir/nodeprobe-pi-activity.js\""));
         assert!(script.contains("install -m 0755 -- \"$src\" \"$service_tmp\""));
         assert!(script.contains("printf '%s' "));
         assert!(script.contains("| base64 -d > \"$probe_tmp\""));
@@ -1034,8 +1052,10 @@ mod tests {
     fn service_start_has_explicit_token_and_listen_flags() {
         assert!(SERVICE_START_SCRIPT.contains("export NODEPROBE_FIXTURES=\"$HOME/tools/nodeprobe/fixtures/titles.tsv\""));
         assert!(SERVICE_START_SCRIPT.contains("NODEPROBE_PROVIDERS=\"$HOME/tools/nodeprobe/fixtures/providers.tsv\""));
+        assert!(SERVICE_START_SCRIPT.contains("AGENTMIRROR_NODEPROBE_PI_EXTENSION=\"$HOME/.pi/agent/extensions/nodeprobe-pi-activity.js\""));
         assert!(SERVICE_START_SCRIPT.contains("test -s \"$NODEPROBE_FIXTURES\""));
         assert!(SERVICE_START_SCRIPT.contains("test -s \"$NODEPROBE_PROVIDERS\""));
+        assert!(SERVICE_START_SCRIPT.contains("test -s \"$AGENTMIRROR_NODEPROBE_PI_EXTENSION\""));
         assert_eq!(
             service_start_args("Ubuntu", "agentmirrord", "TOKEN123"),
             [

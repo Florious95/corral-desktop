@@ -17,7 +17,7 @@ final class PiProbeInstallerTests: XCTestCase {
         try PiProbeInstaller.install(resourceDirectory: resources, homeDirectory: home)
 
         let compatibility = home.appendingPathComponent(".pi/agent/plugins/agentmirror-probe/index.js")
-        let discovered = home.appendingPathComponent(".pi/agent/extensions/agentmirror-probe.js")
+        let discovered = home.appendingPathComponent(".pi/agent/extensions/nodeprobe-pi-activity.js")
         XCTAssertEqual(try Data(contentsOf: compatibility), try Data(contentsOf: source))
         XCTAssertEqual(try Data(contentsOf: discovered), try Data(contentsOf: source))
         XCTAssertEqual(try permissions(compatibility), 0o644)

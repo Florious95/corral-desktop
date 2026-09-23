@@ -46,12 +46,16 @@ export default function WslBootstrapCard({
   } else if (state === 'error') {
     title = 'WSL 会话服务连接失败';
     subtitle = errorMsg || '无法拉起会话服务，请确保 agentmirrord 或 corral-core 在 WSL 中可执行';
-    if (errorMsg && (errorMsg.includes('502') || errorMsg.includes('冲突') || errorMsg.includes('conflict') || errorMsg.includes('被占用') || errorMsg.includes('port'))) {
+    if (errorMsg && (errorMsg.includes('service_port_occupied_502')
+      || errorMsg.includes('502')
+      || errorMsg.includes('冲突')
+      || errorMsg.includes('conflict')
+      || errorMsg.includes('被占用')
+      || errorMsg.includes('port'))) {
       title = '端口 9900 冲突或健康检查失败 (502)';
-      subtitle = errorMsg.includes('502')
-        ? '端口 9900 被占用或网关返回 HTTP 502 错误，请检查是否有残留进程占用 9900 端口'
-        : errorMsg;
+      subtitle = '本机 9900 端口被旧转发或适配层占用，或网关返回 HTTP 502，请检查残留进程后重试。';
       commandHint = 'wsl -d Ubuntu -e lsof -nP -iTCP:9900';
+    }
     } else if (envStatus && !envStatus.service_installed) {
       subtitle = 'WSL 2 中未安装 Agent 会话服务，请在 Ubuntu 中安装 agentmirrord：';
       commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
