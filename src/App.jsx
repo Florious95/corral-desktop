@@ -988,6 +988,7 @@ export default function App({ seedDevices } = {}) {
     if (!uidReady(uid)) { setToastMsg('未连接，未发送'); return }
     const sent = dm.input(uid, text);
     if (!sent) { setToastMsg('未发送'); return }
+    geomTrace('input_send', { ref: uid, req_id: sent.reqId, device_id: sent.deviceId });
     ackGate.current.noteText(uid, sent);
   }, [dm, uidReady]);
 

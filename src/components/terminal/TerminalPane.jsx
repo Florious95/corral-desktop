@@ -149,6 +149,7 @@ export default function TerminalPane({
     }
 
     const pump = new NativeInputPump({
+      deferText: nativeCapabilities.platform !== 'macos',
       sendText: (text) => onTextRef.current?.(text),
       sendKey: (key) => onKeyRef.current?.(key),
       sendBytes: (bytes) => onBytesRef.current?.(bytes),

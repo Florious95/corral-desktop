@@ -39,12 +39,13 @@ test('TerminalStage (SplitPanes) guarantees same-parent flattened absolute proje
   assert.match(splitPanesJsx, /key=\{uid\}/);
   assert.match(splitPanesJsx, /className=\{`pane-host\$\{isVisible \? '' : ' is-hidden'\}/);
 
-  // Absolute positioning projection with left/top/width/height
+  // Absolute projection; visible macOS bottom leaves follow the live stage edge.
   assert.match(splitPanesJsx, /position:\s*'absolute'/);
   assert.match(splitPanesJsx, /left:\s*`\$\{currentRect\.x\}px`/);
   assert.match(splitPanesJsx, /top:\s*`\$\{currentRect\.y\}px`/);
   assert.match(splitPanesJsx, /width:\s*`\$\{currentRect\.w\}px`/);
-  assert.match(splitPanesJsx, /height:\s*`\$\{currentRect\.h\}px`/);
+  assert.match(splitPanesJsx, /height:\s*anchorBottom \? undefined : `\$\{currentRect\.h\}px`/);
+  assert.match(splitPanesJsx, /bottom:\s*anchorBottom \? 0 : undefined/);
 
   // Background resident pane retains geometry and receives visibility: hidden + inert + aria-hidden
   assert.match(splitPanesJsx, /visibility:\s*isVisible \? 'visible' : 'hidden'/);

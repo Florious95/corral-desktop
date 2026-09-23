@@ -61,6 +61,23 @@ test('NativeInputPump merges burst text into one sendText', async () => {
   pump.dispose();
 });
 
+test('immediate text delivery preserves typing, IME and Enter order without a timer', async () => {
+  const sent = [];
+  const pump = new NativeInputPump({
+    deferText: false,
+    sendText: t => sent.push(['text', t]),
+    sendEnter: () => sent.push(['enter']),
+    sendKey: k => sent.push(['key', k]),
+  });
+  pump.onData('a');
+  assert.deepEqual(sent, [['text', 'a']], 'single keystroke is sent in the input turn');
+  pump.onData('中文😀\r');
+  assert.deepEqual(sent, [['text', 'a'], ['text', '中文😀'], ['enter']]);
+  pump.dispose();
+  await sleep(TEXT_FLUSH_MS + 10);
+  assert.equal(sent.length, 3, 'dispose or a stale timer cannot replay text');
+});
+
 test('NativeInputPump flushes text before enter / keys', () => {
   const sent = [];
   const pump = new NativeInputPump({

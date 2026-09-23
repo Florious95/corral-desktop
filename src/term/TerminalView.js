@@ -88,6 +88,7 @@ export class TerminalView {
     this.traceRef = opts.traceRef ?? null;
     this._writeSequence = 0;
     this._parsedSequence = 0;
+    this._inputEchoPending = false;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
@@ -217,7 +218,11 @@ export class TerminalView {
       this._cursorMoveDisposable = this.term.onCursorMove?.(() => this._syncCursorAnchor());
       this._renderDisposable = this.term.onRender?.(() => this._syncCursorAnchor());
     }
-    this._dataDisposable = this.term.onData((data) => this.onData(data));
+    this._dataDisposable = this.term.onData((data) => {
+      geomTrace('input', { ref: this.traceRef, units: data.length });
+      if (nativeCapabilities.platform === 'macos') this._inputEchoPending = true;
+      this.onData(data);
+    });
     // xterm emits X10 mouse reports through onBinary; each code unit is one raw byte.
     this._binaryDisposable = this.term.onBinary
       ? this.term.onBinary((data) => this.onBinary(data))
@@ -416,7 +421,12 @@ export class TerminalView {
       this._writeHandle = null;
       this._flushWrites();
     };
-    if (typeof requestAnimationFrame === 'function') {
+    // xterm already expedites parsing after user input. Do not hold that echo
+    // for another animation frame; all other output keeps bounded batching.
+    if (this._inputEchoPending) {
+      this._inputEchoPending = false;
+      run();
+    } else if (typeof requestAnimationFrame === 'function') {
       this._writeScheduleKind = 'raf';
       this._writeHandle = requestAnimationFrame(run);
     } else if (typeof queueMicrotask === 'function') {

@@ -51,6 +51,20 @@ function openAndAuth(ws) {
   ws._text(JSON.stringify({ v: 1, type: 'auth_ack', payload: { ok: true } }));
 }
 
+test('input acknowledgement timing keeps the request identity without retaining typed text', () => {
+  const { client, sockets } = makeClient();
+  client.connect();
+  openAndAuth(sockets[0]);
+  resetGeomTrace();
+  const reqId = client.input('pane', 'private-input-sentinel');
+  sockets[0]._text(JSON.stringify({ v: 1, type: 'input_ack', payload: { req_id: reqId, ok: true } }));
+  const records = dumpGeomTrace();
+  assert.deepEqual(records.map(r => r.event), ['input_ack']);
+  assert.ok(records.every(r => r.req_id === reqId && Number.isFinite(r.mono_ms)));
+  assert.doesNotMatch(JSON.stringify(records), /private-input-sentinel|tok-test/);
+  client.disconnect();
+});
+
 test('geomTrace disabled returns immediately without retaining an event', () => {
   resetGeomTrace();
   setGeomTraceEnabled(false);

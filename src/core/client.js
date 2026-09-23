@@ -66,6 +66,7 @@ export class Client extends CoreClient {
     };
     const onFrame = this.onFrame;
     this.onFrame = (type, payload) => {
+      if (type === 'input_ack') geomTrace('input_ack', { req_id: payload.req_id, ok: payload.ok, reason: payload.reason });
       if (type === 'presence_update' && payload?.ref) {
         if (payload.disconnected) {
           this.presenceByRef.delete(payload.ref);

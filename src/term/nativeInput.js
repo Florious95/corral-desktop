@@ -292,8 +292,10 @@ export class NativeInputPump {
    * @param {(bytes:Uint8Array)=>void} hooks.sendBytes
    * @param {()=>void} hooks.sendEnter
    * @param {(label:string)=>void} hooks.onUnsupported
+   * @param {boolean} [hooks.deferText] batch ordinary text on platforms that retain the 32ms policy
    */
-  constructor({ sendText, sendKey, sendBytes, sendEnter, onUnsupported }) {
+  constructor({ sendText, sendKey, sendBytes, sendEnter, onUnsupported, deferText = true }) {
+    this.deferText = deferText;
     this.sendText = sendText;
     this.sendKey = sendKey;
     this.sendBytes = sendBytes;
@@ -323,7 +325,7 @@ export class NativeInputPump {
       }
       if (e.type === 'text') {
         this._buf += e.value;
-        if (this._buf.length >= TEXT_FLUSH_CHARS) this.flush();
+        if (!this.deferText || this._buf.length >= TEXT_FLUSH_CHARS) this.flush();
         else this._arm();
         continue;
       }
