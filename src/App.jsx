@@ -185,6 +185,32 @@ export default function App({ seedDevices } = {}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState(() => loadSettings());
 
+  // Issue #255: 三态主题切换（light / dark / system）与系统自适应
+  useEffect(() => {
+    const mode = settings?.themeMode || 'system';
+    const mql = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)')
+      : null;
+
+    const applyTheme = () => {
+      const isDark = mode === 'dark' || (mode === 'system' && (mql?.matches ?? false));
+      if (typeof document !== 'undefined') {
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('terminal:theme-change', { detail: { isDark } }));
+      }
+    };
+
+    applyTheme();
+
+    if (mode === 'system' && mql) {
+      const handler = () => applyTheme();
+      mql.addEventListener?.('change', handler);
+      return () => mql.removeEventListener?.('change', handler);
+    }
+  }, [settings?.themeMode]);
+
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const [pairingOpen, setPairingOpen] = useState(false);
@@ -1304,19 +1330,6 @@ export default function App({ seedDevices } = {}) {
           closeMenu();
           if (unvisibleTabs.length > 0) {
             setWorkspace((prev) => splitSession(prev, menu.id, unvisibleTabs[0].uid, { axis: 'x', ratio: 0.5 }));
-          }
-        },
-      },
-      {
-        key: 'split-down',
-        label: '向下分屏',
-        icon: icon(SplitIcon),
-        color: 'var(--text)',
-        disabled: unvisibleTabs.length === 0,
-        onClick: () => {
-          closeMenu();
-          if (unvisibleTabs.length > 0) {
-            setWorkspace((prev) => splitSession(prev, menu.id, unvisibleTabs[0].uid, { axis: 'y', ratio: 0.5 }));
           }
         },
       },

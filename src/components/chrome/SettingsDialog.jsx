@@ -3,9 +3,11 @@ import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
   DEFAULT_DIRECTORY_TRACKING,
+  DEFAULT_THEME_MODE,
   clampFontSize,
   saveSetting,
 } from '../../core/settings.js';
+import { SunIcon, MoonIcon, MonitorIcon } from '../../lib/icons.jsx';
 import './chrome.css';
 
 const COMMON_FONTS = [
@@ -25,6 +27,7 @@ export default function SettingsDialog({ open, settings, onUpdateSettings, onClo
   const [fontSize, setFontSize] = useState(settings?.['terminal.fontSize'] || DEFAULT_FONT_SIZE);
   const [fontSizeInput, setFontSizeInput] = useState(String(fontSize));
   const [directoryTracking, setDirectoryTracking] = useState(settings?.directoryTracking ?? DEFAULT_DIRECTORY_TRACKING);
+  const [themeMode, setThemeMode] = useState(settings?.themeMode || DEFAULT_THEME_MODE);
 
   useEffect(() => {
     if (!open) return;
@@ -33,6 +36,7 @@ export default function SettingsDialog({ open, settings, onUpdateSettings, onClo
     setFontSize(size);
     setFontSizeInput(String(size));
     setDirectoryTracking(settings?.directoryTracking ?? DEFAULT_DIRECTORY_TRACKING);
+    setThemeMode(settings?.themeMode || DEFAULT_THEME_MODE);
   }, [open, settings]);
 
   useEffect(() => {
@@ -50,6 +54,12 @@ export default function SettingsDialog({ open, settings, onUpdateSettings, onClo
     setFontFamily(value);
     saveSetting('terminal.fontFamily', value);
     onUpdateSettings?.('terminal.fontFamily', value);
+  };
+
+  const handleThemeModeChange = (mode) => {
+    setThemeMode(mode);
+    saveSetting('themeMode', mode);
+    onUpdateSettings?.('themeMode', mode);
   };
 
   const commitFontSize = (value = fontSizeInput) => {
@@ -117,6 +127,48 @@ export default function SettingsDialog({ open, settings, onUpdateSettings, onClo
           </header>
 
           <div className="settings-body">
+            <section className="settings-section" aria-labelledby="settings-theme-title">
+              <h3 className="settings-section-title" id="settings-theme-title">界面外观</h3>
+              <div className="settings-card settings-theme-card">
+                <div className="settings-field-heading">
+                  <span id="settings-theme-label" className="settings-label">主题模式</span>
+                  <span className="settings-hint">浅色、深色或跟随系统外观</span>
+                </div>
+                <div className="settings-theme-segmented" role="radiogroup" aria-labelledby="settings-theme-label">
+                  <button
+                    type="button"
+                    role="radio"
+                    className={`chr-btn-reset settings-segmented-btn${themeMode === 'light' ? ' is-active' : ''}`}
+                    aria-checked={themeMode === 'light'}
+                    onClick={() => handleThemeModeChange('light')}
+                  >
+                    <SunIcon size={14} strokeWidth={2} />
+                    <span>浅色</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    className={`chr-btn-reset settings-segmented-btn${themeMode === 'dark' ? ' is-active' : ''}`}
+                    aria-checked={themeMode === 'dark'}
+                    onClick={() => handleThemeModeChange('dark')}
+                  >
+                    <MoonIcon size={14} strokeWidth={2} />
+                    <span>深色</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    className={`chr-btn-reset settings-segmented-btn${themeMode === 'system' ? ' is-active' : ''}`}
+                    aria-checked={themeMode === 'system'}
+                    onClick={() => handleThemeModeChange('system')}
+                  >
+                    <MonitorIcon size={14} strokeWidth={2} />
+                    <span>跟随系统</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <section className="settings-section" aria-labelledby="settings-typography-title">
               <h3 className="settings-section-title" id="settings-typography-title">终端外观</h3>
               <div className="settings-card">

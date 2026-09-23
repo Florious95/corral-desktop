@@ -7,11 +7,13 @@ export const DEFAULT_FONT_FAMILY =
   'Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, monospace';
 export const DEFAULT_FONT_SIZE = 13;
 export const DEFAULT_DIRECTORY_TRACKING = false;
+export const DEFAULT_THEME_MODE = 'system';
 
 export const DEFAULT_SETTINGS = Object.freeze({
   'terminal.fontFamily': DEFAULT_FONT_FAMILY,
   'terminal.fontSize': DEFAULT_FONT_SIZE,
   directoryTracking: false,
+  themeMode: DEFAULT_THEME_MODE,
 });
 
 /**
@@ -35,11 +37,15 @@ export function loadSettings() {
   const fontSize = rawSize ? clampFontSize(rawSize) : DEFAULT_FONT_SIZE;
   const rawTrack = localStorage.getItem('directoryTracking');
   const directoryTracking = rawTrack !== null ? rawTrack === 'true' : false;
+  const rawTheme = localStorage.getItem('themeMode');
+  const themeMode = (rawTheme === 'light' || rawTheme === 'dark' || rawTheme === 'system')
+    ? rawTheme : DEFAULT_THEME_MODE;
 
   return {
     'terminal.fontFamily': fontFamily,
     'terminal.fontSize': fontSize,
     directoryTracking,
+    themeMode,
   };
 }
 
@@ -62,6 +68,11 @@ export function saveSetting(key, value) {
     const bool = Boolean(value);
     localStorage.setItem('directoryTracking', String(bool));
     return bool;
+  }
+  if (key === 'themeMode') {
+    const mode = (value === 'light' || value === 'dark' || value === 'system') ? value : DEFAULT_THEME_MODE;
+    localStorage.setItem('themeMode', mode);
+    return mode;
   }
   return value;
 }

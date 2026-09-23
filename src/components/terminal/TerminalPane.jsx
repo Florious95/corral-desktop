@@ -445,13 +445,20 @@ export default function TerminalPane({
         firstSub = false;
       }
     };
+    const handleThemeChange = (ev) => {
+      if (viewRef.current && typeof ev?.detail?.isDark === 'boolean') {
+        viewRef.current.setDark(ev.detail.isDark);
+      }
+    };
     if (typeof window !== 'undefined') {
       window.addEventListener('terminal:reflow', handleReflow);
+      window.addEventListener('terminal:theme-change', handleThemeChange);
     }
 
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('terminal:reflow', handleReflow);
+        window.removeEventListener('terminal:theme-change', handleThemeChange);
       }
       ro.disconnect();
       host.removeEventListener('wheel', onWheel, { capture: true });

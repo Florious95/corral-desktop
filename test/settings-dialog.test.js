@@ -27,15 +27,24 @@ const render = (settings = {}, props = {}) => renderToStaticMarkup(createElement
 const input = (html, name) => html.match(new RegExp(`<input[^>]*name="${name.replace('.', '\\.')}"[^>]*>`))?.[0];
 
 // Behavioural DOM events, focus restoration and layout are additionally exercised in a real browser.
-test('settings: closed dialog renders nothing; open dialog has a named modal and two sections', () => {
+test('settings: closed dialog renders nothing; open dialog has a named modal and three sections', () => {
   assert.equal(render({}, { open: false }), '');
   const html = render();
   assert.match(html, /role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-describedby="settings-description"/);
   assert.match(html, /id="settings-title">设置/);
-  assert.equal((html.match(/<section /g) || []).length, 2);
+  assert.equal((html.match(/<section /g) || []).length, 3);
   assert.match(html, /aria-label="关闭设置"/);
   assert.match(html, /修改即时保存/);
   assert.match(html, />完成<\/button>/);
+});
+
+test('settings: theme segmented control renders three options and reflects active state', () => {
+  for (const mode of ['light', 'dark', 'system']) {
+    const html = render({ themeMode: mode });
+    assert.match(html, /role="radiogroup" aria-labelledby="settings-theme-label"/);
+    assert.equal((html.match(/role="radio"/g) || []).length, 3);
+    assert.match(html, new RegExp(`role="radio"[^>]*aria-checked="true"[^>]*>[\\s\\S]*?<span>${mode === 'light' ? '浅色' : mode === 'dark' ? '深色' : '跟随系统'}<\\/span>`));
+  }
 });
 
 test('settings: six font pills expose a single active primary font, including the default fallback stack', () => {
@@ -129,12 +138,15 @@ test('settings: existing storage keys round-trip without adding a new state chan
   saveSetting('terminal.fontFamily', 'Menlo, monospace');
   saveSetting('terminal.fontSize', 99);
   saveSetting('directoryTracking', true);
+  saveSetting('themeMode', 'dark');
   assert.deepEqual(loadSettings(), {
-    'terminal.fontFamily': 'Menlo, monospace', 'terminal.fontSize': 24, directoryTracking: true,
+    'terminal.fontFamily': 'Menlo, monospace', 'terminal.fontSize': 24, directoryTracking: true, themeMode: 'dark',
   });
   saveSetting('directoryTracking', false);
   saveSetting('terminal.fontFamily', '');
+  saveSetting('themeMode', 'system');
   assert.equal(loadSettings().directoryTracking, false);
   assert.equal(loadSettings()['terminal.fontFamily'], DEFAULT_FONT_FAMILY);
-  assert.equal(data.size, 3);
+  assert.equal(loadSettings().themeMode, 'system');
+  assert.equal(data.size, 4);
 });

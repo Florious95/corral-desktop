@@ -519,6 +519,11 @@ src/
   const y = Math.min(e.clientY, window.innerHeight - MH - 8);
   setMenu({ kind, id, x, y });
   ```
+- **菜单类别与动作（2026-09-23 裁定，Issue #261）**：
+  - Space 菜单（`space`）：`新建 Agent`；
+  - Agent 菜单（`agent`）：`收藏 / 取消收藏`、`关闭`（带二次确认）；
+  - Tab 菜单（`tab`）：`适应当前窗口`、`恢复自动标题`（若自定义）、`固定到最左 / 取消固定`、`关闭工作台`、`关闭其他工作台`、`关闭右侧所有工作台`；
+  - 窗格菜单（`pane`）：`适应当前窗口`、`向右分屏`、`收藏 / 取消收藏`、`关闭此分屏`。**彻底删除不贴合设计的「向上分屏」与「向下分屏」（Issue #261）**。
 
 ### 4.6 `chrome/Toast.jsx`
 
@@ -570,13 +575,15 @@ src/
 
 - `<aside>`：`width:{collapsed?0:280}px; flex:none; overflow:hidden; background:var(--sidebar-bg); border-right:1px solid var(--border); display:flex; flex-direction:column; transition:width var(--d-sidebar) var(--ease)`。
 - **内层固定 280px**：`<div style="width:280px;flex:1;display:flex;flex-direction:column;min-height:0">` —— 折叠时内容不重排，只被裁掉。
-- **Search 占位行**（v1 无功能）：`display:flex; align-items:center; gap:10px; margin:10px 10px 2px; padding:6px 10px; border-radius:var(--r-7); font-size:var(--fs-135); cursor:default`（**不加 hover 态**，避免暗示可点）+ `<SearchIcon size={15} stroke="var(--icon-titlebar)"/>` + 文字 `Search`。
-- **Spaces 分组头**：`display:flex; align-items:center; justify-content:space-between; padding:12px 20px 4px`。左侧可点 span：`display:inline-flex; align-items:center; gap:4px; font-size:var(--fs-12); font-weight:600; color:var(--text-muted); cursor:pointer; border-radius:var(--r-5); padding:2px 6px; margin-left:-6px`；hover `background:var(--hover-2); color:var(--icon-strong)`。chevron：`<ChevronDown size={11} strokeWidth={2.2}/>`，`transform:rotate({spacesOpen?0:-90}deg); transition:transform var(--d-chevron) var(--ease)`。**右侧「新建文件夹」按钮删除**（见 §10）。
+- **Search 占位行彻底删除（Issue #253）**：侧栏顶部原无功能 Search 占位行已彻底拔除，释放纵向视觉空间，Spaces 列表自适应上移顶格。
+- **Spaces 分组头**：`display:flex; align-items:center; justify-content:space-between; padding:14px 20px 4px`。左侧可点 span：`display:inline-flex; align-items:center; gap:4px; font-size:var(--fs-12); font-weight:600; color:var(--text-muted); cursor:pointer; border-radius:var(--r-5); padding:2px 6px; margin-left:-6px`；hover `background:var(--hover-2); color:var(--icon-strong)`。chevron：`<ChevronDown size={11} strokeWidth={2.2}/>`，`transform:rotate({spacesOpen?0:-90}deg); transition:transform var(--d-chevron) var(--ease)`。**右侧「新建文件夹」按钮删除**（见 §10）。
 - `spacesOpen` 为真时渲染 `<SpacesList/>`。
 - **Agents 分组头**：`padding:14px 20px 4px; display:flex; align-items:center; min-width:0`。文案：`selected==='all'` → `Agents`；`'fav'` → `收藏的 Agents`；否则 `` `${spaceName} 的 Agents` ``。文字 span 需 `white-space:nowrap;overflow:hidden;text-overflow:ellipsis`，chevron `flex:none`，其余同 Spaces 头。
 - `agentsOpen` 为真时渲染 `<AgentsList/>`。
 - **弹性占位**：`<div style={{flex: agentsOpen ? '0 1 0px' : '1 1 0px'}}/>` —— Agents 收起时把底部 Devices 条推到底。
-- **Devices 底条**：`border-top:1px solid var(--border-strong); display:flex; align-items:center; gap:8px; padding:11px 16px; font-size:var(--fs-13); font-weight:600; flex:none; cursor:pointer; transition:background var(--d-hover)`；hover `background:var(--hover-1)`；点击 = `onToggleDevices`。内容：`<LayersIcon size={15} stroke="var(--icon-strong)"/>` + label（省略号）+ 状态点 `7px` 圆（`anyDeviceOnline` → `var(--green)`，否则 `border:1.5px solid var(--dot-hollow);background:transparent`）+ `<GearIcon size={15} stroke="var(--icon)"/>`（`margin-left:auto`）。
+- **底部 Devices 与设置控制栏（Issue #252 重构）**：`sidebar-footer` 容器 `height:44px; display:flex; align-items:center; justify-content:space-between; gap:4px; padding:4px 8px 4px 12px; border-top:1px solid var(--border-strong)`。
+  - 左侧设备区（`.sidebar-devices`）：`flex:1; min-width:0; height:34px; padding:0 8px; border-radius:var(--r-6); display:flex; align-items:center; gap:8px; cursor:pointer`。包含 `<LayersIcon size={15}/>` + `label`（省略号）+ 状态点 `7px` 圆（`anyDeviceOnline` → `var(--green)`，否则 `border:1.5px solid var(--dot-hollow);background:transparent`）。
+  - 右侧设置按钮（`.sidebar-settings-btn`）：**独立热区 34×34px（>=32px）**，`<GearIcon size={16}/>`，hover 态提供平滑旋转微动效（`transform:rotate(18deg)`）。**与设备区为兄弟元素，彻底消除点击设置误触发设备列表弹窗**。
 
 ### 5.2 `sidebar/SpacesList.jsx`
 
@@ -629,11 +636,11 @@ src/
   只在变化时 `setVpH(h)`。中层 `<div style={{height:vpH, overflowY:'auto'}}>` —— 保证永远只露出整数行，不出现半行。
 - **轨道**：`position:relative; height:{agents.length * 54}px`。
 - **排序**：`sorted = [...agents].sort((a,b)=>(b.fav?1:0)-(a.fav?1:0))`（稳定排序，收藏置顶）。**DOM 顺序仍用 `agents` 原序**，只把 `top = sorted.indexOf(ag) * 54` 写进样式 —— 这样 React key 不动，重排走 `top` 过渡。
-- **行样式**：
+- **行样式（会话行纯净精简，Issue #254）**：
   ```
   position:absolute; left:0; right:0; top:{top}px; height:54px; box-sizing:border-box;
   border:2px solid transparent; background-clip:padding-box;
-  display:flex; flex-direction:column; justify-content:center; padding:0 8px;
+  display:flex; align-items:center; padding:0 12px;
   border-radius:var(--r-9); cursor:pointer;
   background-color:{openKeys.includes(key) ? var(--sel-bg) : transparent};
   opacity:{closing?0:1}; transform:scale({closing?0.94:1});
@@ -641,12 +648,8 @@ src/
   animation:rowIn var(--d-chevron) ease-out;
   ```
   hover `background-color:var(--hover-5)`。
-- **第一行**：`display:flex; align-items:center; gap:8px; font-size:var(--fs-13); font-weight:600; min-width:0`
-  - `<ProviderIcon provider={provider} size={18} active={state==='working'||state==='blocked'}/>`
-  - title span（省略号）
-  - 尾部容器 `margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12} stroke="var(--green-deep)" strokeWidth={2.4}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`。行内不渲染关闭按钮；`关闭 Agent` 仅从该行右键上下文菜单进入并触发二次确认。两者可同时出现（对勾在左，星在右）。
-- **第二行**：`display:flex; align-items:center; gap:6px; font-size:var(--fs-11); color:var(--text-muted); margin-top:3px`
-  - **状态点** `8px` 圆，`border-radius:var(--r-pill); flex:none`：
+- **三大核心视觉要素（彻底剔除重复 Provider 文本与工程/目录名）**：
+  - **核心 1：工作状态指示点**（`.agents-dot`），`8px` 圆，`border-radius:var(--r-pill); flex:none`：
     | state | 样式 | title |
     |---|---|---|
     | working | `background:var(--green); animation:pulse 1.8s ease-out infinite` | 运行中 |
@@ -654,8 +657,10 @@ src/
     | done | `background:var(--green-deep)`（实心，无动画） | 已完成 |
     | idle | `background:transparent; border:1.5px solid var(--dot-hollow)` | 空闲 |
     | unknown | `background:transparent; border:1.5px solid var(--ink-060)` | 状态未知 |
-  - meta 文本：`` `${PROVIDER_LABEL[provider] ?? title} · ${spaceName}` ``；若 `PROVIDER_LABEL[provider] === title`（重复）则只显示 `spaceName`。
-  - **设备徽章**（仅 `multiDevice`）：`margin-left:auto; font-size:var(--fs-10); font-weight:500; padding:2px 8px; border-radius:var(--r-pill); flex:none; box-shadow:var(--ring-hairline)`；配色同 §5.2。
+  - **核心 2：Provider 图标**：`<ProviderIcon provider={provider} size={18} active={state==='working'||state==='blocked'}/>`
+  - **核心 3：会话名称**：`span.agents-row-title`（`flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap`）
+  - **尾部标记**：`margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；多设备徽章（`.agents-badge`，仅 `multiDevice` 时显示）。
+  - **精简成效**：垂直单行居中排布，紧凑清晰，彻底消灭旧版第二行冗余重叠的文字，信噪比极大提升。
 - **空态**（`agents.length === 0`，渲染在轨道之后）：`padding:18px 10px; font-size:var(--fs-12); color:var(--text-faint); text-align:center`，两行：`这个空间还没有 Agent` / `{emptyHint}`（默认 `在 Space 上右键 → 新建 Agent`）。
 
 ---
