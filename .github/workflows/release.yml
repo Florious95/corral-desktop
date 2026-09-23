@@ -76,6 +76,9 @@ jobs:
       - name: Build Windows installers
         run: npm run tauri build
 
+      - name: Verify release has no application console
+        run: node scripts/verify-windows-subsystem.mjs
+
       - name: Stage Windows release artifacts
         id: artifacts
         shell: pwsh

@@ -64,3 +64,6 @@ jobs:
 
       - name: Build Windows desktop application
         run: npm run tauri build -- --no-bundle
+
+      - name: Verify release has no application console
+        run: node scripts/verify-windows-subsystem.mjs
