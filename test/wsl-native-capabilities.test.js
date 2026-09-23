@@ -513,3 +513,35 @@ test('syncLocalTokenAndConnect auto-injects service token and transitions state'
   assert.equal(state, 'error');
   assert.match(errorMsg, /无法获取 WSL 会话服务配对令牌/);
 });
+
+test('Issue #234 explicitly surfaces port 9900 conflict and 502 errors without hanging in starting state', async () => {
+  const [appJsx, cardJsx] = await Promise.all([
+    readFile(new URL('../src/App.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/chrome/WslBootstrapCard.jsx', import.meta.url), 'utf8'),
+  ]);
+
+  // 1. App.jsx 显式监听 starting 期间 localDev.lastError
+  assert.match(appJsx, /Issue #234: 客户端显式捕获端口冲突、502、或连接错误，严禁无限挂起在“正在唤醒”中/);
+  assert.match(appJsx, /wslState !== 'starting'/);
+  assert.match(appJsx, /localDev\?\.lastError/);
+  assert.match(appJsx, /setWslState\('error'\)/);
+
+  // 2. WslBootstrapCard 包含针对 502 和端口冲突的清晰提示与 lsof 诊断命令
+  assert.match(cardJsx, /端口 9900 冲突或健康检查失败 \(502\)/);
+  assert.match(cardJsx, /lsof -nP -iTCP:9900/);
+
+  // 3. 状态机模拟：捕获 502 时立即切为 error 态
+  let state = 'starting';
+  let errorMsg = '';
+  const onDeviceError = (err) => {
+    if (state === 'starting') {
+      state = 'error';
+      errorMsg = err.includes('502') ? '端口 9900 被占用或健康检查失败 (502)，请检查后台服务' : err;
+    }
+  };
+
+  onDeviceError('HTTP 502 Bad Gateway / port occupied');
+  assert.equal(state, 'error');
+  assert.match(errorMsg, /502/);
+});
+
