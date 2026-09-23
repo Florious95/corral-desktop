@@ -338,7 +338,7 @@ src/
 |---|---|
 | 根 | `height:38px; flex:none; display:flex; align-items:center; gap:8px; padding:0 10px 0 0; background:var(--titlebar-grad); border-bottom:1px solid var(--border-strong); box-shadow:var(--titlebar-inset); box-sizing:border-box; user-select:none; position:relative; z-index:10`。横贯窗口全宽。 |
 | 原生灯留白 | 排在最左端（仅 macOS）。`<div class="tb-traffic-lights" aria-hidden="true"/>`，宽 `80px`（78~86px 原生红绿灯安全保护区），不渲染任何可交互按钮。Windows 下收敛为 0 且隐藏。 |
-| 侧栏开关 | 紧接原生灯留白。`<button class="tb-btn tb-sidebar-toggle" ...>`，`28×26px; border-radius:var(--r-6); display:flex;center; cursor:pointer; color:var(--icon-titlebar)`；hover `background:var(--hover-4); color:var(--icon-strong)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
+| 侧栏开关 | 紧接原生灯留白。`<button class="tb-btn tb-sidebar-toggle" ...>`，`28×26px; border-radius:var(--r-6); display:flex; align-items:center; justify-content:center; align-self:center; cursor:pointer; color:var(--icon-titlebar)`；在顶栏（高 38px）内垂直绝对居中，中心线严格在 y=19px，与相邻 TabBar 标签胶囊项（高 26px，中心线 y=19px）严格共线平齐对齐，展开与折叠态切换平滑不跳变（2026-09-23 裁定，Issue #270）；hover `background:var(--hover-4); color:var(--icon-strong)`；`title="折叠/展开侧栏"`；图标 `<SidebarIcon size={16}/>` stroke 1.8 |
 | 品牌名 | **不渲染**（不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
