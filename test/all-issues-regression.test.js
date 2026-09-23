@@ -89,13 +89,13 @@ test('#204 manual Space selection is not overwritten by directory tracking reren
   assert.match(sidebarMount[0], /onSelect=\{setSelected\}/, 'manual Space clicks must own selected state');
 });
 
-test('#196 terminal viewport uses platform-specific outer spacing and fit measures the content box without overflow', async () => {
+test('#196 & #233 terminal viewport uses unified outer spacing (padding: 0 5px) and fit measures content box', async () => {
   const text = await allSource();
   const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
   const paneRule = terminalCss.match(/\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
   const windowsRule = terminalCss.match(/\.app-root\.is-windows\s+\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
-  assert.match(paneRule, /padding\s*:\s*0\s+5px\s*;/, 'macOS/default terminalpane must set horizontal 5px padding and zero vertical padding (padding: 0 5px)');
-  assert.match(windowsRule, /padding\s*:\s*5px\s*;/, 'Windows terminalpane must reserve 5px on all sides');
+  assert.match(paneRule, /padding\s*:\s*0\s+5px\s*;/, 'terminalpane must set horizontal 5px padding and zero vertical padding (padding: 0 5px)');
+  assert.equal(windowsRule, '', 'Windows terminalpane corrupt padding: 5px must be completely reverted (#233)');
   assert.match(text, /className=\{`app-root[\s\S]{0,360}is-windows/, 'app root must expose the native Windows platform class');
   assert.match(paneRule, /box-sizing\s*:\s*border-box\s*;/);
   assert.match(text, /clientWidth/);
@@ -181,16 +181,25 @@ test('MCP issue gate rejects padding, overflow, console errors, and drag jitter'
   );
 });
 
-test('#196 terminal viewport exact platform margin invariant (macOS 0 5px, Windows 5px)', async () => {
+test('#196 & #233 terminal viewport exact platform margin invariant (zero vertical padding, 5px horizontal)', async () => {
   const text = await allSource();
   const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
   const paneBlock = terminalCss.match(/\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
   const windowsBlock = terminalCss.match(/\.app-root\.is-windows\s+\.terminalpane\s*\{([^}]*)\}/)?.[1] || '';
 
-  // macOS / default terminalpane: top/bottom 0, left/right 5px
+  // Unified terminalpane: top/bottom 0, left/right 5px (vertical 5px reverted to fix box-drawing gaps)
   assert.match(paneBlock, /padding\s*:\s*0\s+5px\s*;/);
-  // Windows terminalpane: 5px on all sides
-  assert.match(windowsBlock, /padding\s*:\s*5px\s*;/);
+  assert.equal(windowsBlock, '', 'corrupt .app-root.is-windows .terminalpane rule must be completely reverted');
+});
+
+test('#233 table border and box-drawing character vertical continuity invariant', async () => {
+  const text = await allSource();
+  const terminalCss = text.match(/\/\* src\/components\/terminal\/terminal\.css \*\/[\s\S]*/)?.[0] || text;
+
+  // Box-drawing vertical continuity: no row-level margins or vertical padding injecting gaps between lines
+  assert.doesNotMatch(terminalCss, /\.xterm-rows\s*\{[^}]*row-gap/);
+  assert.doesNotMatch(terminalCss, /\.xterm-rows\s*\{[^}]*gap\s*:[^0]/);
+  assert.doesNotMatch(terminalCss, /\.app-root\.is-windows\s+\.terminalpane\s*\{[^}]*padding\s*:\s*5px/);
 });
 
 export { allSource };

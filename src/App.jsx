@@ -601,6 +601,21 @@ export default function App({ seedDevices } = {}) {
     }
   }, [anyDeviceOnline, checkAndHealWsl, wslState]);
 
+  // Issue #234: 客户端显式捕获端口冲突、502、或连接错误，严禁无限挂起在“正在唤醒”中
+  useEffect(() => {
+    if (wslState !== 'starting') return;
+    const localDev = devices.find((d) => isLocalUrl(d.url));
+    if (localDev?.lastError) {
+      const err = String(localDev.lastError);
+      setWslState('error');
+      if (err.includes('502') || err.includes('conflict') || err.includes('冲突')) {
+        setWslError('端口 9900 被占用或健康检查失败 (502)，请检查后台服务');
+      } else {
+        setWslError(err);
+      }
+    }
+  }, [wslState, devices]);
+
   /* ——— level2：选中某个 Space 才订二级状态流（一台设备同时只能订一个 cwd） ——— */
   useEffect(() => {
     if (selected === 'all' || selected === 'fav') {

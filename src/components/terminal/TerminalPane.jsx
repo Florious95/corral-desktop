@@ -128,9 +128,8 @@ export default function TerminalPane({
       flashTimer = setTimeout(() => setHint(''), 2500);
     };
     // 1. 首帧几何前置纯数学投影（彻底消灭 80x24 与 46x44 盲订）：
-    const isWin = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent || '');
     const paddingX = 10;
-    const paddingY = isWin ? 10 : 0;
+    const paddingY = 0;
     const effectiveW = host.clientWidth || (containerWidth ? Math.max(0, containerWidth - paddingX) : 0);
     const effectiveH = host.clientHeight || (containerHeight ? Math.max(0, containerHeight - paddingY) : 0);
 
