@@ -171,6 +171,11 @@ struct ShellChecks {
                "resize burst delivers one settled WK state")
         let delivered = try await javascript("window.states[0].payload.geometryGeneration", in: controller.webView) as? Int
         expect(delivered == controller.geometryGeneration, "coalesced state carries final generation")
+        _ = try await javascript("window.states=[]; true", in: controller.webView)
+        controller.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification))
+        try await Task.sleep(for: .milliseconds(50))
+        expect(try await javascript("window.states.length === 1 && window.states[0].event === 'window.resizeSettled'", in: controller.webView) as? Bool == true,
+               "completed resize reaches WK before the 120ms metadata debounce")
         _ = try await javascript("window.callNative('window.startDragging').then(x => window.dragReply = x); true", in: controller.webView)
         try await Task.sleep(for: .milliseconds(200))
         expect(try await javascript("window.dragReply?.error?.code === 'unsupported'", in: controller.webView) as? Bool == true, "async drag RPC rejected")

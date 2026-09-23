@@ -24,6 +24,8 @@ export function setGeomTraceEnabled(value) {
   ENABLED = Boolean(value);
 }
 
+export function isGeomTraceEnabled() { return ENABLED; }
+
 export function bookkeep(ref, rows, cols) {
   if (ref == null) return;
   book.set(String(ref), { rows, cols });
@@ -43,7 +45,7 @@ export function bookOf(ref) {
 
 export function geomTrace(event, fields = {}) {
   if (!ENABLED) return 0;
-  const rec = { t: Date.now(), event };
+  const rec = { t: Date.now(), mono_ms: globalThis.performance?.now() ?? null, event };
   for (const [k, v] of Object.entries(fields)) {
     if (DROP.test(k)) continue;
     rec[k] = v === undefined ? null : v;

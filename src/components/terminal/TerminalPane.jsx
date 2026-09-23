@@ -215,6 +215,7 @@ export default function TerminalPane({
       gate.noteSent(act.rows, act.cols);
     };
     view = new TerminalView(host, {
+      traceRef: target,
       fontFamily,
       fontSize,
       initialCols: currentMode === PRESENCE_MODE.TAKEOVER ? initialCols : null,
@@ -414,6 +415,14 @@ export default function TerminalPane({
     });
     ro.observe(host);
 
+    const handleLayoutSettled = () => {
+      if (nativeCapabilities.platform !== 'macos' || currentMode !== PRESENCE_MODE.TAKEOVER
+          || host.closest('.is-hidden')) return;
+      view.fit({ immediate: true, sync: true });
+    };
+    const stage = host.closest('.terminal-stage');
+    stage?.addEventListener('terminal:layout-settled', handleLayoutSettled);
+
     const handleReflow = (ev) => {
       const targetUid = ev?.detail?.uid;
       if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
@@ -463,6 +472,7 @@ export default function TerminalPane({
         window.removeEventListener('terminal:theme-change', handleThemeChange);
       }
       ro.disconnect();
+      stage?.removeEventListener('terminal:layout-settled', handleLayoutSettled);
       host.removeEventListener('wheel', onWheel, { capture: true });
       wheel.dispose();
       clearTimeout(g.timer);

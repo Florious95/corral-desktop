@@ -147,6 +147,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         alignTrafficLights()
         geometryChanged()
     }
+    public func windowDidEndLiveResize(_ notification: Notification) {
+        bridge.emitResizeSettled()
+    }
     public func windowDidChangeScreen(_ notification: Notification) {
         alignTrafficLights()
         geometryChanged()
@@ -157,8 +160,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     }
     public func windowWillEnterFullScreen(_ notification: Notification) { fullscreenTarget = true; geometryChanged() }
     public func windowWillExitFullScreen(_ notification: Notification) { fullscreenTarget = false; geometryChanged() }
-    public func windowDidEnterFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged() }
-    public func windowDidExitFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged() }
+    public func windowDidEnterFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged(); bridge.emitResizeSettled() }
+    public func windowDidExitFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged(); bridge.emitResizeSettled() }
     public func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullscreenTarget = nil; geometryChanged() }
     public func windowDidFailToExitFullScreen(_ window: NSWindow) { fullscreenTarget = nil; geometryChanged() }
     public func windowDidMiniaturize(_ notification: Notification) { geometryChanged() }

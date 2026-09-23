@@ -69,6 +69,7 @@ test('geomTrace: formatLine has both operands, never a token field', () => {
     bookkept_rows: 47, bookkept_cols: 157, token: 'SECRET',
   });
   assert.equal(rec.token, undefined);
+  assert.ok(Number.isFinite(rec.mono_ms), 'performance stages share a monotonic clock');
   const line = formatLine(rec);
   assert.match(line, /geom subscribe/);
   assert.match(line, /rows=47/);

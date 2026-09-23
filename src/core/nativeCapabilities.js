@@ -95,6 +95,9 @@ if (typeof window !== 'undefined' && !window.__nativeEventListenerRegistered) {
         }
         window.dispatchEvent(new CustomEvent('agentmirror:window-state-updated', { detail: detail.payload }));
       }
+      if (detail.event === 'window.resizeSettled') {
+        window.dispatchEvent(new CustomEvent('agentmirror:window-resize-settled'));
+      }
     }
   });
 }
