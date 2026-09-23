@@ -1007,3 +1007,7 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 桌面分发的 daemon、nodeprobe、Pi 扩展与两份 corpus 必须符合 daemon 实际内嵌的同一份 accepted manifest；构建门禁拒绝任一哈希或大小漂移。同步更新 WSL bundle revision，使同版本重装也会替换旧能力清单的 daemon，禁止靠兼容多个插件 hash 掩盖资源错配。
 
 Provider 分类由已验真的 nodeprobe 与 canonical corpus 负责。删除旧 Go provider table 的桌面注入补丁和字符串标识断言；它们对应的上游模块已移除，不作为新 daemon 的交付要求。
+
+### Windows 终端选区复制（2026-09-23，Issue #257）
+
+终端有非空选区时，Ctrl+C 与 Ctrl+Shift+C 同步触发 xterm 的系统 copy 事件，复制原始选区文本并阻止 PTY 输入。无选区的 Ctrl+C 保持中断语义；无选区的 Ctrl+Shift+C 不改剪贴板、不向终端输入。复制失败显示提示，选区保留供重试。macOS 快捷键语义保持不变。

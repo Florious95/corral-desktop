@@ -114,12 +114,14 @@ test('TerminalView attachCustomKeyEventHandler accurately routes keys by platfor
   try {
     let forceTextCalled = false;
     let ctrlVCalled = false;
+    let copyErrors = 0;
 
     const container = { isConnected: true, clientWidth: 800, clientHeight: 400 };
     const view = new TerminalView(container, {
       TerminalCtor: FakeTerminalForFocus,
       onForceTextPaste: () => { forceTextCalled = true; },
       onCtrlV: () => { ctrlVCalled = true; },
+      onCopyError: () => { copyErrors += 1; },
     });
 
     const handler = view.term.keyHandler;
@@ -134,30 +136,45 @@ test('TerminalView attachCustomKeyEventHandler accurately routes keys by platfor
     assert.equal(handler(winCtrlShiftV), false, 'Windows Ctrl+Shift+V must return false');
     assert.equal(forceTextCalled, true, 'onForceTextPaste must be called on Windows Ctrl+Shift+V');
 
-    // 3. Windows Ctrl+Shift+C copies selection and returns false
-    view.term.selection = 'selected terminal text';
-    let copiedText = '';
-    const origClipboard = globalThis.navigator?.clipboard;
-    Object.defineProperty(globalThis, 'navigator', {
-      value: {
-        clipboard: {
-          writeText: async (text) => { copiedText = text; },
-        },
+    // Copy stays inside the trusted key event and xterm's existing copy handler.
+    const copied = [];
+    view.term.element.ownerDocument = {
+      execCommand: (command) => {
+        assert.equal(command, 'copy');
+        copied.push(view.term.getSelection());
+        return true;
       },
-      configurable: true,
-      writable: true,
+    };
+    const copyKey = (shiftKey) => ({
+      type: 'keydown', ctrlKey: true, metaKey: false, altKey: false, shiftKey, key: 'c',
+      preventDefault() { this.prevented = true; },
+      stopPropagation() { this.stopped = true; },
     });
-    try {
-      const winCtrlShiftC = { type: 'keydown', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true, key: 'c' };
-      assert.equal(handler(winCtrlShiftC), false, 'Windows Ctrl+Shift+C must return false');
-      assert.equal(copiedText, 'selected terminal text');
-    } finally {
-      if (origClipboard) globalThis.navigator.clipboard = origClipboard;
+    for (const shift of [false, true]) {
+      view.term.selection = '选区 UTF-8\nsecond line';
+      const event = copyKey(shift);
+      assert.equal(handler(event), false, 'selected copy must never reach xterm input');
+      assert.equal(event.prevented, true);
+      assert.equal(event.stopped, true);
     }
+    assert.deepEqual(copied, ['选区 UTF-8\nsecond line', '选区 UTF-8\nsecond line']);
 
-    // 4. Ctrl+C (terminal interrupt) is NOT intercepted, returns true
-    const ctrlC = { type: 'keydown', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, key: 'c' };
-    assert.equal(handler(ctrlC), true, 'Ctrl+C must return true for terminal interrupt');
+    // Without a selection, Ctrl+C retains the terminal interrupt path.
+    view.term.selection = '';
+    const ctrlC = copyKey(false);
+    assert.equal(handler(ctrlC), true);
+    assert.equal(ctrlC.prevented, undefined);
+    assert.equal(handler(copyKey(true)), false, 'empty Ctrl+Shift+C is copy-only');
+    assert.equal(copied.length, 2, 'an empty selection must not overwrite the clipboard');
+
+    // Failed copy is visible and never falls through to terminal interrupt.
+    view.term.selection = 'keep selection for retry';
+    for (const copy of [() => false, () => { throw new Error('copy denied'); }]) {
+      view.term.element.ownerDocument.execCommand = copy;
+      assert.equal(handler(copyKey(false)), false);
+      assert.equal(view.term.selection, 'keep selection for retry');
+    }
+    assert.equal(copyErrors, 2);
 
     // 5. Normal keys return true
     assert.equal(handler({ type: 'keydown', key: 'a' }), true);

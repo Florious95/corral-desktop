@@ -16,6 +16,11 @@ export function isCtrlShiftC(ev) {
     && (ev.key === 'c' || ev.key === 'C');
 }
 
+export function isCtrlC(ev) {
+  return !!ev && ev.type === 'keydown' && ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey
+    && (ev.key === 'c' || ev.key === 'C');
+}
+
 export function isCmdV(ev) {
   return !!ev && ev.type === 'keydown' && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey
     && (ev.key === 'v' || ev.key === 'V');

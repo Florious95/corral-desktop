@@ -241,6 +241,7 @@ export default function TerminalPane({
       onPaste: (ev) => onPasteRef.current?.(ev),
       onCtrlV: () => onCtrlVRef.current?.(),
       onForceTextPaste: () => onForceTextPasteRef.current?.(),
+      onCopyError: () => setHint('复制失败，请重试'),
     });
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
