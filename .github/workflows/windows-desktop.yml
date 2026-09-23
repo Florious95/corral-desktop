@@ -27,6 +27,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  unix-frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   windows-desktop:
     runs-on: windows-latest
     steps:
@@ -50,7 +63,6 @@ jobs:
         run: npm ci
 
       - name: Run frontend tests
-        continue-on-error: true
         run: npm test
 
       - name: Check Tauri backend

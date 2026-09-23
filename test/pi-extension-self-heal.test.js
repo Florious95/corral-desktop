@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
-import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const extensionPath = fileURLToPath(new URL('../src-tauri/resources/nodeprobe-pi-activity.js', import.meta.url));
+const extensionPath = new URL('../src-tauri/resources/nodeprobe-pi-activity.js', import.meta.url).href;
 
-test('Pi activity extension recreates a missing socket without losing working state', () => {
-  const dir = `/Volumes/nvme/tmp/agentmirror-pi-heal-${process.pid}`;
+test('Pi activity extension recreates a missing socket without losing working state', {
+  skip: process.platform === 'win32' && 'Pi runs in WSL; filesystem sockets require a Unix host',
+}, () => {
+  // A short relative path also stays within the Unix socket pathname limit.
+  const dir = `.pi-heal-${process.pid}`;
   rmSync(dir, { recursive: true, force: true });
   const script = String.raw`
     import assert from 'node:assert/strict';
