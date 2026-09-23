@@ -4,7 +4,7 @@
  */
 
 export const DEFAULT_FONT_FAMILY =
-  'Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, monospace';
+  'Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, "AgentMirror Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "Apple Symbols", "Segoe UI Symbol", monospace';
 export const DEFAULT_FONT_SIZE = 13;
 export const DEFAULT_DIRECTORY_TRACKING = false;
 export const DEFAULT_THEME_MODE = 'system';

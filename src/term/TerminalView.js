@@ -55,9 +55,9 @@ function withImplicitCr(bytes) {
   return normalized;
 }
 
-// Keep the chosen text font; use the installed Nerd Font for terminal icons.
-const terminalFontFamily = (family) => `${family}, ${nativeCapabilities.platform === 'windows'
-  ? '"Segoe UI Symbol", "Segoe UI Emoji"' : '"Apple Symbols", "Apple Color Emoji"'}, "Symbols Nerd Font Mono", "JetBrainsMono Nerd Font Mono"`;
+// Keep the chosen text font; append symbol & Nerd Fonts for terminal icons & glyphs (Issue #277).
+const terminalFontFamily = (family) => `${family}, "AgentMirror Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono Nerd Font", "JetBrainsMono NF", ${nativeCapabilities.platform === 'windows'
+  ? '"Segoe UI Symbol", "Segoe UI Emoji", "Apple Symbols"' : '"Apple Symbols", "Apple Color Emoji", "Segoe UI Symbol"'}`;
 
 export class TerminalView {
   /**

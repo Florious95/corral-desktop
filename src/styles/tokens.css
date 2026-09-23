@@ -1,6 +1,15 @@
 /* AgentMirror 设计 token —— 唯一事实来源 docs/UI-SPEC.md §1
    组件里一律引用变量名，禁止裸 hex。 */
 
+/* Issue #277: 离线内联嵌入符号字体，彻底消除 U+1F5AB 🖫 与核心终端杂项符号在 macOS/Windows 上的中空豆腐块（tofu） */
+@font-face {
+  font-family: 'AgentMirror Symbols';
+  src: url("data:font/truetype;charset=utf-8;base64,AAEAAAAKAIAAAwAgT1MvMkTfR+cAAAEoAAAAYGNtYXAAHuwJAAABkAAAAFBnbHlmeTs6+gAAAegAAABiaGVhZDCdiBgAAACsAAAANmhoZWEHWgPrAAAA5AAAACRobXR4BwgA3AAAAYgAAAAIbG9jYQAxAA0AAAHgAAAABm1heHAABwATAAABCAAAACBuYW1lnRG/TgAAAkwAAACEcG9zdKSwe7sAAALQAAAALwABAAAAAQAAJzItPl8PPPUAAwPoAAAAAObZofMAAAAA5tmh8wBkAAADcANSAAAAAwACAAAAAAAAAAEAAAOE/5wAAAPoAGQAZANwAAEAAAAAAAAAAAAAAAAAAAACAAEAAAACABEABAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwOEAZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAPz8/PwAA/////wOE/5wAAAOEAGQAAAAAAAAAAAAAAAAAAAAgAAADIABkA+gAeAAAAAMAAAADAAAAHAADAAEAAAAcAAMACgAAADQABAAYAAAAAgACAAAAAP//AAD//wABAAAADAAAAAAAHAAAAAAAAAABAAH1qwAB9asAAAABAAAADQAxAAAAAQBkAAACvAMgAAMAADMRIRFkAlgDIPzgAAAEAHgAMgNwA1IABAAIAAwAEAAANxEhFxEBESERBTMVIwMRIRF4AmKW/ZQBfP7oZGR4AggyAyCW/XYDIP62AUpGtP4MAUD+wAAAAAAABAA2AAEAAAAAAAEAEwAAAAEAAAAAAAIABwATAAMAAQQJAAEAJgAaAAMAAQQJAAIADgBAQWdlbnRNaXJyb3IgU3ltYm9sc1JlZ3VsYXIAQQBnAGUAbgB0AE0AaQByAHIAbwByACAAUwB5AG0AYgBvAGwAcwBSAGUAZwB1AGwAYQByAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAQIIdW5pMUY1QUIA") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  unicode-range: U+1F5AB;
+}
+
 :root {
   /* ——— 1.1 中性色阶（raw ramp，仅供语义 token 引用） ——— */
   --ink-900: #201e1d;
@@ -124,7 +133,7 @@
 
   /* ——— 1.7 字体与字号 ——— */
   --font-ui: -apple-system, 'SF Pro Text', 'PingFang SC', 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, 'Cascadia Code', 'JetBrains Mono', 'AgentMirror Symbols', 'Symbols Nerd Font Mono', 'Symbols Nerd Font', 'JetBrainsMono Nerd Font Mono', 'JetBrainsMono NFM', 'Apple Symbols', 'Segoe UI Symbol', 'Apple Color Emoji', 'Segoe UI Emoji', monospace;
 
   --fs-10: 10px;
   --fs-105: 10.5px;
