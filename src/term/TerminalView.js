@@ -229,6 +229,13 @@ export class TerminalView {
     }
     // 单一 textarea 唯一 paste 接缝（裁决 §5.2）
     const textarea = this.term.textarea;
+    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' && textarea) {
+      this._testFocus = () => {
+        window.__AGENTMIRROR_TEST_HOOKS__ ??= {};
+        window.__AGENTMIRROR_TEST_HOOKS__.activeTerminal = this.term;
+      };
+      textarea.addEventListener('focus', this._testFocus);
+    }
     if (textarea?.addEventListener) {
       this._pasteListener = (ev) => {
         ev.preventDefault();
@@ -636,6 +643,13 @@ export class TerminalView {
 
   dispose() {
     this._disposed = true;
+    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' && this._testFocus) {
+      this.term.textarea?.removeEventListener('focus', this._testFocus);
+      if (window.__AGENTMIRROR_TEST_HOOKS__?.activeTerminal === this.term) {
+        delete window.__AGENTMIRROR_TEST_HOOKS__.activeTerminal;
+      }
+      this._testFocus = null;
+    }
     this._cancelWriteSchedule();
     this._writeQueue.length = 0;
     this._writeHead = 0;
