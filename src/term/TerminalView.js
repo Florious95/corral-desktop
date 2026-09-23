@@ -93,6 +93,8 @@ export class TerminalView {
 
     this.fontSize = fontSize;
     this.fontFamily = fontFamily;
+    // Windows uses the DOM renderer: extra leading separates box-drawing rows.
+    this.lineHeight = nativeCapabilities.platform === 'windows' ? 1 : 1.25;
     this.hideCursor = hideCursor === true;
     this._customTheme = Boolean(opts.theme);
     const initialCols = opts.initialCols || (opts.cols ?? null);
@@ -108,7 +110,7 @@ export class TerminalView {
       scrollback,
       fontSize,
       fontFamily,
-      lineHeight: 1.25,
+      lineHeight: this.lineHeight,
       customGlyphs: true,
       cursorBlink: !this.hideCursor,
       cursorStyle: 'block',
@@ -678,7 +680,7 @@ export class TerminalView {
     const metrics = getFontMetrics({
       fontFamily: this.term.options?.fontFamily || this.fontFamily,
       fontSize: this.fontSize,
-      lineHeight: 1.25,
+      lineHeight: this.lineHeight,
     });
     // 兼容 FakeTerminal 测试替身注入的 screen 元素模拟
     const screen = this.term.element && this.term.element.querySelector?.('.xterm-screen');

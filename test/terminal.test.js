@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { TerminalView } from '../src/term/TerminalView.js';
+import { setNativeEngineForTests, resetNativeEngineForTests } from '../src/core/nativeCapabilities.js';
 import { parseAnsi } from '../src/components/terminal/ansi.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -77,6 +78,23 @@ function makeView(overrides = {}) {
   });
   return { view, container, calls, wheel: (deltaY) => wheelHandlers.forEach((fn) => fn({ deltaY })) };
 }
+
+test('Windows DOM rows have no extra leading and fallback grid uses the same cell height', () => {
+  for (const [platform, lineHeight, rows] of [['windows', 1, 20], ['macos', 1.25, 16]]) {
+    setNativeEngineForTests({ platform });
+    const { view, container } = makeView();
+    try {
+      view.term.element = null;
+      container.clientHeight = 260;
+      view.fit();
+      assert.equal(view.term.opts.lineHeight, lineHeight);
+      assert.equal(view.rows, rows, `${platform} fallback grid agrees with renderer leading`);
+    } finally {
+      view.dispose();
+      resetNativeEngineForTests();
+    }
+  }
+});
 
 test('resize 上报合并成一次：连续 fit 只回调最终几何', async () => {
   const { view, container, calls } = makeView();
