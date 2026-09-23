@@ -161,6 +161,16 @@ struct ShellChecks {
         try await Task.sleep(for: .milliseconds(300))
         let bootOK = try await javascript("window.boot?.ok === true && window.boot.result.runtime === 'swift'", in: controller.webView) as? Bool
         expect(bootOK == true, "real WK reply bootstrap")
+        _ = try await javascript("window.states=[]; window.addEventListener('agentmirror:native', e => window.states.push(e.detail)); true", in: controller.webView)
+        for _ in 0..<30 {
+            controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
+            try await Task.sleep(for: .milliseconds(4))
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        expect(try await javascript("window.states.length === 1", in: controller.webView) as? Bool == true,
+               "resize burst delivers one settled WK state")
+        let delivered = try await javascript("window.states[0].payload.geometryGeneration", in: controller.webView) as? Int
+        expect(delivered == controller.geometryGeneration, "coalesced state carries final generation")
         _ = try await javascript("window.callNative('window.startDragging').then(x => window.dragReply = x); true", in: controller.webView)
         try await Task.sleep(for: .milliseconds(200))
         expect(try await javascript("window.dragReply?.error?.code === 'unsupported'", in: controller.webView) as? Bool == true, "async drag RPC rejected")
@@ -168,6 +178,7 @@ struct ShellChecks {
         try await Task.sleep(for: .milliseconds(200))
         expect(LocalContent.isEntry(controller.webView.url), "external navigation denied")
         let oldEpoch = try await javascript("window.boot.result.epoch", in: controller.webView) as? String
+        controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
         finished = false
         controller.reload()
         for _ in 0..<100 where !finished { try await Task.sleep(for: .milliseconds(100)) }
