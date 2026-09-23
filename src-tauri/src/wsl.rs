@@ -886,17 +886,15 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
         // Reuse an existing process while it is coming up. Never stop a
         // healthy/starting daemon merely because the UI was reopened.
         if !service_process_ready(&ubuntu.name, service) {
-            // Keep the daemon in the foreground inside a detached wsl.exe process.
+            // Keep the daemon in the foreground inside a console-free wsl.exe process.
             // WSL therefore keeps the Linux session alive after this function and
             // the GUI process return.
-            const DETACHED_PROCESS: u32 = 0x0000_0008;
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            // DETACHED_PROCESS would make Windows ignore CREATE_NO_WINDOW.
             let _child = hidden_command("wsl.exe")
                 .args(service_start_args(&ubuntu.name, service, &token))
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
                 .spawn()
                 .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
         }

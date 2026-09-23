@@ -342,7 +342,7 @@ src/
 | 品牌名 | **不渲染**（不要展示产品名）。 |
 | 分裂徽章 | **不渲染**（去界化后不再占用标题条）。 |
 | 拖动区 | 剩余宽度 `<div class="tb-drag" data-tauri-drag-region/>`。支持窗口移动，不铺到交互控件上。 |
-| Windows 窗口控制 | （仅 Windows，2026-09-19 裁定）。左侧 TitleBar 不挂载控制按钮（防止侧栏折叠向左移位）；三联按钮 `<WindowsWindowControls />` 挂载在应用视口最右上角（`.tb-session-header` 最右侧，`position: absolute; right: 0; top: 0; width: 138px; z-index: 50`），`.tb-session-header.is-windows` 严格预留 `padding-right: 138px` 避让空间；三键各宽 46px，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮。 |
+| Windows 窗口控制 | （仅 Windows，2026-09-19 裁定）。左侧 TitleBar 不挂载控制按钮（防止侧栏折叠向左移位）；三联按钮 `<WindowsWindowControls />` 挂载在应用视口最右上角（`.tb-session-header` 最右侧，`position: absolute; right: 0; top: 0; width: 138px; z-index: 50`），`.tb-session-header.is-windows` 严格预留 `padding-right: 138px` 避让空间；三键各宽 46px，严格声明 `data-tauri-drag-region="false"`，关闭按钮 hover 红色高亮。 **2026-09-23（Issue #242）**：Windows 发布 EXE 为 GUI 子系统；WSL 后台进程统一使用 `CREATE_NO_WINDOW`，不混用 `DETACHED_PROCESS`。正常启动不得附带控制台窗口；调试构建可保留诊断控制台。 |
 
 ### 4.1.1 `chrome/TabBar.jsx`（2026-09-16 用户多工作台最新裁定）
 
