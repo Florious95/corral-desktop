@@ -8,7 +8,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import {
   DEFAULT_SETTINGS, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
-  clampFontSize, loadSettings, saveSetting,
+  TERMINAL_FONT_FAMILIES, clampFontSize, loadSettings, saveSetting,
 } from '../src/core/settings.js';
 
 // Render the actual JSX with the production React/Vite toolchain, not a copied component.
@@ -45,6 +45,19 @@ test('settings: six font pills expose a single active primary font, including th
     assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1);
     const expected = family.split(',')[0].replaceAll('"', '');
     assert.ok(html.includes(`aria-pressed="true">${expected}</button>`));
+  }
+});
+
+test('settings: paired presets keep distinct physical fallback stacks', () => {
+  assert.equal(TERMINAL_FONT_FAMILIES.length, 6);
+  assert.equal(new Set(TERMINAL_FONT_FAMILIES).size, 6);
+  for (const [left, right] of [[1, 5], [5, 1], [2, 3], [3, 2]]) {
+    assert.notEqual(TERMINAL_FONT_FAMILIES[left], TERMINAL_FONT_FAMILIES[right]);
+    const leftConcrete = new Set(TERMINAL_FONT_FAMILIES[left].split(',').map((name) => name.trim().toLowerCase()));
+    const rightConcrete = new Set(TERMINAL_FONT_FAMILIES[right].split(',').map((name) => name.trim().toLowerCase()));
+    leftConcrete.delete('monospace');
+    rightConcrete.delete('monospace');
+    assert.equal([...leftConcrete].some((name) => rightConcrete.has(name)), false);
   }
 });
 

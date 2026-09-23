@@ -8,6 +8,18 @@ export const DEFAULT_FONT_FAMILY =
 export const DEFAULT_FONT_SIZE = 13;
 export const DEFAULT_DIRECTORY_TRACKING = false;
 
+// Keep a distinct installed-font fallback for every preset. Generic `monospace`
+// alone collapses several choices to the same renderer on hosts without the
+// optional coding fonts (Issue #259).
+export const TERMINAL_FONT_FAMILIES = Object.freeze([
+  'Cascadia Code, Consolas, monospace',
+  'JetBrains Mono, "Andale Mono", Menlo, "Lucida Console", monospace',
+  'Fira Code, Monaco, "Courier New", monospace',
+  'Menlo, "Segoe UI Mono", monospace',
+  'Consolas, "Andale Mono", monospace',
+  'Courier New, monospace',
+]);
+
 export const DEFAULT_SETTINGS = Object.freeze({
   'terminal.fontFamily': DEFAULT_FONT_FAMILY,
   'terminal.fontSize': DEFAULT_FONT_SIZE,

@@ -607,6 +607,7 @@ export class TerminalView {
     if (typeof fontFamily === 'string' && fontFamily.trim()) {
       const trimmed = fontFamily.trim();
       if (this.term.options.fontFamily !== trimmed) {
+        this.fontFamily = trimmed;
         this.term.options.fontFamily = trimmed;
         changed = true;
       }

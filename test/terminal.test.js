@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { TerminalView } from '../src/term/TerminalView.js';
 import { setNativeEngineForTests, resetNativeEngineForTests } from '../src/core/nativeCapabilities.js';
 import { parseAnsi } from '../src/components/terminal/ansi.js';
+import { TERMINAL_FONT_FAMILIES } from '../src/core/settings.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -21,6 +22,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class FakeTerminal {
   constructor(opts) {
     this.opts = opts;
+    this.options = { fontFamily: opts.fontFamily, fontSize: opts.fontSize };
     this.cols = 80;
     this.rows = 24;
     this.writes = [];
@@ -94,6 +96,26 @@ test('Windows DOM rows have no extra leading and fallback grid uses the same cel
       resetNativeEngineForTests();
     }
   }
+});
+
+test('字体预设 2↔6、3↔4 每次切换都触发终端更新', () => {
+  const { view } = makeView({ fontFamily: TERMINAL_FONT_FAMILIES[0], fontSize: 13 });
+  const fitCalls = [];
+  const fit = view.fit.bind(view);
+  view.fit = (opts) => { fitCalls.push(opts); return fit(opts); };
+  view.open();
+  fitCalls.length = 0;
+
+  for (const [left, right] of [[1, 5], [2, 3]]) {
+    for (const family of [left, right, left]) {
+      view.updateFont({ fontFamily: TERMINAL_FONT_FAMILIES[family] });
+      assert.equal(view.term.options.fontFamily, TERMINAL_FONT_FAMILIES[family]);
+      assert.equal(view.fontFamily, TERMINAL_FONT_FAMILIES[family]);
+      assert.equal(fitCalls.length, 1, `font ${family + 1} should trigger a fit`);
+      fitCalls.length = 0;
+    }
+  }
+  view.dispose();
 });
 
 test('resize 上报合并成一次：连续 fit 只回调最终几何', async () => {

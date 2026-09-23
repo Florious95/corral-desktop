@@ -3,19 +3,13 @@ import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
   DEFAULT_DIRECTORY_TRACKING,
+  TERMINAL_FONT_FAMILIES,
   clampFontSize,
   saveSetting,
 } from '../../core/settings.js';
 import './chrome.css';
 
-const COMMON_FONTS = [
-  'Cascadia Code, Consolas, monospace',
-  'JetBrains Mono, Menlo, monospace',
-  'Fira Code, Monaco, monospace',
-  'Menlo, Monaco, monospace',
-  'Consolas, "Courier New", monospace',
-  'monospace',
-];
+const COMMON_FONTS = TERMINAL_FONT_FAMILIES;
 const primaryFont = (font) => font.split(',')[0].trim().replace(/["']/g, '').toLowerCase();
 
 /** 设置即时生效；数字输入保留未完成的中间态，失焦 / Enter 才夹逼。 */
