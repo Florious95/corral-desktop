@@ -997,3 +997,7 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 ### Windows Local 监听（2026-09-23，Issue #240）
 
 客户端管理的 WSL daemon 显式绑定 `127.0.0.1:9900`；启动、readiness 与客户端 Local 连接统一使用 IPv4 loopback。WSL localhost forwarding 的 Windows IPv4 可达性仍须在实际安装包上验收。
+
+### Windows WSL 启动响应（2026-09-23，Issue #243）
+
+检查、安装、启动和读取 token 的原生 IPC 均异步分派到阻塞线程池，不占用窗口消息循环。每次 WSL 查询最多等待 30 秒并仅终止本次 launcher；启动 readiness 最多 10 秒，launcher 提前退出立即报错。仍需真实 HTTP readiness 和 token 就绪才进入连接流程，等待期间窗口保持响应。

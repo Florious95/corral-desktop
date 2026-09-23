@@ -29,6 +29,16 @@ const PROVIDERS_TSV: &str = include_str!("../resources/nodeprobe-providers.tsv")
 const TITLES_TSV: &str = include_str!("../resources/nodeprobe-titles.tsv");
 const PI_PROBE_SOURCE: &str = include_str!("../resources/nodeprobe-pi-activity.js");
 
+// Every WSL operation may start a cold distribution. Keep all process and
+// readiness waits off both the native event loop and the async executor.
+async fn on_wsl_worker<T: Send + 'static>(
+    task: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|_| "wsl_task_failed".to_string())?
+}
+
 /// Snapshot of the WSL 2 environment used by the local AgentMirror daemon.
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
 pub struct WslEnvironmentStatus {
@@ -149,10 +159,63 @@ fn hidden_command(program: &str) -> std::process::Command {
 
 #[cfg(windows)]
 fn run_wsl(args: &[&str]) -> Result<std::process::Output, String> {
-    hidden_command("wsl.exe")
-        .args(args)
-        .output()
-        .map_err(|error| format!("wsl_unavailable: {error}"))
+    wsl_output(
+        hidden_command("wsl.exe").args(args),
+        std::time::Duration::from_secs(30),
+    )
+}
+
+#[cfg(any(windows, test))]
+fn wsl_output(
+    command: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + timeout;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        // Callers use typed errors, never raw WSL stderr (which can contain credentials).
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| "wsl_unavailable".to_string())?;
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = send.send(result);
+    });
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            result => {
+                // Terminate and reap only the Windows launcher created by this call.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(if result.is_err() {
+                    "wsl_wait_failed"
+                } else {
+                    "wsl_timeout"
+                }.to_string());
+            }
+        }
+    };
+    let stdout = receive
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| "wsl_timeout".to_string())?
+        .map_err(|_| "wsl_output_failed".to_string())?;
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    })
 }
 
 #[cfg(windows)]
@@ -482,7 +545,11 @@ fn check_windows_environment() -> Result<WslEnvironmentStatus, String> {
 
 /// Install the bundled Linux daemon and its provider table into the Ubuntu home.
 #[tauri::command]
-pub fn install_wsl_service(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn install_wsl_service(app: tauri::AppHandle) -> Result<(), String> {
+    on_wsl_worker(move || install_wsl_service_blocking(app)).await
+}
+
+fn install_wsl_service_blocking(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         return install_wsl_service_windows(&app);
@@ -497,7 +564,11 @@ pub fn install_wsl_service(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Return the local WSL 2/Ubuntu/tmux/agentmirrord state.
 #[tauri::command]
-pub fn check_wsl_environment() -> Result<WslEnvironmentStatus, String> {
+pub async fn check_wsl_environment() -> Result<WslEnvironmentStatus, String> {
+    on_wsl_worker(check_wsl_environment_blocking).await
+}
+
+fn check_wsl_environment_blocking() -> Result<WslEnvironmentStatus, String> {
     #[cfg(windows)]
     {
         return check_windows_environment();
@@ -557,7 +628,11 @@ fn read_token_from_wsl_script(distribution: &str, script: &str) -> Option<String
 }
 
 #[tauri::command]
-pub fn read_wsl_service_token() -> Result<String, String> {
+pub async fn read_wsl_service_token() -> Result<String, String> {
+    on_wsl_worker(read_wsl_service_token_blocking).await
+}
+
+fn read_wsl_service_token_blocking() -> Result<String, String> {
     #[cfg(windows)]
     {
         let list_output = match run_wsl(&["-l", "-v"]) {
@@ -607,8 +682,8 @@ pub fn read_wsl_service_token() -> Result<String, String> {
 /// Keep the original command registered too because older desktop bundles
 /// invoke `read_wsl_service_token`.
 #[tauri::command]
-pub fn get_wsl_pairing_token() -> Result<String, String> {
-    read_wsl_service_token()
+pub async fn get_wsl_pairing_token() -> Result<String, String> {
+    read_wsl_service_token().await
 }
 
 #[cfg(any(windows, test))]
@@ -806,13 +881,20 @@ fn service_http_ready() -> bool {
     service_http_status().is_some_and(|status| status < 500)
 }
 
-#[cfg(windows)]
-fn wait_for_service_ready() -> Result<(), String> {
+#[cfg(any(windows, test))]
+fn wait_for_service_ready(
+    mut status: impl FnMut() -> Option<u16>,
+    mut launcher_running: impl FnMut() -> Result<bool, String>,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
     // Probe the real public endpoint immediately, then every 25ms. A process
     // being present is not readiness; the first successful HTTP response is.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
-        match service_http_status() {
+        if !launcher_running()? {
+            return Err("service_start_failed: launcher exited before readiness".to_string());
+        }
+        match status() {
             Some(502) => return Err("service_port_occupied_502".to_string()),
             Some(status) if status < 500 => return Ok(()),
             _ => std::thread::sleep(std::time::Duration::from_millis(25)),
@@ -832,14 +914,14 @@ fn service_token_ready(distribution: &str, expected: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), String> {
-    for _ in 0..40 {
-        if service_token_ready(distribution, expected) {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(25));
+fn verify_service_token(distribution: &str, expected: &str) -> Result<(), String> {
+    // ensure_wsl_service_token completed the atomic write before the launch.
+    // Repeating a slow WSL invocation 40 times cannot make that write more durable.
+    if service_token_ready(distribution, expected) {
+        Ok(())
+    } else {
+        Err("service_token_not_ready".to_string())
     }
-    Err("service_token_not_ready".to_string())
 }
 
 /// Start a whitelisted session service in the Ubuntu WSL distribution.
@@ -851,7 +933,11 @@ fn wait_for_service_token(distribution: &str, expected: &str) -> Result<(), Stri
 /// The login shell loads the user's PATH so binaries installed under
 /// `~/.local/bin` are resolvable; service and token stay positional arguments.
 #[tauri::command]
-pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> Result<(), String> {
+pub async fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> Result<(), String> {
+    on_wsl_worker(move || start_wsl_service_blocking(app, service_cmd)).await
+}
+
+fn start_wsl_service_blocking(app: tauri::AppHandle, service_cmd: Option<String>) -> Result<(), String> {
     #[cfg(windows)]
     {
         let _ = app;
@@ -885,24 +971,35 @@ pub fn start_wsl_service(app: tauri::AppHandle, service_cmd: Option<String>) -> 
 
         // Reuse an existing process while it is coming up. Never stop a
         // healthy/starting daemon merely because the UI was reopened.
+        let mut launcher = None;
         if !service_process_ready(&ubuntu.name, service) {
             // Keep the daemon in the foreground inside a console-free wsl.exe process.
             // WSL therefore keeps the Linux session alive after this function and
             // the GUI process return.
             // DETACHED_PROCESS would make Windows ignore CREATE_NO_WINDOW.
-            let _child = hidden_command("wsl.exe")
+            let child = hidden_command("wsl.exe")
                 .args(service_start_args(&ubuntu.name, service, &token))
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .map_err(|error| format!("wsl_service_start_failed: {error}"))?;
+            launcher = Some(child);
         }
 
-        wait_for_service_ready()?;
+        wait_for_service_ready(
+            service_http_status,
+            || match launcher.as_mut() {
+                Some(child) => child.try_wait()
+                    .map(|exit| exit.is_none())
+                    .map_err(|_| "wsl_service_wait_failed".to_string()),
+                None => Ok(true), // An existing daemon is not owned by this launch.
+            },
+            std::time::Duration::from_secs(10),
+        )?;
         // Ensure the token file is visible before returning so the frontend
         // can authenticate without a race.
-        wait_for_service_token(&ubuntu.name, &token)
+        verify_service_token(&ubuntu.name, &token)
     }
 
     #[cfg(not(windows))]
@@ -922,6 +1019,65 @@ mod tests {
         NODEPROBE_SHA256, PI_PROBE_SOURCE, RUNNING_SERVICE_TOKEN_SCRIPT, SERVICE_START_SCRIPT,
         SYSTEM_ENV_TOKEN_SCRIPT, TITLES_TSV, TOKEN_READ_SCRIPT,
     };
+
+    #[test]
+    fn blocking_wsl_work_yields_to_the_caller_until_completion() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let (release, wait) = std::sync::mpsc::channel();
+        let mut future = Box::pin(super::on_wsl_worker(move || {
+            wait.recv_timeout(std::time::Duration::from_secs(2))
+                .map_err(|_| "test_release_timeout".to_string())?;
+            Ok(42)
+        }));
+        let mut context = Context::from_waker(Waker::noop());
+        // A blocking implementation would never return from this poll.
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+        release.send(()).unwrap();
+        assert_eq!(tauri::async_runtime::block_on(future), Ok(42));
+    }
+
+    #[test]
+    fn readiness_fails_immediately_when_launcher_exits() {
+        let result = super::wait_for_service_ready(
+            || panic!("do not probe a launcher that already exited"),
+            || Ok(false),
+            std::time::Duration::from_secs(10),
+        );
+        assert_eq!(result, Err("service_start_failed: launcher exited before readiness".into()));
+    }
+
+    #[test]
+    fn readiness_requires_http_and_preserves_failure_and_deadline() {
+        let timeout = std::time::Duration::from_secs(1);
+        let mut replies = [None, Some(200)].into_iter();
+        assert_eq!(super::wait_for_service_ready(|| replies.next().flatten(), || Ok(true), timeout), Ok(()));
+        assert_eq!(super::wait_for_service_ready(|| Some(502), || Ok(true), timeout), Err("service_port_occupied_502".into()));
+        assert_eq!(super::wait_for_service_ready(|| None, || Ok(true), std::time::Duration::ZERO), Err("service_start_failed".into()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn wsl_output_drains_pipes_and_preserves_exit_status() {
+        let output = super::wsl_output(
+            hidden_command("sh").args(["-c", "head -c 131072 /dev/zero; exit 7"]),
+            std::time::Duration::from_secs(2),
+        ).unwrap();
+        assert_eq!(output.stdout.len(), 131072);
+        assert_eq!(output.status.code(), Some(7));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn wsl_output_times_out_a_stuck_launcher() {
+        let started = std::time::Instant::now();
+        let result = super::wsl_output(
+            hidden_command("sh").args(["-c", "exec sleep 5"]),
+            std::time::Duration::from_millis(50),
+        );
+        assert_eq!(result.unwrap_err(), "wsl_timeout");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
 
     #[test]
     fn windows_launcher_has_no_window_flag() {
