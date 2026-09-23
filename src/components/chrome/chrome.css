@@ -1269,6 +1269,42 @@
 .settings-switch[aria-checked='true'] .settings-switch-knob {
   transform: translateX(15px);
 }
+/* —— Segmented Pill (Theme mode, Issue #255) —— */
+.settings-theme-segmented {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--surface-sunken);
+  border-radius: var(--r-8);
+  border: 1px solid var(--border-hairline);
+  box-sizing: border-box;
+}
+.settings-segmented-btn {
+  flex: 1;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--r-6);
+  font-size: var(--fs-125);
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: transparent;
+  transition: all var(--d-fast);
+}
+.settings-segmented-btn:hover {
+  color: var(--text);
+  background: var(--hover-2);
+}
+.settings-segmented-btn.is-active,
+.settings-segmented-btn[aria-pressed='true'] {
+  background: var(--field-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-knob);
+  font-weight: 600;
+}
 .settings-footer {
   border-top: 1px solid var(--border);
   padding-top: 14px;

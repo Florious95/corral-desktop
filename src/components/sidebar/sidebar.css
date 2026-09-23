@@ -22,24 +22,6 @@
   min-height: 0;
 }
 
-/* —— Search —— */
-.sidebar-search {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 10px 2px;
-  padding: 6px 10px;
-  border-radius: var(--r-7);
-  font-size: var(--fs-135);
-  cursor: default;
-}
-.sidebar-search-label {
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* —— 分组标题 —— */
 .sidebar-group-head {
   display: flex;
@@ -48,7 +30,7 @@
   min-width: 0;
 }
 .sidebar-group-head-spaces {
-  padding: 12px 20px 4px;
+  padding: 14px 20px 4px;
 }
 .sidebar-group-head-agents {
   padding: 14px 20px 4px;
@@ -82,17 +64,33 @@
   white-space: nowrap;
 }
 
-/* —— 底部 Devices 条 —— */
-.sidebar-devices {
+/* —— 底部 Devices 条与控制栏 (Issue #252) —— */
+.sidebar-footer {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 11px 16px;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 8px 4px 12px;
+  height: 44px;
+  box-sizing: border-box;
   border-top: 1px solid var(--border-strong);
+  background: transparent;
+}
+.sidebar-devices {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: var(--r-6);
   font-size: var(--fs-13);
   font-weight: 600;
+  color: var(--text);
   cursor: pointer;
+  background: transparent;
   transition: background var(--d-hover);
 }
 .sidebar-devices:hover {
@@ -116,10 +114,25 @@
   background: var(--green);
   border: none;
 }
-.sidebar-devices-gear {
-  display: inline-flex;
+.sidebar-settings-btn {
   flex: none;
-  margin-left: auto;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-6);
+  cursor: pointer;
+  color: var(--icon);
+  transition: background var(--d-hover), color var(--d-hover), transform var(--d-fast);
+}
+.sidebar-settings-btn:hover {
+  background: var(--hover-2);
+  color: var(--icon-strong);
+  transform: rotate(18deg);
+}
+.sidebar-settings-btn:active {
+  transform: rotate(36deg);
 }
 
 /* —— Spaces 列表 —— */
@@ -273,9 +286,8 @@
   border: 2px solid transparent;
   background-clip: padding-box;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 8px;
+  align-items: center;
+  padding: 0 12px;
   border-radius: var(--r-9);
   cursor: pointer;
   background-color: transparent;
@@ -307,18 +319,21 @@
   background-color: var(--hover-2);
 }
 .agents-row-main {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
-  font-size: var(--fs-13);
-  font-weight: 600;
+  font-size: var(--fs-135);
+  font-weight: 500;
 }
 .agents-row-title {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
 }
 .agents-row-marks {
   margin-left: auto;
@@ -328,20 +343,7 @@
   flex: none;
 }
 .agents-row-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 3px;
-  font-size: var(--fs-115);
-  line-height: 15px;
   color: var(--ink-700);
-}
-.agents-row-metatext {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .agents-dot {
   flex: none;

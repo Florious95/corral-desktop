@@ -1,7 +1,6 @@
 // Agents 列表（UI-SPEC §5.3）。行高 54px、绝对定位 + top 过渡，收藏置顶靠 top 重排。
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import ProviderIcon from './ProviderIcon.jsx';
-import { PROVIDER_LABEL } from '../../core/providers.js';
 import { StarIcon, CheckIcon } from '../../lib/icons.jsx';
 import { AGENT_ROW_HEIGHT as ROW, sortAgents, visibleWindow } from './agentWindow.js';
 
@@ -17,13 +16,6 @@ const STATE_TITLE = {
 
 /** 状态收敛到闭集，未知值一律当 unknown 渲染成灰空心点 */
 const stateOf = (s) => (STATE_TITLE[s] ? s : 'unknown');
-
-/** meta 文本：`${显示名} · ${space}`；显示名与标题重复时只留 space */
-function metaText(ag) {
-  const label = PROVIDER_LABEL[ag.provider];
-  if (label === ag.title) return ag.spaceName;
-  return `${label ?? ag.title} · ${ag.spaceName}`;
-}
 
 const sameAgentRow = (prev, next) => {
   const a = prev.agent;
@@ -65,6 +57,10 @@ const AgentRow = memo(function AgentRow({
       onPointerDown={(e) => onPointerDown && onPointerDown(e, ag)}
     >
       <div className="agents-row-main">
+        <span
+          className={`agents-dot is-${stateOf(ag.state)}`}
+          title={STATE_TITLE[stateOf(ag.state)]}
+        />
         <ProviderIcon
           provider={ag.provider}
           size={18}
@@ -77,13 +73,6 @@ const AgentRow = memo(function AgentRow({
           ) : null}
           {ag.fav ? <StarIcon size={12} fill="var(--amber)" /> : null}
         </span>
-      </div>
-      <div className="agents-row-meta">
-        <span
-          className={`agents-dot is-${stateOf(ag.state)}`}
-          title={STATE_TITLE[stateOf(ag.state)]}
-        />
-        <span className="agents-row-metatext">{metaText(ag)}</span>
         {multiDevice ? (
           <span className={`agents-badge${ag.deviceLocal ? ' is-local' : ''}`}>
             {ag.deviceName}

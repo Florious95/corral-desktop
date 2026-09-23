@@ -2,7 +2,7 @@
 import SpacesList from './SpacesList.jsx';
 import AgentsList from './AgentsList.jsx';
 import { isSameSpaceKey } from '../../lib/wslPath.js';
-import { SearchIcon, ChevronDown, LayersIcon, GearIcon } from '../../lib/icons.jsx';
+import { ChevronDown, LayersIcon, GearIcon } from '../../lib/icons.jsx';
 import './sidebar.css';
 
 function GroupHeader({ open, onToggle, working = false, children }) {
@@ -85,11 +85,6 @@ export default function Sidebar({
   return (
     <aside className="sidebar" style={{ width: collapsed ? 0 : 280 }}>
       <div className="sidebar-inner">
-        <div className="sidebar-search">
-          <SearchIcon size={15} stroke="var(--icon-titlebar)" />
-          <span className="sidebar-search-label">Search</span>
-        </div>
-
         <div className="sidebar-group-head sidebar-group-head-spaces">
           <GroupHeader open={spacesOpen} onToggle={onToggleSpaces} working={spacesHasWorking}>
             Spaces
@@ -130,21 +125,26 @@ export default function Sidebar({
           <div className="agents-host" />
         )}
 
-        <div className="sidebar-devices" onClick={onToggleDevices}>
-          <LayersIcon size={15} stroke="var(--icon-strong)" />
-          <span className="sidebar-devices-label">{deviceLabel}</span>
-          <span className={`sidebar-devices-dot${anyDeviceOnline ? ' is-online' : ''}`} />
+        <div className="sidebar-footer">
           <button
             type="button"
-            className="chr-btn-reset sidebar-devices-gear"
+            className="chr-btn-reset sidebar-devices"
+            title={deviceLabel}
+            aria-label={`设备列表: ${deviceLabel}`}
+            onClick={onToggleDevices}
+          >
+            <LayersIcon size={15} stroke="var(--icon-strong)" />
+            <span className="sidebar-devices-label">{deviceLabel}</span>
+            <span className={`sidebar-devices-dot${anyDeviceOnline ? ' is-online' : ''}`} />
+          </button>
+          <button
+            type="button"
+            className="chr-btn-reset sidebar-settings-btn sidebar-devices-gear"
             title="设置"
             aria-label="设置"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenSettings?.();
-            }}
+            onClick={onOpenSettings}
           >
-            <GearIcon size={15} stroke="var(--icon)" />
+            <GearIcon size={16} stroke="var(--icon)" />
           </button>
         </div>
       </div>
