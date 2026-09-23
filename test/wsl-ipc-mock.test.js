@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
+const unixShellOnly = { skip: process.platform === 'win32' && 'WSL shell and POSIX modes require a Unix host' };
 
 async function readSources() {
   const rust = await readFile(new URL('src-tauri/src/wsl.rs', root), 'utf8');
@@ -24,7 +25,7 @@ function runScript(script, env) {
 }
 
 async function fakeHomes() {
-  const base = await mkdtemp(join(tmpdir(), 'agentmirror-wsl-ipc-'));
+  const base = await mkdtemp(join(fileURLToPath(root), '.wsl-ipc-'));
   const defaultHome = join(base, 'default');
   const ownerHome = join(base, 'home', 'alaudalancy');
   await mkdir(join(defaultHome, '.config', 'agentmirror'), { recursive: true });
@@ -44,7 +45,7 @@ test('Issue 217 Tier 1: WSL token bridge uses root and all user-home fallbacks',
   assert.match(main, /wsl::get_wsl_pairing_token/);
 });
 
-test('Issue 217 Tier 1: token file under configured HOME is readable with 0600 mode', async () => {
+test('Issue 217 Tier 1: token file under configured HOME is readable with 0600 mode', unixShellOnly, async () => {
   const { base, defaultHome } = await fakeHomes();
   const { script } = await readSources();
   try {
@@ -59,7 +60,7 @@ test('Issue 217 Tier 1: token file under configured HOME is readable with 0600 m
   }
 });
 
-test('Issue 217 Tier 1: wrong default HOME falls through to another WSL user home', async () => {
+test('Issue 217 Tier 1: wrong default HOME falls through to another WSL user home', unixShellOnly, async () => {
   const { base, defaultHome, ownerHome } = await fakeHomes();
   const { script } = await readSources();
   try {

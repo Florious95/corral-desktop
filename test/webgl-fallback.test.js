@@ -1,8 +1,12 @@
-import { test } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { attachWebglRenderer } from '../src/term/webglRenderer.js';
 import { TerminalView } from '../src/term/TerminalView.js';
 import { setNativeEngineForTests, resetNativeEngineForTests } from '../src/core/nativeCapabilities.js';
+
+// WebGL is a non-Windows capability. Host OS must not select the test scenario.
+beforeEach(() => setNativeEngineForTests({ platform: 'macos' }));
+afterEach(() => resetNativeEngineForTests());
 
 test('attachWebglRenderer: returns null immediately on Windows platform to prevent WebGL GPU memory bloat', async () => {
   setNativeEngineForTests({ platform: 'windows' });

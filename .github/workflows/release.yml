@@ -61,7 +61,6 @@ jobs:
         run: npm ci
 
       - name: Run frontend tests
-        continue-on-error: true
         run: npm test
 
       - name: Check Tauri backend
@@ -158,7 +157,6 @@ jobs:
         run: npm ci
 
       - name: Run frontend tests
-        continue-on-error: true
         run: npm test
 
       - name: Select pinned Xcode toolchain
