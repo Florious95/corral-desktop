@@ -12,6 +12,9 @@ src-tauri/gen/schemas/
 .worktrees/
 .grok/
 
+# 5090 Pi setup credentials (local only; never commit)
+.agents/skills/setup-5090-pi-agent/.env
+
 # 巡检夹具的 Chrome 用户目录：localStorage 里有配对 token，⛔ 绝不入库
 .team/nodes/garble/chrome-profile/
 

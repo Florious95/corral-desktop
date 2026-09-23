@@ -1,0 +1,70 @@
+{
+  "defaults": {
+    "contextWindow": 200000,
+    "maxTokens": 32768,
+    "thinkingLevelMap": {
+      "off": "none",
+      "minimal": "low",
+      "low": "low",
+      "medium": "medium",
+      "high": "high",
+      "xhigh": "high",
+      "max": "high"
+    }
+  },
+  "models": {
+    "gemini 3.8 flash": {
+      "contextWindow": 1000000,
+      "maxTokens": 65536,
+      "thinkingLevelMap": {
+        "off": "none",
+        "low": "low",
+        "high": "high",
+        "minimal": null,
+        "medium": null,
+        "xhigh": null,
+        "max": null
+      }
+    },
+    "gemini-3.8-flash-high": {
+      "contextWindow": 1000000,
+      "maxTokens": 65536,
+      "thinkingLevelMap": {
+        "off": "none",
+        "low": "low",
+        "high": "high",
+        "minimal": null,
+        "medium": null,
+        "xhigh": null,
+        "max": null
+      }
+    },
+    "claude opus 4.6 (thinking)": {
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    "claude sonnet 4.6 (thinking)": {
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    "gpt-6-astra": {
+      "contextWindow": 272000
+    },
+    "gpt-5.6-luna": {
+      "contextWindow": 272000
+    },
+    "qwen3.8-27b": {
+      "name": "Qwen3.8-27B (5090 local)",
+      "contextWindow": 262144,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "low",
+        "low": "low",
+        "medium": "low",
+        "high": "low",
+        "xhigh": "low",
+        "max": "low"
+      }
+    }
+  }
+}
