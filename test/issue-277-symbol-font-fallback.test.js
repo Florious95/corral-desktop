@@ -12,16 +12,16 @@ test('Issue #277: DEFAULT_FONT_FAMILY includes symbol and Nerd Font fallbacks', 
   assert.ok(DEFAULT_FONT_FAMILY.includes('Segoe UI Symbol'), 'Must include Segoe UI Symbol');
 });
 
-test('Issue #277: tokens.css declares embedded AgentMirror Symbols @font-face for U+1F5AB', async () => {
+test('Issue #277: tokens.css declares same-origin AgentMirror Symbols @font-face for U+1F5AB', async () => {
   const tokensCss = await readFile(
     new URL('../src/styles/tokens.css', import.meta.url),
     'utf8'
   );
 
-  // 1. Embedded @font-face for AgentMirror Symbols with U+1F5AB unicode-range
+  // 1. Same-origin @font-face for AgentMirror Symbols with U+1F5AB unicode-range (compliant with default-src 'self' CSP)
   assert.match(tokensCss, /@font-face\s*\{[^}]*font-family:\s*['"]AgentMirror Symbols['"]/);
   assert.match(tokensCss, /unicode-range:\s*U\+1F5AB/);
-  assert.match(tokensCss, /src:\s*url\("data:font\/truetype;charset=utf-8;base64,/);
+  assert.match(tokensCss, /src:\s*url\(['"]?\/fonts\/AgentMirrorSymbols\.ttf['"]?\)/);
 
   // 2. --font-mono includes AgentMirror Symbols, Apple Symbols, and Segoe UI Symbol
   assert.match(tokensCss, /--font-mono:[^;]*'AgentMirror Symbols'/);
@@ -30,14 +30,16 @@ test('Issue #277: tokens.css declares embedded AgentMirror Symbols @font-face fo
   assert.match(tokensCss, /--font-mono:[^;]*'Segoe UI Symbol'/);
 });
 
-test('Issue #277: TerminalView.js terminalFontFamily appends comprehensive symbol fallback chain', async () => {
+test('Issue #277: TerminalView.js terminalFontFamily places symbol fallbacks BEFORE generic monospace', async () => {
   const terminalViewJs = await readFile(
     new URL('../src/term/TerminalView.js', import.meta.url),
     'utf8'
   );
 
-  // Source contract for terminalFontFamily helper
-  assert.match(terminalViewJs, /const terminalFontFamily = \(family\) => `\$\{family\}, "AgentMirror Symbols",/);
+  // Source contract for terminalFontFamily helper: strips generic monospace and appends symbol fonts before monospace
+  assert.match(terminalViewJs, /const terminalFontFamily =/);
+  assert.match(terminalViewJs, /replace\(\/\(\?:,\\s\*\)\?\\bmonospace\\b\\s\*\$\/i,\s*''\)/);
+  assert.match(terminalViewJs, /"AgentMirror Symbols"/);
   assert.match(terminalViewJs, /"Symbols Nerd Font Mono"/);
   assert.match(terminalViewJs, /"Apple Symbols"/);
   assert.match(terminalViewJs, /"Segoe UI Symbol"/);
@@ -64,18 +66,20 @@ test('Issue #277: TerminalView.js terminalFontFamily appends comprehensive symbo
   };
 
   const view = new TerminalView(container, {
-    fontFamily: 'Menlo',
+    fontFamily: 'Cascadia Code, Consolas, monospace',
     fontSize: 13,
     TerminalCtor: FakeTerminal,
   });
 
   const fontOptions = view.term.options.fontFamily;
-  assert.ok(fontOptions.startsWith('Menlo,'), 'Primary font must be Menlo');
+  assert.ok(fontOptions.startsWith('Cascadia Code, Consolas,'), 'Primary font must be preserved without premature monospace');
   assert.ok(fontOptions.includes('"AgentMirror Symbols"'), 'Must include AgentMirror Symbols');
   assert.ok(fontOptions.includes('"Symbols Nerd Font Mono"'), 'Must include Symbols Nerd Font Mono');
   assert.ok(fontOptions.includes('"JetBrainsMono Nerd Font Mono"'), 'Must include JetBrainsMono Nerd Font Mono');
   assert.ok(fontOptions.includes('"Apple Symbols"'), 'Must include Apple Symbols');
   assert.ok(fontOptions.includes('"Segoe UI Symbol"'), 'Must include Segoe UI Symbol');
+  // Generic monospace MUST only be at the very end of the full chain
+  assert.match(fontOptions, /"Apple Symbols"[\s\S]*?monospace$/, 'Generic monospace must terminate the chain after all symbols');
 });
 
 test('Issue #277: UI-SPEC.md §6.2 documentation records symbol font fallback resolution', async () => {
@@ -129,11 +133,13 @@ class Runner: NSObject, WKNavigationDelegate {
         }
 
         do {
-            let js = "(() => { const canvas = document.createElement(\\"canvas\\"); canvas.width = 64; canvas.height = 64; const ctx = canvas.getContext(\\"2d\\"); ctx.font = \\"32px \\\\\\"AgentMirror Symbols\\\\\\", \\\\\\"Symbols Nerd Font Mono\\\\\\", \\\\\\"JetBrainsMono Nerd Font Mono\\\\\\", \\\\\\"Apple Symbols\\\\\\", monospace\\"; ctx.fillText(String.fromCodePoint(0x1F5AB), 10, 40); const data = ctx.getImageData(0, 0, 64, 64).data; let ink = 0; for (let i = 3; i < data.length; i += 4) { if (data[i] > 10) ink++; } return { ink: ink, width: ctx.measureText(String.fromCodePoint(0x1F5AB)).width }; })()"
+            let js = "(() => { const fontLoaded = document.fonts.check(\\"16px 'AgentMirror Symbols'\\"); const c1 = document.createElement(\\"canvas\\"); c1.width = 64; c1.height = 64; const ctx1 = c1.getContext(\\"2d\\"); ctx1.font = \\"32px 'AgentMirror Symbols', monospace\\"; ctx1.fillText(String.fromCodePoint(0x1F5AB), 10, 40); const d1 = ctx1.getImageData(0, 0, 64, 64).data; const c2 = document.createElement(\\"canvas\\"); c2.width = 64; c2.height = 64; const ctx2 = c2.getContext(\\"2d\\"); ctx2.font = \\"32px monospace\\"; ctx2.fillText(String.fromCodePoint(0x1F5AB), 10, 40); const d2 = ctx2.getImageData(0, 0, 64, 64).data; let diffPixels = 0; for (let i = 3; i < d1.length; i += 4) { if (Math.abs(d1[i] - d2[i]) > 30) diffPixels++; } const w1 = ctx1.measureText(String.fromCodePoint(0x1F5AB)).width; const w2 = ctx2.measureText(String.fromCodePoint(0x1F5AB)).width; return { fontLoaded, w1, w2, diffPixels }; })()"
             let res = try await webView.evaluateJavaScript(js) as? [String: Any]
-            let ink = res?["ink"] as? Int ?? 0
-            let width = res?["width"] as? Double ?? 0
-            print("OK_RES:\\(ink):\\(width)")
+            let fontLoaded = res?["fontLoaded"] as? Bool ?? false
+            let w1 = res?["w1"] as? Double ?? 0
+            let w2 = res?["w2"] as? Double ?? 0
+            let diff = res?["diffPixels"] as? Int ?? 0
+            print("OK_RES:\\(fontLoaded):\\(w1):\\(w2):\\(diff)")
         } catch {
             print("ERR:\(error)")
         }
@@ -157,9 +163,19 @@ app.run()
 
   const out = execFileSync('swift', ['-e', swiftCode], { encoding: 'utf8' }).trim();
   assert.ok(out.startsWith('OK_RES:'), `Swift probe must succeed, got: ${out}`);
-  const [, inkStr, widthStr] = out.split(':');
-  const ink = parseInt(inkStr, 10);
-  const width = parseFloat(widthStr);
-  assert.ok(ink > 50, `U+1F5AB must render non-zero ink pixels (got ${ink})`);
-  assert.ok(width > 10, `U+1F5AB must have positive advance width (got ${width})`);
+  const [, loadedStr, w1Str, w2Str, diffStr] = out.split(':');
+  const fontLoaded = loadedStr === 'true';
+  const w1 = parseFloat(w1Str);
+  const w2 = parseFloat(w2Str);
+  const diffPixels = parseInt(diffStr, 10);
+
+  // 1. 验证 AgentMirror Symbols 字体真实加载生效（非假绿）
+  assert.equal(fontLoaded, true, 'document.fonts.check must verify AgentMirror Symbols is loaded and available');
+
+  // 2. 验证矢量字形 advance width 区别于 LastResort 豆腐块
+  assert.notEqual(w1, w2, `advance width with font (${w1}) must differ from tofu box (${w2})`);
+  assert.ok(w1 > 20, `U+1F5AB advance width must be >= 20px (got ${w1})`);
+
+  // 3. 验证实测栅格墨迹与 LastResort 豆腐块拓扑差异显著（两头夹住，坚决杜绝假绿）
+  assert.ok(diffPixels > 100, `U+1F5AB rendered bitmap must have >100 pixel difference from LastResort tofu box (got ${diffPixels})`);
 });

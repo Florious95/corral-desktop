@@ -55,9 +55,14 @@ function withImplicitCr(bytes) {
   return normalized;
 }
 
-// Keep the chosen text font; append symbol & Nerd Fonts for terminal icons & glyphs (Issue #277).
-const terminalFontFamily = (family) => `${family}, "AgentMirror Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono Nerd Font", "JetBrainsMono NF", ${nativeCapabilities.platform === 'windows'
-  ? '"Segoe UI Symbol", "Segoe UI Emoji", "Apple Symbols"' : '"Apple Symbols", "Apple Color Emoji", "Segoe UI Symbol"'}`;
+// Keep the chosen text font; strip any generic monospace suffix so symbol & Nerd Fonts can cascade before generic monospace (Issue #277).
+const terminalFontFamily = (family) => {
+  const cleanFamily = (family || '').replace(/(?:,\s*)?\bmonospace\b\s*$/i, '').trim();
+  const symbolChain = nativeCapabilities.platform === 'windows'
+    ? '"Segoe UI Symbol", "Segoe UI Emoji", "Apple Symbols"'
+    : '"Apple Symbols", "Apple Color Emoji", "Segoe UI Symbol"';
+  return `${cleanFamily ? `${cleanFamily}, ` : ''}"AgentMirror Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono Nerd Font", "JetBrainsMono NF", ${symbolChain}, monospace`;
+};
 
 export class TerminalView {
   /**
