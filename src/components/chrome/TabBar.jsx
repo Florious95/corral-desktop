@@ -32,7 +32,7 @@ function getTabStatus(tab, leaves, agentsByUid, agent) {
  * 会话状态指示灯
  *
  * 状态规格（顾问报告 §0 & §4.1.1）：
- * - working: 绿灯微动（CSS 缓动 pulse，尊重 prefers-reduced-motion）
+ * - working: 绿灯高质感静态发光（消除持续 GPU 重绘合成，UI-SPEC 2026-09-24 裁定）
  * - idle: 绿灯静止
  * - unknown / 离线: 灰空心圆圈
  */

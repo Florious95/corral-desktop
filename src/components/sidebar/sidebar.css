@@ -209,11 +209,10 @@
 .spaces-dot.is-working {
   background: var(--green);
   box-shadow: 0 0 5px var(--green-ring);
-  animation: tb-lamp-pulse 2.4s ease-in-out infinite;
 }
 .spaces-dot.is-blocked {
   background: var(--amber);
-  animation: pulseAmber 1.8s ease-out infinite;
+  box-shadow: 0 0 5px var(--amber-ring);
 }
 .spaces-row-counts {
   flex: none;
@@ -361,11 +360,10 @@
 .agents-dot.is-working {
   background: var(--green);
   box-shadow: 0 0 6px var(--green-ring);
-  animation: tb-lamp-pulse 2.4s ease-in-out infinite;
 }
 .agents-dot.is-blocked {
   background: var(--amber);
-  animation: pulseAmber 1.8s ease-out infinite;
+  box-shadow: 0 0 6px var(--amber-ring);
 }
 .agents-dot.is-done {
   background: var(--green-deep);

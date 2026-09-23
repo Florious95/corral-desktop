@@ -13,16 +13,17 @@ test('TabBar component matches UI-SPEC §4.1.1 and advisor requirements', async 
   assert.match(tabBarJsx, /tb-tab-lamp/);
   assert.match(tabBarJsx, /className="tb-tab-close"/);
 
-  // Status indicator lamps (working / idle / unknown - 2026-09-16 顾问审查精进)
+  // Status indicator lamps (working / idle / unknown - 2026-09-16 顾问审查精进，2026-09-24 静态发光裁定)
   assert.match(tabBarJsx, /const status = agent\?\.state \|\| agent\?\.status \|\| 'unknown';/);
   assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*background:\s*(var\(--green\)|#34c759|#22c55e);/);
   assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*box-shadow:\s*0 0 6px (var\(--green-ring\)|rgba\(34, 197, 94, 0\.6\));/);
-  assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*tb-lamp-pulse/);
+  assert.equal(
+    /\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*tb-lamp-pulse/.test(chromeCss),
+    false,
+    '.tb-tab-lamp.is-working must NOT have animation: tb-lamp-pulse (prevents 120Hz GPU render lock)',
+  );
   assert.match(chromeCss, /\.tb-tab-lamp\.is-idle\s*\{[^}]*background:\s*(var\(--icon-idle\)|rgba\(255,\s*255,\s*255,\s*0\.28\));/);
   assert.match(chromeCss, /\.tb-tab-lamp\.is-unknown\s*\{[^}]*border:\s*1px solid var\(--text-faint\);/);
-
-  // prefers-reduced-motion protection
-  assert.match(chromeCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*none;/);
 
   // Pinned tab style (32px 舒适边距，2026-09-16 裁定)
   assert.match(chromeCss, /\.tb-tab-pinned\s*\{[^}]*width:\s*(32px|28px);/);

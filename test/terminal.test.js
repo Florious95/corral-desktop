@@ -326,10 +326,10 @@ test('parseAnsi 不生成标记，尖括号原样留在片段文本里', () => {
   assert.equal(segs[0].text, '<script> & "x"');   // React 渲染片段自带转义，不需要预转义
 });
 
-test('焦点列实心闪烁、失焦列空心：cursorBlink + outline inactive + focus/blur', () => {
+test('焦点列实心不闪烁、失焦列空心：cursorBlink:false (UI-SPEC §6.2) + outline inactive + focus/blur', () => {
   const { view } = makeView();
   view.open();
-  assert.equal(view.term.opts.cursorBlink, true);
+  assert.equal(view.term.opts.cursorBlink, false);
   assert.equal(view.term.opts.cursorStyle, 'block');
   assert.equal(view.term.opts.cursorInactiveStyle, 'outline');
   view.focus();

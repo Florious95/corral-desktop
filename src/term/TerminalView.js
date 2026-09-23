@@ -132,7 +132,7 @@ export class TerminalView {
       fontFamily: terminalFontFamily(fontFamily),
       lineHeight: this.lineHeight,
       customGlyphs: true,
-      cursorBlink: !this.hideCursor,
+      cursorBlink: false,
       cursorStyle: 'block',
       cursorInactiveStyle: this.hideCursor ? 'none' : 'outline',
       convertEol: false,

@@ -374,7 +374,7 @@ src/
     - 消除 `.tb-tabs-scroll` 滚动容器因固定高度/内边距导致的 1px 截断；滚动容器高度显式设为 `height: 28px; box-sizing: border-box; padding: 0 1px`，胶囊定位在 `top: 1px; height: 26px`，确保上下均有充足空间，底边绝不被截断；
     - 胶囊采用精确测量宽度赋值与等比 1px 细边框，禁止非等比拉伸边框导致粗糙模糊，确保胶囊在任何时刻均为等比清晰细腻的 1px 边框；
   - 动态展示当前活跃会话名称（多窗格时标出窗格数如 `Session (2)`）+ 状态灯（`.tb-tab-lamp`）。
-  - **状态灯规格**：Working 状态为绿灯微动脉冲（`animation: tb-lamp-pulse`，尊重 prefers-reduced-motion）；Idle 状态为温和中性灰小点；Unknown 状态为灰色空心圆圈。
+  - **状态灯规格（2026-09-24 裁定，macOS GPU 降载与消除无限合成）**：Working 状态为绿灯高质感静态发光（`box-shadow: 0 0 6px var(--green-ring)`，彻底移除 `animation: ... infinite`，杜绝 WebKit `CADisplayLink` 锁定 120Hz 与持续 GPU 合成）；Idle 状态为温和中性灰小点；Unknown 状态为灰色空心圆圈。
   - Hover / Active 时显露右侧快速关闭按钮（`.tb-tab-close`，`<XIcon size={11} strokeWidth={2.2}/>`）。
 - **生命周期交互**：
   - 点击已可见 Tab 切换工作台并展示该工作台专属分屏树；
@@ -652,8 +652,8 @@ src/
   - **核心 1：工作状态指示点**（`.agents-dot`），`8px` 圆，`border-radius:var(--r-pill); flex:none`：
     | state | 样式 | title |
     |---|---|---|
-    | working | `background:var(--green); animation:pulse 1.8s ease-out infinite` | 运行中 |
-    | blocked | `background:var(--amber); animation:pulseAmber 1.8s ease-out infinite` | 等待确认 |
+    | working | `background:var(--green); box-shadow: 0 0 6px var(--green-ring);`（静态发光，无动画） | 运行中 |
+    | blocked | `background:var(--amber); box-shadow: 0 0 6px var(--amber-ring);`（静态发光，无动画） | 等待确认 |
     | done | `background:var(--green-deep)`（实心，无动画） | 已完成 |
     | idle | `background:transparent; border:1.5px solid var(--dot-hollow)` | 空闲 |
     | unknown | `background:transparent; border:1.5px solid var(--ink-060)` | 状态未知 |
@@ -723,7 +723,7 @@ src/
 - **终端区**：`flex:1; min-height:0; box-sizing:border-box; background:var(--bg)`。**终端视口边距（2026-09-22 裁定，Issue #196 & #233）**：各平台 `.terminalpane` 统一保持 `padding: 0 5px;`（上下 0 消除单窗格与分屏底部空洞感，彻底回退 Windows 平台上下 5px 留白偏差；左右 5px 保留舒适文本安全距离，防止文字贴边）。全屏遮罩（`.chr-scrim`）采用纯净透明度渐变动画 `scrimFadeIn`，杜绝任何 scale / translate 几何缩放与平移抖动（2026-09-22 裁定，Issue #202）。
   **2026-09-23（Issue #239）**：Windows DOM 渲染器取消字符行之间的额外 leading，渲染与字体度量回退共用行高；外层 padding 不负责字符行内的制表符接缝。
   **2026-09-23（macOS 实测回归 & Issue #277 符号回退）**：macOS 同样取消额外行距。首屏投影与实际渲染共用行高；布局读取 xterm 渲染器已计算的精确字符格尺寸，不跨 DOM/WebGL 渲染器缓存，也不从整幅画布的整数宽度反推单格；切换后按最终渲染单元格重新计算列数，避免右侧空白随窗格宽度累积。终端保留用户正文选定字体，内嵌离线 `AgentMirror Symbols` 符号字体（覆盖 U+1F5AB 🖫 等杂项磁盘/存储符号），并追加平台符号字体（macOS Apple Symbols/Apple Color Emoji，Windows Segoe UI Symbol/Segoe UI Emoji）及 Symbols Nerd Font Mono/JetBrainsMono Nerd Font Mono 后备，彻底消除底栏符号与 Git Diff 状态的中空方块（tofu）；不替换 PTY 字符、不联网下载字体。
-  xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: macOS/Windows 为 1.0，其余平台 1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
+  xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: macOS/Windows 为 1.0，其余平台 1.25`、`cursorBlink:false`（严格关闭闪烁，彻底消除 WebGL 600ms 定时器空转重绘，2026-09-24 裁定）、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：
