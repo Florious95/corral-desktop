@@ -196,16 +196,16 @@ git -C "$STAGE" archive --format=tar HEAD | \
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_TARGET" \
     "wsl.exe -e bash -lc \"rm -rf '$REMOTE_PAYLOAD' && mkdir -p '$REMOTE_PAYLOAD' && tar -xf - -C '$REMOTE_PAYLOAD'\""
 
-# Values are sent as stdin records, never as SSH argv. The fixed remote script
-# below starts by reading these four records.
+# Values are sent as shell-quoted stdin assignments, never as SSH argv or
+# terminal output. The remote shell receives one script and executes it without
+# echoing the credential-bearing assignments.
 {
-  printf '%s\n' "$TEAM_AGENT_BASE_URL" "$TEAM_AGENT_API_KEY" "$REMOTE_PAYLOAD" "$SMOKE_SESSION"
+  printf 'set -Eeuo pipefail\n'
+  printf 'TEAM_AGENT_BASE_URL=%q\nTEAM_AGENT_API_KEY=%q\nREMOTE_PAYLOAD=%q\nSMOKE_SESSION=%q\n' \
+    "$TEAM_AGENT_BASE_URL" "$TEAM_AGENT_API_KEY" "$REMOTE_PAYLOAD" "$SMOKE_SESSION"
+  printf 'export TEAM_AGENT_BASE_URL TEAM_AGENT_API_KEY REMOTE_PAYLOAD SMOKE_SESSION\n'
   cat <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
-IFS= read -r TEAM_AGENT_BASE_URL
-IFS= read -r TEAM_AGENT_API_KEY
-IFS= read -r REMOTE_PAYLOAD
-IFS= read -r SMOKE_SESSION
 
 fail() {
   printf 'remote setup failed: %s\n' "$*" >&2
@@ -306,6 +306,14 @@ adapted = adapt(value)
 if path.name == "settings.json" and isinstance(adapted, dict):
     adapted["defaultProvider"] = "team-agent"
     adapted["defaultModel"] = "gpt-5.6-luna"
+    packages = adapted.get("packages")
+    if isinstance(packages, list):
+        # This package is a macOS-only desktop bridge and makes Pi abort
+        # while loading Linux settings. Keep all other user packages.
+        adapted["packages"] = [
+            package for package in packages
+            if "codex-computer-use-mcp" not in json.dumps(package).lower()
+        ]
 path.write_text(json.dumps(adapted, indent=2, ensure_ascii=False) + "\n")
 PY
   fi
@@ -333,6 +341,7 @@ path = Path(sys.argv[1])
 start = "# setup-5090-pi-agent: begin"
 end = "# setup-5090-pi-agent: end"
 block = (start + "\n"
+         "export PATH=\"$HOME/.local/bin:$PATH\"\n"
          "unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY\n"
          "if [ -f \"$HOME/.pi/agent/env\" ]; then . \"$HOME/.pi/agent/env\"; fi\n"
          "unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY\n"
@@ -371,9 +380,34 @@ done
 [[ ! -e "$AGENT_DIR/auth.json" && ! -e "$AGENT_DIR/models-store.json" ]] \
   || fail 'forbidden Pi auth store remains'
 
+# Use a WSL-local npm config. A Windows npm prefix in ~/.npmrc is invalid
+# inside WSL and may also carry unrelated user configuration.
+NPM_CONFIG_USERCONFIG="$HOME/.cache/setup-5090-pi-agent-npmrc"
+mkdir -p "$HOME/.cache"
+printf 'prefix=%s\n' "$HOME/.local" > "$NPM_CONFIG_USERCONFIG"
+chmod 600 "$NPM_CONFIG_USERCONFIG"
+export NPM_CONFIG_USERCONFIG
+
 # Resolve nvm if present, then install the official Pi package for this user.
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-if [[ -s "$NVM_DIR/nvm.sh" ]]; then . "$NVM_DIR/nvm.sh"; fi
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # Avoid nvm's implicit auto-use when the user's npmrc has a Windows
+    # prefix; select the active version explicitly below.
+    export NVM_NO_USE=1
+    . "$NVM_DIR/nvm.sh"
+    unset NVM_NO_USE
+    if command -v nvm >/dev/null 2>&1; then
+      active_node=$(nvm current)
+      if [[ "$active_node" != 'none' && "$active_node" != 'system' ]]; then
+        nvm use --delete-prefix "$active_node" --silent >/dev/null
+      fi
+    fi
+  fi
+fi
+# Apply the WSL-local global prefix only after any nvm loading.
+export npm_config_prefix="$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
 command -v node >/dev/null 2>&1 || fail 'node is not installed in WSL'
 command -v npm >/dev/null 2>&1 || fail 'npm is not installed in WSL'
 npm install -g @earendil-works/pi-coding-agent --no-audit --no-fund >/dev/null
@@ -402,6 +436,22 @@ if [[ -n "$SMOKE_SESSION" ]]; then
   tmux has-session -t "$SMOKE_SESSION" 2>/dev/null || fail 'smoke session did not stay alive'
   printf 'Pi smoke session: pass (%s)\n' "$SMOKE_SESSION"
 fi
+
+# Pi may materialize auth stores while discovering models; remove and audit
+# once more after all Pi/npm activity, including an optional smoke session.
+remove_personal_auth
+while IFS= read -r -d '' forbidden; do
+  fail 'forbidden credential file remains under .pi/agent'
+done < <(find "$AGENT_DIR" -type f \( \
+  -iname 'auth.json' -o -iname 'models-store.json' -o \
+  -iname 'credentials.json' -o -iname 'oauth.json' \
+\) -print0)
+while IFS= read -r -d '' candidate; do
+  if [[ "$candidate" == "$ENV_PATH" ]]; then continue; fi
+  if grep -IqE 'sk-[A-Za-z0-9]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{20,}|(OPENAI|XAI|ANTHROPIC)_API_KEY[[:space:]]*=' "$candidate"; then
+    fail 'personal subscription literal found after Pi setup'
+  fi
+done < <(find "$AGENT_DIR" -type f -print0)
 
 printf 'Pi configuration sync: pass\n'
 printf 'Backup: %s\n' "$BACKUP"
