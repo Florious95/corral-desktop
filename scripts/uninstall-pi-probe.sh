@@ -7,6 +7,7 @@ home=${HOME:?HOME is required}
 rm -rf -- "$home/.pi/agent/plugins/agentmirror-probe"
 rm -f -- \
   "$home/.pi/agent/plugins/agentmirror-probe.js" \
+  "$home/.pi/agent/extensions/nodeprobe-pi-activity.js" \
   "$home/.pi/agent/extensions/agentmirror-probe.js"
 
 # Clean interrupted atomic writes without touching unrelated files.

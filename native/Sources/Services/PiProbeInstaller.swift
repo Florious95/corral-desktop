@@ -3,9 +3,9 @@ import Foundation
 /// Installs only the AgentMirror-owned Pi probe files. Existing user plugins,
 /// extensions, and parent directories are never removed.
 public enum PiProbeInstaller {
-    public static let resourceName = "agentmirror-probe.js"
+    public static let resourceName = "nodeprobe-pi-activity.js"
     public static let probeDirectoryName = "agentmirror-probe"
-    public static let extensionName = "agentmirror-probe.js"
+    public static let extensionName = "nodeprobe-pi-activity.js"
 
     public static func install(
         resourceDirectory: URL?,
@@ -49,7 +49,8 @@ public enum PiProbeInstaller {
             try fileManager.removeItem(at: probeDirectory)
         }
         for legacy in [pluginsDirectory.appendingPathComponent(extensionName),
-                       extensionDirectory.appendingPathComponent(extensionName)] {
+                       extensionDirectory.appendingPathComponent(extensionName),
+                       extensionDirectory.appendingPathComponent("agentmirror-probe.js")] {
             if fileManager.fileExists(atPath: legacy.path) {
                 try fileManager.removeItem(at: legacy)
             }

@@ -14,7 +14,7 @@
 | **`token`** | `~/.config/agentmirror/token` | `0600` | 内部双向握手安全令牌 | 自动生成高熵随机令牌 | 物理删除 |
 | **`providers.tsv`** | `~/tools/nodeprobe/fixtures/providers.tsv` | `0600` | Agent 启动器白名单与模板 | 自动生成标准 6 大 Provider 配置 | 物理删除 |
 | **`titles.tsv`** | `~/tools/nodeprobe/fixtures/titles.tsv` | `0600` | 会话标题映射表 | 自动初始化为空配置 | 物理删除 |
-| **`pi 状态检测插件`** | `~/.pi/agent/plugins/agentmirror-probe/index.js`（兼容路径） + `~/.pi/agent/extensions/agentmirror-probe.js`（Pi 自动发现） | 目录 `0755` / 文件 `0644` | 捕获并上报 Pi 节点的实时健康、Working/Idle 状态 | WSL 引导或 macOS 原生壳启动时原子写入并验证权限 | 仅删除 AgentMirror 自有探针路径，完整清理且绝不触碰用户插件 |
+| **`pi 状态检测插件`** | `~/.pi/agent/plugins/agentmirror-probe/index.js`（兼容路径） + `~/.pi/agent/extensions/nodeprobe-pi-activity.js`（Pi 自动发现） | 目录 `0755` / 文件 `0644` | 捕获并上报 Pi 节点的实时健康、Working/Idle 状态 | WSL 引导或 macOS 原生壳启动时原子写入并验证权限 | 仅删除 AgentMirror 自有探针路径，完整清理且绝不触碰用户插件 |
 
 ---
 
@@ -50,7 +50,7 @@
 - [ ] **进程安全终结**：
   - 遍历所有 WSL 发行版，执行 `pkill -x agentmirrord` 彻底杀死运行中的后台服务，释放 `9900` 端口；
 - [ ] **Pi 状态检测插件彻底移除**：
-  - Windows NSIS 与 macOS `scripts/uninstall-pi-probe.sh` 仅物理删除 AgentMirror 自有 `~/.pi/agent/plugins/agentmirror-probe/`、兼容文件及 `~/.pi/agent/extensions/agentmirror-probe.js`；
+  - Windows NSIS 与 macOS `scripts/uninstall-pi-probe.sh` 仅物理删除 AgentMirror 自有 `~/.pi/agent/plugins/agentmirror-probe/`、兼容文件及 `~/.pi/agent/extensions/nodeprobe-pi-activity.js`；同时清理此前 PR #212 遗留的错误 `agentmirror-probe.js` 文件。
   - 清理中断安装留下的 `.agentmirror-probe.tmp-*`，恢复 Pi 原生初始插件配置，不留下任何失效钩子或僵尸路径；
 - [ ] **守护文件与配置物理销毁**：
   - 物理删除 `~/.local/bin/agentmirrord`；

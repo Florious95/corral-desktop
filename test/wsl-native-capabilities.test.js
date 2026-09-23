@@ -175,6 +175,8 @@ test('native token bridge prefers the registered fresh-install pairing command',
   assert.match(rust, /fn hidden_command\(program: &str\)/);
   assert.match(rust, /command\.creation_flags\(CREATE_NO_WINDOW\)/);
   assert.match(rust, /hidden_command\("wsl\.exe"\)/);
+  assert.match(rust, /extension=\"\$extensions_dir\/nodeprobe-pi-activity\.js\"/);
+  assert.ok(rust.includes('AGENTMIRROR_NODEPROBE_PI_EXTENSION=\\"$HOME/.pi/agent/extensions/nodeprobe-pi-activity.js\\"'));
   assert.doesNotMatch(rust, /let verify = run_wsl\(\[[\s\S]*\{AGENTMIRRORD_VERSION\}/);
   assert.match(commands, /wsl::get_wsl_pairing_token/);
 });
@@ -302,6 +304,8 @@ test('WslBootstrapCard renders respective guidance text and command hints for ev
   // 4. 重试按钮无死锁（无 disabled 属性，允许随时重试）
   assert.match(cardJsx, /className="app-empty-btn wsl-retry-btn"/);
   assert.match(cardJsx, /onClick=\{onRetry\}/);
+  assert.match(cardJsx, /service_port_occupied_502/);
+  assert.match(cardJsx, /HTTP 502/);
   assert.doesNotMatch(cardJsx, /disabled=\{isLoading\}/);
 });
 

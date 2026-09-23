@@ -3,7 +3,7 @@
 // Set NODEPROBE_PI_ACTIVITY_DIR to a private local directory shared with nodeprobe.
 
 import { createServer } from "node:net";
-import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -50,6 +50,30 @@ function currentRecord() {
   };
 }
 
+function ownsRecord() {
+  if (!path || !state.instanceId) return false;
+  try {
+    const record = JSON.parse(readFileSync(path, "utf8"));
+    return record.pid === pid && record.instance_id === state.instanceId;
+  } catch {
+    return false;
+  }
+}
+
+function unlinkOwnedSocket() {
+  if (!socketPath || !existsSync(socketPath) || !ownsRecord()) return;
+  try {
+    unlinkSync(socketPath);
+  } catch {}
+}
+
+function unlinkOwnedRecord() {
+  if (!path || !ownsRecord()) return;
+  try {
+    unlinkSync(path);
+  } catch {}
+}
+
 function publish() {
   if (!path) return;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -62,20 +86,17 @@ function publish() {
 async function startChannel() {
   if (!socketPath) return;
   if (state.startPromise) return state.startPromise;
-  // A restart must finish the old listener before unlinking/rebinding the
-  // pathname. Otherwise a second server can retain an unlinked listener
-  // while a new server owns the visible pathname.
+  // A restart must finish the old listener before rebinding. Never unlink a
+  // pathname owned by another instance: the JSON record is the ownership
+  // fence, and EADDRINUSE is safer than stealing a live channel.
   if (state.stopPromise) await state.stopPromise;
   if (state.server) return;
   if (state.startPromise) return state.startPromise;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  if (existsSync(socketPath)) unlinkOwnedSocket();
 
   state.startPromise = (async () => {
-    try {
-      unlinkSync(socketPath);
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-
     const candidate = createServer((socket) => {
       socket.on("error", () => {});
       let input = "";
@@ -93,7 +114,6 @@ async function startChannel() {
       });
     });
     state.server = candidate;
-    state.instanceId = randomUUID();
     await new Promise((resolve, reject) => {
       let ready = false;
       candidate.on("error", (error) => {
@@ -104,7 +124,10 @@ async function startChannel() {
       });
       candidate.listen(socketPath, () => {
         try {
-          chmodSync(socketPath, 0o600);
+          // The pathname can disappear while the kernel listener remains
+          // alive. Let the heartbeat own recovery instead of failing startup
+          // on a transient ENOENT between listen and chmod.
+          if (existsSync(socketPath)) chmodSync(socketPath, 0o600);
           ready = true;
           resolve();
         } catch (error) {
@@ -129,20 +152,33 @@ async function stopChannel() {
     }
     const active = state.server;
     if (!active) {
-      try {
-        unlinkSync(socketPath);
-      } catch {}
+      unlinkOwnedSocket();
       return;
     }
     await new Promise((resolve) => active.close(resolve));
     if (state.server === active) state.server = undefined;
-    try {
-      unlinkSync(socketPath);
-    } catch {}
+    unlinkOwnedSocket();
   })().finally(() => {
     state.stopPromise = undefined;
   });
   return state.stopPromise;
+}
+
+async function ensureChannel() {
+  if (!socketPath) return;
+  if (state.server && existsSync(socketPath)) return;
+  if (state.server) {
+    await stopChannel();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await startChannel();
+}
+
+async function heartbeat() {
+  try {
+    await ensureChannel();
+  } catch {}
+  publish();
 }
 
 export default function (pi) {
@@ -151,7 +187,7 @@ export default function (pi) {
     state.sessionName = ctx.sessionManager.getSessionName();
     state.activity = "idle";
     publish();
-    if (!state.heartbeat) state.heartbeat = setInterval(publish, 1000).unref();
+    if (!state.heartbeat) state.heartbeat = setInterval(() => { void heartbeat(); }, 1000).unref();
   });
 
   pi.on("session_info_changed", async (event) => {
@@ -189,8 +225,6 @@ export default function (pi) {
     state.activity = "idle";
     publish();
     await stopChannel();
-    try {
-      if (path) unlinkSync(path);
-    } catch {}
+    unlinkOwnedRecord();
   });
 }
