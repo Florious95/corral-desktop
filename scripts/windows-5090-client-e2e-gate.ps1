@@ -6,6 +6,8 @@ param(
 
     [string]$TestRunRoot = "$env:USERPROFILE\AgentMirror-e2e-client-v011",
     [string]$ArtifactDir = "$env:USERPROFILE\agentmirror-client-e2e-v011",
+    [ValidatePattern('^com\.agentmirror\.desktop\.test(?:\.[A-Za-z0-9_-]+)*$')]
+    [string]$TestBundleId = 'com.agentmirror.desktop.test',
     [ValidatePattern('^[A-Za-z0-9_.-]+$')]
     [string]$ServiceDistro = 'Ubuntu-24.04',
     [ValidateRange(1, 10000)]
@@ -35,7 +37,10 @@ if ($root -match '(?i)\\(?:Program Files|Program Files \(x86\))(?:\\|$)') {
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $receiptPath = Join-Path $artifacts 'windows-5090-client-e2e.json'
 $cdpReceipt = Join-Path $artifacts 'windows-5090-startup-receipt.json'
+$cdpStdout = Join-Path $artifacts 'cdp-runner.stdout.log'
+$cdpStderr = Join-Path $artifacts 'cdp-runner.stderr.log'
 $serviceTrace = Join-Path $artifacts 'windows-5090-service-pids.jsonl'
+$testDataPaths = @("$env:LOCALAPPDATA\$TestBundleId", "$env:APPDATA\$TestBundleId")
 
 $targetConsoleNames = @('conhost.exe', 'cmd.exe', 'wsl.exe', 'WindowsTerminal.exe', 'wt.exe', 'OpenConsole.exe')
 function Invoke-Wsl {
@@ -95,6 +100,7 @@ $oldWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
 $oldWebViewData = $env:WEBVIEW2_USER_DATA_FOLDER
 $appProcess = $null
 $cdpProcess = $null
+$cleanupStarted = $false
 $seenServicePids = [Collections.Generic.HashSet[int]]::new()
 $preexistingServicePids = @()
 $baselineConsole = @()
@@ -110,9 +116,22 @@ $run = [ordered]@{
     timeoutMs = $TimeoutMs
     verdict = 'NOT-RUN'
     tokenValuesOmitted = $true
+    testBundleId = $TestBundleId
 }
 
 try {
+    # Import failures happen before the JS receipt handler can run.
+    $nodeScript = Join-Path $repoRoot 'scripts/windows-5090-startup-receipt.mjs'
+    if (-not (Test-Path -LiteralPath $nodeScript -PathType Leaf)) { throw 'CDP runner script is missing' }
+    $nodeExe = (Get-Command node -CommandType Application -ErrorAction Stop).Source
+    Push-Location $repoRoot
+    try {
+        & $nodeExe --input-type=module -e "await import('ws')"
+        if ($LASTEXITCODE -ne 0) { throw 'CDP runner dependency unavailable; run npm ci in the checkout' }
+    } finally { Pop-Location }
+    foreach ($path in @($cdpReceipt, $cdpStdout, $cdpStderr, $serviceTrace)) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
     if (@(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $DebugPort -ErrorAction SilentlyContinue).Count) {
         throw "Refusing occupied WebView2 debug port $DebugPort"
     }
@@ -124,12 +143,13 @@ try {
     if ($existingApps.Count) { throw 'Refusing to touch a pre-existing AgentMirror process' }
 
     # Clean only the disposable root and this app's known per-user config.
+    $cleanupStarted = $true
     $uninstaller = Join-Path $root 'uninstall.exe'
     if (Test-Path -LiteralPath $uninstaller) {
         $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/S') -Wait -PassThru -WindowStyle Hidden
         $run.uninstallExit = $uninstall.ExitCode
     }
-    foreach ($path in @($root, "$env:LOCALAPPDATA\com.agentmirror.desktop", "$env:APPDATA\com.agentmirror.desktop")) {
+    foreach ($path in (@($root) + $testDataPaths)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
 
@@ -147,12 +167,13 @@ try {
     $processStartUtc = $appProcess.StartTime.ToUniversalTime().ToString('o')
     $run.process = [ordered]@{ pid = $appProcess.Id; startUtc = $processStartUtc }
 
-    $nodeScript = Join-Path $repoRoot 'scripts/windows-5090-startup-receipt.mjs'
-    $cdpProcess = Start-Process -FilePath 'node' -ArgumentList @(
-        $nodeScript, '--debug-port', $DebugPort, '--output', $cdpReceipt,
+    # Start-Process flattens ArgumentList; quote paths explicitly for spaces.
+    $cdpProcess = Start-Process -FilePath $nodeExe -ArgumentList @(
+        ('"' + $nodeScript + '"'), '--debug-port', $DebugPort, '--output', ('"' + $cdpReceipt + '"'),
         '--expected-rows', $ExpectedRows, '--timeout-ms', $TimeoutMs,
         '--process-start-utc', $processStartUtc
-    ) -PassThru -WorkingDirectory $repoRoot -WindowStyle Hidden
+    ) -PassThru -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $cdpStdout -RedirectStandardError $cdpStderr
+    $run.cdpProcess = [ordered]@{ pid = $cdpProcess.Id; stdout = $cdpStdout; stderr = $cdpStderr }
 
     while (-not $cdpProcess.HasExited) {
         foreach ($row in @(Get-ConsoleSnapshot)) {
@@ -172,8 +193,16 @@ try {
         Start-Sleep -Milliseconds 50
     }
     $cdpProcess.WaitForExit()
-    if (-not (Test-Path -LiteralPath $cdpReceipt -PathType Leaf)) { throw 'CDP receipt was not written' }
+    $run.cdpProcess.exitCode = $cdpProcess.ExitCode
+    if (-not (Test-Path -LiteralPath $cdpReceipt -PathType Leaf)) {
+        $run.apparatusFailed = $true
+        throw "CDP receipt was not written; node exit=$($cdpProcess.ExitCode); stderr=$cdpStderr"
+    }
     $cdp = Get-Content -LiteralPath $cdpReceipt -Raw | ConvertFrom-Json
+    if ($cdp.verdict -eq 'NOT-RUN') {
+        $run.apparatusFailed = $true
+        throw "CDP apparatus did not complete: $($cdp.reason)"
+    }
     $visibleConsole = @($consoleEvents | Where-Object { $_.windowHandle -ne 0 })
     $run.cdp = $cdp
     $run.console = [ordered]@{
@@ -197,7 +226,7 @@ try {
     if ($run.verdict -ne 'PASS') { throw 'Client e2e gate failed' }
 }
 catch {
-    $run.verdict = if ($run.process) { 'FAIL' } else { 'NOT-RUN' }
+    $run.verdict = if ($run.notRespondingObserved -or ($run.process -and -not $run.apparatusFailed)) { 'FAIL' } else { 'NOT-RUN' }
     $run.reason = $_.Exception.Message
     throw
 }
@@ -211,11 +240,11 @@ finally {
     $run | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
     # One-key gate leaves no installed test bundle behind, including on failure.
     $finalUninstaller = Join-Path $root 'uninstall.exe'
-    if (Test-Path -LiteralPath $finalUninstaller) {
+    if ($cleanupStarted -and (Test-Path -LiteralPath $finalUninstaller)) {
         Start-Process -FilePath $finalUninstaller -ArgumentList @('/S') -Wait -WindowStyle Hidden | Out-Null
     }
-    foreach ($path in @($root, "$env:LOCALAPPDATA\com.agentmirror.desktop", "$env:APPDATA\com.agentmirror.desktop")) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+    foreach ($path in (@($root) + $testDataPaths)) {
+        if ($cleanupStarted -and (Test-Path -LiteralPath $path)) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
