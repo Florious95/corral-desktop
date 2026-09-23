@@ -147,6 +147,7 @@ export default function SplitPanes({
       className="splitpanes terminal-stage"
       ref={stageRef}
       data-stage="terminal-stage"
+      data-platform={nativeCapabilities.platform}
       data-multi-pane={visibleUids.length > 1 ? 'true' : undefined}
     >
       {isEmpty && (

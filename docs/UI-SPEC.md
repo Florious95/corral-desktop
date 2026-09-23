@@ -764,6 +764,8 @@ src/
 
 触底的可见 macOS 窗格用 CSS `bottom: 0` 直接锚定舞台底边，不依赖 ResizeObserver→React 的上一帧像素高度；内部 xterm 继续底锚。顶部/中间窗格与后台常驻窗格保留投影高度，PTY 网格仍走原尺寸管线。这样窗口连续拉伸、投影尚未提交时，底部窗格和终端画布也同时贴底、平齐。
 
+**2026-09-23（macOS 后台绘制）**：非活动 Tab 的常驻窗格保持挂载、投影尺寸和终端缓冲区，但通过 `content-visibility: hidden` 停止子树绘制，让 xterm 原生 IntersectionObserver 暂停 WebGL。单独 `visibility: hidden` 仍会绘制后台输出，不满足此约束。恢复可见后由 xterm 刷新当前缓冲区；不丢输入输出、不取消会话订阅、不销毁/重建渲染上下文。空闲无输出、非焦点终端不得持续绘制。
+
 ---
 
 ## 7. 交互状态机（全部由 `App.jsx` 持有）

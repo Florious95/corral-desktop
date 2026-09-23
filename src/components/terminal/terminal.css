@@ -42,6 +42,12 @@
   pointer-events: none;
 }
 
+/* Keep resident geometry/buffers while letting xterm's IntersectionObserver
+   suspend the invisible WebGL surface. visibility:hidden alone still draws. */
+.terminal-stage[data-platform="macos"] > .pane-host.is-hidden {
+  content-visibility: hidden;
+}
+
 .pane-close-btn {
   position: absolute;
   top: 6px;
