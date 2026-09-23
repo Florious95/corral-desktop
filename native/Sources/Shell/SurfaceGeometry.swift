@@ -18,6 +18,11 @@ public struct SurfaceGeometry {
     /// A same-sized layout update therefore cannot reuse an old rectangle set.
     public mutating func invalidate() {
         geometryGeneration += 1
+        disarm()
+    }
+
+    /// Reject an invalid report without inventing another native layout change.
+    public mutating func disarm() {
         armed = false
         dragRects = []
         exclusions = []

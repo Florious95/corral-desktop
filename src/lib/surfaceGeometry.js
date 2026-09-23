@@ -116,20 +116,29 @@ export function createSurfaceGeometryWatcher({
   let inFlight = false;
   let scheduledAgain = false;
   let currentDisarmSeq = 0;
+  let disarmed = false;
 
   const disarmImmediate = () => {
     if (isDisposed) return;
     currentDisarmSeq++;
     // OPEN-2: 清空去重缓存，确保 disarm 后相同几何可以重新触发 arm
     lastGeomJson = '';
+    // resize and ResizeObserver may describe the same gesture many times.
+    // One disarm suffices until another arm is sent (including an in-flight arm).
+    if (disarmed) return;
+    disarmed = true;
     // OPEN-2: 布局变动前立即向 Native 下发 disarm，报废旧的拖拽区域
     try {
       const p = onUpdate({ phase: 'disarm' });
       if (p && typeof p.catch === 'function') {
-        p.catch(() => {});
+        p.catch((error) => {
+          // A stale generation means native already invalidated this map.
+          // Wait for its settled state instead of retrying on every resize.
+          if (error?.code !== 'stale_geometry') disarmed = false;
+        });
       }
     } catch (_) {
-      // 容错忽略
+      disarmed = false;
     }
   };
 
@@ -143,6 +152,7 @@ export function createSurfaceGeometryWatcher({
     if (json === lastGeomJson) return; // 几何未变化跳过
 
     inFlight = true;
+    disarmed = false;
     const runDisarmSeq = currentDisarmSeq;
     try {
       await onUpdate(geom);
@@ -190,6 +200,7 @@ export function createSurfaceGeometryWatcher({
 
   let lastViewportWidth = typeof window !== 'undefined' ? Math.round(window.innerWidth || 0) : -1;
   let lastViewportHeight = typeof window !== 'undefined' ? Math.round(window.innerHeight || 0) : -1;
+  let lastNativeGeometry = '';
 
   const onWinResize = () => {
     if (isDisposed) return;
@@ -205,16 +216,19 @@ export function createSurfaceGeometryWatcher({
 
   const onWindowState = (e) => {
     if (isDisposed) return;
-    // P0: 严禁在此无脑清空 lastGeomJson 并无脑调用 onLayoutChange() (disarmImmediate)，彻底切断死循环！
-    // 仅当 Native 广播的视口尺寸确实发生改变时，才进行防抖调度 schedule()
+    // Native has already invalidated its hit map. Rearm even for same-size
+    // generation/scale changes, without echoing another disarm back to native.
     const payload = e?.detail;
     const vp = payload?.viewportCSS;
     if (vp && typeof vp.width === 'number' && typeof vp.height === 'number') {
       const w = Math.round(vp.width);
       const h = Math.round(vp.height);
-      if (w !== lastViewportWidth || h !== lastViewportHeight) {
+      const geometry = JSON.stringify([payload.geometryGeneration, w, h, payload.devicePixelRatio]);
+      if (geometry !== lastNativeGeometry) {
+        lastNativeGeometry = geometry;
         lastViewportWidth = w;
         lastViewportHeight = h;
+        currentDisarmSeq++;
         lastGeomJson = '';
         schedule();
       }
@@ -239,6 +253,7 @@ export function createSurfaceGeometryWatcher({
     disarm: disarmImmediate,
     dispose() {
       // OPEN-3: 销毁前先发出最后一次 disarm，确保原生外壳清理在途点击区
+      disarmed = false;
       disarmImmediate();
       isDisposed = true;
       lastGeomJson = '';

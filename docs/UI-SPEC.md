@@ -718,6 +718,7 @@ src/
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：
   - 彻底拔除 500ms 盲等与 46x44 盲建：由 `SplitPanes` 预先投影物理像素，结合全局离屏常驻字体度量缓存（`fontMetrics.js`）纯数学直接得出目标 `initialCols / initialRows` 并注入构造函数，发起的首帧网络 `subscribe` 直接携带最终尺寸一步到位拉起远端目标几何，彻底消灭二次 resize 导致的 CLI 输入框弹跳；
   - 拖拽 Resize 视觉 60fps 跟随与网络 PTY 120ms 节流解耦：本地容器与视口 60fps 实时跟随鼠标刷新，网络 PTY `resize` 维持单一 120ms 尾随防抖；
+  - macOS 原生窗口在尺寸/屏幕变化时立即失效拖拽命中图；最新窗口几何静止至少 120ms 后合并通知 WKWebView，最多一条在途通知。前端每次重新 arm 前仅发送一次 disarm；原生同尺寸 generation/DPR 变化也必须重新 arm，禁止退回旧命中图。拒绝旧报告只清空命中图，不虚增原生 generation（2026-09-23，Issue #251）。
   - 首帧快照单微任务原子上屏：首帧快照到达时，在同一个微任务中同步完成快照写入与 `setReady(true)` 状态更新，保证内容上屏与加载占位卸载严格在同一帧呈现，零白屏闪烁。
   **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就用最新几何重发 `subscribe`（不再紧跟同尺寸网络 `resize`）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
@@ -737,6 +738,7 @@ src/
   - 文本粘贴复用 `handlePaneText` 发送，一次手势一次发送，保留多行文本且绝不自动追加 Enter；
   - 图片粘贴提取有效 bytes 后触发 `uploadAndPreview` 原生 HTTP 上传预览；图片-only 快捷键（macOS Ctrl+V）与纯文本快捷键（Windows Ctrl+Shift+V）各自职责明确、失败可见。
 - **终端快捷键与鼠标映射**：
+  - TUI 开启鼠标跟踪时，左键按下、连续拖动、释放按 xterm 生成的 SGR/X10 字节直达 PTY；无按键移动、右/中键与滚轮不走此通道。Windows 按 Shift、macOS 按 Option 强制本地选区（沿用 xterm 平台原生语义），无鼠标模式时正常框选（2026-09-23，Issue #258）。
   - 支持快捷键 `Ctrl+Shift+C` 复制终端选中文本；
   - 支持快捷键 `Ctrl+Shift+V` 强制纯文本粘贴；
   - 终端区域右键点击保持标准上下文冒泡（UI-SPEC §4.5 窗格菜单），坚决禁止捕获阶段暴力拦截阻断右键菜单或静默向 PTY 灌入剪贴板文本（2026-09-21 裁定）。
@@ -1007,3 +1009,7 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 桌面分发的 daemon、nodeprobe、Pi 扩展与两份 corpus 必须符合 daemon 实际内嵌的同一份 accepted manifest；构建门禁拒绝任一哈希或大小漂移。同步更新 WSL bundle revision，使同版本重装也会替换旧能力清单的 daemon，禁止靠兼容多个插件 hash 掩盖资源错配。
 
 Provider 分类由已验真的 nodeprobe 与 canonical corpus 负责。删除旧 Go provider table 的桌面注入补丁和字符串标识断言；它们对应的上游模块已移除，不作为新 daemon 的交付要求。
+
+### Windows 终端选区复制（2026-09-23，Issue #257）
+
+终端有非空选区时，Ctrl+C 与 Ctrl+Shift+C 同步触发 xterm 的系统 copy 事件，复制原始选区文本并阻止 PTY 输入。无选区的 Ctrl+C 保持中断语义；无选区的 Ctrl+Shift+C 不改剪贴板、不向终端输入。复制失败显示提示，选区保留供重试。macOS 快捷键语义保持不变。

@@ -19,7 +19,7 @@ import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
 import { attachWebglRenderer } from './webglRenderer.js';
 import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
-import { isCtrlV, isCtrlShiftV, isCtrlShiftC, isCmdV } from './clipboard.js';
+import { isCtrlV, isCtrlShiftV, isCtrlC, isCtrlShiftC, isCmdV } from './clipboard.js';
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
 import { getFontMetrics } from './fontMetrics.js';
 
@@ -74,7 +74,7 @@ export class TerminalView {
   constructor(container, opts = {}) {
     const {
       onResize, onHistoryBoundary, onData, onBinary, onWriteBackpressure,
-      onPaste, onCtrlV, onForceTextPaste,
+      onPaste, onCtrlV, onForceTextPaste, onCopyError,
       scrollback = 0, fontSize = 13, fontFamily = 'ui-monospace, SF Mono, Menlo, monospace',
       maxPendingWriteBytes = MAX_PENDING_WRITE_BYTES,
       hideCursor = false, TerminalCtor = Terminal,
@@ -88,6 +88,7 @@ export class TerminalView {
     this.onPaste = onPaste || (() => {});
     this.onCtrlV = onCtrlV || (() => {});
     this.onForceTextPaste = onForceTextPaste || (() => {});
+    this.onCopyError = onCopyError || (() => {});
     this.maxPendingWriteBytes = Number.isInteger(maxPendingWriteBytes) && maxPendingWriteBytes > 0
       ? maxPendingWriteBytes : MAX_PENDING_WRITE_BYTES;
 
@@ -119,6 +120,8 @@ export class TerminalView {
       // 输入走 onData → 协议。远程 delta 负责回显，xterm 不本地 echo。
       disableStdin: false,
       allowProposedApi: true,
+      // xterm uses Option on macOS and Shift elsewhere to select in mouse mode.
+      macOptionClickForcesSelection: true,
       theme,
     });
     this._lastDims = null;
@@ -152,15 +155,23 @@ export class TerminalView {
         if (event.isComposing || event.keyCode === 229) return true;
         if (event.type !== 'keydown') return true;
 
-        // 1. Windows Ctrl+Shift+C: 复制当前终端选中文字，不发 PTY
-        if (isWindows && isCtrlShiftC(event)) {
-          if (typeof this.term.hasSelection === 'function' && this.term.hasSelection()) {
-            const selection = this.term.getSelection();
-            if (selection && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-              navigator.clipboard.writeText(selection).catch(() => {});
+        // Copy through xterm's native `copy` event while the key gesture is
+        // still active. This avoids Web Clipboard permission/focus failures.
+        if (isWindows && (isCtrlC(event) || isCtrlShiftC(event))) {
+          const selection = this.term.hasSelection?.() ? this.term.getSelection() : '';
+          if (selection || event.shiftKey) {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            if (selection) {
+              try {
+                if (!this.term.element?.ownerDocument?.execCommand('copy')) this.onCopyError();
+              } catch {
+                this.onCopyError();
+              }
             }
+            return false;
           }
-          return false;
+          // Empty Ctrl+C remains xterm's normal ETX/PTY interrupt.
         }
 
         // 2. Windows Ctrl+Shift+V: 强制纯文本粘贴
@@ -220,6 +231,14 @@ export class TerminalView {
     }
     // 单一 textarea 唯一 paste 接缝（裁决 §5.2）
     const textarea = this.term.textarea;
+    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' && textarea) {
+      this._testFocus = () => {
+        window.__AGENTMIRROR_TEST_HOOKS__ ??= {};
+        window.__AGENTMIRROR_TEST_HOOKS__.activeTerminal = this.term;
+      };
+      textarea.addEventListener('focus', this._testFocus);
+      if (textarea.ownerDocument?.activeElement === textarea) this._testFocus();
+    }
     if (textarea?.addEventListener) {
       this._pasteListener = (ev) => {
         ev.preventDefault();
@@ -579,7 +598,10 @@ export class TerminalView {
     if (this.hideCursor) this.term.write(HIDE_CURSOR);
   }
 
-  focus() { try { this.term.focus(); } catch { /* 已 dispose */ } }
+  focus() {
+    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1') this._testFocus?.();
+    try { this.term.focus(); } catch { /* 已 dispose */ }
+  }
 
   blur() { try { this.term.blur(); } catch { /* 已 dispose */ } }
 
@@ -628,6 +650,13 @@ export class TerminalView {
 
   dispose() {
     this._disposed = true;
+    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' && this._testFocus) {
+      this.term.textarea?.removeEventListener('focus', this._testFocus);
+      if (window.__AGENTMIRROR_TEST_HOOKS__?.activeTerminal === this.term) {
+        delete window.__AGENTMIRROR_TEST_HOOKS__.activeTerminal;
+      }
+      this._testFocus = null;
+    }
     this._cancelWriteSchedule();
     this._writeQueue.length = 0;
     this._writeHead = 0;

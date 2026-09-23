@@ -72,6 +72,18 @@ final class SurfaceGeometryTests: XCTestCase {
         XCTAssertTrue(deduper.shouldEmit(initial))
     }
 
+    func testRejectedReportDisarmsWithoutAdvancingNativeGeneration() throws {
+        var geometry = SurfaceGeometry()
+        try geometry.update(arm(0, 1), bounds: bounds, backingScale: 2)
+        geometry.disarm()
+        XCTAssertEqual(geometry.geometryGeneration, 0)
+        XCTAssertFalse(geometry.isDraggable(CGPoint(x: 20, y: 20), bounds: bounds,
+                                            backingScale: 2, flipped: true))
+        try geometry.update(arm(0, 2), bounds: bounds, backingScale: 2)
+        XCTAssertTrue(geometry.isDraggable(CGPoint(x: 20, y: 20), bounds: bounds,
+                                           backingScale: 2, flipped: true))
+    }
+
     func testResetAdvancesGenerationWhenRevisionRestarts() throws {
         var geometry = SurfaceGeometry()
         try geometry.update(arm(0, 7), bounds: bounds, backingScale: 2)

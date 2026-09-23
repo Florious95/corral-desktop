@@ -283,7 +283,7 @@ test('OPEN-2 & OPEN-3: watcher sends disarm immediately upon layout change and d
   assert.equal(dispatched.length, 1);
 });
 
-test('P0 guard: window-state-updated with unchanged viewport does not trigger disarm or report', async () => {
+test('native generation changes rearm same-size geometry without a disarm feedback loop', async () => {
   const dispatched = [];
   const listeners = new Map();
   const originalWindow = globalThis.window;
@@ -320,9 +320,13 @@ test('P0 guard: window-state-updated with unchanged viewport does not trigger di
     },
   });
 
-  // Must NOT trigger disarm, and must NOT trigger report
+  // A native invalidation needs a fresh map even if the viewport is unchanged.
   await new Promise((r) => setTimeout(r, 50));
-  assert.equal(dispatched.length, 0, 'No IPC disarm or arm must be dispatched when dimensions are unchanged');
+  assert.deepEqual(dispatched.map((geom) => geom.phase), ['arm']);
+  dispatched.length = 0;
+  onWindowState({ detail: { geometryGeneration: 2, viewportCSS: { width: 1000, height: 800 } } });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(dispatched.length, 0, 'duplicate metadata must not cause more IPC');
 
   // Now broadcast with CHANGED viewport (1100x900)
   onWindowState({
@@ -342,4 +346,26 @@ test('P0 guard: window-state-updated with unchanged viewport does not trigger di
   else delete globalThis.window;
 });
 
+test('one disarm per layout burst; a change during an in-flight arm invalidates it again', async () => {
+  const dispatched = [];
+  let acknowledge;
+  const watcher = createSurfaceGeometryWatcher({
+    container: { querySelectorAll: () => [] }, debounceMs: 10_000,
+    onUpdate: (geom) => {
+      dispatched.push(geom.phase);
+      if (geom.phase === 'arm') return new Promise((resolve) => { acknowledge = resolve; });
+    },
+  });
+  watcher.triggerImmediately();
+  for (let i = 0; i < 100; i++) watcher.disarm();
+  assert.deepEqual(dispatched, ['arm', 'disarm']);
+  acknowledge();
+  await Promise.resolve();
+  watcher.triggerImmediately();
+  watcher.disarm();
+  assert.deepEqual(dispatched, ['arm', 'disarm', 'arm', 'disarm']);
+  acknowledge();
+  await Promise.resolve();
+  watcher.dispose();
+});
 
