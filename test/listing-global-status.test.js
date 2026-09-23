@@ -182,10 +182,15 @@ test('SpacesList eliminates redundant folder row lamp while TabBar breathing lam
   assert.match(spacesListJsx, /spaces-count-working/);
   assert.match(spacesListJsx, /spaces-count-total/);
 
-  // 3. 核心验收铁律：顶栏 TabBar 状态呼吸灯（tb-tab-lamp / tb-lamp-pulse）绝对保留！
+  // 3. 核心验收铁律：顶栏 TabBar 状态指示灯（tb-tab-lamp）保留高质感静态发光（2026-09-24 裁定，杜绝 GPU 持续重绘）
   assert.match(tabBarJsx, /<StatusLamp status=\{finalStatus\} \/>/);
   assert.match(tabBarJsx, /tb-tab-lamp/);
-  assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*tb-lamp-pulse/);
+  assert.match(chromeCss, /\.tb-tab-lamp\.is-working\s*\{[^}]*box-shadow:\s*0 0 6px (var\(--green-ring\)|rgba\(34, 197, 94, 0\.6\));/);
+  assert.equal(
+    /\.tb-tab-lamp\.is-working\s*\{[^}]*animation:\s*tb-lamp-pulse/.test(chromeCss),
+    false,
+    '.tb-tab-lamp.is-working must NOT have animation: tb-lamp-pulse',
+  );
 });
 
 test('App.jsx completely eliminates PR #144 fake cache chains and relies purely on authoritative workspaces', async () => {

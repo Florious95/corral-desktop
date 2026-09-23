@@ -276,7 +276,6 @@
 .tb-tab-lamp.is-working {
   background: var(--green);
   box-shadow: 0 0 6px var(--green-ring);
-  animation: tb-lamp-pulse 2.4s ease-in-out infinite;
 }
 .tb-tab-lamp.is-idle {
   background: var(--icon-idle);
@@ -284,15 +283,6 @@
 .tb-tab-lamp.is-unknown {
   background: transparent;
   border: 1px solid var(--text-faint);
-}
-@keyframes tb-lamp-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tb-tab-lamp.is-working {
-    animation: none;
-  }
 }
 .tb-tab-close {
   display: flex;
