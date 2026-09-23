@@ -119,6 +119,8 @@ export class TerminalView {
       // 输入走 onData → 协议。远程 delta 负责回显，xterm 不本地 echo。
       disableStdin: false,
       allowProposedApi: true,
+      // xterm uses Option on macOS and Shift elsewhere to select in mouse mode.
+      macOptionClickForcesSelection: true,
       theme,
     });
     this._lastDims = null;

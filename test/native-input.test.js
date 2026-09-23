@@ -111,6 +111,38 @@ test('classifyMouseBtn: only left button (including modifiers) is click', () => 
   assert.equal(classifyMouseBtn(4), 'click');
   assert.equal(classifyMouseBtn(2), 'silent');
   assert.equal(classifyMouseBtn(3), 'silent');
+  for (let modifiers = 0; modifiers < 32; modifiers += 4) {
+    assert.equal(classifyMouseBtn(32 + modifiers), 'click', 'left drag is input');
+    for (const button of [33, 34, 35, 64, 65, 128]) {
+      assert.equal(classifyMouseBtn(button + modifiers), 'silent');
+    }
+  }
+});
+
+test('NativeInputPump preserves complete SGR and X10 left drag gestures across chunk boundaries', () => {
+  for (const protocol of ['sgr', 'x10']) {
+    const report = (button, row, release = false) => protocol === 'sgr'
+      ? `\x1b[<${button};100;${row}${release ? 'm' : 'M'}`
+      : '\x1b[M' + String.fromCharCode(button + 32, 132, row + 32);
+    const gesture = [report(0, 100), report(32, 101), report(32, 102),
+      report(protocol === 'sgr' ? 0 : 3, 102, true)];
+    const input = gesture.join('');
+    for (let split = 1; split < input.length; split++) {
+      const sent = [];
+      const pump = new NativeInputPump({
+        sendText: () => assert.fail('mouse bytes became text'),
+        sendKey: () => assert.fail('mouse bytes became keys'),
+        sendEnter: () => assert.fail('mouse bytes became enter'),
+        sendBytes: (bytes) => sent.push(...bytes),
+        onUnsupported: () => assert.fail('drag is supported'),
+      });
+      const inputMethod = protocol === 'sgr' ? 'onData' : 'onBinary';
+      pump[inputMethod](input.slice(0, split));
+      pump[inputMethod](input.slice(split));
+      assert.deepEqual(sent, Array.from(input, (char) => char.charCodeAt(0)), `${protocol} split ${split}`);
+      pump.dispose();
+    }
+  }
 });
 
 test('NativeInputPump forwards SGR left click bytes and blocks right click', () => {
@@ -302,4 +334,3 @@ test('pump still uplinks type / arrows / Ctrl-C / enter', () => {
   assert.equal(rec.enter, 1);
   pump.dispose();
 });
-
