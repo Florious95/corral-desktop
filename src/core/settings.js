@@ -4,21 +4,21 @@
  */
 
 export const DEFAULT_FONT_FAMILY =
-  'Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, monospace';
+  'Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, "AgentMirror Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "Apple Symbols", "Segoe UI Symbol", monospace';
 export const DEFAULT_FONT_SIZE = 13;
 export const DEFAULT_DIRECTORY_TRACKING = false;
 export const DEFAULT_THEME_MODE = 'system';
 
-// Keep a distinct installed-font fallback for every preset. Generic `monospace`
-// alone collapses several choices to the same renderer on hosts without the
-// optional coding fonts (Issue #259).
+// Keep a distinct installed-font fallback for every preset.
+// Generic monospace is placed at the end of the full symbol fallback chain (Issue #277),
+// so symbol & Nerd Fonts are not prematurely intercepted.
 export const TERMINAL_FONT_FAMILIES = Object.freeze([
-  'Cascadia Code, Consolas, monospace',
-  'JetBrains Mono, "Andale Mono", Menlo, "Lucida Console", monospace',
-  'Fira Code, Monaco, "Courier New", monospace',
-  'Menlo, "Segoe UI Mono", monospace',
-  'Consolas, "Andale Mono", monospace',
-  'Courier New, monospace',
+  'Cascadia Code, Consolas',
+  'JetBrains Mono, "Andale Mono", Menlo, "Lucida Console"',
+  'Fira Code, Monaco, "Courier New"',
+  'Menlo, "Segoe UI Mono"',
+  'Consolas, "Andale Mono"',
+  'Courier New',
 ]);
 
 export const DEFAULT_SETTINGS = Object.freeze({

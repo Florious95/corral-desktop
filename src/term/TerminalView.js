@@ -55,9 +55,19 @@ function withImplicitCr(bytes) {
   return normalized;
 }
 
-// Keep the chosen text font; use the installed Nerd Font for terminal icons.
-const terminalFontFamily = (family) => `${family}, ${nativeCapabilities.platform === 'windows'
-  ? '"Segoe UI Symbol", "Segoe UI Emoji"' : '"Apple Symbols", "Apple Color Emoji"'}, "Symbols Nerd Font Mono", "JetBrainsMono Nerd Font Mono"`;
+// Keep the chosen text font; strip any generic monospace suffix so symbol & Nerd Fonts can cascade before generic monospace (Issue #277).
+const terminalFontFamily = (family) => {
+  const cleanFamily = (family || '').replace(/(?:,\s*)?\bmonospace\b\s*$/i, '').trim();
+  const symbolChain = nativeCapabilities.platform === 'windows'
+    ? '"Segoe UI Symbol", "Segoe UI Emoji", "Apple Symbols"'
+    : '"Apple Symbols", "Apple Color Emoji", "Segoe UI Symbol"';
+  return `${cleanFamily ? `${cleanFamily}, ` : ''}"AgentMirror Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono Nerd Font", "JetBrainsMono NF", ${symbolChain}, monospace`;
+};
+
+// 预加载 AgentMirror Symbols 字体，尽早使 U+1F5AB 🖫 处于 loaded 状态（Issue #277）
+if (typeof document !== 'undefined' && document.fonts?.load) {
+  document.fonts.load("16px 'AgentMirror Symbols'", '🖫').catch(() => {});
+}
 
 export class TerminalView {
   /**
@@ -299,7 +309,34 @@ export class TerminalView {
       this._webglAddon = addon;
       // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
       if (addon) this.fit({ immediate: true });
+      if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
+        try {
+          if (typeof this.term.clearTextureAtlas === 'function') this.term.clearTextureAtlas();
+          else addon?.clearTextureAtlas?.();
+          this.term.refresh?.(0, this.term.rows - 1);
+        } catch {}
+      }
+      return addon;
     });
+
+    // 监听 Web 字体加载完成：强制清理 WebGL 纹理图集缓存并重绘，防止首帧未命中字体时将豆腐块永久缓存在 Texture Atlas 中
+    if (typeof document !== 'undefined' && document.fonts) {
+      const handleFontsLoaded = () => {
+        if (this._disposed || !this.term) return;
+        try {
+          if (typeof this.term.clearTextureAtlas === 'function') {
+            this.term.clearTextureAtlas();
+          } else if (typeof this._webglAddon?.clearTextureAtlas === 'function') {
+            this._webglAddon.clearTextureAtlas();
+          }
+          this.term.refresh?.(0, this.term.rows - 1);
+        } catch {}
+      };
+
+      document.fonts.ready?.then(handleFontsLoaded).catch(() => {});
+      document.fonts.addEventListener?.('loadingdone', handleFontsLoaded);
+      this._fontLoadingListener = handleFontsLoaded;
+    }
   }
 
   /**
@@ -721,6 +758,10 @@ export class TerminalView {
     this._compositionListeners = null;
     for (const observer of this._anchorObservers || []) observer.disconnect();
     this._anchorObservers = null;
+    if (this._fontLoadingListener && typeof document !== 'undefined' && document.fonts?.removeEventListener) {
+      document.fonts.removeEventListener('loadingdone', this._fontLoadingListener);
+      this._fontLoadingListener = null;
+    }
     try { this.term.dispose(); } catch { /* 已 dispose */ }
   }
 

@@ -1,6 +1,15 @@
 /* AgentMirror 设计 token —— 唯一事实来源 docs/UI-SPEC.md §1
    组件里一律引用变量名，禁止裸 hex。 */
 
+/* Issue #277: 离线静态同源符号字体（'self' 分发，避免 CSP data: 拦截），彻底消除 U+1F5AB 🖫 在 macOS/Windows 上的中空豆腐块（tofu） */
+@font-face {
+  font-family: 'AgentMirror Symbols';
+  src: url('/fonts/AgentMirrorSymbols.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  unicode-range: U+1F5AB;
+}
+
 :root {
   /* ——— 1.1 中性色阶（raw ramp，仅供语义 token 引用） ——— */
   --ink-900: #201e1d;
@@ -124,7 +133,7 @@
 
   /* ——— 1.7 字体与字号 ——— */
   --font-ui: -apple-system, 'SF Pro Text', 'PingFang SC', 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, 'Cascadia Code', 'JetBrains Mono', 'AgentMirror Symbols', 'Symbols Nerd Font Mono', 'Symbols Nerd Font', 'JetBrainsMono Nerd Font Mono', 'JetBrainsMono NFM', 'Apple Symbols', 'Segoe UI Symbol', 'Apple Color Emoji', 'Segoe UI Emoji', monospace;
 
   --fs-10: 10px;
   --fs-105: 10.5px;
