@@ -452,36 +452,29 @@ test('fullscreen methods check navigator.userActivation.isActive to prevent brow
   }
 });
 
-test('agentmirror:native window.state event updates epoch and geometryGeneration in getSwiftState', async () => {
-  resetNativeEngineForTests();
+test('native resize completion is forwarded once and rejects stale epochs and sequences', async () => {
   const originalWindow = globalThis.window;
-
-  globalThis.window = {
-    addEventListener: () => {},
-    dispatchEvent: () => {},
-  };
-
-  const initial = nativeCapabilities.getSwiftState ? nativeCapabilities.getSwiftState() : {};
-
-  // Simulate window.dispatchEvent with 'agentmirror:native'
-  const event = {
-    detail: {
-      epoch: 'generation-epoch-777',
-      event: 'window.state',
-      payload: {
-        geometryGeneration: 42,
-      },
-    },
-  };
-
-  // Dispatch on globalThis if custom event is available
-  if (typeof globalThis.dispatchEvent === 'function') {
-    globalThis.dispatchEvent(new CustomEvent('agentmirror:native', { detail: event.detail }));
+  const target = new EventTarget();
+  globalThis.window = target;
+  try {
+    const module = await import('../src/core/nativeCapabilities.js?resize-event-contract');
+    const completed = [];
+    target.addEventListener('agentmirror:window-resize-settled', () => completed.push(true));
+    const emit = (fields = {}) => target.dispatchEvent(new CustomEvent('agentmirror:native', {
+      detail: { v: 1, epoch: 'resize-epoch', seq: 1, event: 'window.resizeSettled', ...fields },
+    }));
+    emit();
+    emit();
+    emit({ seq: 2, epoch: 'stale-epoch' });
+    emit({ seq: 2, v: 2 });
+    assert.equal(completed.length, 1);
+    emit({ seq: 2 });
+    assert.equal(completed.length, 2);
+    assert.equal(module.getSwiftState().epoch, 'resize-epoch');
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
   }
-
-  if (originalWindow !== undefined) globalThis.window = originalWindow;
-  else delete globalThis.window;
-  resetNativeEngineForTests();
 });
 
 test('secureStore.set rejects with fail-closed Error when devices payload is not an Array', async () => {

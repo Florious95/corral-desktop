@@ -235,6 +235,23 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
+    /// A completed gesture has a known final size; terminal grids need not
+    /// wait for the unrelated titlebar hit-map metadata debounce.
+    func emitResizeSettled() {
+        guard ready, let owner, owner.acceptsMessages else { return }
+        let eventEpoch = epoch
+        sequence += 1
+        let event: [String: Any] = ["v": 1, "epoch": eventEpoch, "event": "window.resizeSettled",
+                                    "seq": sequence, "payload": owner.windowState]
+        Task { @MainActor [weak self, weak owner] in
+            guard let self, let owner, self.epoch == eventEpoch, owner.acceptsMessages else { return }
+            _ = try? await owner.webView.callAsyncJavaScript(
+                "window.dispatchEvent(new CustomEvent('agentmirror:native', {detail: event}))",
+                arguments: ["event": event], in: nil, contentWorld: .page
+            )
+        }
+    }
+
     func emitWindowState() {
         guard ready, owner?.acceptsMessages == true else { return }
         stateChange += 1

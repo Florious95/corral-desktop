@@ -121,6 +121,7 @@ Cursor TUI 将真实终端游标停在底部左下角，同时在自己的 follo
 
 **必须保留的两条行为(照抄 web 版,有单测护着):**
 - `_report()` 用 **120ms debounce** 合并 resize —— 服务端每次真 reflow 都回一帧 snapshot,不合并会闪烁重画。
+  macOS 在明确的布局提交/原生 resize 结束边界取消尾随等待，先提交舞台矩形，再 `fit({immediate:true,sync:true})`；仍由同宽门禁发送唯一 subscribe，不额外发送网络 resize（2026-09-23）。
 - 首帧之后的 `fit()` 把**本地** `term.resize` 也推迟到同一 120ms：列宽来回抖时若回到原几何，daemon `resize` 会 no-op 不补快照；先本地 reflow 旧内容就会钉死错乱（裁定 2026-08-23）。
 - `onScroll` 边界:`line <= 0 && this._lastScrollLine > 0` → 触发 `onHistoryBoundary()` → 拉更早历史。
 

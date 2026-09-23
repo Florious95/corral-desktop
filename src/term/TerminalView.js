@@ -22,6 +22,7 @@ import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from 
 import { isCtrlV, isCtrlShiftV, isCtrlC, isCtrlShiftC, isCmdV } from './clipboard.js';
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
 import { getFontMetrics } from './fontMetrics.js';
+import { geomTrace, isGeomTraceEnabled } from './geomTrace.js';
 
 /** 滚轮触顶到再次触发拉历史之间的最小间隔（ms），避免一次手势打出几十个请求。 */
 const WHEEL_THROTTLE_MS = 400;
@@ -80,6 +81,9 @@ export class TerminalView {
       hideCursor = false, TerminalCtor = Terminal,
     } = opts;
     this.container = container;
+    this.traceRef = opts.traceRef ?? null;
+    this._writeSequence = 0;
+    this._parsedSequence = 0;
     this.onResize = onResize || (() => {});
     this.onHistoryBoundary = onHistoryBoundary || (() => {});
     this.onData = onData || (() => {});
@@ -199,6 +203,11 @@ export class TerminalView {
   /** 挂载进容器并做一次 fit。 */
   open() {
     this.term.open(this.container);
+    this._traceRenderDisposable = this.term.onRender?.(({ start, end }) => {
+      if (!isGeomTraceEnabled()) return;
+      geomTrace('render', { ref: this.traceRef, write_seq: this._parsedSequence,
+        rows: this.term.rows, cols: this.term.cols, start_row: start, end_row: end });
+    });
     if (this.hideCursor) {
       this.term.write(HIDE_CURSOR);
       this._cursorMoveDisposable = this.term.onCursorMove?.(() => this._syncCursorAnchor());
@@ -305,6 +314,7 @@ export class TerminalView {
       derived_cols: derivedCols,
       derived_rows: derivedRows,
     };
+    geomTrace('fit', { ref: this.traceRef, rows: derivedRows, cols: derivedCols, immediate, sync });
     const cols = this._fixedGrid ? this._fixedGrid.cols : derivedCols;
     const rows = this._fixedGrid ? this._fixedGrid.rows : derivedRows;
     this._pendingCols = cols;
@@ -359,6 +369,7 @@ export class TerminalView {
   }
 
   _commitGrid(cols, rows, { reportDelay = true } = {}) {
+    geomTrace('grid_commit', { ref: this.traceRef, rows, cols, report_delay: reportDelay });
     if (cols !== this.term.cols || rows !== this.term.rows) {
       // C: 有旧快照时先 reset 再 resize，避免把捕获宽度 A 的格子 wrap 进宽度 B。
       if (this._hasPainted) {
@@ -426,10 +437,14 @@ export class TerminalView {
 
   _write(kind, data) {
     this._writeInFlight = true;
+    const writeSequence = ++this._writeSequence;
+    geomTrace('parse_start', { ref: this.traceRef, kind, write_seq: writeSequence });
     let finished = false;
     const done = () => {
       if (finished) return;
       finished = true;
+      this._parsedSequence = writeSequence;
+      geomTrace('parse_done', { ref: this.traceRef, kind, write_seq: writeSequence });
       this._writeInFlight = false;
       if (!this._disposed && !this._recovering) this._scheduleWrite();
     };
@@ -680,6 +695,7 @@ export class TerminalView {
     if (this._scrollDisposable) this._scrollDisposable.dispose();
     if (this._cursorMoveDisposable) this._cursorMoveDisposable.dispose();
     if (this._renderDisposable) this._renderDisposable.dispose();
+    this._traceRenderDisposable?.dispose();
     if (this._pasteListener && this.term.textarea?.removeEventListener) {
       this.term.textarea.removeEventListener('paste', this._pasteListener, true);
       this._pasteListener = null;

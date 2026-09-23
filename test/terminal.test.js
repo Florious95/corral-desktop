@@ -148,6 +148,36 @@ test('几何没变不上报', async () => {
   view.dispose();
 });
 
+test('completed layout flushes only the final grid and cancels the trailing resize timer', async () => {
+  const { view, container, calls } = makeView();
+  view.open();
+  calls.resize.length = 0;
+  container.clientWidth = 640;
+  view.fit();
+  container.clientWidth = 480;
+  view.fit({ immediate: true, sync: true });
+  assert.deepEqual(calls.resize, [[25, 60]], 'known final geometry does not wait 120ms');
+  view.fit(); // ResizeObserver may deliver the already-committed size later.
+  await sleep(160);
+  assert.deepEqual(calls.resize, [[25, 60]], 'neither old timer nor observer duplicates the wire action');
+  assert.equal(view.cols, 60);
+  view.dispose();
+});
+
+test('a completed layout does not resize a fixed mobile grid', async () => {
+  const { view, container, calls } = makeView();
+  view.open();
+  view.setFixedGrid({ rows: 44, cols: 46 });
+  calls.resize.length = 0;
+  container.clientWidth = 1600;
+  view.fit({ immediate: true, sync: true });
+  await sleep(160);
+  assert.deepEqual(calls.resize, []);
+  assert.equal(view.cols, 46);
+  assert.equal(view.rows, 44);
+  view.dispose();
+});
+
 test('滚到顶触发拉历史；停在顶部不重复触发', () => {
   const { view, calls } = makeView();
   view.open();

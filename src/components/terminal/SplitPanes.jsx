@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import './terminal.css';
 import { XIcon } from '../../lib/icons.jsx';
 import { project, migrateLegacyPanes, getLeaves } from '../../lib/workspaceLayout.js';
+import { nativeCapabilities } from '../../core/nativeCapabilities.js';
 
 /**
  * 同父平铺常驻分屏舞台（TerminalStage / SplitPanes，UI-SPEC §6.1，2026-09-15 裁定）
@@ -38,6 +39,7 @@ export default function SplitPanes({
   const localStageRef = useRef(null);
   const stageRef = externalStageRef || localStageRef;
   const [rect, setRect] = useState(() => ({ x: 0, y: 0, w: 0, h: 0 }));
+  const resizeSettled = useRef(false);
 
   useEffect(() => {
     const el = stageRef.current;
@@ -50,13 +52,26 @@ export default function SplitPanes({
     };
 
     updateRect();
+    const handleResizeSettled = () => {
+      resizeSettled.current = true;
+      // Commit the measured stage and its child rectangles together before
+      // fitting terminals. A native end notification can precede React's RO commit.
+      setRect({ x: 0, y: 0, w: el.clientWidth, h: el.clientHeight });
+    };
+    window.addEventListener('agentmirror:window-resize-settled', handleResizeSettled);
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(updateRect);
       ro.observe(el);
-      return () => ro.disconnect();
+      return () => {
+        ro.disconnect();
+        window.removeEventListener('agentmirror:window-resize-settled', handleResizeSettled);
+      };
     }
     window.addEventListener('resize', updateRect);
-    return () => window.removeEventListener('resize', updateRect);
+    return () => {
+      window.removeEventListener('resize', updateRect);
+      window.removeEventListener('agentmirror:window-resize-settled', handleResizeSettled);
+    };
   }, []);
 
   // 兼容旧接口：若未传 root，则通过 legacy panes 数组迁移构建
@@ -76,6 +91,18 @@ export default function SplitPanes({
   // 纯几何投影计算可见叶子的坐标
   const layout = useMemo(() => project(effectiveRoot, effectiveRect, 1), [effectiveRoot, effectiveRect]);
   const visibleUids = useMemo(() => Object.keys(layout), [layout]);
+
+  // A committed split tree is final. Viewport changes retain their observer
+  // debounce, but a completed drop need not wait for another quiet period.
+  const previousRoot = useRef(effectiveRoot);
+  useLayoutEffect(() => {
+    const committed = previousRoot.current !== effectiveRoot || resizeSettled.current;
+    previousRoot.current = effectiveRoot;
+    resizeSettled.current = false;
+    if (committed && nativeCapabilities.platform === 'macos') {
+      stageRef.current?.dispatchEvent(new Event('terminal:layout-settled'));
+    }
+  }, [effectiveRoot, rect]);
 
   // 常驻宿主集合：访问过的 Tab 保持在常驻列表中，关闭时才真正清理卸载
   const [residentUids, setResidentUids] = useState([]);

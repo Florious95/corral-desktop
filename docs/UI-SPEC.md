@@ -719,11 +719,12 @@ src/
   **2026-09-23（Issue #239）**：Windows DOM 渲染器取消字符行之间的额外 leading，渲染与字体度量回退共用行高；外层 padding 不负责字符行内的制表符接缝。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: Windows DOM 为 1.0，其余平台 1.25`、`cursorBlink:false`、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
-  首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。
+  首次几何就绪后立即完成首订；后续连续窗口拖拽的 `fit()` 目标 cols/rows 在 **120ms 静止后** `term.resize`（明确完成边界见下文）（裁定 2026-09-17）。首帧立刻落到格子。
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：
   - 彻底拔除 500ms 盲等与 46x44 盲建：由 `SplitPanes` 预先投影物理像素，结合全局离屏常驻字体度量缓存（`fontMetrics.js`）纯数学直接得出目标 `initialCols / initialRows` 并注入构造函数，发起的首帧网络 `subscribe` 直接携带最终尺寸一步到位拉起远端目标几何，彻底消灭二次 resize 导致的 CLI 输入框弹跳；
-  - 拖拽 Resize 视觉 60fps 跟随与网络 PTY 120ms 节流解耦：本地容器与视口 60fps 实时跟随鼠标刷新，网络 PTY `resize` 维持单一 120ms 尾随防抖；
+  - 拖拽 Resize 视觉 60fps 跟随与网络 PTY 120ms 节流解耦：本地容器与视口 60fps 实时跟随鼠标刷新，PTY 几何仍由唯一 `subscribe` 通道提交，连续变动维持 120ms 尾随防抖；
   - macOS 原生窗口在尺寸/屏幕变化时立即失效拖拽命中图；最新窗口几何静止至少 120ms 后合并通知 WKWebView，最多一条在途通知。前端每次重新 arm 前仅发送一次 disarm；原生同尺寸 generation/DPR 变化也必须重新 arm，禁止退回旧命中图。拒绝旧报告只清空命中图，不虚增原生 generation（2026-09-23，Issue #251）。
+  - **macOS 已完成排布（2026-09-23）**：分屏树提交、原生窗口拖拽结束、进入/退出全屏完成属于明确结束边界。舞台先提交最终子窗格矩形，再同步 flush 最终 grid 与唯一 subscribe，并取消旧的 120ms 尾随计时；未完成的连续 resize 仍合并，避让/隐藏窗格不抢占 PTY。原生完成信号独立于标题栏命中图的 120ms 通知。诊断使用单调时钟记录 fit→grid_commit→subscribe→snapshot→parse_done→render，render 指 xterm 渲染回调，不能冒充系统实际呈现或完整业务稳定。
   - 首帧快照单微任务原子上屏：首帧快照到达时，在同一个微任务中同步完成快照写入与 `setReady(true)` 状态更新，保证内容上屏与加载占位卸载严格在同一帧呈现，零白屏闪烁。
   **同宽不变量（裁定 2026-08-23）**：每一帧画进 xterm 的 snapshot，其捕获宽度必须等于当时网格宽度。①几何落定之后才 `subscribe`（点开瞬间的过渡宽度不下订）②本地网格变了就用最新几何重发 `subscribe`（不再紧跟同尺寸网络 `resize`）③旧快照在改宽前 `reset`，捕获宽度 ≠ 网格宽度的 snapshot/delta 不下笔。⛔ 不裁行、不改宽度计算。频繁切列时过渡宽度 ⛔ 不把旧 snapshot 本地 reflow。
 - **未就绪占位**（`!ready`）：居中，`44×44px; border-radius:var(--r-12); background:var(--surface-sunken); border:1px solid var(--border-hairline); display:flex;center; margin:0 auto 12px` + `<TerminalIcon size={20} stroke="var(--icon-placeholder)"/>`；下方 `正在连接会话…`（`--fs-13`/600/`var(--text-muted)`）+ `订阅 {ref} · 等待首帧快照`（`--fs-115`/`var(--text-faint)`/`margin-top:3px`）。
