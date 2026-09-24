@@ -201,6 +201,7 @@ export default function App({ seedDevices } = {}) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('terminal:theme-change', { detail: { isDark } }));
       }
+      void nativeCapabilities.window.setTheme(isDark).catch(() => {});
     };
 
     applyTheme();

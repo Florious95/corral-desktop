@@ -194,6 +194,41 @@ test('Swift RPC dispatch performs bootstrap, attaches epoch, and calls canonical
   }
 });
 
+test('Swift RPC dispatch carries effective theme to the native opaque surface', async () => {
+  resetNativeEngineForTests();
+  const originalWindow = globalThis.window;
+  const calls = [];
+
+  try {
+    globalThis.window = {
+      webkit: {
+        messageHandlers: {
+          native: {
+            postMessage: async (envelope) => {
+              calls.push(envelope);
+              const base = { v: 1, id: envelope.id, epoch: 'theme-epoch-001', ok: true };
+              if (envelope.method === 'bootstrap') {
+                return { ...base, result: { epoch: 'theme-epoch-001', window: {} } };
+              }
+              if (envelope.method === 'window.setTheme') return { ...base, result: null };
+              return { ...base, ok: false, error: { message: 'unexpected method' } };
+            },
+          },
+        },
+      },
+    };
+
+    await nativeCapabilities.window.setTheme(true);
+    assert.deepEqual(calls.map(({ method }) => method), ['bootstrap', 'window.setTheme']);
+    assert.deepEqual(calls[1].params, { isDark: true });
+    assert.equal(calls[1].epoch, 'theme-epoch-001');
+  } finally {
+    if (originalWindow !== undefined) globalThis.window = originalWindow;
+    else delete globalThis.window;
+    resetNativeEngineForTests();
+  }
+});
+
 test('Swift RPC dispatch handles legacy window.__nativeCallback asynchronous resolution', async () => {
   resetNativeEngineForTests();
   const originalWindow = globalThis.window;
