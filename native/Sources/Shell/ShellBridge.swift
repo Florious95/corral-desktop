@@ -70,7 +70,7 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     static let windowMethods: Set<String> = [
         "bootstrap", "window.getState", "window.isFullscreen", "window.setFullscreen",
-        "window.toggleFullscreen", "window.minimize", "window.close", "surface.update"
+        "window.toggleFullscreen", "window.minimize", "window.close", "window.setTheme", "surface.update"
     ]
     static let serviceMethods: Set<String> = [
         "devices.load", "devices.save", "secureStore.get", "secureStore.set",
@@ -218,6 +218,12 @@ public final class ShellBridge: NSObject, WKScriptMessageHandlerWithReply {
                   let flag = params[key] as? NSNumber,
                   CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw ShellError.invalidRequest }
             try owner.setFullscreen(flag.boolValue)
+            return NSNull()
+        case "window.setTheme":
+            guard Set(params.keys) == ["isDark"],
+                  let isDark = params["isDark"] as? NSNumber,
+                  CFGetTypeID(isDark) == CFBooleanGetTypeID() else { throw ShellError.invalidRequest }
+            owner.setTheme(isDark: isDark.boolValue)
             return NSNull()
         default:
             guard params.isEmpty else { throw ShellError.invalidRequest }

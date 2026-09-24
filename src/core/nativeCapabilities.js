@@ -467,6 +467,15 @@ export const nativeCapabilities = {
       return typeof document !== 'undefined' ? Boolean(document.fullscreenElement) : false;
     },
 
+    async setTheme(isDark) {
+      if (testEngineOverride?.window?.setTheme) return testEngineOverride.window.setTheme(Boolean(isDark));
+      const env = detectNativeEnvironment();
+      if (env === 'swift') {
+        return callSwiftRPC('window.setTheme', { isDark: Boolean(isDark) });
+      }
+      return true;
+    },
+
     async setFullscreen(flag) {
       if (testEngineOverride?.window?.setFullscreen) return testEngineOverride.window.setFullscreen(flag);
       const env = detectNativeEnvironment();

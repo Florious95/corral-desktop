@@ -49,8 +49,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         bridge = ShellBridge(services: services ?? DefaultShellServices.shared)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")
         webView = WKWebView(frame: .zero, configuration: config)
-        // C1 ablation: make the WebView/window opaque to remove the full-window
-        // alpha-blending path from the idle GPU measurement.
+        // The native shell owns an opaque backing surface; theme updates keep
+        // the page and window colors synchronized without alpha blending.
         webView.setValue(true, forKey: "drawsBackground")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -58,12 +58,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         window.title = "Corral"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        // C1 ablation: use an opaque dark surface instead of transparent glass.
+        // Keep the initial backing color aligned with the system appearance;
+        // the page sends the effective light/dark theme immediately after load.
+        // The WebView receives the same color below.
         window.isOpaque = true
-        window.backgroundColor = NSColor(srgbRed: 15.0 / 255.0,
-                                         green: 17.0 / 255.0,
-                                         blue: 21.0 / 255.0,
-                                         alpha: 1.0)
+        let initialColor = Self.backgroundColor(isDark: Self.systemIsDark)
+        window.backgroundColor = initialColor
+        webView.underPageBackgroundColor = initialColor
         window.hasShadow = true
         window.minSize = NSSize(width: 1100, height: 700)
         window.isReleasedWhenClosed = false
@@ -93,6 +94,23 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
 
     public var isFullscreen: Bool { window?.styleMask.contains(.fullScreen) ?? false }
     public var geometryGeneration: Int { dragSurface.geometry.geometryGeneration }
+
+    public func setTheme(isDark: Bool) {
+        let color = Self.backgroundColor(isDark: isDark)
+        window?.backgroundColor = color
+        webView.underPageBackgroundColor = color
+    }
+
+    public static func backgroundColor(isDark: Bool) -> NSColor {
+        NSColor(srgbRed: isDark ? 15.0 / 255.0 : 251.0 / 255.0,
+                green: isDark ? 17.0 / 255.0 : 250.0 / 255.0,
+                blue: isDark ? 21.0 / 255.0 : 248.0 / 255.0,
+                alpha: 1.0)
+    }
+
+    private static var systemIsDark: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
     public var windowState: [String: Any] {
         [
             "fullscreen": isFullscreen,

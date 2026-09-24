@@ -1031,6 +1031,8 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 - resize、跨屏、全屏、reload/dispose 时清空可拖矩形。正式接缝使用单调 Native `geometryGeneration` 与布局前 `disarm`/`arm` 屏障；同尺寸 DOM 动画仍须由前端在布局提交前 disarm，不得在未握手或几何失效时默认整页可拖。
 - React 保留 Tab 和业务交互。N1 的系统标题栏是装配起点，最终标题栏/安全留白须在 F2/I1 与既有布局同候选验收，不擅自改变 header 几何。
 - `GlassChrome` 在 macOS 26+ 挂载公共 `NSGlassEffectView`/`NSGlassEffectContainerView`，旧系统、减少透明度或提高对比度时降级为实底并保留清晰边界；终端/canvas 保持实底。WK 背景实际穿透未通过交付面验证前，不声明玻璃合成验收完成。
+- **原生不透明承载面与主题契约（2026-09-24，PR #307 收口）**：C1 实验/交付候选固定 `NSWindow.isOpaque = true`、`WKWebView.drawsBackground = true`；Swift 窗口底色与 `WKWebView.underPageBackgroundColor` 必须由同一有效主题同步，浅色为 `#FBFAF8`，深色为 `#0F1115`，禁止只硬编码暗色。React 三态主题（light / dark / system）生效后经 `window.setTheme` 原生 bridge 更新两者。
+- **材质与层级**：root 下 `GlassChrome` 只占顶部 38px `headerFrame`，位于覆盖全 root 的 WKWebView 之下；drag surface / 原生标题栏控件位于最上层。system glass、legacy visual effect、opaque accessibility fallback 严格互斥；终端舞台不进入 `behindWindow` 材质采样区。以上是不透明承载面与层级契约，不等同于 GPU/WindowServer 根治证明，真实 `.app` 仍需独立消融验收。
 - bundle 页面限定 `agentmirror://app/index.html`，只对可信主 frame 暴露 `native` handler；服务由 I1 注入，未配置返回不可用。页面重载换代并取消 pending。资源响应使用 `HTTPURLResponse` 的白名单 MIME、200/206/416 状态与单范围流式传输；实际候选 `.app` 仍须按交付面验收。
 
 ### Windows Local 监听（2026-09-23，Issue #240）
