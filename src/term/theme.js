@@ -10,8 +10,8 @@
 
 export const DARK_TERMINAL_THEME = Object.freeze({
   background: '#0f1115',
-  foreground: '#c0caf5',
-  cursor: '#c0caf5',
+  foreground: '#D5DCE6',
+  cursor: '#D5DCE6',
   cursorAccent: '#0f1115',
   selectionBackground: 'rgba(122, 162, 247, 0.3)',
   selectionForeground: '#ffffff',
@@ -64,7 +64,9 @@ export const LIGHT_TERMINAL_THEME = Object.freeze({
 export function detectDarkMode(opts = {}) {
   if (typeof opts.dark === 'boolean') return opts.dark;
   if (typeof window !== 'undefined') {
-    if (document.documentElement?.getAttribute('data-theme') === 'dark') return true;
+    const dataTheme = document.documentElement?.getAttribute('data-theme');
+    if (dataTheme === 'dark') return true;
+    if (dataTheme === 'light') return false;
     if (document.body?.classList?.contains('dark')) return true;
     return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches || false;
   }

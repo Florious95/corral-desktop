@@ -4,7 +4,7 @@
 
 - 设计稿出处：`design-handoff/cross-platform-desktop-ui-mockups/project/Agent App Prototype.dc.html`（主）+ `Desktop Mockups.dc.html` 的 `#1c 窗口 chrome 规格`。
 - 技术栈：Tauri v2 + Vite + React（JSX，**无 TypeScript**）+ `@xterm/xterm` 6。包管理 npm。
-- 仅 macOS，仅亮色主题，界面文案中文。
+- 跨平台（macOS / Windows），支持三态主题（浅色 / 深色 / 跟随系统，Issue #255 / #296），界面文案中文。
 - 协议：`/Volumes/nvme/Projects/远程Agent安卓/docs/protocol.md`（v1，只读参考）。
 
 ---
@@ -244,6 +244,28 @@
 }
 ```
 pulse 用法固定为 `pulse 1.8s ease-out infinite`（amber 同）。
+
+### 1.10 深色模式主题系统与审美规范（2026-09-24 裁定，Issue #255 / #296）
+
+依据 Astra 审美指导书，深色模式定位为“低饱和石墨蓝灰、层级克制、文字清晰的专业终端桌面主题”：
+- **表面层级（Surface Ramps）**：
+  - 画布底色：`--bg-solid` / `--terminal-bg` 为 `#0F1115`，终端与分屏缝隙保持一致，无发白槽沟；
+  - Surface-0：`#171B22`（侧栏、顶栏 Header、底部工具条基底）；
+  - Surface-1：`#1E242D`（设置弹框外壳、占位图标框）；
+  - Surface-2：`#272F3A`（卡片表面、右键浮层、活跃 Tab 胶囊）；
+  - Surface-3：`#323D4B`（hover / pressed 浅层高光，分段选中高光）。
+- **文字与反差（WCAG 2.1 AA 标准）**：
+  - Text-primary：`#E5E7EB`（正文、当前会话标题）；
+  - Text-secondary：`#B7C0CD`（次级说明、非活跃标签）；
+  - Text-muted：`#9DAABB`（正常空态说明、组标题、辅助元数据，对比度 ≥ 4.6:1）；
+  - Text-disabled：`#667181`（真正不可操作的禁用项）；
+  - 彻底消灭完成按钮反相白字白底 Bug：通过成对动作变量 `--action-primary-bg: #8FAADC` 对 `--action-primary-fg: #111722`，反差达到 8.55:1；
+- **分屏与高光**：
+  - 活跃窗格边框：`--pane-active-border: #5C79A3`（单一 1px 细线，不加 0.25alpha 泛光）；
+  - 分屏手柄高光：收敛至中心 2px 细线（`--accent: #8FAADC`），不填满 6px 间隙；
+- **Provider 图标**：
+  - 纯黑单色资产（Codex、Cursor、Pi 等）在深色模式下应用 `filter: invert(0.88) brightness(1.1)`，反差达到 5:1 以上；彩色品牌资产（Claude Code、Copilot、Grok 等）严格保持原色不反相；
+  - 非活动态图标透明度自适应提升至 `0.65`，避免在深底上丢失轮廓。
 
 全局补充（`src/styles/app.css` 顶部）：
 ```css
@@ -538,7 +560,7 @@ src/
 
 ### 4.10 `chrome/SettingsDialog.jsx`（2026-09-21 设置界面重构裁定）
 
-- **视觉**：沿用应用现有暖灰液态玻璃与墨色强调，不单独引入暗色主题。弹窗宽 560px、18px 圆角，窄窗口保留左右各 16px；高度不超过视口减 32px。标题 / 内容 / 页脚三段，内容独立滚动，关闭与完成始终可见。
+- **视觉**：支持浅色/深色主题外观（Issue #255 / #296）；深色模式采用专业低饱和石墨蓝灰。弹窗宽 560px、18px 圆角，窄窗口保留左右各 16px；高度不超过视口减 32px。标题 / 内容 / 页脚三段，内容独立滚动，关闭与完成始终可见。
 - **分组**：「终端外观」「工作区行为」两节；12px 圆角浅色卡片、细边框与内高光。只用现有语义 token，不再引用不存在的 `--text-strong` / `--text-subtle`。
 - **字体**：六个本地常用字体胶囊按各自字体栈展示，主字体匹配时以墨底浅字与 `aria-pressed` 标记（包括默认回退栈）；自定义 CSS 字体栈输入仍保留。未安装字体使用 CSS 回退，不宣称已检测 / 安装字体、不联网加载字体。
 - **字号**：原生 range（10–24，步长 1）+ 减号 / 数字文本输入 / px / 加号组成联动控件，边界步进按钮禁用；输入合法数值即时生效；空值 / 单个 `1` 等中间态不提前夹逼，失焦或 Enter 使用现有 `clampFontSize` 收口。保留数字清洗与上下方向键步进，禁止回退到会中断输入的 number 自动夹逼。
@@ -941,7 +963,7 @@ PROVIDER_LABEL  // §8.2 最后一列（旧封存 UI 别名仍可读）
 | Windows caption 三键（原型 46×40 废弃方案） | **已按 2026-09-19 裁定重写** | 依据多端支持规划，采用 Tauri v2 标准集成方案：引入 `<WindowsWindowControls />`（46×38px，严格 `data-tauri-drag-region="false"`），并自适应 `TitleBar.jsx`，替代了原型的历史废案 |
 | 底部「图标 · 运行 / 空闲」画廊条（`iconGallery`） | **删除** | 设计稿演示用 |
 | 「新建文件夹」按钮 + 内联文件夹输入行（`folderEditing` 全套） | **删除** | Space = 服务端发现的 workspace，客户端不可创建 |
-| 暗色主题 | **不做** | 设计稿只有亮色；xterm 主题也固定亮色 |
+| 暗色主题 | **已支持** | 依据 Issue #255 / #296 规范完整实现深色模式及三态主题切换（浅色/深色/跟随系统），并依据 Astra 审美指导书完成低饱和石墨蓝灰与成对语义 Token 重构 |
 | 侧栏 Search 功能 | 只保留占位行（无 hover、无点击） | 未在本期范围 |
 | 侧栏宽度可调（原型 prop 240–340） | 固定 280 | 无需求 |
 | 分裂列拖拽调宽 | 不做，flex 均分 | 无需求 |

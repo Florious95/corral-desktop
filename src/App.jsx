@@ -196,6 +196,7 @@ export default function App({ seedDevices } = {}) {
       const isDark = mode === 'dark' || (mode === 'system' && (mql?.matches ?? false));
       if (typeof document !== 'undefined') {
         document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
       }
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('terminal:theme-change', { detail: { isDark } }));

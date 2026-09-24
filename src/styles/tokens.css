@@ -11,6 +11,39 @@
 }
 
 :root {
+  /* ——— 1.0 基础表面与语义色对（默认 / 浅色模式，Issue #296 规范对齐） ——— */
+  color-scheme: light;
+  --surface-0: #f5f3ef;
+  --surface-1: #fdfcfb;
+  --surface-2: #ffffff;
+  --surface-3: #e8e5e0;
+  --control-border-hover: rgba(0, 0, 0, .24);
+  --pane-active-border: #2e5898;
+  --accent: #2e5898;
+  --accent-hover: #24477c;
+  --accent-pressed: #1a345c;
+  --on-accent: #ffffff;
+  --selection-bg: rgba(0, 0, 0, .06);
+  --selection-fg: var(--text);
+  --selection-border: rgba(0, 0, 0, .14);
+  --action-primary-bg: #3a3835;
+  --action-primary-fg: #ffffff;
+  --action-primary-hover: #201e1d;
+  --action-primary-pressed: #000000;
+  --choice-selected-bg: var(--ink-800);
+  --choice-selected-fg: #ffffff;
+  --choice-selected-border: var(--ink-800);
+  --preview-bg: #3a3835;
+  --preview-fg: #fbfaf8;
+  --range-fill: var(--ink-800);
+  --control-thumb: #ffffff;
+  --switch-off-bg: var(--toggle-off);
+  --switch-on-bg: var(--brand);
+  --tab-active-bg: var(--bg);
+  --tab-active-border: var(--border-input);
+  --text-disabled: #b0aca3;
+  --provider-icon-idle-opacity: 0.4;
+
   /* ——— 1.1 中性色阶（raw ramp，仅供语义 token 引用） ——— */
   --ink-900: #201e1d;
   --ink-800: #3a3835;
@@ -206,8 +239,10 @@
   100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0) }
 }
 
-/* ——— 2.0 深色模式主题变量 (Issue #255) ——— */
+/* ——— 2.0 深色模式主题变量 (Issue #255 / Issue #296 依据 Astra 审美指导书完整重构) ——— */
 [data-theme='dark'] {
+  color-scheme: dark;
+
   /* ——— 1.1 中性色阶（Dark Mode） ——— */
   --ink-900: #fbfaf8;
   --ink-800: #ededec;
@@ -222,87 +257,131 @@
   --ink-100: #242320;
   --ink-060: #1a1917;
 
-  /* ——— 1.2 表面 / 文字 / 图标 (Dark Mode) ——— */
+  /* ——— 1.2 表面体系 (Surface Ramps) ——— */
+  --bg-solid: #0F1115;
+  --terminal-bg: #0F1115;
   --bg: rgba(15, 17, 21, 0.96);
-  --bg-solid: #0f1115;
-  --sidebar-bg: rgba(22, 25, 32, 0.70);
-  --titlebar-top: rgba(26, 29, 38, 0.60);
-  --titlebar-bottom: rgba(20, 22, 29, 0.40);
-  --bar-bg: rgba(24, 28, 36, 0.80);
-  --surface-sunken: rgba(12, 14, 18, 0.85);
-  --field-bg: #1c202a;
+  --surface-0: #171B22;
+  --surface-1: #1E242D;
+  --surface-2: #272F3A;
+  --surface-3: #323D4B;
+  --sidebar-bg: #171B22;
+  --titlebar-top: #1B2028;
+  --titlebar-bottom: #171B22;
+  --titlebar-grad: linear-gradient(180deg, #1B2028 0%, #171B22 100%);
+  --bar-bg: #171B22;
+  --surface-sunken: #171B22;
+  --field-bg: #171B22;
 
-  --text: var(--ink-800);
-  --text-secondary: var(--ink-600);
-  --text-muted: var(--ink-400);
-  --text-faint: var(--ink-250);
-  --text-hover: var(--ink-900);
-  --label: var(--ink-400);
+  /* ——— 1.3 文字与图标 ——— */
+  --text: #E5E7EB;
+  --text-secondary: #B7C0CD;
+  --text-muted: #9DAABB;
+  --text-disabled: #667181;
+  --text-faint: #9DAABB;
+  --text-hover: #FFFFFF;
+  --label: #9DAABB;
 
-  --icon: var(--ink-400);
-  --icon-strong: var(--ink-700);
-  --icon-titlebar: var(--ink-600);
-  --icon-placeholder: var(--ink-300);
-  --icon-idle: var(--ink-300);
-  --dot-hollow: var(--ink-300);
-  --checkbox-border: var(--ink-250);
+  --icon: #AAB6C5;
+  --icon-strong: #E5E7EB;
+  --icon-titlebar: #AAB6C5;
+  --icon-placeholder: #8291A5;
+  --icon-idle: #8291A5;
+  --dot-hollow: #8291A5;
+  --checkbox-border: #6D7B90;
 
-  /* ——— 1.3 强调色 (Dark Mode) ——— */
-  --green: #34c759;
-  --green-ring: rgba(52, 199, 89, .45);
-  --green-deep: #4ade80;
-  --green-badge-bg: rgba(52, 199, 89, 0.15);
-  --amber: #f59e0b;
-  --amber-ring: rgba(245, 158, 11, .45);
-  --amber-deep: #fbbf24;
-  --danger: #ef4444;
-  --brand: #f97316;
-  --warn-text: #fb923c;
-  --gold: #d4af37;
-  --gold-hover: #f3e5ab;
-  --input-focus: #7aa2f7;
-  --input-focus-ring: rgba(122, 162, 247, .25);
+  /* ——— 1.4 边框体系 (3 类边框分工) ——— */
+  --border-subtle: #2A323E;
+  --border: #3A4554;
+  --border-strong: #3A4554;
+  --border-hairline: #2A323E;
+  --border-input: #6D7B90;
+  --control-border-hover: #8291A5;
+  --pane-active-border: #5C79A3;
 
-  --badge-local-bg: rgba(255, 255, 255, 0.08);
-  --badge-local-fg: var(--ink-700);
-  --badge-remote-bg: rgba(245, 158, 11, 0.12);
-  --badge-remote-fg: #fbbf24;
+  /* ——— 1.5 强调色与状态色 ——— */
+  --accent: #8FAADC;
+  --accent-hover: #A5BBE5;
+  --accent-pressed: #7896CE;
+  --on-accent: #111722;
+  --selection-bg: #28374C;
+  --selection-fg: #DCE8FF;
+  --selection-border: #5C79A3;
+  --input-focus: #8FAADC;
+  --input-focus-ring: rgba(143, 170, 220, .22);
 
-  /* ——— 1.4 叠加层 / 边框 (Dark Mode) ——— */
+  --green: #72BE93;
+  --green-ring: rgba(114, 190, 147, .45);
+  --green-deep: #72BE93;
+  --green-badge-bg: rgba(114, 190, 147, 0.15);
+  --amber: #D8B57B;
+  --amber-ring: rgba(216, 181, 123, .45);
+  --amber-deep: #D8B57B;
+  --danger: #F08A93;
+  --brand: #D69A80;
+  --warn-text: #D8B57B;
+  --gold: #D8B57B;
+  --gold-hover: #E5C995;
+
+  --badge-local-bg: #272F3A;
+  --badge-local-fg: #B7C0CD;
+  --badge-remote-bg: rgba(216, 181, 123, 0.15);
+  --badge-remote-fg: #D8B57B;
+
+  /* ——— 1.6 控件与动作语义对 ——— */
+  --action-primary-bg: #8FAADC;
+  --action-primary-fg: #111722;
+  --action-primary-hover: #A5BBE5;
+  --action-primary-pressed: #7896CE;
+  --choice-selected-bg: #28374C;
+  --choice-selected-fg: #DCE8FF;
+  --choice-selected-border: #5C79A3;
+  --preview-bg: #0F1115;
+  --preview-fg: #D5DCE6;
+  --range-fill: #8FAADC;
+  --control-thumb: #D5DCE6;
+  --switch-off-bg: #414D5D;
+  --switch-on-bg: #42638E;
+  --tab-active-bg: #272F3A;
+  --tab-active-border: #3A4554;
+  --provider-icon-idle-opacity: 0.65;
+
+  /* ——— 1.7 叠加层 / 玻璃层 / 阴影 ——— */
   --hover-1: rgba(255, 255, 255, .04);
   --hover-2: rgba(255, 255, 255, .06);
   --hover-3: rgba(255, 255, 255, .08);
   --hover-4: rgba(255, 255, 255, .10);
   --hover-5: rgba(255, 255, 255, .12);
   --active-1: rgba(255, 255, 255, .16);
-  --sel-bg: rgba(255, 255, 255, .09);
-  --fill-subtle: rgba(255, 255, 255, .05);
-  --toggle-off: rgba(255, 255, 255, .18);
+  --sel-bg: #28374C;
+  --fill-subtle: #1E242D;
+  --toggle-off: #414D5D;
 
-  --border-hairline: rgba(255, 255, 255, .07);
-  --border: rgba(255, 255, 255, .10);
-  --border-strong: rgba(255, 255, 255, .14);
-  --border-input: rgba(255, 255, 255, .18);
+  --glass-menu: rgba(39, 47, 58, .98);
+  --glass-popover: rgba(39, 47, 58, .98);
+  --glass-dialog: rgba(30, 36, 45, .98);
+  --scrim: rgba(0, 0, 0, .40);
+  --scrim-blur: blur(3px);
+  --blur-dialog: blur(28px) saturate(1.05);
+  --blur-menu: blur(20px) saturate(1.05);
+  --blur-popover: blur(24px) saturate(1.05);
+  --titlebar-inset: inset 0 1px 0 rgba(255, 255, 255, .025);
+  --shadow-dialog: 0 0 0 1px var(--border), 0 24px 64px rgba(0, 0, 0, .44), 0 6px 18px rgba(0, 0, 0, .20);
+  --shadow-menu: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .20);
+  --shadow-popover: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .20);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, .36);
+  --input-focus-ring: rgba(143, 170, 220, .22);
+
   --ring-hairline: inset 0 0 0 0.5px rgba(255, 255, 255, .08);
   --ring-tile: 0 0 0 0.5px rgba(255, 255, 255, .10);
-  --ring-tile-sel: 0 0 0 1.5px #7aa2f7;
+  --ring-tile-sel: 0 0 0 1.5px #8FAADC;
   --ring-chip: inset 0 0 0 1px rgba(255, 255, 255, .14);
-
-  /* ——— 1.5 玻璃层 / 阴影 (Dark Mode) ——— */
-  --glass-menu: rgba(24, 28, 36, .85);
-  --glass-popover: rgba(26, 30, 40, .90);
-  --glass-dialog: rgba(22, 26, 34, .95);
-  --scrim: rgba(0, 0, 0, .55);
-
-  --shadow-menu: 0 0 0 0.5px rgba(255, 255, 255, .10), 0 16px 44px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .3);
-  --shadow-popover: 0 0 0 0.5px rgba(255, 255, 255, .12), 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3);
-  --shadow-dialog: 0 0 0 0.5px rgba(255, 255, 255, .14), 0 24px 70px rgba(0, 0, 0, .7);
-  --shadow-knob: 0 1px 3px rgba(0, 0, 0, .4);
-  --titlebar-inset: inset 0 1px 0 rgba(255, 255, 255, .08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    color-scheme: dark;
+
     --ink-900: #fbfaf8;
     --ink-800: #ededec;
     --ink-700: #d6d4ce;
@@ -316,49 +395,89 @@
     --ink-100: #242320;
     --ink-060: #1a1917;
 
+    --bg-solid: #0F1115;
+    --terminal-bg: #0F1115;
     --bg: rgba(15, 17, 21, 0.96);
-    --bg-solid: #0f1115;
-    --sidebar-bg: rgba(22, 25, 32, 0.70);
-    --titlebar-top: rgba(26, 29, 38, 0.60);
-    --titlebar-bottom: rgba(20, 22, 29, 0.40);
-    --bar-bg: rgba(24, 28, 36, 0.80);
-    --surface-sunken: rgba(12, 14, 18, 0.85);
-    --field-bg: #1c202a;
+    --surface-0: #171B22;
+    --surface-1: #1E242D;
+    --surface-2: #272F3A;
+    --surface-3: #323D4B;
+    --sidebar-bg: #171B22;
+    --titlebar-top: #1B2028;
+    --titlebar-bottom: #171B22;
+    --titlebar-grad: linear-gradient(180deg, #1B2028 0%, #171B22 100%);
+    --bar-bg: #171B22;
+    --surface-sunken: #171B22;
+    --field-bg: #171B22;
 
-    --text: var(--ink-800);
-    --text-secondary: var(--ink-600);
-    --text-muted: var(--ink-400);
-    --text-faint: var(--ink-250);
-    --text-hover: var(--ink-900);
-    --label: var(--ink-400);
+    --text: #E5E7EB;
+    --text-secondary: #B7C0CD;
+    --text-muted: #9DAABB;
+    --text-disabled: #667181;
+    --text-faint: #9DAABB;
+    --text-hover: #FFFFFF;
+    --label: #9DAABB;
 
-    --icon: var(--ink-400);
-    --icon-strong: var(--ink-700);
-    --icon-titlebar: var(--ink-600);
-    --icon-placeholder: var(--ink-300);
-    --icon-idle: var(--ink-300);
-    --dot-hollow: var(--ink-300);
-    --checkbox-border: var(--ink-250);
+    --icon: #AAB6C5;
+    --icon-strong: #E5E7EB;
+    --icon-titlebar: #AAB6C5;
+    --icon-placeholder: #8291A5;
+    --icon-idle: #8291A5;
+    --dot-hollow: #8291A5;
+    --checkbox-border: #6D7B90;
 
-    --green: #34c759;
-    --green-ring: rgba(52, 199, 89, .45);
-    --green-deep: #4ade80;
-    --green-badge-bg: rgba(52, 199, 89, 0.15);
-    --amber: #f59e0b;
-    --amber-ring: rgba(245, 158, 11, .45);
-    --amber-deep: #fbbf24;
-    --danger: #ef4444;
-    --brand: #f97316;
-    --warn-text: #fb923c;
-    --gold: #d4af37;
-    --gold-hover: #f3e5ab;
-    --input-focus: #7aa2f7;
-    --input-focus-ring: rgba(122, 162, 247, .25);
+    --border-subtle: #2A323E;
+    --border: #3A4554;
+    --border-strong: #3A4554;
+    --border-hairline: #2A323E;
+    --border-input: #6D7B90;
+    --control-border-hover: #8291A5;
+    --pane-active-border: #5C79A3;
 
-    --badge-local-bg: rgba(255, 255, 255, 0.08);
-    --badge-local-fg: var(--ink-700);
-    --badge-remote-bg: rgba(245, 158, 11, 0.12);
-    --badge-remote-fg: #fbbf24;
+    --accent: #8FAADC;
+    --accent-hover: #A5BBE5;
+    --accent-pressed: #7896CE;
+    --on-accent: #111722;
+    --selection-bg: #28374C;
+    --selection-fg: #DCE8FF;
+    --selection-border: #5C79A3;
+    --input-focus: #8FAADC;
+    --input-focus-ring: rgba(143, 170, 220, .22);
+
+    --green: #72BE93;
+    --green-ring: rgba(114, 190, 147, .45);
+    --green-deep: #72BE93;
+    --green-badge-bg: rgba(114, 190, 147, 0.15);
+    --amber: #D8B57B;
+    --amber-ring: rgba(216, 181, 123, .45);
+    --amber-deep: #D8B57B;
+    --danger: #F08A93;
+    --brand: #D69A80;
+    --warn-text: #D8B57B;
+    --gold: #D8B57B;
+    --gold-hover: #E5C995;
+
+    --badge-local-bg: #272F3A;
+    --badge-local-fg: #B7C0CD;
+    --badge-remote-bg: rgba(216, 181, 123, 0.15);
+    --badge-remote-fg: #D8B57B;
+
+    --action-primary-bg: #8FAADC;
+    --action-primary-fg: #111722;
+    --action-primary-hover: #A5BBE5;
+    --action-primary-pressed: #7896CE;
+    --choice-selected-bg: #28374C;
+    --choice-selected-fg: #DCE8FF;
+    --choice-selected-border: #5C79A3;
+    --preview-bg: #0F1115;
+    --preview-fg: #D5DCE6;
+    --range-fill: #8FAADC;
+    --control-thumb: #D5DCE6;
+    --switch-off-bg: #414D5D;
+    --switch-on-bg: #42638E;
+    --tab-active-bg: #272F3A;
+    --tab-active-border: #3A4554;
+    --provider-icon-idle-opacity: 0.65;
 
     --hover-1: rgba(255, 255, 255, .04);
     --hover-2: rgba(255, 255, 255, .06);
@@ -366,28 +485,43 @@
     --hover-4: rgba(255, 255, 255, .10);
     --hover-5: rgba(255, 255, 255, .12);
     --active-1: rgba(255, 255, 255, .16);
-    --sel-bg: rgba(255, 255, 255, .09);
-    --fill-subtle: rgba(255, 255, 255, .05);
-    --toggle-off: rgba(255, 255, 255, .18);
+    --sel-bg: #28374C;
+    --fill-subtle: #1E242D;
+    --toggle-off: #414D5D;
 
-    --border-hairline: rgba(255, 255, 255, .07);
-    --border: rgba(255, 255, 255, .10);
-    --border-strong: rgba(255, 255, 255, .14);
-    --border-input: rgba(255, 255, 255, .18);
+    --glass-menu: rgba(39, 47, 58, .98);
+    --glass-popover: rgba(39, 47, 58, .98);
+    --glass-dialog: rgba(30, 36, 45, .98);
+    --scrim: rgba(0, 0, 0, .40);
+    --scrim-blur: blur(3px);
+    --blur-dialog: blur(28px) saturate(1.05);
+    --blur-menu: blur(20px) saturate(1.05);
+    --blur-popover: blur(24px) saturate(1.05);
+    --titlebar-inset: inset 0 1px 0 rgba(255, 255, 255, .025);
+    --shadow-dialog: 0 0 0 1px var(--border), 0 24px 64px rgba(0, 0, 0, .44), 0 6px 18px rgba(0, 0, 0, .20);
+    --shadow-menu: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .20);
+    --shadow-popover: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .20);
+    --shadow-knob: 0 1px 3px rgba(0, 0, 0, .36);
+    --input-focus-ring: rgba(143, 170, 220, .22);
+
     --ring-hairline: inset 0 0 0 0.5px rgba(255, 255, 255, .08);
     --ring-tile: 0 0 0 0.5px rgba(255, 255, 255, .10);
-    --ring-tile-sel: 0 0 0 1.5px #7aa2f7;
+    --ring-tile-sel: 0 0 0 1.5px #8FAADC;
     --ring-chip: inset 0 0 0 1px rgba(255, 255, 255, .14);
+  }
+}
 
-    --glass-menu: rgba(24, 28, 36, .85);
-    --glass-popover: rgba(26, 30, 40, .90);
-    --glass-dialog: rgba(22, 26, 34, .95);
-    --scrim: rgba(0, 0, 0, .55);
+/* 活跃 Tab 胶囊在深色主题下使用 Surface-2 (#272F3A) 与轻细边框 (#3A4554) 浮起 (Issue #296) */
+[data-theme='dark'] .tb-tab-capsule,
+[data-theme='dark'] .tb-tab.is-active {
+  background: var(--tab-active-bg, var(--surface-2));
+  border-color: var(--tab-active-border, var(--border));
+}
 
-    --shadow-menu: 0 0 0 0.5px rgba(255, 255, 255, .10), 0 16px 44px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .3);
-    --shadow-popover: 0 0 0 0.5px rgba(255, 255, 255, .12), 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3);
-    --shadow-dialog: 0 0 0 0.5px rgba(255, 255, 255, .14), 0 24px 70px rgba(0, 0, 0, .7);
-    --shadow-knob: 0 1px 3px rgba(0, 0, 0, .4);
-    --titlebar-inset: inset 0 1px 0 rgba(255, 255, 255, .08);
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .tb-tab-capsule,
+  :root:not([data-theme='light']) .tb-tab.is-active {
+    background: var(--tab-active-bg, var(--surface-2));
+    border-color: var(--tab-active-border, var(--border));
   }
 }
