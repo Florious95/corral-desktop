@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TerminalView } from '../src/term/TerminalView.js';
+import {
+  attachWebglRenderer,
+  isWebglDisabled,
+  setDisableWebglForTests,
+} from '../src/term/webglRenderer.js';
 
 class MockContainer {
   constructor() {
@@ -83,4 +88,54 @@ test('TerminalView runtime lock blocks DECSET ?12h and combined escape sequences
   assert.equal(decModes?.applicationCursorKeys, true, 'other DEC modes must still work');
 
   view.dispose();
+});
+
+test('TerminalView runtime lock resists fragmented/chunked escape sequences across packet boundaries', async () => {
+  const container = new MockContainer();
+  const view = new TerminalView(container);
+
+  const decModes = view.term._core?.coreService?.decPrivateModes;
+
+  // Chunked DECSCUSR 5: "\x1b[5" then " q"
+  await new Promise((done) => view.term.write('\x1b[5', done));
+  await new Promise((done) => view.term.write(' q', done));
+  assert.equal(view.term.options.cursorBlink, false);
+  assert.equal(decModes?.cursorBlink, false);
+  assert.equal(decModes?.cursorStyle, 'bar');
+
+  // Chunked DECSET 12: "\x1b[?" then "12h"
+  await new Promise((done) => view.term.write('\x1b[?', done));
+  await new Promise((done) => view.term.write('12h', done));
+  assert.equal(view.term.options.cursorBlink, false);
+  assert.equal(decModes?.cursorBlink, false);
+
+  view.dispose();
+});
+
+test('WebGL ablation channel: supports explicit disableWebgl parameter and test overrides for Phase 2 energy profiling', async () => {
+  setDisableWebglForTests(null);
+  assert.equal(isWebglDisabled(), false);
+
+  // 1. Global / test override disables WebGL
+  setDisableWebglForTests(true);
+  assert.equal(isWebglDisabled(), true);
+
+  const fakeTerm = { loadAddon() {} };
+  const res = await attachWebglRenderer(fakeTerm);
+  assert.equal(res, null, 'attachWebglRenderer must return null when WebGL is disabled');
+
+  // 2. Per-instance disableWebgl parameter disables WebGL
+  setDisableWebglForTests(false);
+  assert.equal(isWebglDisabled(), false);
+
+  const resInstance = await attachWebglRenderer(fakeTerm, undefined, { disableWebgl: true });
+  assert.equal(resInstance, null, 'Per-instance disableWebgl: true must return null');
+
+  // 3. TerminalView accepts disableWebgl option
+  const container = new MockContainer();
+  const view = new TerminalView(container, { disableWebgl: true });
+  assert.equal(view._disableWebgl, true);
+  view.dispose();
+
+  setDisableWebglForTests(null);
 });
