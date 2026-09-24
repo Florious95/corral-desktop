@@ -19,6 +19,10 @@ export function wsToHttpOrigin(wsUrl) {
     throw new UploadError('invalid_url', '上传地址必须是 WebSocket');
   }
   u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+  // On loopback, normalize 'localhost' to IPv4 '127.0.0.1' so HTTP upload never attempts IPv6 ::1 (Issue #240 & #289)
+  if (u.hostname === 'localhost') {
+    u.hostname = '127.0.0.1';
+  }
   u.pathname = '';
   u.search = '';
   u.hash = '';

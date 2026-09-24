@@ -1,4 +1,4 @@
-export const DEFAULT_LOCAL_URL = 'ws://localhost:9900/ws';
+export const DEFAULT_LOCAL_URL = 'ws://127.0.0.1:9900/ws';
 export const DEFAULT_LOCAL_DEVICE = Object.freeze({
   id: 'local',
   name: 'Local',

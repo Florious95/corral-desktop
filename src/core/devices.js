@@ -159,7 +159,7 @@ export class DeviceManager {
     this._devices = loaded
       .map((d) => ({
         ...d,
-        url: d.id === 'local' && d.url === 'ws://127.0.0.1:9900/ws'
+        url: d.id === 'local' && (d.url === 'ws://localhost:9900/ws' || d.url === 'ws://127.0.0.1:9900/ws')
           ? DEFAULT_LOCAL_DEVICE.url
           : d.url,
         checked: explicit ? checked.has(d.id) : true,

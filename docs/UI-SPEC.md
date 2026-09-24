@@ -1012,6 +1012,14 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 
 客户端管理的 WSL daemon 显式绑定 `127.0.0.1:9900`；启动、readiness 与客户端 Local 连接统一使用 IPv4 loopback。WSL localhost forwarding 的 Windows IPv4 可达性仍须在实际安装包上验收。
 
+### Windows 本地模式图片上传速度与 IPv4 地址归一（2026-09-24，Issue #289）
+
+Windows 本地模式下剪贴板图片上传卡顿的直接根因为：URL 使用 `localhost:9900` 导致 Windows 优先尝试 IPv6 (`[::1]:9900`)，因 WSL 管理的 daemon 仅监听 IPv4 `127.0.0.1:9900` 从而引发 1~3 秒 TCP SYN 超时重试。
+1. `DEFAULT_LOCAL_URL` 严格收敛为 IPv4 loopback `ws://127.0.0.1:9900/ws`；
+2. `wsToHttpOrigin` 与 Rust 侧 `upload_http` 双端强制将环回 `localhost` 归一化为 `127.0.0.1`，杜绝任何 IPv6 SYN 超时回退；
+3. `nativeCapabilities.upload.uploadHttp` 缓存 Tauri `invoke` 实例，消灭高频重复动态 import；
+4. `extractPasteEventSnapshot` 保持对 `ClipboardEvent` 的同步原子数据捕获与瞬时二进制流转换，上传前发送与发送完成到 `attach_preview` 保持零延时直通。
+
 ### Windows WSL 启动响应（2026-09-23，Issue #243）
 
 检查、安装、启动和读取 token 的原生 IPC 均异步分派到阻塞线程池，不占用窗口消息循环。每次 WSL 查询最多等待 30 秒并仅终止本次 launcher；启动 readiness 最多 10 秒，launcher 提前退出立即报错。仍需真实 HTTP readiness 和 token 就绪才进入连接流程，等待期间窗口保持响应。

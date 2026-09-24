@@ -314,6 +314,15 @@ export function filterUiSnapshot(raw) {
 /**
  * 原生能力统一门面
  */
+let cachedTauriInvoke = null;
+async function getTauriInvoke() {
+  if (!cachedTauriInvoke) {
+    const mod = await import('@tauri-apps/api/core');
+    cachedTauriInvoke = mod.invoke;
+  }
+  return cachedTauriInvoke;
+}
+
 export const nativeCapabilities = {
   get environment() {
     if (testEngineOverride?.environment) {
@@ -587,7 +596,7 @@ export const nativeCapabilities = {
       }
 
       if (env === 'tauri') {
-        const { invoke } = await import('@tauri-apps/api/core');
+        const invoke = await getTauriInvoke();
         const result = await invoke('upload_http', {
           url,
           token,
