@@ -98,6 +98,7 @@ class Conn {
   }
 
   sendBinary(buf) {
+    if (this.hub.onBinary?.(this, buf) === false) return;
     if (this.ws.readyState === 1) this.ws.send(buf);
   }
 
@@ -115,7 +116,7 @@ class Conn {
     const p = frame.payload || {};
     this.hub.received.push({ type, payload: p });
     if (!KNOWN_TYPES.has(type)) return this.error('unsupported_type', `unknown frame type: ${type}`);
-    if (type !== 'auth' && !this.authed) return this.error('unauthorized', 'not authenticated');
+    if (type !== 'auth' && !this.authed && !this.hub.allowAnonymous) return this.error('unauthorized', 'not authenticated');
 
     switch (type) {
       case 'auth': {
@@ -243,6 +244,8 @@ export function startMockDaemon(opts = {}) {
     level2Ms: Number(opts.level2Ms ?? 2000),
     workspaces: opts.workspaces ?? WORKSPACES,
     level2: opts.level2 ?? LEVEL2,
+    onBinary: typeof opts.onBinary === 'function' ? opts.onBinary : null,
+    allowAnonymous: opts.allowAnonymous === true,
     received: [],
     conns: new Set(),
   };

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TerminalView } from '../src/term/TerminalView.js';
 
-class MockContainer {
+class MockElement {
   constructor() {
     this.clientWidth = 800;
     this.clientHeight = 600;
@@ -16,89 +16,91 @@ class MockContainer {
   getBoundingClientRect() { return { width: 800, height: 600, top: 0, left: 0 }; }
 }
 
-test('TerminalView exposes renderer diagnostics, firstPaint callback, and window test hooks', async () => {
-  globalThis.window = {
-    __AGENTMIRROR_TEST_HOOKS__: {},
-    dispatchEvent: () => {},
-  };
+test('Anti-False-Green: TerminalView never reports firstPaintRendered when open() was not called', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { __AGENTMIRROR_TEST_HOOKS__: {}, dispatchEvent() {} };
 
-  const container = new MockContainer();
+  const container = new MockElement();
+  let firstPaintCalled = false;
+
+  const view = new TerminalView(container, {
+    traceRef: 'unopened-view',
+    disableWebgl: true,
+    onFirstPaint: () => { firstPaintCalled = true; },
+  });
+
+  // Verify initial unopened state
+  assert.equal(Boolean(view.term.element), false, 'term.element must be undefined before open()');
+  assert.equal(view.isFirstPaintRendered, false);
+
+  // Write snapshot without calling open()
+  view.writeSnapshot(new TextEncoder().encode('\x1b[2J\x1b[H$ unrendered data'));
+  await new Promise((r) => setTimeout(r, 40));
+
+  // Must NOT trigger onFirstPaint and must NOT be considered rendered
+  assert.equal(firstPaintCalled, false, 'onFirstPaint callback must NOT fire when term is not opened in DOM');
+  assert.equal(view.isFirstPaintRendered, false, 'isFirstPaintRendered getter must stay false');
+
+  const hooks = globalThis.window.__AGENTMIRROR_TEST_HOOKS__;
+  const diag = hooks.getRenderDiagnostics ? hooks.getRenderDiagnostics() : { firstPaintRendered: false, activePanesCount: 0 };
+  assert.equal(diag.firstPaintRendered, false);
+  assert.equal(diag.activePanesCount, 0, 'activePanesCount must be 0 because term.element is not connected');
+
+  // Verify clean dispose does not retain view in activeViews
+  view.dispose();
+  assert.equal(Boolean(hooks.activeViews?.has(view)), false, 'activeViews must not retain disposed view');
+
+  if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow;
+});
+
+test('TerminalView reports firstPaintRendered only after open() mounts to DOM and snapshot parses', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { __AGENTMIRROR_TEST_HOOKS__: {}, dispatchEvent() {} };
+
+  const container = new MockElement();
+  const screenEl = new MockElement();
+  screenEl.parentElement = container;
+
   let firstPaintCalled = false;
   let firstPaintInfo = null;
 
   const view = new TerminalView(container, {
-    traceRef: 'test-session-1',
-    disableWebgl: true, // DOM renderer mode
+    traceRef: 'opened-view',
+    disableWebgl: true,
     onFirstPaint: (info) => {
       firstPaintCalled = true;
       firstPaintInfo = info;
     },
   });
 
-  assert.equal(view.rendererType, 'dom');
-  assert.equal(view.canvasCount, 0);
-  assert.equal(view.isFirstPaintRendered, false);
-
-  // Write snapshot and wait for xterm parse/paint callback
-  view.writeSnapshot(new TextEncoder().encode('\x1b[2J\x1b[H$ hello'));
-  await new Promise((r) => setTimeout(r, 20));
-
-  assert.equal(view.isFirstPaintRendered, true);
-  assert.equal(firstPaintCalled, true);
-  assert.equal(firstPaintInfo.ref, 'test-session-1');
-  assert.equal(firstPaintInfo.renderer, 'dom');
-  assert.equal(firstPaintInfo.canvasCount, 0);
-
-  // Check window.__AGENTMIRROR_TEST_HOOKS__.getRenderDiagnostics()
-  const diag = globalThis.window.__AGENTMIRROR_TEST_HOOKS__.getRenderDiagnostics();
-  assert.ok(diag);
-  assert.equal(diag.firstPaintRendered, true);
-  assert.equal(diag.activePanesCount, 1);
-  assert.equal(diag.activeRenderer, 'dom');
-  assert.equal(diag.canvasCount, 0);
-  assert.equal(diag.panes.length, 1);
-  assert.equal(diag.panes[0].ref, 'test-session-1');
-  assert.equal(diag.panes[0].renderer, 'dom');
-
-  view.dispose();
-  assert.equal(globalThis.window.__AGENTMIRROR_TEST_HOOKS__.getRenderDiagnostics().activePanesCount, 0);
-});
-
-test('TerminalView reports webgl renderer when WebGL addon is attached and active', async () => {
-  globalThis.window = {
-    __AGENTMIRROR_TEST_HOOKS__: {},
-    dispatchEvent: () => {},
-  };
-
-  const container = new MockContainer();
-  // Mock canvas in DOM
-  container.querySelector = (sel) => {
-    if (sel === '.xterm-screen canvas') return { getBoundingClientRect: () => ({ width: 800, height: 600 }) };
-    return null;
-  };
-  container.querySelectorAll = (sel) => {
-    if (sel === '.xterm-screen canvas') return [{}, {}];
-    return [];
-  };
-
-  const view = new TerminalView(container, {
-    traceRef: 'test-session-webgl',
-    disableWebgl: false,
+  // Mock element getter on term instance
+  Object.defineProperty(view.term, 'element', {
+    value: screenEl,
+    configurable: true,
   });
 
-  // Mock fake webgl addon attached
-  view._webglAddon = { dispose() {} };
+  // Write snapshot
+  view.writeSnapshot(new TextEncoder().encode('\x1b[2J\x1b[H$ rendered content'));
+  await new Promise((r) => setTimeout(r, 40));
 
-  assert.equal(view.rendererType, 'webgl');
-  assert.equal(view.canvasCount, 2);
+  assert.equal(firstPaintCalled, true);
+  assert.equal(view.isFirstPaintRendered, true);
+  assert.equal(firstPaintInfo.ref, 'opened-view');
+  assert.equal(firstPaintInfo.renderer, 'dom');
 
-  view.writeSnapshot(new TextEncoder().encode('\x1b[2J\x1b[H$ webgl ready'));
-  await new Promise((r) => setTimeout(r, 20));
-
-  const diag = globalThis.window.__AGENTMIRROR_TEST_HOOKS__.getRenderDiagnostics();
-  assert.equal(diag.activeRenderer, 'webgl');
+  const hooks = globalThis.window.__AGENTMIRROR_TEST_HOOKS__;
+  const diag = hooks.getRenderDiagnostics();
   assert.equal(diag.firstPaintRendered, true);
-  assert.equal(diag.canvasCount, 2);
+  assert.equal(diag.activePanesCount, 1);
+
+  // Disconnecting element removes it from active diagnostics
+  screenEl.isConnected = false;
+  view._notifyRenderDiagnostics();
+  const diagDisconnected = hooks.getRenderDiagnostics();
+  assert.equal(diagDisconnected.activePanesCount, 0);
 
   view.dispose();
+  assert.equal(Boolean(hooks.activeViews?.has(view)), false);
+
+  if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow;
 });

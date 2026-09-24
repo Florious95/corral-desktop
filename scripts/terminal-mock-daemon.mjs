@@ -207,29 +207,20 @@ class MockConnection {
   }
 
   startSubscription(ref, rows, cols) {
-    const existing = this.subs.get(ref);
-    const geometryChanged = !existing || existing.rows !== rows || existing.cols !== cols;
-
     this.stopSubscription(ref);
 
-    // If session is already settled AND geometry has not changed, suppress duplicate output burst
-    if (this.hub.settledSessions.has(ref) && !geometryChanged) {
-      this.hub.logEvent('post_settle_subscribe_suppressed', { ref, rows, cols });
+    // 1. 始终正常应答当前几何的快照（遵循标准协议语义，绝不吞帧导致 SameWidthController 挂死在 awaitingSnapshot）
+    this.sendBinary(encodeBinary(1, ref, buildSnapshotBuffer(ref, rows, cols)));
+    this.hub.noteSnapshot(ref, { rows, cols });
+
+    // 2. 如果该会话已经经历过启动测试脉冲进入静止态（settled），则不再重复产生测试输出内容，保持静止
+    if (this.hub.settledSessions.has(ref)) {
+      this.hub.logEvent('post_settle_subscribe_quiet_snapshot_replied', { ref, rows, cols });
       this.subs.set(ref, { rows, cols, burstTimer: null });
       return;
     }
 
-    // If geometry changed (e.g. from initial 44x46 to actual settled 54x148), reset settled state
-    if (geometryChanged && this.hub.settledSessions.has(ref)) {
-      this.hub.settledSessions.delete(ref);
-      this.hub.logEvent('geometry_changed_resettle', { ref, oldRows: existing?.rows, oldCols: existing?.cols, rows, cols });
-    }
-
-    // 1. Send snapshot for current geometry
-    this.sendBinary(encodeBinary(1, ref, buildSnapshotBuffer(ref, rows, cols)));
-    this.hub.noteSnapshot(ref, { rows, cols });
-
-    // 2. Send a bounded burst of lines (e.g. 3 lines) to simulate real startup output
+    // 3. 初次订阅时：发送有限有界（如 3 行）启动输出，随后彻底停止定时器并标记该会话已静止（settled）
     const burstTotal = this.hub.burstLines;
     let burstIndex = 0;
 
@@ -312,6 +303,7 @@ export function startTerminalMockDaemon(opts = {}) {
         connections: hub.conns.size,
         snapshotsCount: hub.totalSnapshotsDelivered,
         uniqueSessionsWithSnapshot: hub.snapshotsDelivered.size,
+        uniqueRefsWithSnapshot: Array.from(hub.snapshotsDelivered.keys()),
         settledCount: hub.settledSessions.size,
         allSettled: hub.snapshotsDelivered.size > 0 && hub.snapshotsDelivered.size === hub.settledSessions.size,
         events: hub.events,

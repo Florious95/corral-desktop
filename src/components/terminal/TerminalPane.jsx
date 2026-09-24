@@ -540,7 +540,7 @@ export default function TerminalPane({
       data-platform={nativeCapabilities.platform}
       data-presence-mode={presenceMode}
       data-ready={ready ? 'true' : 'false'}
-      data-rendered={renderDiag.rendered || ready ? 'true' : 'false'}
+      data-rendered={renderDiag.rendered ? 'true' : 'false'}
       data-renderer={renderDiag.renderer}
       data-canvas-count={renderDiag.canvasCount}
       data-cols={viewRef.current?.cols ?? agent.cols ?? undefined}

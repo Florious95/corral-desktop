@@ -226,17 +226,7 @@ export class TerminalView {
   open() {
     this.term.open(this.container);
     this._traceRenderDisposable = this.term.onRender?.(({ start, end }) => {
-      if (!this._firstPaintRendered && this._hasPainted) {
-        this._firstPaintRendered = true;
-        this._onFirstPaint?.({
-          ref: this.traceRef,
-          renderer: this.rendererType,
-          canvasCount: this.canvasCount,
-          cols: this.cols,
-          rows: this.rows,
-        });
-        this._notifyRenderDiagnostics();
-      }
+      this._markFirstPaint();
       if (isGeomTraceEnabled()) {
         geomTrace('render', { ref: this.traceRef, write_seq: this._parsedSequence,
           rows: this.term.rows, cols: this.term.cols, start_row: start, end_row: end });
@@ -547,16 +537,8 @@ export class TerminalView {
       }
       this.term.write(this.hideCursor ? withHiddenCursor(data) : data, () => {
         done();
-        if (kind === 'snapshot' && !this._firstPaintRendered) {
-          this._firstPaintRendered = true;
-          this._onFirstPaint?.({
-            ref: this.traceRef,
-            renderer: this.rendererType,
-            canvasCount: this.canvasCount,
-            cols: this.cols,
-            rows: this.rows,
-          });
-          this._notifyRenderDiagnostics();
+        if (kind === 'snapshot') {
+          this._markFirstPaint();
         }
       });
     } catch (error) {
@@ -937,8 +919,31 @@ export class TerminalView {
     return root?.querySelectorAll?.('.xterm-screen canvas')?.length ?? 0;
   }
 
+  /**
+   * 仅当终端已被 open() 挂载到 DOM 中、且实际完成文字屏幕绘制时，才判定为 true。
+   * 未调用 open() 或容器已脱离 DOM 的实例，绝对不可报告 firstPaintRendered（防假绿）。
+   */
   get isFirstPaintRendered() {
-    return Boolean(this._firstPaintRendered || this._hasPainted);
+    const hasScreenElement = Boolean(this.term?.element && this.term.element.isConnected);
+    return Boolean(hasScreenElement && this._firstPaintRendered);
+  }
+
+  _markFirstPaint() {
+    if (this._disposed) return;
+    const hasScreenElement = Boolean(this.term?.element && this.term.element.isConnected);
+    if (!hasScreenElement) return;
+
+    if (!this._firstPaintRendered && this._hasPainted) {
+      this._firstPaintRendered = true;
+      this._onFirstPaint?.({
+        ref: this.traceRef,
+        renderer: this.rendererType,
+        canvasCount: this.canvasCount,
+        cols: this.cols,
+        rows: this.rows,
+      });
+      this._notifyRenderDiagnostics();
+    }
   }
 
   _notifyRenderDiagnostics() {
@@ -948,9 +953,15 @@ export class TerminalView {
 
     window.__AGENTMIRROR_TEST_HOOKS__ ??= {};
     window.__AGENTMIRROR_TEST_HOOKS__.activeViews ??= new Set();
-    window.__AGENTMIRROR_TEST_HOOKS__.activeViews.add(this);
 
-    const allViews = Array.from(window.__AGENTMIRROR_TEST_HOOKS__.activeViews).filter((v) => !v._disposed && v.container?.isConnected);
+    // 只有未 dispose 且终端已打开（term.element 存在且挂载在 DOM 中）的实例才能驻留注册表
+    if (!this._disposed && this.term?.element?.isConnected) {
+      window.__AGENTMIRROR_TEST_HOOKS__.activeViews.add(this);
+    } else {
+      window.__AGENTMIRROR_TEST_HOOKS__.activeViews.delete(this);
+    }
+
+    const allViews = Array.from(window.__AGENTMIRROR_TEST_HOOKS__.activeViews).filter((v) => !v._disposed && Boolean(v.term?.element && v.term.element.isConnected));
     const panes = allViews.map((v) => ({
       ref: v.traceRef || '',
       ready: v.isFirstPaintRendered,
