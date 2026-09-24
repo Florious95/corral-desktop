@@ -33,6 +33,9 @@ const TINT = {
   claude: 'var(--tint-claude)',
 };
 
+/** 纯黑色矢量/单色资产集合（在深色模式下通过滤镜反白，避免贴在深色底上隐形，Issue #296 R1） */
+const MONOCHROME_PROVIDERS = new Set(['codex', 'openai', 'cursor', 'pi', 'grok']);
+
 /**
  * @param {Object} props
  * @param {string|null} [props.provider]
@@ -40,6 +43,7 @@ const TINT = {
  * @param {boolean} [props.active=false]  运行态（state 为 working/blocked）
  */
 export default function ProviderIcon({ provider = null, size = 18, active = false }) {
+  const isMonochrome = Boolean(provider && MONOCHROME_PROVIDERS.has(provider));
   const pair = provider ? ICONS[provider] : null;
   if (pair) {
     return (
@@ -48,10 +52,11 @@ export default function ProviderIcon({ provider = null, size = 18, active = fals
         width={size}
         height={size}
         alt={provider}
+        className={`provider-icon${isMonochrome ? ' is-monochrome' : ''}${active ? ' is-active' : ''}`}
         style={{
           display: 'block',
           flex: 'none',
-          opacity: active ? 1 : 0.4,
+          opacity: active ? 1 : 'var(--provider-icon-idle-opacity, 0.4)',
           transition: 'opacity var(--d-icon)',
         }}
       />

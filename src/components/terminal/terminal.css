@@ -22,9 +22,9 @@
   background: var(--bg);
 }
 
-/* 多分屏状态下带有卡片边框与圆角，透出 6px 底层间隙 (Issue #271) */
+/* 多分屏状态下带有卡片边框与圆角，透出 6px 底层间隙 (Issue #271 / #296) */
 [data-multi-pane="true"] .pane-host {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-subtle, var(--border));
   border-radius: var(--r-8);
 }
 
@@ -39,7 +39,7 @@
   inset: 0;
   pointer-events: none;
   z-index: 4;
-  border: 1px solid var(--input-focus);
+  border: 1px solid var(--pane-active-border, var(--input-focus));
   border-radius: var(--r-8);
   box-sizing: border-box;
 }
@@ -84,7 +84,17 @@
   inset: 0;
   transition: background-color var(--d-hover), opacity var(--d-hover);
   opacity: 0;
-  background-color: var(--input-focus);
+  background-color: var(--accent, var(--input-focus));
+}
+
+.split-resizer[data-axis="x"]::after {
+  left: 2px;
+  right: 2px;
+}
+
+.split-resizer[data-axis="y"]::after {
+  top: 2px;
+  bottom: 2px;
 }
 
 .split-resizer:hover::after,
@@ -223,8 +233,8 @@
   width: 44px;
   height: 44px;
   border-radius: var(--r-12);
-  background: var(--surface-sunken);
-  border: 1px solid var(--border-hairline);
+  background: var(--surface-1, var(--surface-sunken));
+  border: 1px solid var(--border-subtle, var(--border-hairline));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -239,7 +249,7 @@
 
 .terminalpane-placeholder-sub {
   font-size: var(--fs-115);
-  color: var(--text-faint);
+  color: var(--text-muted);
   margin-top: 3px;
 }
 

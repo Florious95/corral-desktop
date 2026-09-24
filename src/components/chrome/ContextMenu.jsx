@@ -41,8 +41,9 @@ export default function ContextMenu({ open, x, y, items, onClose }) {
             key={it.key}
             type="button"
             role="menuitem"
+            disabled={Boolean(it.disabled)}
             className={'chr-btn-reset cm-item' + (it.separator ? ' cm-sep' : '')}
-            style={{ color: it.disabled ? 'var(--text-faint)' : it.color || 'var(--text)' }}
+            style={{ color: it.disabled ? 'var(--text-disabled, var(--text-faint))' : it.color || 'var(--text)' }}
             onClick={() => {
               if (!it.disabled) it.onClick();
               onClose();

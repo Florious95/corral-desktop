@@ -164,8 +164,11 @@
   background: var(--sel-bg);
   font-weight: 600;
 }
-.spaces-row:hover {
+.spaces-row:hover:not(.is-selected) {
   background: var(--hover-5);
+}
+.spaces-row.is-selected:hover {
+  background: var(--sel-bg);
 }
 .spaces-row-name {
   flex: 1;
@@ -395,6 +398,17 @@
 .agents-empty {
   padding: 18px 10px;
   font-size: var(--fs-12);
-  color: var(--text-faint);
+  color: var(--text-muted);
   text-align: center;
+}
+
+/* 黑色/单色 Provider 矢量资产在深色主题下反白（Issue #296） */
+[data-theme='dark'] .provider-icon.is-monochrome {
+  filter: invert(0.88) brightness(1.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .provider-icon.is-monochrome {
+    filter: invert(0.88) brightness(1.1);
+  }
 }

@@ -82,7 +82,7 @@
   gap: 8px;
   padding: 0 10px 0 8px;
   background: var(--titlebar-grad);
-  border-bottom: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-subtle, var(--border-strong));
   box-shadow: var(--titlebar-inset);
   box-sizing: border-box;
   user-select: none;
@@ -398,13 +398,18 @@
   transition: background-color var(--d-hover);
 }
 .cm-item:hover {
-  background-color: var(--hover-5);
+  background-color: var(--surface-3, var(--hover-5));
 }
 .cm-item:active {
   background-color: var(--active-1);
 }
+.cm-item:disabled {
+  color: var(--text-disabled, var(--text-faint)) !important;
+  cursor: default;
+  background-color: transparent !important;
+}
 .cm-sep {
-  border-top: 1px solid var(--border-strong);
+  border-top: 1px solid var(--border-subtle, var(--border-strong));
   margin-top: 4px;
 }
 
@@ -627,14 +632,15 @@
 }
 .chr-btn-primary {
   padding: 7px 16px;
-  color: #fff;
-  background: var(--ink-800);
+  color: var(--action-primary-fg, #fff);
+  background: var(--action-primary-bg, var(--ink-800));
+  transition: background-color var(--d-hover), color var(--d-hover);
 }
 .chr-btn-primary:hover {
-  background: var(--ink-900);
+  background: var(--action-primary-hover, var(--ink-900));
 }
 .chr-btn-primary:active {
-  background: #000;
+  background: var(--action-primary-pressed, #000);
 }
 
 /* ---------- §4.2 mobile pairing ---------- */
@@ -1046,10 +1052,10 @@
 }
 .settings-card {
   padding: 14px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-subtle, var(--border-strong));
   border-radius: var(--r-12);
   background: var(--glass-popover);
-  box-shadow: var(--titlebar-inset), 0 2px 5px var(--fill-subtle);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 .settings-field-heading {
   display: flex;
@@ -1088,9 +1094,15 @@
   border-color: var(--icon-placeholder);
 }
 .settings-preset-btn[aria-pressed='true'] {
-  background: var(--ink-800);
-  border-color: var(--ink-800);
-  color: var(--bg-solid);
+  background: var(--choice-selected-bg, var(--ink-800));
+  border-color: var(--choice-selected-border, var(--ink-800));
+  color: var(--choice-selected-fg, var(--bg-solid));
+  font-weight: 600;
+}
+.settings-preset-btn[aria-pressed='true']:hover {
+  background: var(--choice-selected-bg, var(--ink-800));
+  border-color: var(--choice-selected-border, var(--ink-800));
+  color: var(--choice-selected-fg, var(--bg-solid));
 }
 .settings-preset-btn:active,
 .settings-done:active {
@@ -1126,7 +1138,7 @@
   height: 28px;
   margin: 0;
   border-radius: var(--r-pill);
-  background: linear-gradient(to right, var(--ink-800) var(--settings-range-progress), var(--toggle-off) var(--settings-range-progress)) center / 100% 4px no-repeat;
+  background: linear-gradient(to right, var(--range-fill, var(--ink-800)) var(--settings-range-progress), var(--border-input, var(--toggle-off)) var(--settings-range-progress)) center / 100% 4px no-repeat;
   cursor: pointer;
 }
 .settings-size-slider::-webkit-slider-thumb {
@@ -1134,17 +1146,17 @@
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--border-input);
+  border: 1px solid var(--range-thumb-border, var(--border-input));
   border-radius: 50%;
-  background: var(--field-bg);
+  background: var(--control-thumb, var(--field-bg));
   box-shadow: var(--shadow-knob);
 }
 .settings-size-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
-  border: 1px solid var(--border-input);
+  border: 1px solid var(--range-thumb-border, var(--border-input));
   border-radius: 50%;
-  background: var(--field-bg);
+  background: var(--control-thumb, var(--field-bg));
   box-shadow: var(--shadow-knob);
 }
 .settings-size-slider:focus-visible {
@@ -1177,7 +1189,7 @@
   background: var(--hover-4);
 }
 .settings-step:disabled {
-  color: var(--text-faint);
+  color: var(--text-disabled, var(--text-faint));
   cursor: default;
 }
 .settings-dialog .chr-setting-font-size {
@@ -1199,15 +1211,16 @@
   margin-top: 12px;
   padding: 12px 14px;
   border-radius: var(--r-8);
-  background: var(--ink-800);
-  color: var(--bg-solid);
+  background: var(--preview-bg, var(--ink-800));
+  color: var(--preview-fg, var(--bg-solid));
+  border: 1px solid var(--border-subtle, transparent);
 }
 .settings-preview-heading {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
   font-size: var(--fs-10);
-  color: var(--ink-060);
+  color: var(--preview-caption, #C4C0B7);
 }
 .settings-preview-sample {
   display: flex;
@@ -1240,21 +1253,23 @@
   width: 38px;
   height: 23px;
   border-radius: var(--r-pill);
-  background: var(--toggle-off);
-  box-shadow: var(--ring-hairline);
-  transition: background var(--d-toggle);
+  background: var(--switch-off-bg, var(--toggle-off));
+  border: 1px solid var(--border-input);
+  box-sizing: border-box;
+  transition: background var(--d-toggle), border-color var(--d-toggle);
 }
 .settings-switch[aria-checked='true'] {
-  background: var(--ink-800);
+  background: var(--switch-on-bg, var(--ink-800));
+  border-color: var(--switch-on-border, var(--ink-800));
 }
 .settings-switch-knob {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 1px;
+  left: 1px;
   width: 19px;
   height: 19px;
   border-radius: 50%;
-  background: var(--field-bg);
+  background: var(--control-thumb, var(--field-bg));
   box-shadow: var(--shadow-knob);
   transition: transform var(--d-toggle) var(--ease);
 }
@@ -1266,9 +1281,9 @@
   display: flex;
   gap: 4px;
   padding: 3px;
-  background: var(--surface-sunken);
+  background: var(--surface-0, var(--surface-sunken));
   border-radius: var(--r-8);
-  border: 1px solid var(--border-hairline);
+  border: 1px solid var(--border-subtle, var(--border-hairline));
   box-sizing: border-box;
 }
 .settings-segmented-btn {
@@ -1292,16 +1307,16 @@
 }
 .settings-segmented-btn.is-active,
 .settings-segmented-btn[aria-pressed='true'] {
-  background: var(--field-bg);
+  background: var(--surface-3, var(--field-bg));
   color: var(--text);
-  box-shadow: var(--shadow-knob);
+  box-shadow: 0 0 0 1px var(--border-subtle);
   font-weight: 600;
 }
 .settings-footer {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-subtle, var(--border));
   padding-top: 14px;
   padding-bottom: 14px;
-  background: var(--fill-subtle);
+  background: transparent;
 }
 .settings-save-note {
   display: flex;

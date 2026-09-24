@@ -68,7 +68,7 @@ test('Dark terminal theme strictly satisfies WCAG AA (>= 4.5:1) on WSL dark base
 test('resolveTerminalTheme selects correct theme based on options', () => {
   const darkTheme = resolveTerminalTheme({ dark: true });
   assert.equal(darkTheme.background, '#0f1115');
-  assert.equal(darkTheme.foreground, '#c0caf5');
+  assert.equal(darkTheme.foreground, '#D5DCE6');
 
   const lightTheme = resolveTerminalTheme({ dark: false });
   assert.equal(lightTheme.background, '#fbfaf8');
@@ -101,7 +101,7 @@ test('TerminalView supports setDark and dynamic theme updates', () => {
   // 动态切换到暗色主题
   view.setDark(true);
   assert.equal(view.term.options.theme.background, '#0f1115');
-  assert.equal(view.term.options.theme.foreground, '#c0caf5');
+  assert.equal(view.term.options.theme.foreground, '#D5DCE6');
 
   // 动态切回亮色主题
   view.setDark(false);
