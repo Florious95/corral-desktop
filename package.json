@@ -1,6 +1,6 @@
 {
   "name": "corral-desktop",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "type": "module",
   "description": "Corral desktop client — mirrors tmux-hosted Agent CLI sessions over WebSocket (protocol v1)",
