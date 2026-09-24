@@ -135,7 +135,7 @@ button { border: 0; background: none; padding: 0 }
 }
 
 .app-empty-title { font-size: var(--fs-13); font-weight: 600; color: var(--text-muted) }
-.app-empty-sub { font-size: var(--fs-115); color: var(--text-faint); margin-top: var(--sp-2) }
+.app-empty-sub { font-size: var(--fs-115); color: var(--text-muted); margin-top: var(--sp-2) }
 
 .app-empty-btn {
   margin-top: var(--sp-10);
@@ -143,13 +143,13 @@ button { border: 0; background: none; padding: 0 }
   border-radius: var(--r-8);
   font-size: var(--fs-13);
   font-weight: 600;
-  color: #fff;
-  background: var(--ink-800);
+  color: var(--action-primary-fg, #fff);
+  background: var(--action-primary-bg, var(--ink-800));
   cursor: pointer;
-  transition: background var(--d-hover);
+  transition: background var(--d-hover), color var(--d-hover);
 }
-.app-empty-btn:hover { background: var(--ink-900) }
-.app-empty-btn:active { background: #000 }
+.app-empty-btn:hover { background: var(--action-primary-hover, var(--ink-900)) }
+.app-empty-btn:active { background: var(--action-primary-pressed, #000) }
 
 /* ——— xterm 覆盖：终端底色跟随窗口，滚动条已全局隐藏 ——— */
 .xterm .xterm-viewport { background: transparent !important }
