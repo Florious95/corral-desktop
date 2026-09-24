@@ -402,12 +402,24 @@ export default function TerminalPane({
     // and trigger the first subscribe.
     viewRef.current = view;
     view.open();
+    // Hidden resident panes are content-visibility skipped, so xterm records
+    // a zero client rect during open. Preserve the projected non-zero geometry
+    // used for the initial grid; revealing an unchanged split must stay silent.
+    if (initialCols && initialRows && effectiveW > 0 && effectiveH > 0 && view.lastFit) {
+      view.lastFit.container_width_px = effectiveW;
+      view.lastFit.container_height_px = effectiveH;
+    }
     if (focused || pendingFocusRef.current) {
       view.focus();
       pendingFocusRef.current = false;
     }
 
     const ro = new ResizeObserver(() => {
+      // Hidden resident panes already have their projected geometry. Their
+      // observer may fire while a tab switches, but fitting them here only
+      // repeats the same grid and can trigger an activation reflow.
+      if (host.closest('.is-hidden')) return;
+      if (view.isFitCurrent?.()) return;
       if (currentMode === PRESENCE_MODE.TAKEOVER) {
         view.fit();
       } else {
@@ -419,7 +431,7 @@ export default function TerminalPane({
 
     const handleLayoutSettled = () => {
       if (nativeCapabilities.platform !== 'macos' || currentMode !== PRESENCE_MODE.TAKEOVER
-          || host.closest('.is-hidden')) return;
+          || host.closest('.is-hidden') || view.isFitCurrent?.()) return;
       view.fit({ immediate: true, sync: true });
     };
     const stage = host.closest('.terminal-stage');
