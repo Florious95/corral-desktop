@@ -36,7 +36,7 @@ test('WindowsWindowControls component implements three buttons and strict drag-r
   assert.match(controlsJsx, /className="tb-win-btn tb-win-min"/);
   assert.match(controlsJsx, /title="最小化"/);
   assert.match(controlsJsx, /className="tb-win-btn tb-win-max"/);
-  assert.match(controlsJsx, /fullscreen \? '还原' : '最大化'/);
+  assert.match(controlsJsx, /isMax \? '还原' : '最大化'/);
   assert.match(controlsJsx, /className="tb-win-btn tb-win-close"/);
   assert.match(controlsJsx, /title="关闭"/);
 
@@ -44,9 +44,9 @@ test('WindowsWindowControls component implements three buttons and strict drag-r
   const buttonDragRegionMatches = controlsJsx.match(/data-tauri-drag-region="false"/g);
   assert.ok(buttonDragRegionMatches && buttonDragRegionMatches.length >= 4);
 
-  // 4. 绑定 nativeCapabilities 窗口接口
+  // 4. 绑定 nativeCapabilities 窗口接口（最大化/还原，Issue #298）
   assert.match(controlsJsx, /nativeCapabilities\.window\.minimize/);
-  assert.match(controlsJsx, /nativeCapabilities\.window\.toggleFullscreen/);
+  assert.match(controlsJsx, /nativeCapabilities\.window\.toggleMaximize/);
   assert.match(controlsJsx, /nativeCapabilities\.window\.close/);
 });
 

@@ -1020,6 +1020,13 @@ Windows 本地模式下剪贴板图片上传卡顿的直接根因为：URL 使�
 3. `nativeCapabilities.upload.uploadHttp` 缓存 Tauri `invoke` 实例，消灭高频重复动态 import；
 4. `extractPasteEventSnapshot` 保持对 `ClipboardEvent` 的同步原子数据捕获与瞬时二进制流转换，上传前发送与发送完成到 `attach_preview` 保持零延时直通。
 
+### Windows 窗口最大化与还原状态解耦（2026-09-24，Issue #298）
+
+Windows 右上角放大按钮（`.tb-win-max`）执行标准 Windows「最大化 / 还原」语义，与 document / native 全屏彻底解耦：
+1. 窗口控制能力：`nativeCapabilities.window` 规范实现 `isMaximized`、`maximize`、`unmaximize` 与 `toggleMaximize` 原生接口，并在 `src-tauri/capabilities/default.json` 授予对应权限；
+2. 状态与事件响应：组件挂载及窗口每次触发 `resize` / `onResized` 时均通过 `isMaximized()` 校验真实状态；在最大化与还原之间可靠双向切换，`aria-label` 与 `title` 随动展示「最大化」与「还原」，失败路径静默防御不抛出未处理异常；
+3. 全屏与最大化状态解耦：Windows 下普通最大化窗口仅铺满工作区，`fillsDisplay()` 在 Windows 下恒返回 `false`，确保 `isFullscreen` 与 `isMaximized` 状态互不混淆；最大化路径仅调用 `maximize()` / `unmaximize()`，绝不触发 `setFullscreen()`。
+
 ### Windows WSL 启动响应（2026-09-23，Issue #243）
 
 检查、安装、启动和读取 token 的原生 IPC 均异步分派到阻塞线程池，不占用窗口消息循环。每次 WSL 查询最多等待 30 秒并仅终止本次 launcher；启动 readiness 最多 10 秒，launcher 提前退出立即报错。仍需真实 HTTP readiness 和 token 就绪才进入连接流程，等待期间窗口保持响应。

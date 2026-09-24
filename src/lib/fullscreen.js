@@ -7,6 +7,8 @@ import { nativeCapabilities } from '../core/nativeCapabilities.js';
  */
 export function fillsDisplay() {
   if (typeof window === 'undefined') return false;
+  // On Windows, maximized windows fill the available workspace but are NOT fullscreen (Issue #298).
+  if (nativeCapabilities.platform === 'windows') return false;
   const sw = window.screen.availWidth || window.screen.width;
   const sh = window.screen.availHeight || window.screen.height;
   return window.innerWidth >= sw - 24 && window.innerHeight >= sh - 80;
