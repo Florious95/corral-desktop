@@ -34,21 +34,21 @@ fi
 
 swift build --package-path "$PACKAGE" --configuration "$CONFIGURATION"
 BIN_DIR=$(swift build --package-path "$PACKAGE" --configuration "$CONFIGURATION" --show-bin-path)
-BIN="$BIN_DIR/AgentMirrorApp"
+BIN="$BIN_DIR/CorralApp"
 [[ -x "$BIN" ]] || { echo "missing executable: $BIN" >&2; exit 1; }
 
 mkdir -p "$OUT_ROOT"
 STAGE=$(mktemp -d "$OUT_ROOT/.stage.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
-APP="$STAGE/AgentMirror.app"
+APP="$STAGE/Corral.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/AgentMirrorApp"
+cp "$BIN" "$APP/Contents/MacOS/CorralApp"
 sed "s/__VERSION__/$VERSION/g" \
   "$PACKAGE/Resources/Release-Info.plist" > "$APP/Contents/Info.plist"
 cp -R "$WEB_ROOT" "$APP/Contents/Resources/web"
 cp "$ROOT/src-tauri/resources/nodeprobe-pi-activity.js" "$APP/Contents/Resources/nodeprobe-pi-activity.js"
 if [[ -f "$ROOT/src-tauri/icons/icon.icns" ]]; then
-  cp "$ROOT/src-tauri/icons/icon.icns" "$APP/Contents/Resources/AgentMirror.icns"
+  cp "$ROOT/src-tauri/icons/icon.icns" "$APP/Contents/Resources/Corral.icns"
 fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
@@ -57,9 +57,9 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 CODESIGN_IDENTITY=${CODESIGN_IDENTITY:--}
 codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP" >/dev/null
 
-FINAL="$OUT_ROOT/AgentMirror.app"
+FINAL="$OUT_ROOT/Corral.app"
 if [[ -e "$FINAL" ]]; then
-  PREVIOUS="$OUT_ROOT/.previous-$(date +%s)-AgentMirror.app"
+  PREVIOUS="$OUT_ROOT/.previous-$(date +%s)-Corral.app"
   mv "$FINAL" "$PREVIOUS"
   echo "previous bundle moved to $PREVIOUS"
 fi
@@ -68,11 +68,11 @@ trap - EXIT
 rm -rf "$STAGE"
 
 /usr/bin/plutil -p "$FINAL/Contents/Info.plist"
-file "$FINAL/Contents/MacOS/AgentMirrorApp"
-file "$FINAL/Contents/MacOS/AgentMirrorApp" | grep -q 'arm64' || {
+file "$FINAL/Contents/MacOS/CorralApp"
+file "$FINAL/Contents/MacOS/CorralApp" | grep -q 'arm64' || {
   echo "production app executable is not arm64" >&2
   exit 1
 }
 /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$FINAL/Contents/Info.plist" | grep -Fxq "$VERSION"
-/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$FINAL/Contents/Info.plist" | grep -Fxq 'com.agentmirror.desktop'
+/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$FINAL/Contents/Info.plist" | grep -Fxq 'com.corral.desktop'
 printf 'built %s\n' "$FINAL"

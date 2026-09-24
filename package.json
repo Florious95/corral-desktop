@@ -1,9 +1,9 @@
 {
-  "name": "agentmirror-desktop",
+  "name": "corral-desktop",
   "version": "0.1.13",
   "private": true,
   "type": "module",
-  "description": "AgentMirror macOS desktop client — mirrors tmux-hosted Agent CLI sessions over WebSocket (protocol v1)",
+  "description": "Corral desktop client — mirrors tmux-hosted Agent CLI sessions over WebSocket (protocol v1)",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",

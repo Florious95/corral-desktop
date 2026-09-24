@@ -28,10 +28,18 @@ public final class UISnapshotStore: @unchecked Sendable {
     ]
 
     public let fileURL: URL
+    private let legacyFileURL: URL?
     private let fileManager: FileManager
 
     public init(fileURL: URL, fileManager: FileManager = .default) {
         self.fileURL = fileURL.standardizedFileURL
+        self.legacyFileURL = nil
+        self.fileManager = fileManager
+    }
+
+    private init(fileURL: URL, legacyFileURL: URL?, fileManager: FileManager) {
+        self.fileURL = fileURL.standardizedFileURL
+        self.legacyFileURL = legacyFileURL?.standardizedFileURL
         self.fileManager = fileManager
     }
 
@@ -40,10 +48,17 @@ public final class UISnapshotStore: @unchecked Sendable {
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first ?? fileManager.homeDirectoryForCurrentUser
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.agentmirror.desktop.test"
-        let directory = appSupport.appendingPathComponent(bundleID, isDirectory: true)
+        let directory = appSupport.appendingPathComponent(
+            Bundle.main.bundleIdentifier ?? "com.corral.desktop.test",
+            isDirectory: true
+        )
+        let legacyDirectory = appSupport.appendingPathComponent(
+            "com.agentmirror.desktop",
+            isDirectory: true
+        )
         self.init(
             fileURL: directory.appendingPathComponent(Self.fileName, isDirectory: false),
+            legacyFileURL: legacyDirectory.appendingPathComponent(Self.fileName, isDirectory: false),
             fileManager: fileManager
         )
     }
@@ -111,6 +126,8 @@ public final class UISnapshotStore: @unchecked Sendable {
         let targetURL: URL
         if Self.isPrivateRegularFile(fileURL.path) {
             targetURL = fileURL
+        } else if let legacyFileURL, Self.isPrivateRegularFile(legacyFileURL.path) {
+            targetURL = legacyFileURL
         } else {
             let legacyURL = fileURL.deletingLastPathComponent().appendingPathComponent("ui-snapshot.json")
             guard Self.isPrivateRegularFile(legacyURL.path) else { return nil }

@@ -191,7 +191,7 @@ export default function PairingDialog({ open, payload, onCancel, onCopied, onSav
             <>
               <PairingQr value={value} />
               <div className="pair-target">{displayTarget(effectivePayload)}</div>
-              <div className="pair-help">打开 AgentMirror 移动端，选择扫码连接并对准此二维码</div>
+              <div className="pair-help">打开 Corral 移动端，选择扫码连接并对准此二维码</div>
               <div className="pair-actions">
                 <button type="button" className="chr-btn-reset chr-btn" onClick={copy}>
                   {copyState || (editableToken ? '保存并复制配对信息' : '复制配对链接 / Token')}

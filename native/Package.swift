@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "AgentMirrorNative",
+    name: "CorralNative",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "AgentMirrorApp", targets: ["AgentMirrorApp"]),
+        .executable(name: "CorralApp", targets: ["AgentMirrorApp"]),
         .library(name: "Services", targets: ["Services"]),
         .library(name: "Shell", targets: ["Shell"]),
     ],

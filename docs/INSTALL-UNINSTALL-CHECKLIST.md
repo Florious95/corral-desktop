@@ -1,4 +1,4 @@
-# AgentMirror 安装与卸载完整生命周期核验清单（Install & Uninstall Checklist）
+# Corral 安装与卸载完整生命周期核验清单（Install & Uninstall Checklist）
 
 - **立案依据**：GitHub Issue [#192](https://github.com/Florious95/corral-desktop/issues/192)
 - **修订日期**：2026-09-21
@@ -11,7 +11,7 @@
 | 组件名称 | 目标安装路径 | 权限模式 | 作用说明 | 安装行为 | 卸载行为 |
 |---|---|---|---|---|---|
 | **`agentmirrord`** | `~/.local/bin/agentmirrord` | `0755` | Linux 静态代理守护服务 | 自动解压/写入并启动常驻守护 | 终止进程并物理删除二进制 |
-| **`token`** | `~/.config/agentmirror/token` | `0600` | 内部双向握手安全令牌 | 自动生成高熵随机令牌 | 物理删除 |
+| **`token`** | `~/.config/corral/token` | `0600` | 内部双向握手安全令牌 | 自动生成高熵随机令牌 | 物理删除 |
 | **`providers.tsv`** | `~/tools/nodeprobe/fixtures/providers.tsv` | `0600` | Agent 启动器白名单与模板 | 自动生成标准 6 大 Provider 配置 | 物理删除 |
 | **`titles.tsv`** | `~/tools/nodeprobe/fixtures/titles.tsv` | `0600` | 会话标题映射表 | 自动初始化为空配置 | 物理删除 |
 | **`pi 状态检测插件`** | `~/.pi/agent/plugins/agentmirror-probe/index.js`（兼容路径） + `~/.pi/agent/extensions/nodeprobe-pi-activity.js`（Pi 自动发现） | 目录 `0755` / 文件 `0644` | 捕获并上报 Pi 节点的实时健康、Working/Idle 状态 | WSL 引导或 macOS 原生壳启动时原子写入并验证权限 | 仅删除 AgentMirror 自有探针路径，完整清理且绝不触碰用户插件 |
@@ -54,11 +54,11 @@
   - 清理中断安装留下的 `.agentmirror-probe.tmp-*`，恢复 Pi 原生初始插件配置，不留下任何失效钩子或僵尸路径；
 - [ ] **守护文件与配置物理销毁**：
   - 物理删除 `~/.local/bin/agentmirrord`；
-  - 物理删除 `~/.config/agentmirror/token`；
+  - 物理删除 `~/.config/corral/token`（并清理仅用于向前迁移的旧 `~/.config/agentmirror/token`）；
   - 物理删除 `~/tools/nodeprobe/fixtures/` 下的 `providers.tsv` 与 `titles.tsv`；
 - [ ] **宿主机本地缓存与注册表归整**：
-  - 清理 `$env:LOCALAPPDATA\Programs\AgentMirror`；
-  - 清理 `$env:LOCALAPPDATA\agentmirror-desktop` 缓存与 store；
+  - 清理 `$env:LOCALAPPDATA\Programs\Corral`；
+  - 清理 `$env:LOCALAPPDATA\com.corral.desktop` 缓存与 store；
   - 清理开始菜单与桌面快捷方式；
   - 清理 Windows 卸载注册表注册项；
 - [ ] **系统初态验收**：

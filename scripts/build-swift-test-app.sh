@@ -20,26 +20,26 @@ fi
 
 swift build --package-path "$PACKAGE" --configuration "$CONFIGURATION"
 BIN_DIR=$(swift build --package-path "$PACKAGE" --configuration "$CONFIGURATION" --show-bin-path)
-BIN="$BIN_DIR/AgentMirrorApp"
+BIN="$BIN_DIR/CorralApp"
 [[ -x "$BIN" ]] || { echo "missing executable: $BIN" >&2; exit 1; }
 
 mkdir -p "$OUT_ROOT"
 STAGE=$(mktemp -d "$OUT_ROOT/.stage.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
-APP="$STAGE/AgentMirrorTest.app"
+APP="$STAGE/CorralTest.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/AgentMirrorApp"
+cp "$BIN" "$APP/Contents/MacOS/CorralApp"
 cp "$PACKAGE/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp -R "$WEB_ROOT" "$APP/Contents/Resources/web"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # Ad-hoc signing makes the isolated test bundle launchable without touching the
-# user's signed AgentMirror.app. Distribution signing belongs to xcodebuild.
+# user's signed Corral.app. Distribution signing belongs to xcodebuild.
 codesign --force --deep --sign - "$APP" >/dev/null
 
-FINAL="$OUT_ROOT/AgentMirrorTest.app"
+FINAL="$OUT_ROOT/CorralTest.app"
 if [[ -e "$FINAL" ]]; then
-  PREVIOUS="$OUT_ROOT/.previous-$(date +%s)-AgentMirrorTest.app"
+  PREVIOUS="$OUT_ROOT/.previous-$(date +%s)-CorralTest.app"
   mv "$FINAL" "$PREVIOUS"
   echo "previous bundle moved to $PREVIOUS"
 fi
@@ -49,4 +49,4 @@ rm -rf "$STAGE"
 
 echo "built $FINAL"
 /usr/bin/plutil -p "$FINAL/Contents/Info.plist"
-file "$FINAL/Contents/MacOS/AgentMirrorApp"
+file "$FINAL/Contents/MacOS/CorralApp"

@@ -86,7 +86,7 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $bundle = Join-Path $PWD 'src-tauri\target\release\bundle'
           $release = Join-Path $PWD 'release'
-          $portableDir = Join-Path $env:RUNNER_TEMP 'agentmirror-portable'
+          $portableDir = Join-Path $env:RUNNER_TEMP 'corral-portable'
           New-Item -ItemType Directory -Force -Path $release, $portableDir | Out-Null
 
           $nsis = Get-ChildItem (Join-Path $bundle 'nsis\*.exe') -File |
@@ -94,21 +94,21 @@ jobs:
           if (-not $nsis) {
             throw 'Tauri did not produce an NSIS installer.'
           }
-          Copy-Item $nsis.FullName (Join-Path $release "AgentMirror_${version}_x64-setup.exe")
+          Copy-Item $nsis.FullName (Join-Path $release "Corral_${version}_x64-setup.exe")
 
           $msi = Get-ChildItem (Join-Path $bundle 'msi\*.msi') -File |
             Select-Object -First 1
           if ($msi) {
-            Copy-Item $msi.FullName (Join-Path $release "AgentMirror_${version}_x64_en-US.msi")
+            Copy-Item $msi.FullName (Join-Path $release "Corral_${version}_x64_en-US.msi")
           }
 
-          $binary = Join-Path $PWD 'src-tauri\target\release\agentmirror-desktop.exe'
+          $binary = Join-Path $PWD 'src-tauri\target\release\corral-desktop.exe'
           if (-not (Test-Path $binary)) {
             throw "Portable binary was not found: $binary"
           }
-          Copy-Item $binary (Join-Path $portableDir 'AgentMirror.exe')
-          Compress-Archive -Path (Join-Path $portableDir 'AgentMirror.exe') `
-            -DestinationPath (Join-Path $release "AgentMirror-v${version}-windows-x64.zip") -Force
+          Copy-Item $binary (Join-Path $portableDir 'Corral.exe')
+          Compress-Archive -Path (Join-Path $portableDir 'Corral.exe') `
+            -DestinationPath (Join-Path $release "Corral-v${version}-windows-x64.zip") -Force
 
           $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and '${{ inputs.tag }}') {
             '${{ inputs.tag }}'
@@ -122,7 +122,7 @@ jobs:
       - name: Clean and smoke-test Windows installer
         shell: pwsh
         run: |
-          $installer = Get-ChildItem (Join-Path $PWD 'release\AgentMirror_*_x64-setup.exe') -File |
+          $installer = Get-ChildItem (Join-Path $PWD 'release\Corral_*_x64-setup.exe') -File |
             Select-Object -First 1
           if (-not $installer) {
             throw 'Staged NSIS installer was not found.'
@@ -173,10 +173,10 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Build production AgentMirror.app
+      - name: Build production Corral.app
         run: |
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
-          VERSION="$version" OUT_ROOT="$RUNNER_TEMP/agentmirror-native" ./scripts/build-swift-app.sh
+          VERSION="$version" OUT_ROOT="$RUNNER_TEMP/corral-native" ./scripts/build-swift-app.sh
 
       - name: Create and verify macOS DMG
         id: artifacts
@@ -184,8 +184,8 @@ jobs:
           set -euo pipefail
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
           release="$GITHUB_WORKSPACE/release"
-          app="$RUNNER_TEMP/agentmirror-native/AgentMirror.app"
-          dmg="$release/AgentMirror-v${version}-macOS-arm64.dmg"
+          app="$RUNNER_TEMP/corral-native/Corral.app"
+          dmg="$release/Corral-v${version}-macOS-arm64.dmg"
           mkdir -p "$release"
           test -d "$app"
           ./scripts/create-dmg.sh "$app" "$dmg"
@@ -202,11 +202,11 @@ jobs:
           mount_point=$(printf '%s\n' "$mount_output" | awk '$NF ~ /^\/Volumes\// {print $NF; exit}')
           test -n "$mount_point"
           mounted=1
-          test -d "$mount_point/AgentMirror.app"
+          test -d "$mount_point/Corral.app"
           test -L "$mount_point/Applications"
           test "$(readlink "$mount_point/Applications")" = '/Applications'
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mount_point/AgentMirror.app/Contents/Info.plist")" = 'com.agentmirror.desktop'
-          file "$mount_point/AgentMirror.app/Contents/MacOS/AgentMirrorApp" | grep -q 'arm64'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mount_point/Corral.app/Contents/Info.plist")" = 'com.corral.desktop'
+          file "$mount_point/Corral.app/Contents/MacOS/CorralApp" | grep -q 'arm64'
           hdiutil detach "$mount_point" >/dev/null
           mounted=0
 
@@ -243,7 +243,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$(find release -maxdepth 1 -type f -print -quit)"
-          (cd release && sha256sum AgentMirror* | sort) > release/SHA256SUMS
+          (cd release && sha256sum Corral* | sort) > release/SHA256SUMS
           {
             echo '## Release artifacts'
             echo
@@ -258,10 +258,10 @@ jobs:
           files: release/*
           generate_release_notes: true
           body: |
-            AgentMirror desktop release.
+            Corral desktop release.
 
             - Windows: NSIS installer, MSI installer when produced, and a portable x64 ZIP.
             - Windows WSL2: local-direct mode can connect to the local agentmirrord WebSocket on port 9900 without pairing.
-            - macOS: native Swift AppKit + WKWebView arm64 DMG. Open the DMG and drag `AgentMirror.app` to the `Applications` shortcut.
+            - macOS: native Swift AppKit + WKWebView arm64 DMG. Open the DMG and drag `Corral.app` to the `Applications` shortcut.
 
             Verify downloaded artifacts with the attached `SHA256SUMS` file.

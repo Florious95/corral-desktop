@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>AgentMirror</string>
+    <string>Corral</string>
     <key>CFBundleExecutable</key>
-    <string>AgentMirrorApp</string>
+    <string>CorralApp</string>
     <key>CFBundleIdentifier</key>
-    <string>com.agentmirror.desktop</string>
+    <string>com.corral.desktop</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>AgentMirror</string>
+    <string>Corral</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -21,7 +21,7 @@
     <key>CFBundleVersion</key>
     <string>__VERSION__</string>
     <key>CFBundleIconFile</key>
-    <string>AgentMirror</string>
+    <string>Corral</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

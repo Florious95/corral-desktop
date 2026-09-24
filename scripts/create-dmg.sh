@@ -2,15 +2,15 @@
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-  echo "usage: $0 /path/to/AgentMirror.app /path/to/AgentMirror-vVERSION-macOS-arm64.dmg" >&2
+  echo "usage: $0 /path/to/Corral.app /path/to/Corral-vVERSION-macOS-arm64.dmg" >&2
   exit 2
 fi
 
 APP_PATH=$1
 OUTPUT_PATH=$2
-APP_NAME=AgentMirror.app
+APP_NAME=Corral.app
 OUTPUT_DIR=$(dirname "$OUTPUT_PATH")
-VOLUME_NAME=AgentMirror
+VOLUME_NAME=Corral
 
 [[ "$(uname -s)" == "Darwin" ]] || {
   echo "create-dmg.sh requires macOS hdiutil" >&2
@@ -34,7 +34,7 @@ command -v hdiutil >/dev/null || {
 }
 
 mkdir -p "$OUTPUT_DIR"
-STAGE=$(mktemp -d "$OUTPUT_DIR/.agentmirror-dmg.XXXXXX")
+STAGE=$(mktemp -d "$OUTPUT_DIR/.corral-dmg.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP_PATH" "$STAGE/$APP_NAME"
 ln -s /Applications "$STAGE/Applications"
