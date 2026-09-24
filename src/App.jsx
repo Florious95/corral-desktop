@@ -4,7 +4,7 @@ import { DeviceManager } from './core/devices.js';
 import { isLocalUrl } from './core/local.js';
 import { geomTrace } from './term/geomTrace.js';
 import {
-  CloseLeftIcon, CloseRightIcon, PlusIcon, SplitIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon, SidebarIcon, ReflowIcon,
+  CloseLeftIcon, CloseRightIcon, PlusIcon, StarIcon, StarOutline, TerminalIcon, XIcon, PinIcon, SidebarIcon, ReflowIcon,
 } from './lib/icons.jsx';
 
 import TitleBar from './components/chrome/TitleBar.jsx';
@@ -50,7 +50,6 @@ import {
   getLeaves,
   openSession,
   focusTab,
-  splitSession,
   closePane,
   pinTab,
   closeOtherTabs,
@@ -1322,7 +1321,6 @@ export default function App({ seedDevices } = {}) {
 
     // pane
     const agent = agentByKey.get(menu.id);
-    const unvisibleTabs = workspace.tabs.filter((t) => !visibleLeaves.includes(t.uid));
     return [
       {
         key: 'reflow',
@@ -1330,19 +1328,6 @@ export default function App({ seedDevices } = {}) {
         icon: icon(ReflowIcon),
         color: 'var(--text)',
         onClick: () => { closeMenu(); handleReflowPane(menu.id); },
-      },
-      {
-        key: 'split-right',
-        label: '向右分屏',
-        icon: icon(SplitIcon),
-        color: 'var(--text)',
-        disabled: unvisibleTabs.length === 0,
-        onClick: () => {
-          closeMenu();
-          if (unvisibleTabs.length > 0) {
-            setWorkspace((prev) => splitSession(prev, menu.id, unvisibleTabs[0].uid, { axis: 'x', ratio: 0.5 }));
-          }
-        },
       },
       {
         key: 'fav',

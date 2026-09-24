@@ -519,11 +519,11 @@ src/
   const y = Math.min(e.clientY, window.innerHeight - MH - 8);
   setMenu({ kind, id, x, y });
   ```
-- **菜单类别与动作（2026-09-23 裁定，Issue #261）**：
+- **菜单类别与动作（2026-09-23 裁定，Issue #261；2026-09-24 裁定，Issue #295）**：
   - Space 菜单（`space`）：`新建 Agent`；
   - Agent 菜单（`agent`）：`收藏 / 取消收藏`、`关闭`（带二次确认）；
   - Tab 菜单（`tab`）：`适应当前窗口`、`恢复自动标题`（若自定义）、`固定到最左 / 取消固定`、`关闭工作台`、`关闭其他工作台`、`关闭右侧所有工作台`；
-  - 窗格菜单（`pane`）：`适应当前窗口`、`向右分屏`、`收藏 / 取消收藏`、`关闭此分屏`。**彻底删除不贴合设计的「向上分屏」与「向下分屏」（Issue #261）**。
+  - 窗格菜单（`pane`）：`适应当前窗口`、`收藏 / 取消收藏`、`关闭此分屏`。**彻底删除「向右分屏」（Issue #295）与历史「向上分屏」/「向下分屏」（Issue #261），保持右键菜单简洁并与现有分屏交互逻辑一致**。
 
 ### 4.6 `chrome/Toast.jsx`
 
@@ -1003,6 +1003,7 @@ PR93/94 的无底栏、图片一次上传后 attach_preview 预贴、不自动 E
 裁定日期：2026-09-16。方案 A 的 N1 提供 AppKit 窗口、WKWebView 本地静态资源容器与原生同步拖窗接缝；本段记录研发候选，不表示 Swift 壳已交付或玻璃验收通过。
 
 - Native 仅根据预报告的 chrome 空白矩形，在自身窗口的当前 `mouseDown` 同步调用 AppKit `performDrag(with:)`；按钮、Tab、关闭区、输入、终端与弹层优先排除。Swift 禁止 `window.startDragging` 异步 RPC。
+- macOS 自定义顶栏空白区双击由原生 `mouseDown` 显式切换窗口内 Zoom：目标严格为当前 `NSScreen.visibleFrame`，再次双击恢复进入 Zoom 前的 frame；不得调用原生 Fullscreen 或挤占 Dock/菜单栏（Issue #297，2026-09-24）。
 - resize、跨屏、全屏、reload/dispose 时清空可拖矩形。正式接缝使用单调 Native `geometryGeneration` 与布局前 `disarm`/`arm` 屏障；同尺寸 DOM 动画仍须由前端在布局提交前 disarm，不得在未握手或几何失效时默认整页可拖。
 - React 保留 Tab 和业务交互。N1 的系统标题栏是装配起点，最终标题栏/安全留白须在 F2/I1 与既有布局同候选验收，不擅自改变 header 几何。
 - `GlassChrome` 在 macOS 26+ 挂载公共 `NSGlassEffectView`/`NSGlassEffectContainerView`，旧系统、减少透明度或提高对比度时降级为实底并保留清晰边界；终端/canvas 保持实底。WK 背景实际穿透未通过交付面验证前，不声明玻璃合成验收完成。
