@@ -747,6 +747,7 @@ src/
   **2026-09-23（Issue #239）**：Windows DOM 渲染器取消字符行之间的额外 leading，渲染与字体度量回退共用行高；外层 padding 不负责字符行内的制表符接缝。
   **2026-09-23（macOS 实测回归 & Issue #277 符号回退）**：macOS 同样取消额外行距。首屏投影与实际渲染共用行高；布局读取 xterm 渲染器已计算的精确字符格尺寸，不跨 DOM/WebGL 渲染器缓存，也不从整幅画布的整数宽度反推单格；切换后按最终渲染单元格重新计算列数，避免右侧空白随窗格宽度累积。终端保留用户正文选定字体，内嵌离线 `AgentMirror Symbols` 符号字体（覆盖 U+1F5AB 🖫 等杂项磁盘/存储符号），并追加平台符号字体（macOS Apple Symbols/Apple Color Emoji，Windows Segoe UI Symbol/Segoe UI Emoji）及 Symbols Nerd Font Mono/JetBrainsMono Nerd Font Mono 后备，彻底消除底栏符号与 Git Diff 状态的中空方块（tofu）；不替换 PTY 字符、不联网下载字体。
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: macOS/Windows 为 1.0，其余平台 1.25`、`cursorBlink:false`（严格关闭闪烁，彻底消除 WebGL 600ms 定时器空转重绘，2026-09-24 裁定）、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
+  **2026-09-24（运行期光标协议硬锁策略）**：除构造默认 `cursorBlink:false` 外，前端在终端协议层实施运行期硬锁：彻底防御底层程序通过转义序列（`DECSCUSR`、`DECSET ?12h`）重新激活光标闪烁，避免 WebGL 渲染管线内部被动拉起 600ms `CursorBlinkStateManager` 定时重绘；同时完整保留合法光标形状（bar / block / underline）、`0` 参数重置恢复应用配置默认形状及其他 DEC 私有模式。本项属于协议层内部硬锁适配，系统级实际能耗与 GPU 占用需经由真实交付面与独立量具消融检验。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：

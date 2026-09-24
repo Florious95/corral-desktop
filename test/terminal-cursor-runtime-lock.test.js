@@ -195,3 +195,12 @@ test('WebGL ablation channel: supports explicit disableWebgl parameter and test 
 
   setDisableWebglForTests(null);
 });
+
+test('UI-SPEC §6.2 documents 2026-09-24 runtime cursor protocol lock policy', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const spec = await readFile(new URL('../docs/UI-SPEC.md', import.meta.url), 'utf8');
+
+  assert.match(spec, /2026-09-24（运行期光标协议硬锁策略）/);
+  assert.match(spec, /DECSCUSR.*DECSET \?12h/);
+  assert.match(spec, /系统级实际能耗与 GPU 占用需经由真实交付面与独立量具消融检验/);
+});

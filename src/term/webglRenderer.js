@@ -17,15 +17,10 @@ export function setDisableWebglForTests(disabled) {
 
 /**
  * 判断当前是否显式关闭 WebGL 渲染器（回退至 DOM 渲染器）。
- * 支持参数传入、环境变量 VITE_DISABLE_WEBGL、全局标志 window.__AGENTMIRROR_DISABLE_WEBGL__ / window.__CORRAL_DISABLE_WEBGL__。
+ * 生产代码仅接受显式测试重载与环境变量，不暴露未授权 window 全局诊断后门。
  */
 export function isWebglDisabled() {
   if (typeof testDisableWebgl === 'boolean') return testDisableWebgl;
-  if (typeof window !== 'undefined') {
-    if (window.__AGENTMIRROR_DISABLE_WEBGL__ === true || window.__CORRAL_DISABLE_WEBGL__ === true) {
-      return true;
-    }
-  }
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     if (import.meta.env.VITE_DISABLE_WEBGL === '1' || import.meta.env.VITE_DISABLE_WEBGL === 'true') {
       return true;
