@@ -81,9 +81,10 @@ test('App wires TabBar into session header and mounts TerminalStage with am.work
   // Level2 unsubscribe on 'all' or 'fav' (Bug 1 regression guard)
   assert.match(appJsx, /if\s*\(selected === 'all' \|\| selected === 'fav'\)\s*\{\s*dm\.unsubscribeLevel2\(\);/);
 
-  // Tab right-click menu and Pane right-click menu (Issue #261: split-down and split-up removed, split-right preserved)
+  // Tab right-click menu and Pane right-click menu (Issue #261 & #295: legacy split-up, split-down, and split-right removed)
   assert.match(appJsx, /menu\.kind === 'tab'/);
-  assert.match(appJsx, /key: 'split-right'/);
+  assert.doesNotMatch(appJsx, /key: 'split-right'/);
+  assert.doesNotMatch(appJsx, /向右分屏/);
   assert.doesNotMatch(appJsx, /key: 'split-down'/);
   assert.doesNotMatch(appJsx, /向下分屏/);
   assert.doesNotMatch(appJsx, /向上分屏/);
