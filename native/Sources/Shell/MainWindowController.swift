@@ -49,15 +49,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         bridge = ShellBridge(services: services ?? DefaultShellServices.shared)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")
         webView = WKWebView(frame: .zero, configuration: config)
-        webView.setValue(false, forKey: "drawsBackground")
+        // C1 ablation: make the WebView/window opaque to remove the full-window
+        // alpha-blending path from the idle GPU measurement.
+        webView.setValue(true, forKey: "drawsBackground")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "Corral"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        // C1 ablation: use an opaque dark surface instead of transparent glass.
+        window.isOpaque = true
+        window.backgroundColor = NSColor(srgbRed: 15.0 / 255.0,
+                                         green: 17.0 / 255.0,
+                                         blue: 21.0 / 255.0,
+                                         alpha: 1.0)
         window.hasShadow = true
         window.minSize = NSSize(width: 1100, height: 700)
         window.isReleasedWhenClosed = false
