@@ -92,11 +92,12 @@ test('Issue #255: Theme mode settings and tokens support light, dark, and system
   assert.equal(DEFAULT_SETTINGS.themeMode, 'system');
 });
 
-test('Issue #261: Pane context menu removes split-down and retains split-right', async () => {
+test('Issue #261 & #295: Pane context menu removes split-down and split-right', async () => {
   const appJsx = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
 
-  // Pane menu retains split-right and excludes split-down
-  assert.match(appJsx, /key: 'split-right'/);
+  // Pane menu excludes all legacy split actions (split-right, split-down, split-up)
+  assert.doesNotMatch(appJsx, /key: 'split-right'/);
+  assert.doesNotMatch(appJsx, /向右分屏/);
   assert.doesNotMatch(appJsx, /key: 'split-down'/);
   assert.doesNotMatch(appJsx, /向下分屏/);
   assert.doesNotMatch(appJsx, /向上分屏/);
