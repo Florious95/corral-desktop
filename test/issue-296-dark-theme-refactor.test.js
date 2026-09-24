@@ -129,6 +129,55 @@ test('Issue #296: detectDarkMode respects explicit light data-theme even when OS
   }
 });
 
+test('Issue #296 R1: ProviderIcon includes grok in monochrome whitelist and renders is-monochrome', async () => {
+  const providerIconJsx = await readFile(new URL('../src/components/sidebar/ProviderIcon.jsx', import.meta.url), 'utf8');
+
+  // Verify grok is included in MONOCHROME_PROVIDERS alongside codex, openai, cursor, pi
+  assert.match(providerIconJsx, /const MONOCHROME_PROVIDERS = new Set\(\[['"][^\]]*grok/);
+  assert.match(providerIconJsx, /const MONOCHROME_PROVIDERS = new Set\(\[['"][^\]]*codex/);
+  assert.match(providerIconJsx, /const MONOCHROME_PROVIDERS = new Set\(\[['"][^\]]*cursor/);
+  assert.match(providerIconJsx, /const MONOCHROME_PROVIDERS = new Set\(\[['"][^\]]*pi/);
+});
+
+test('Issue #296 R2: Range thumb has distinct dark ink border against filled track with >= 3:1 contrast', async () => {
+  const css = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+  const tokensCss = await readFile(new URL('../src/styles/tokens.css', import.meta.url), 'utf8');
+
+  // Range thumb uses dedicated range-thumb-border token
+  assert.match(css, /\.settings-size-slider::-webkit-slider-thumb\s*\{[^}]*border:\s*1px solid var\(--range-thumb-border/);
+  assert.match(css, /\.settings-size-slider::-moz-range-thumb\s*\{[^}]*border:\s*1px solid var\(--range-thumb-border/);
+
+  // Dark mode defines --range-thumb-border as #111722
+  assert.match(tokensCss, /--range-thumb-border:\s*#111722;/);
+
+  // Contrast between #111722 border and #8FAADC filled track is >= 3:1 (actual ~7.65:1)
+  const thumbBorderContrast = contrast('#111722', '#8FAADC');
+  assert.ok(thumbBorderContrast >= 3.0, `Thumb border contrast ${thumbBorderContrast.toFixed(2)} must be >= 3:1`);
+});
+
+test('Issue #296 R3: Restores light mode tokens without regressions', async () => {
+  const tokensCss = await readFile(new URL('../src/styles/tokens.css', import.meta.url), 'utf8');
+  const chromeCss = await readFile(new URL('../src/components/chrome/chrome.css', import.meta.url), 'utf8');
+
+  // 1. Preview caption is paired: light mode uses #C4C0B7 with high contrast on dark preview background
+  assert.match(tokensCss, /--preview-caption:\s*#C4C0B7;/);
+  const lightPreviewCaptionContrast = contrast('#C4C0B7', '#3A3835');
+  assert.ok(lightPreviewCaptionContrast >= 4.5, `Light preview caption contrast ${lightPreviewCaptionContrast.toFixed(2)} must be >= 4.5:1`);
+  assert.match(chromeCss, /\.settings-preview-heading\s*\{[^}]*color:\s*var\(--preview-caption/);
+
+  // 2. Light switch on-state is restored to ink-800 rather than orange brand or blue
+  assert.match(tokensCss, /--switch-on-bg:\s*var\(--ink-800\);/);
+  assert.match(tokensCss, /--switch-on-border:\s*var\(--ink-800\);/);
+  assert.match(chromeCss, /\.settings-switch\[aria-checked='true'\]\s*\{[^}]*border-color:\s*var\(--switch-on-border/);
+
+  // 3. Light pane active border maps to original input-focus
+  assert.match(tokensCss, /--pane-active-border:\s*var\(--input-focus\);/);
+
+  // 4. Border subtle is provided for light mode, preventing 0px header border
+  assert.match(tokensCss, /--border-subtle:\s*rgba\(0,\s*0,\s*0,\s*\.06\);/);
+  assert.match(chromeCss, /\.tb-session-header\s*\{[^}]*border-bottom:\s*1px solid var\(--border-subtle/);
+});
+
 test('Issue #296: tokens.css declares paired semantic action tokens in root and dark themes', async () => {
   const css = await readFile(new URL('../src/styles/tokens.css', import.meta.url), 'utf8');
 

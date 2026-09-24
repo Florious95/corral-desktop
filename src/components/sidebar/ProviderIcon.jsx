@@ -33,8 +33,8 @@ const TINT = {
   claude: 'var(--tint-claude)',
 };
 
-/** 纯黑色矢量/单色资产集合（在深色模式下通过滤镜反白，避免贴在深色底上隐形，Issue #296） */
-const MONOCHROME_PROVIDERS = new Set(['codex', 'openai', 'cursor', 'pi']);
+/** 纯黑色矢量/单色资产集合（在深色模式下通过滤镜反白，避免贴在深色底上隐形，Issue #296 R1） */
+const MONOCHROME_PROVIDERS = new Set(['codex', 'openai', 'cursor', 'pi', 'grok']);
 
 /**
  * @param {Object} props
