@@ -64,10 +64,10 @@ export const LIGHT_TERMINAL_THEME = Object.freeze({
 export function detectDarkMode(opts = {}) {
   if (typeof opts.dark === 'boolean') return opts.dark;
   if (typeof window !== 'undefined') {
-    const dataTheme = document.documentElement?.getAttribute('data-theme');
+    const dataTheme = typeof document !== 'undefined' ? document.documentElement?.getAttribute('data-theme') : null;
     if (dataTheme === 'dark') return true;
     if (dataTheme === 'light') return false;
-    if (document.body?.classList?.contains('dark')) return true;
+    if (typeof document !== 'undefined' && document.body?.classList?.contains('dark')) return true;
     return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches || false;
   }
   return false;
