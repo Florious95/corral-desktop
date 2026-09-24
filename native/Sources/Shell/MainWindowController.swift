@@ -4,6 +4,7 @@ import WebKit
 @MainActor
 final class TitlebarDragSurfaceView: NSView {
     weak var dragSurface: DragSurfaceView?
+    var onDoubleClick: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -15,7 +16,11 @@ final class TitlebarDragSurfaceView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        dragSurface?.beginDrag(with: event)
+        if event.clickCount == 2 {
+            onDoubleClick?()
+        } else {
+            dragSurface?.beginDrag(with: event)
+        }
     }
 }
 
@@ -30,6 +35,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     private var allowLoad = false
     private var disposed = false
     private var fullscreenTarget: Bool?
+    private var windowZoomState = WindowZoomState()
     public private(set) var acceptsMessages = false
     public var onLoadFailure: (() -> Void)?
     public var onLoadFinished: (() -> Void)?
@@ -105,6 +111,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         acceptsMessages = false
         bridge.reset()
         bridge.owner = nil
+        windowZoomState.reset()
         dragSurface.geometry.reset()
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -114,6 +121,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
 
     public override func close() { dispose(); super.close() }
     public func windowWillClose(_ notification: Notification) { dispose() }
+
+    public func toggleWindowZoom() {
+        guard let window, !disposed, !isFullscreen,
+              let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame,
+              let frame = windowZoomState.toggle(currentFrame: window.frame,
+                                                 visibleFrame: visibleFrame) else { return }
+        window.setFrame(frame, display: true, animate: true)
+    }
 
     public func setFullscreen(_ flag: Bool) throws {
         guard let window, !disposed else { throw ShellError.unavailable }
@@ -201,6 +216,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         guard let titlebarContainer else { return }
         self.titlebarContainer = titlebarContainer
         titlebarDragSurface.dragSurface = dragSurface
+        titlebarDragSurface.onDoubleClick = { [weak self] in self?.toggleWindowZoom() }
         titlebarDragSurface.autoresizingMask = []
         // NSThemeFrame rejects arbitrary subviews on macOS 14. Keep the
         // overlay in our content hierarchy while the full-size content view
