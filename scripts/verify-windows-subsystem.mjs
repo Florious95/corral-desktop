@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
 // Check the delivered PE, not just Rust source or linker configuration.
-const path = process.argv[2] || 'src-tauri/target/release/agentmirror-desktop.exe';
+const path = process.argv[2] || 'src-tauri/target/release/corral-desktop.exe';
 const pe = readFileSync(path);
 assert.equal(pe.toString('ascii', 0, 2), 'MZ', 'expected a Windows executable');
 const header = pe.readUInt32LE(0x3c);
