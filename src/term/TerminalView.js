@@ -165,6 +165,10 @@ export class TerminalView {
     this._cursorAnchor = null;
     this._anchorObservers = null;
     this._pasteListener = null;
+    this._csiDisposables = null;
+
+    // 运行期硬锁守卫：彻底防御 DECSET ?12h 与 DECSCUSR 转义序列动态激活光标闪烁，杜绝 WebGL 600ms 定时器死灰复燃
+    this._lockCursorBlink();
 
     // 应用终端快捷键统一由 term.attachCustomKeyEventHandler 守护（裁决 §5.1）
     if (typeof this.term.attachCustomKeyEventHandler === 'function') {
@@ -633,6 +637,75 @@ export class TerminalView {
     });
   }
 
+  /**
+   * 运行期硬锁守卫：彻底防御外部进程/shell通过转义序列（DECSCUSR / DECSET 12）重新激活光标闪烁。
+   * 防止 @xterm/addon-webgl 内部激活 600ms CursorBlinkStateManager 定时重绘导致 GPU 空转。
+   */
+  _lockCursorBlink() {
+    const term = this.term;
+    if (!term) return;
+
+    // 1. 锁死 options.cursorBlink 读写
+    try {
+      if (term.options) {
+        Object.defineProperty(term.options, 'cursorBlink', {
+          get: () => false,
+          set: () => {},
+          configurable: true,
+          enumerable: true,
+        });
+      }
+    } catch {}
+
+    // 2. 锁死 optionsService.options.cursorBlink 读写
+    const optsService = term._core?.optionsService;
+    if (optsService?.options) {
+      try {
+        Object.defineProperty(optsService.options, 'cursorBlink', {
+          get: () => false,
+          set: () => {},
+          configurable: true,
+          enumerable: true,
+        });
+      } catch {}
+    }
+
+    // 3. 锁死 coreService.decPrivateModes.cursorBlink 读写
+    const decModes = term._core?.coreService?.decPrivateModes;
+    if (decModes) {
+      try {
+        Object.defineProperty(decModes, 'cursorBlink', {
+          get: () => false,
+          set: () => {},
+          configurable: true,
+          enumerable: true,
+        });
+      } catch {}
+    }
+
+    // 4. 注册 CSI 处理器：拦截 DECSCUSR (CSI Ps SP q) 保证光标形状随动的同时硬锁 cursorBlink 为 false
+    if (term.parser?.registerCsiHandler) {
+      const d1 = term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
+        const p = params[0] || 1;
+        if (p === 0) {
+          if (decModes) decModes.cursorStyle = undefined;
+        } else {
+          const style = (p === 3 || p === 4) ? 'underline' : (p === 5 || p === 6) ? 'bar' : 'block';
+          if (decModes) decModes.cursorStyle = style;
+        }
+        if (decModes) decModes.cursorBlink = false;
+        return true;
+      });
+      const d2 = term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+        if (params.length === 1 && params[0] === 12) {
+          return true; // 拦截单一 DECSET 12 序列
+        }
+        return false;
+      });
+      this._csiDisposables = [d1, d2].filter(Boolean);
+    }
+  }
+
   /** Convert a string offset to xterm cell columns so CJK input remains aligned. */
   _lineColumn(line, charIndex) {
     if (!line?.getCell) return charIndex;
@@ -780,6 +853,8 @@ export class TerminalView {
       document.fonts.removeEventListener('loadingdone', this._fontLoadingListener);
       this._fontLoadingListener = null;
     }
+    for (const d of this._csiDisposables || []) d?.dispose?.();
+    this._csiDisposables = null;
     try { this.term.dispose(); } catch { /* 已 dispose */ }
   }
 
