@@ -75,7 +75,7 @@ export default function SplitPanes({
     setLocalPreviewRoot(null);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = stageRef.current;
     if (!el) return;
 
@@ -143,6 +143,22 @@ export default function SplitPanes({
   );
   const visibleUids = useMemo(() => Object.keys(layout), [layout]);
 
+  // Project inactive tabs against the same stage size so their hidden hosts
+  // retain their eventual split geometry before they are revealed. Otherwise
+  // a resident pane temporarily inherits the active tab's full-size fallback
+  // and emits a needless resize when its split tab becomes active.
+  const residentRects = useMemo(() => {
+    const projected = new Map();
+    for (const tab of tabs || []) {
+      const tabRoot = tab?.root || (tab?.activeUid ? { kind: 'leaf', uid: tab.activeUid } : null);
+      if (!tabRoot) continue;
+      const tabLayout = projectLayout(tabRoot, effectiveRect, SPLIT_GAP_PX).panes;
+      for (const [uid, rect] of Object.entries(tabLayout)) projected.set(uid, rect);
+    }
+    for (const [uid, pane] of Object.entries(layout)) projected.set(uid, pane);
+    return projected;
+  }, [tabs, effectiveRect, layout]);
+
   // A committed split tree is final. Viewport changes retain their observer
   // debounce, but a completed drop need not wait for another quiet period.
   const previousRoot = useRef(effectiveRoot);
@@ -155,34 +171,35 @@ export default function SplitPanes({
     }
   }, [effectiveRoot, rect]);
 
-  // 常驻宿主集合：访问过的 Tab 保持在常驻列表中，关闭时才真正清理卸载
+  // 常驻宿主集合：工作区声明过的窗格保持挂载，关闭时才真正清理卸载。
+  // This makes an inactive split tab ready before its first reveal.
+  const residentCandidates = useMemo(() => {
+    const candidates = new Set(
+      tabs && tabs.length > 0
+        ? tabs.flatMap((tab) => {
+            if (tab?.root) return getLeaves(tab.root);
+            if (tab?.activeUid) return [tab.activeUid];
+            return [];
+          })
+        : (panes && panes.length > 0 ? panes.map((pane) => pane.key) : visibleUids)
+    );
+    if (previewUid) candidates.add(previewUid);
+    return candidates;
+  }, [tabs, panes, previewUid, visibleUids]);
   const [residentUids, setResidentUids] = useState([]);
   const lastRects = useRef(new Map());
 
   useEffect(() => {
-    const validUids = new Set(
-      (tabs && tabs.length > 0)
-        ? tabs.flatMap((t) => {
-            if (t.root) return getLeaves(t.root);
-            if (t.activeUid) return [t.activeUid];
-            return [t.uid];
-          })
-        : (panes && panes.length > 0 ? panes.map((p) => p.key) : visibleUids)
-    );
-    // previewUid lives outside workspace.tabs until it is committed to a tab.
-    // Keep it resident so the first click can mount its TerminalPane immediately.
-    if (previewUid) validUids.add(previewUid);
-
     setResidentUids((prev) => {
-      const filtered = prev.filter((uid) => validUids.has(uid));
+      const filtered = prev.filter((uid) => residentCandidates.has(uid));
       const existing = new Set(filtered);
-      const toAdd = visibleUids.filter((uid) => !existing.has(uid) && validUids.has(uid));
+      const toAdd = [...residentCandidates].filter((uid) => !existing.has(uid));
       if (toAdd.length === 0 && filtered.length === prev.length) {
         return prev;
       }
       return [...filtered, ...toAdd];
     });
-  }, [tabs, panes, previewUid, visibleUids]);
+  }, [residentCandidates]);
 
   // 记录每个可见窗格的最新非零矩形（供移入后台时保持尺寸，避免坍缩为 0 或 display:none）
   for (const uid of visibleUids) {
@@ -411,7 +428,9 @@ export default function SplitPanes({
         const isVisible = layout[uid] !== undefined;
         const currentRect = isVisible
           ? layout[uid]
-          : (lastRects.current.get(uid) || { x: 0, y: 0, w: effectiveRect.w, h: effectiveRect.h });
+          : (residentRects.get(uid) || lastRects.current.get(uid) || {
+            x: 0, y: 0, w: effectiveRect.w, h: effectiveRect.h,
+          });
         // CSS follows the viewport before ResizeObserver/React commits its new
         // projection. Keep the outer bottom edge anchored during that interval.
         const anchorBottom = isVisible && nativeCapabilities.platform === 'macos'

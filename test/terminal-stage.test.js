@@ -36,7 +36,10 @@ test('TerminalStage (SplitPanes) guarantees same-parent flattened absolute proje
   // Same-parent single DOM container
   assert.match(splitPanesJsx, /className="splitpanes terminal-stage"/);
   assert.match(splitPanesJsx, /previewUid/);
-  assert.match(splitPanesJsx, /validUids\.add\(previewUid\)/);
+  assert.match(splitPanesJsx, /residentCandidates = useMemo/);
+  assert.match(splitPanesJsx, /const toAdd = \[\.\.\.residentCandidates\]\.filter/);
+  assert.match(splitPanesJsx, /residentRects = useMemo/);
+  assert.match(splitPanesJsx, /useLayoutEffect/);
   assert.match(splitPanesJsx, /key=\{uid\}/);
   assert.match(splitPanesJsx, /className=\{`pane-host\$\{isVisible \? '' : ' is-hidden'\}/);
 
@@ -62,7 +65,18 @@ test('TerminalStage (SplitPanes) guarantees same-parent flattened absolute proje
   assert.match(terminalCss, /\.terminal-stage\s*\{[^}]*position:\s*relative;/);
   assert.match(terminalCss, /\.pane-host\s*\{[^}]*position:\s*absolute;/);
   assert.match(terminalCss, /\.pane-host\.is-hidden\s*\{[^}]*visibility:\s*hidden;/);
+  assert.match(terminalCss, /\.terminal-stage\[data-platform="macos"\] > \.pane-host\.is-hidden\s*\{[^}]*content-visibility:\s*hidden;/);
   assert.match(terminalCss, /\.pane-close-btn\s*\{/);
+});
+
+test('resident split activation suppresses redundant fit and layout-settled work', async () => {
+  const paneJsx = await readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8');
+  const terminalView = await readFile(new URL('../src/term/TerminalView.js', import.meta.url), 'utf8');
+
+  assert.match(paneJsx, /host\.closest\('\.is-hidden'\)\) return/);
+  assert.match(paneJsx, /view\.isFitCurrent\?\.\(\)/);
+  assert.match(terminalView, /isFitCurrent\(\)/);
+  assert.match(terminalView, /if \(!force && this\.isFitCurrent\(\)\) return/);
 });
 
 test('App wires TabBar into session header and mounts TerminalStage with am.workspace.v1', async () => {
