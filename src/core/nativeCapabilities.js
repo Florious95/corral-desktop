@@ -2,7 +2,7 @@
  * AgentMirror 桌面端 · 原生能力抽象层（Native Capabilities Adapter）
  *
  * 统一收敛桌面壳的原生交互，提供四项白名单能力闭集：
- * 1. window: close, minimize, toggleFullscreen, isFullscreen, setFullscreen, startDragging
+ * 1. window: close, minimize, toggleMaximize, isMaximized, maximize, unmaximize, toggleFullscreen, isFullscreen, setFullscreen, startDragging
  * 2. clipboard: readText, readImage, readFiles
  * 3. upload: uploadHttp
  * 4. secureStore: get, set（严格锁定白名单 key === 'devices'）
@@ -363,6 +363,64 @@ export const nativeCapabilities = {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         return getCurrentWindow().minimize();
       }
+    },
+
+    async isMaximized() {
+      if (testEngineOverride?.window?.isMaximized) return testEngineOverride.window.isMaximized();
+      const env = detectNativeEnvironment();
+      if (env === 'tauri') {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        return getCurrentWindow().isMaximized();
+      }
+      return false;
+    },
+
+    async maximize() {
+      if (testEngineOverride?.window?.maximize) return testEngineOverride.window.maximize();
+      const env = detectNativeEnvironment();
+      if (env === 'tauri') {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        return getCurrentWindow().maximize();
+      }
+      return true;
+    },
+
+    async unmaximize() {
+      if (testEngineOverride?.window?.unmaximize) return testEngineOverride.window.unmaximize();
+      const env = detectNativeEnvironment();
+      if (env === 'tauri') {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        return getCurrentWindow().unmaximize();
+      }
+      return false;
+    },
+
+    async toggleMaximize() {
+      if (testEngineOverride?.window?.toggleMaximize) return testEngineOverride.window.toggleMaximize();
+      if (testEngineOverride?.window?.isMaximized) {
+        const max = await testEngineOverride.window.isMaximized();
+        if (max) {
+          if (testEngineOverride?.window?.unmaximize) await testEngineOverride.window.unmaximize();
+          return false;
+        } else {
+          if (testEngineOverride?.window?.maximize) await testEngineOverride.window.maximize();
+          return true;
+        }
+      }
+      const env = detectNativeEnvironment();
+      if (env === 'tauri') {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const w = getCurrentWindow();
+        const max = await w.isMaximized();
+        if (max) {
+          await w.unmaximize();
+          return false;
+        } else {
+          await w.maximize();
+          return true;
+        }
+      }
+      return false;
     },
 
     async toggleFullscreen() {

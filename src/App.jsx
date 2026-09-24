@@ -1443,7 +1443,7 @@ export default function App({ seedDevices } = {}) {
             />
             {/* 顶部长按拖窗收敛至原生 data-tauri-drag-region="deep"，由 Tauri 官方 drag.js 原生触发 startDragging */}
             <div className="tb-drag" />
-            {isWindows && <WindowsWindowControls fullscreen={nativeFullscreen} />}
+            {isWindows && <WindowsWindowControls />}
           </header>
 
           <div className="main-stage-container">
