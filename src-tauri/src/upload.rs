@@ -50,6 +50,20 @@ fn multipart(filename: &str, mime: &str, bytes: &[u8], boundary: &str) -> Vec<u8
     out
 }
 
+fn normalize_upload_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("http://localhost:") {
+        format!("http://127.0.0.1:{rest}")
+    } else if let Some(rest) = url.strip_prefix("https://localhost:") {
+        format!("https://127.0.0.1:{rest}")
+    } else if url == "http://localhost/upload" {
+        "http://127.0.0.1/upload".to_string()
+    } else if url == "https://localhost/upload" {
+        "https://127.0.0.1/upload".to_string()
+    } else {
+        url.to_string()
+    }
+}
+
 fn upload_once<F>(url: &str, token: &str, filename: &str, mime: &str, bytes: &[u8], mut log: F) -> Result<String, String>
 where F: FnMut(&str, Option<u16>, Option<&str>, Option<&str>) {
     if bytes.is_empty() { return Err("invalid_file: empty image".to_string()); }
@@ -59,9 +73,10 @@ where F: FnMut(&str, Option<u16>, Option<&str>, Option<&str>) {
         .timeout_connect(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
         .build();
-    let safe_url = scrub_url(url);
+    let normalized_url = normalize_upload_url(url);
+    let safe_url = scrub_url(&normalized_url);
     log(&safe_url, None, None, None);
-    let request = agent.request("POST", url)
+    let request = agent.request("POST", &normalized_url)
         .set("Authorization", &format!("Bearer {token}"))
         .set("Content-Type", &format!("multipart/form-data; boundary={boundary}"));
     let response = match request.send_bytes(&body) {
@@ -271,6 +286,14 @@ mod tests {
         let url = server("HTTP/1.1 401 Unauthorized\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx", false);
         let err = upload_once(&url, "test-token", "x.png", "image/png", b"PNG", |_, _, _, _| {}).unwrap_err();
         assert!(err.starts_with("unauthorized:"));
+    }
+
+    #[test]
+    fn normalize_upload_url_converts_localhost_to_ipv4() {
+        assert_eq!(normalize_upload_url("http://localhost:9900/upload"), "http://127.0.0.1:9900/upload");
+        assert_eq!(normalize_upload_url("https://localhost:9900/upload"), "https://127.0.0.1:9900/upload");
+        assert_eq!(normalize_upload_url("http://127.0.0.1:9900/upload"), "http://127.0.0.1:9900/upload");
+        assert_eq!(normalize_upload_url("http://192.168.1.100:9900/upload"), "http://192.168.1.100:9900/upload");
     }
 
     #[test]
