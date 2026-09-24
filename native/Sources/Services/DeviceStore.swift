@@ -111,7 +111,7 @@ public struct DeviceStoreNamespace: Equatable, Hashable, Sendable {
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first ?? fileManager.homeDirectoryForCurrentUser
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.agentmirror.desktop"
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.corral.desktop"
         return appSupport
             .appendingPathComponent(bundleID, isDirectory: true)
             .appendingPathComponent(DeviceStore.fileName, isDirectory: false)

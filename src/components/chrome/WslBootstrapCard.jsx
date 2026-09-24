@@ -63,7 +63,7 @@ export default function WslBootstrapCard({
       commandHint = 'go install github.com/Florious95/corral-core/server/cmd/agentmirrord@latest';
     } else if (errorMsg && (errorMsg.includes('token') || errorMsg.includes('令牌'))) {
       subtitle = errorMsg;
-      commandHint = 'wsl -d Ubuntu -e cat ~/.config/agentmirror/token';
+      commandHint = 'wsl -d Ubuntu -e cat ~/.config/corral/token';
     }
   }
 

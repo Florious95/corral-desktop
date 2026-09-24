@@ -492,7 +492,7 @@ test('syncLocalTokenAndConnect auto-injects service token and transitions state'
         return true;
       }
       state = 'error';
-      errorMsg = '无法获取 WSL 会话服务配对令牌，请检查 ~/.config/agentmirror/token';
+      errorMsg = '无法获取 WSL 会话服务配对令牌，请检查 ~/.config/corral/token';
       return false;
     }
     mockDm.connect('local');

@@ -36,7 +36,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             launchFailed = true
             let alert = NSAlert()
-            alert.messageText = "AgentMirror could not load its bundled interface."
+            alert.messageText = "Corral could not load its bundled interface."
             alert.informativeText = "Reinstall a complete application bundle."
             alert.runModal()
             NSApp.terminate(nil)

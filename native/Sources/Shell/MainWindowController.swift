@@ -47,7 +47,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "AgentMirror"
+        window.title = "Corral"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isOpaque = false

@@ -744,22 +744,40 @@ read_token() {
         exit 0
     fi
 }
+migrate_token() {
+    home="$1"
+    legacy="$home/.config/agentmirror/token"
+    current="$home/.config/corral/token"
+    if test ! -e "$current" && test -s "$legacy"; then
+        mkdir -p "$(dirname "$current")"
+        umask 077
+        cp -- "$legacy" "$current"
+        chmod 600 "$current"
+    fi
+}
+read_user_token() {
+    home="$1"
+    migrate_token "$home"
+    read_token "$home/.config/corral/token"
+    read_token "$home/.config/agentmirror/token"
+}
 
 # Prefer the configured HOME, then the home of the running daemon's UID.
-read_token "$HOME/.config/agentmirror/token"
+read_user_token "$HOME"
 for name in agentmirrord corral-core; do
     for pid in $(pgrep -x "$name" 2>/dev/null || true); do
         uid=$(awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null || true)
         home=$(awk -F: -v uid="$uid" '$3 == uid {print $6; exit}' /etc/passwd 2>/dev/null || true)
         test -n "$home" || continue
-        read_token "$home/.config/agentmirror/token"
+        read_user_token "$home"
     done
 done
 
 # Finally cover distros whose service user is not present in /proc anymore.
-read_token "/root/.config/agentmirror/token"
-for path in /home/*/.config/agentmirror/token; do
-    read_token "$path"
+read_user_token "/root"
+for home in /home/*; do
+    test -d "$home" || continue
+    read_user_token "$home"
 done
 exit 1
 "#;
@@ -767,7 +785,7 @@ exit 1
 #[cfg(windows)]
 const TOKEN_WRITE_SCRIPT: &str = r#"set -eu
 token="$1"
-path="$HOME/.config/agentmirror/token"
+path="$HOME/.config/corral/token"
 mkdir -p "$(dirname "$path")"
 tmp="$path.tmp.$$"
 trap 'rm -f "$tmp"' EXIT
@@ -1192,9 +1210,10 @@ mod tests {
         assert!(RUNNING_SERVICE_TOKEN_SCRIPT.contains("head -c 257"));
         assert!(SYSTEM_ENV_TOKEN_SCRIPT.contains("/etc/agentmirror/*.env"));
         assert!(SYSTEM_ENV_TOKEN_SCRIPT.contains("AGENTMIRROR_TOKEN="));
-        assert!(TOKEN_READ_SCRIPT.contains("$HOME/.config/agentmirror/token"));
+        assert!(TOKEN_READ_SCRIPT.contains("current=\"$home/.config/corral/token\""));
+        assert!(TOKEN_READ_SCRIPT.contains("legacy=\"$home/.config/agentmirror/token\""));
         assert!(TOKEN_READ_SCRIPT.contains("/proc/$pid/status"));
-        assert!(TOKEN_READ_SCRIPT.contains("/home/*/.config/agentmirror/token"));
+        assert!(TOKEN_READ_SCRIPT.contains("migrate_token"));
         let syntax = hidden_command("sh")
             .args(["-n", "-c", TOKEN_READ_SCRIPT])
             .status()

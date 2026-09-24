@@ -4,7 +4,8 @@ import { nativeCapabilities } from './nativeCapabilities.js';
 /*
  * localStorage persistence (CLIENT-CONTRACT §4).
  *
- * One JSON document per key, all under the `agentmirror.desktop.v1.` prefix.
+ * One JSON document per key, all under the `corral.desktop.v1.` prefix. The
+ * legacy AgentMirror prefix is read once and copied forward for upgrades.
  * Every loader swallows parse/storage failures and returns a stable default —
  * corrupt data must never white-screen the app. Schema violations drop the
  * whole entry rather than patching it half-way.
@@ -24,7 +25,8 @@ export function isNativeDesktop() {
   return nativeCapabilities.environment === 'swift' || isTauri();
 }
 
-export const PREFIX = 'agentmirror.desktop.v1.';
+export const PREFIX = 'corral.desktop.v1.';
+export const LEGACY_PREFIX = 'agentmirror.desktop.v1.';
 
 export const KEYS = Object.freeze({
   devices: `${PREFIX}devices`,
@@ -56,7 +58,7 @@ export function backupUiSnapshot(storage) {
       const snapshot = {};
       for (let i = 0; i < storage.length; i++) {
         const k = storage.key(i);
-        if (k && (k.startsWith(PREFIX) || k.startsWith('am.'))) {
+        if (k && (k.startsWith(PREFIX) || k.startsWith(LEGACY_PREFIX) || k.startsWith('am.'))) {
           const v = storage.getItem(k);
           if (typeof v === 'string') snapshot[k] = v;
         }
@@ -66,6 +68,18 @@ export function backupUiSnapshot(storage) {
       }
     } catch (_) {}
   }
+}
+
+function legacyKey(key) {
+  return key.startsWith(PREFIX) ? `${LEGACY_PREFIX}${key.slice(PREFIX.length)}` : key;
+}
+
+function readJsonWithLegacy(storage, key) {
+  const current = readJson(storage, key);
+  if (current !== undefined) return current;
+  const legacy = readJson(storage, legacyKey(key));
+  if (legacy !== undefined) writeJson(storage, key, legacy);
+  return legacy;
 }
 
 function writeJson(storage, key, value) {
@@ -110,7 +124,7 @@ function normalizeDevices(raw) {
 export function loadDevices(storage) {
   // Desktop shell: never read pairing material from localStorage (UI-SPEC §7.4).
   if (isNativeDesktop()) return [];
-  return normalizeDevices(readJson(storage, KEYS.devices));
+  return normalizeDevices(readJsonWithLegacy(storage, KEYS.devices));
 }
 
 export function saveDevices(devices, storage) {
@@ -276,12 +290,12 @@ export function flushSecureSaves() {
 
 /** @returns {string[]} device ids that participate in the aggregated model. */
 export function loadCheckedDevices(storage) {
-  return stringArray(readJson(storage, KEYS.checkedDevices));
+  return stringArray(readJsonWithLegacy(storage, KEYS.checkedDevices));
 }
 
 /** Distinguishes "user unchecked everything" ([]) from "never written" (default: all checked). */
 export function hasCheckedDevices(storage) {
-  return Array.isArray(readJson(storage, KEYS.checkedDevices));
+  return Array.isArray(readJsonWithLegacy(storage, KEYS.checkedDevices));
 }
 
 export function saveCheckedDevices(ids, storage) {
@@ -290,7 +304,7 @@ export function saveCheckedDevices(ids, storage) {
 
 /** @returns {string[]} favKey() values. */
 export function loadFavorites(storage) {
-  return stringArray(readJson(storage, KEYS.favorites));
+  return stringArray(readJsonWithLegacy(storage, KEYS.favorites));
 }
 
 export function saveFavorites(keys, storage) {
@@ -299,7 +313,7 @@ export function saveFavorites(keys, storage) {
 
 /** @returns {{sidebarCollapsed:boolean,panes:string[],activePane:string|null,lastSpace:string|null}} */
 export function loadUi(storage) {
-  const raw = readJson(storage, KEYS.ui);
+  const raw = readJsonWithLegacy(storage, KEYS.ui);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_UI };
   return {
     sidebarCollapsed: raw.sidebarCollapsed === true,

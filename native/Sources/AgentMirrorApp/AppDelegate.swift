@@ -62,14 +62,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainMenu = NSMenu()
 
         let appMenuItem = NSMenuItem()
-        let appMenu = NSMenu(title: "AgentMirror")
-        let aboutItem = NSMenuItem(title: "About AgentMirror",
+        let appMenu = NSMenu(title: "Corral")
+        let aboutItem = NSMenuItem(title: "About Corral",
                                    action: Selector(("orderFrontStandardAboutPanel:")),
                                    keyEquivalent: "")
         aboutItem.target = NSApp
         appMenu.addItem(aboutItem)
         appMenu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "Quit AgentMirror",
+        let quitItem = NSMenuItem(title: "Quit Corral",
                                   action: Selector(("terminate:")),
                                   keyEquivalent: "q")
         quitItem.target = NSApp
@@ -107,9 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ).first else {
             throw ShellError.unavailable
         }
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.agentmirror.desktop"
+        // The production bundle now uses com.corral.desktop. Migrate the
+        // previous app-support store exactly once before the WebView starts.
         return appSupport
-            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("com.agentmirror.desktop", isDirectory: true)
             .appendingPathComponent("devices.json", isDirectory: false)
     }
 
@@ -127,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showLaunchFailure() {
         let alert = NSAlert()
         alert.alertStyle = .critical
-        alert.messageText = "AgentMirror 无法启动"
+        alert.messageText = "Corral 无法启动"
         alert.informativeText = "前端资源或安全存储初始化失败。请检查应用安装后重试。"
         alert.addButton(withTitle: "退出")
         alert.runModal()

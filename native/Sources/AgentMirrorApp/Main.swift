@@ -5,7 +5,7 @@ import AppKit
 /// isolated .app bundle and under `swift run`.
 @main
 @MainActor
-struct AgentMirrorMain {
+struct CorralMain {
     static func main() {
         let application = NSApplication.shared
         let delegate = AppDelegate()

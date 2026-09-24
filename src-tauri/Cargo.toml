@@ -1,8 +1,8 @@
 [package]
-name = "agentmirror-desktop"
+name = "corral-desktop"
 version = "0.1.13"
-description = "AgentMirror desktop client"
-authors = ["AgentMirror contributors"]
+description = "Corral desktop client"
+authors = ["Corral contributors"]
 license = "Apache-2.0"
 edition = "2021"
 
