@@ -112,6 +112,62 @@ test('TerminalView runtime lock resists fragmented/chunked escape sequences acro
   view.dispose();
 });
 
+test('TerminalView runtime lock survives writeSnapshot/term.reset and avoids stale closure/stuck block cursor', async () => {
+  const container = new MockContainer();
+  const view = new TerminalView(container);
+
+  // Set to blinking bar: \x1b[5 q
+  await new Promise((done) => view.term.write('\x1b[5 q', done));
+  assert.equal(view.term._core.coreService.decPrivateModes.cursorStyle, 'bar');
+  assert.equal(view.term._core.coreService.decPrivateModes.cursorBlink, false);
+
+  const originalModes = view.term._core.coreService.decPrivateModes;
+
+  // Perform writeSnapshot (which invokes term.reset())
+  view.writeSnapshot(new TextEncoder().encode('\x1b[5 qsnapshot'));
+  await new Promise((done) => view.term.write('', done));
+
+  const newModes = view.term._core.coreService.decPrivateModes;
+  assert.notEqual(newModes, originalModes, 'term.reset() must replace decPrivateModes instance');
+  assert.equal(newModes.cursorBlink, false, 'new decPrivateModes must be immediately re-locked to false');
+  assert.equal(typeof Object.getOwnPropertyDescriptor(newModes, 'cursorBlink')?.get, 'function', 'new decPrivateModes must have locked getter');
+
+  // Verify subsequent cursor style updates after reset work properly instead of being stuck at block
+  await new Promise((done) => view.term.write('\x1b[3 q', done));
+  assert.equal(view.term._core.coreService.decPrivateModes.cursorStyle, 'underline', 'cursorStyle must adapt to underline after reset');
+  assert.equal(view.term._core.coreService.decPrivateModes.cursorBlink, false);
+
+  view.dispose();
+});
+
+test('TerminalView DECSCUSR accurately parses param 0 as default reset and safely ignores unsupported params', async () => {
+  const container = new MockContainer();
+  const view = new TerminalView(container);
+
+  // 1. Configure default cursorStyle to bar
+  view.term.options.cursorStyle = 'bar';
+
+  // Remote sets underline: \x1b[3 q
+  await new Promise((done) => view.term.write('\x1b[3 q', done));
+  assert.equal(view.term._core.coreService.decPrivateModes.cursorStyle, 'underline');
+
+  // Remote sends \x1b[0 q (reset to default configured style)
+  await new Promise((done) => view.term.write('\x1b[0 q', done));
+  const decModes = view.term._core.coreService.decPrivateModes;
+  assert.equal(decModes.cursorStyle, undefined, 'param 0 must clear remote cursorStyle to undefined');
+  const effectiveStyle = decModes.cursorStyle ?? view.term.options.cursorStyle;
+  assert.equal(effectiveStyle, 'bar', 'effectiveStyle must fall back to configured default bar');
+
+  // 2. Remote sets underline: \x1b[3 q, then sends unsupported param 7 (\x1b[7 q)
+  await new Promise((done) => view.term.write('\x1b[3 q', done));
+  assert.equal(decModes.cursorStyle, 'underline');
+
+  await new Promise((done) => view.term.write('\x1b[7 q', done));
+  assert.equal(decModes.cursorStyle, 'underline', 'unsupported param 7 must be safely ignored without forcing block');
+
+  view.dispose();
+});
+
 test('WebGL ablation channel: supports explicit disableWebgl parameter and test overrides for Phase 2 energy profiling', async () => {
   setDisableWebglForTests(null);
   assert.equal(isWebglDisabled(), false);

@@ -639,8 +639,26 @@ export class TerminalView {
   }
 
   /**
+   * 锁死当前激活的 decPrivateModes.cursorBlink 属性为只读 false。
+   */
+  _lockDecPrivateModes() {
+    const decModes = this.term?._core?.coreService?.decPrivateModes;
+    if (!decModes) return;
+    if (typeof Object.getOwnPropertyDescriptor(decModes, 'cursorBlink')?.get === 'function') return;
+    try {
+      Object.defineProperty(decModes, 'cursorBlink', {
+        get: () => false,
+        set: () => {},
+        configurable: true,
+        enumerable: true,
+      });
+    } catch {}
+  }
+
+  /**
    * 运行期硬锁守卫：彻底防御外部进程/shell通过转义序列（DECSCUSR / DECSET 12）重新激活光标闪烁。
    * 防止 @xterm/addon-webgl 内部激活 600ms CursorBlinkStateManager 定时重绘导致 GPU 空转。
+   * 并在 xterm / coreService 发生 reset 时（如首帧快照 writeSnapshot），对新生成的 decPrivateModes 持续生效。
    */
   _lockCursorBlink() {
     const term = this.term;
@@ -671,30 +689,41 @@ export class TerminalView {
       } catch {}
     }
 
-    // 3. 锁死 coreService.decPrivateModes.cursorBlink 读写
-    const decModes = term._core?.coreService?.decPrivateModes;
-    if (decModes) {
-      try {
-        Object.defineProperty(decModes, 'cursorBlink', {
-          get: () => false,
-          set: () => {},
-          configurable: true,
-          enumerable: true,
-        });
-      } catch {}
+    // 3. 拦截 CoreService 与 term 自身的 reset，在重置生成新 decPrivateModes 时重新安装属性锁
+    const coreService = term._core?.coreService;
+    if (coreService && typeof coreService.reset === 'function') {
+      const origCoreReset = coreService.reset.bind(coreService);
+      coreService.reset = () => {
+        origCoreReset();
+        this._lockDecPrivateModes();
+      };
+    }
+    if (typeof term.reset === 'function') {
+      const origReset = term.reset.bind(term);
+      term.reset = () => {
+        origReset();
+        this._lockDecPrivateModes();
+      };
     }
 
-    // 4. 注册 CSI 处理器：拦截 DECSCUSR (CSI Ps SP q) 保证光标形状随动的同时硬锁 cursorBlink 为 false
+    // 4. 初次锁定当前 decPrivateModes
+    this._lockDecPrivateModes();
+
+    // 5. 注册 CSI 处理器：动态读取当前激活的 decPrivateModes，精确解析 DECSCUSR 参数（规避重置后闭包失效）
     if (term.parser?.registerCsiHandler) {
       const d1 = term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
-        const p = params[0] || 1;
-        if (p === 0) {
+        const decModes = term._core?.coreService?.decPrivateModes;
+        if (decModes) this._lockDecPrivateModes();
+        const param = params.length === 0 ? 1 : params[0];
+        if (param === 0) {
           if (decModes) decModes.cursorStyle = undefined;
-        } else {
-          const style = (p === 3 || p === 4) ? 'underline' : (p === 5 || p === 6) ? 'bar' : 'block';
-          if (decModes) decModes.cursorStyle = style;
+        } else if (param === 1 || param === 2) {
+          if (decModes) decModes.cursorStyle = 'block';
+        } else if (param === 3 || param === 4) {
+          if (decModes) decModes.cursorStyle = 'underline';
+        } else if (param === 5 || param === 6) {
+          if (decModes) decModes.cursorStyle = 'bar';
         }
-        if (decModes) decModes.cursorBlink = false;
         return true;
       });
       const d2 = term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
