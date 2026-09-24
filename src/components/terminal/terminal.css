@@ -49,8 +49,9 @@
   pointer-events: none;
 }
 
-/* Keep resident geometry/buffers while letting xterm's IntersectionObserver
-   suspend the invisible WebGL surface. visibility:hidden alone still draws. */
+/* Keep hidden resident panes out of the compositor while their explicit host
+   geometry remains available to the parent projection. TerminalPane seeds its
+   lastFit from that projected geometry before the pane is revealed. */
 .terminal-stage[data-platform="macos"] > .pane-host.is-hidden {
   content-visibility: hidden;
 }

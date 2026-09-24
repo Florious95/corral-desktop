@@ -719,6 +719,7 @@ src/
   - 合法宿主 UID 是已固化 Tab 的全部叶子加上当前 root 叶子（含 `previewUid`）；预览尚未写入 `tabs` 时也必须挂载 TerminalPane；
   - 已打开且未关闭的会话宿主常驻于 DOM 中，切换到后台时保留最后的非零尺寸矩形，施加 `visibility:hidden; pointer-events:none; inert; aria-hidden:true`；
   - 重新切回可见时直接恢复 `visibility:visible`，仅在几何发生真实改变时触发 120ms 防抖的 xterm `fit()`。
+  - **单屏 ↔ 已初始化分屏切换（2026-09-26，Issue #301）**：按同一舞台矩形预投影所有 Tab 的叶子几何，并在隐藏宿主上保留该矩形与 xterm 网格；激活已驻留分屏时不得触发 `fit`、`subscribe` 或 `resize`，12 帧几何采样保持恒定。只有真实容器/字体度量改变才允许重排。
   - 仅在 Tab 明确关闭或服务端确认删除时，才真正卸载该组件并完整清理 xterm / 监听器 / 资源。
 - **窗格结构与关闭钮**：
   - `.pane-host`：`position:absolute; box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden`；单窗格全屏无外边框，多分屏状态（`[data-multi-pane="true"]`）带有 `1px solid var(--border)` 及 `border-radius:var(--r-8)` 卡片外框。

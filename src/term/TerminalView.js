@@ -308,7 +308,7 @@ export class TerminalView {
     this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
       this._webglAddon = addon;
       // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
-      if (addon) this.fit({ immediate: true });
+      if (addon) this.fit({ immediate: true, force: true });
       if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
         try {
           if (typeof this.term.clearTextureAtlas === 'function') this.term.clearTextureAtlas();
@@ -343,8 +343,25 @@ export class TerminalView {
    * 按容器像素重算 rows/cols。首帧立刻落到格子并上报订阅；之后 120ms 内的抖动只记目标，
    * 落定后再 term.resize + 上报。否则频繁切列会把旧 snapshot 按过渡宽度本地 reflow，
    * 回到原几何时 daemon resize 还是 no-op（不补快照），错乱就钉死。
+   * `force` 只用于字体/渲染器或显式手动重排；常驻 pane 恢复时相同容器尺寸必须静默。
    */
-  fit({ immediate = false, sync = false } = {}) {
+  isFitCurrent() {
+    const el = this.container;
+    if (this._disposed || !el || !el.isConnected) return false;
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    if (w === 0 || h === 0) return false;
+    const cell = this._cell();
+    const derivedCols = Math.max(2, Math.floor(w / cell.w));
+    const derivedRows = Math.max(2, Math.floor(h / cell.h));
+    return Boolean(this.lastFit
+      && this.lastFit.container_width_px === w
+      && this.lastFit.container_height_px === h
+      && this.lastFit.derived_cols === derivedCols
+      && this.lastFit.derived_rows === derivedRows);
+  }
+
+  fit({ immediate = false, sync = false, force = false } = {}) {
     const el = this.container;
     if (this._disposed || !el || !el.isConnected) return;
     const w = el.clientWidth;
@@ -353,6 +370,7 @@ export class TerminalView {
     const cell = this._cell();
     const derivedCols = Math.max(2, Math.floor(w / cell.w));
     const derivedRows = Math.max(2, Math.floor(h / cell.h));
+    if (!force && this.isFitCurrent()) return;
     this.lastFit = {
       container_width_px: w,
       container_height_px: h,
@@ -713,7 +731,7 @@ export class TerminalView {
     }
     if (changed) {
       this._cellMetrics = null;
-      this.fit({ immediate: true, sync: true });
+      this.fit({ immediate: true, sync: true, force: true });
     }
   }
 
