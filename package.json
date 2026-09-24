@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:dom": "npm run prebuild && VITE_DISABLE_WEBGL=1 vite build",
     "test": "node scripts/run-tests.mjs",
     "tauri": "tauri",
     "core:init": "git submodule update --init deps/corral-core",
