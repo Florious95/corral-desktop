@@ -10,8 +10,14 @@ if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
     throw "NSIS installer was not found: $InstallerPath"
 }
 
-$processNames = @('AgentMirror', 'agentmirror-desktop')
+$processNames = @('Corral', 'corral-desktop', 'AgentMirror', 'agentmirror-desktop')
 $knownResiduePaths = @(
+    (Join-Path $env:LOCALAPPDATA 'Corral'),
+    (Join-Path $env:LOCALAPPDATA 'Programs\Corral'),
+    (Join-Path $env:APPDATA 'Corral'),
+    (Join-Path $env:ProgramData 'Corral'),
+    (Join-Path $env:ProgramFiles 'Corral'),
+    (Join-Path ${env:ProgramFiles(x86)} 'Corral'),
     (Join-Path $env:LOCALAPPDATA 'AgentMirror'),
     (Join-Path $env:LOCALAPPDATA 'Programs\AgentMirror'),
     (Join-Path $env:APPDATA 'AgentMirror'),
@@ -38,7 +44,7 @@ function Remove-AgentMirrorResidue {
 }
 
 Remove-AgentMirrorResidue
-$installDir = Join-Path $env:RUNNER_TEMP 'AgentMirror-e2e-install'
+$installDir = Join-Path $env:RUNNER_TEMP 'Corral-e2e-install'
 if (Test-Path -LiteralPath $installDir) {
     Remove-Item -LiteralPath $installDir -Recurse -Force
 }
@@ -53,13 +59,13 @@ try {
         throw "NSIS installer failed with exit code $($installResult.ExitCode)"
     }
 
-    $exe = @('AgentMirror.exe', 'agentmirror-desktop.exe') |
+    $exe = @('Corral.exe', 'corral-desktop.exe', 'AgentMirror.exe', 'agentmirror-desktop.exe') |
         ForEach-Object {
             Get-ChildItem -LiteralPath $installDir -Filter $_ -File -Recurse -ErrorAction SilentlyContinue
         } |
         Select-Object -First 1
     if (-not $exe) {
-        throw "Installed AgentMirror executable was not found under $installDir"
+        throw "Installed Corral executable was not found under $installDir"
     }
 
     $appProcess = Start-Process -FilePath $exe.FullName `
