@@ -5,15 +5,45 @@
 
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
 
+let testDisableWebgl = null;
+
+/**
+ * 供测试或能耗消融实验动态配置是否禁用 WebGL（Phase 2 单因素对比）。
+ * @param {boolean|null} disabled
+ */
+export function setDisableWebglForTests(disabled) {
+  testDisableWebgl = typeof disabled === 'boolean' ? disabled : null;
+}
+
+/**
+ * 判断当前是否显式关闭 WebGL 渲染器（回退至 DOM 渲染器）。
+ * 生产代码仅接受显式测试重载与环境变量，不暴露未授权 window 全局诊断后门。
+ */
+export function isWebglDisabled() {
+  if (typeof testDisableWebgl === 'boolean') return testDisableWebgl;
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    if (import.meta.env.VITE_DISABLE_WEBGL === '1' || import.meta.env.VITE_DISABLE_WEBGL === 'true') {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * @param {{ loadAddon: Function }} term xterm instance
  * @param {() => Promise<{WebglAddon: new () => { dispose?: Function, onContextLoss?: Function }}>} [importer]
+ * @param {Object} [options]
+ * @param {boolean} [options.disableWebgl=false] 显式消融禁用开关
  * @returns {Promise<object|null>}
  */
-export async function attachWebglRenderer(term, importer = defaultImporter) {
+export async function attachWebglRenderer(term, importer = defaultImporter, { disableWebgl = false } = {}) {
   if (!term || typeof term.loadAddon !== 'function') return null;
   // Windows WebView2 下禁用 WebGL，使用原生 DirectWrite DOM 渲染器，彻底消除 GPU 进程 1GB+ 纹理显存膨胀（Issue #198）
   if (nativeCapabilities.platform === 'windows') {
+    return null;
+  }
+  // Phase 2 消融通道：支持显式参数、环境变量或全局配置禁用 WebGL，供真实 macOS 交付包进行 WebGL vs DOM 能耗与吞吐单因素对比
+  if (disableWebgl || isWebglDisabled()) {
     return null;
   }
   try {

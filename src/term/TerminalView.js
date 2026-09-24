@@ -122,6 +122,7 @@ export class TerminalView {
     this.initialCols = initialCols;
     this.initialRows = initialRows;
     this._cellMetrics = opts.cellMetrics || null;
+    this._disableWebgl = opts.disableWebgl ?? false;
 
     const theme = resolveTerminalTheme(opts);
     this.term = new TerminalCtor({
@@ -165,6 +166,10 @@ export class TerminalView {
     this._cursorAnchor = null;
     this._anchorObservers = null;
     this._pasteListener = null;
+    this._csiDisposables = null;
+
+    // 运行期硬锁守卫：彻底防御 DECSET ?12h 与 DECSCUSR 转义序列动态激活光标闪烁，杜绝 WebGL 600ms 定时器死灰复燃
+    this._lockCursorBlink();
 
     // 应用终端快捷键统一由 term.attachCustomKeyEventHandler 守护（裁决 §5.1）
     if (typeof this.term.attachCustomKeyEventHandler === 'function') {
@@ -305,7 +310,7 @@ export class TerminalView {
       this._observeCursorAnchor();
     }
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
-    this.readyWebgl = attachWebglRenderer(this.term).then((addon) => {
+    this.readyWebgl = attachWebglRenderer(this.term, undefined, { disableWebgl: this._disableWebgl }).then((addon) => {
       this._webglAddon = addon;
       // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
       if (addon) this.fit({ immediate: true, force: true });
@@ -633,6 +638,104 @@ export class TerminalView {
     });
   }
 
+  /**
+   * 锁死当前激活的 decPrivateModes.cursorBlink 属性为只读 false。
+   */
+  _lockDecPrivateModes() {
+    const decModes = this.term?._core?.coreService?.decPrivateModes;
+    if (!decModes) return;
+    if (typeof Object.getOwnPropertyDescriptor(decModes, 'cursorBlink')?.get === 'function') return;
+    try {
+      Object.defineProperty(decModes, 'cursorBlink', {
+        get: () => false,
+        set: () => {},
+        configurable: true,
+        enumerable: true,
+      });
+    } catch {}
+  }
+
+  /**
+   * 运行期硬锁守卫：彻底防御外部进程/shell通过转义序列（DECSCUSR / DECSET 12）重新激活光标闪烁。
+   * 防止 @xterm/addon-webgl 内部激活 600ms CursorBlinkStateManager 定时重绘导致 GPU 空转。
+   * 并在 xterm / coreService 发生 reset 时（如首帧快照 writeSnapshot），对新生成的 decPrivateModes 持续生效。
+   */
+  _lockCursorBlink() {
+    const term = this.term;
+    if (!term) return;
+
+    // 1. 锁死 options.cursorBlink 读写
+    try {
+      if (term.options) {
+        Object.defineProperty(term.options, 'cursorBlink', {
+          get: () => false,
+          set: () => {},
+          configurable: true,
+          enumerable: true,
+        });
+      }
+    } catch {}
+
+    // 2. 锁死 optionsService.options.cursorBlink 读写
+    const optsService = term._core?.optionsService;
+    if (optsService?.options) {
+      try {
+        Object.defineProperty(optsService.options, 'cursorBlink', {
+          get: () => false,
+          set: () => {},
+          configurable: true,
+          enumerable: true,
+        });
+      } catch {}
+    }
+
+    // 3. 拦截 CoreService 与 term 自身的 reset，在重置生成新 decPrivateModes 时重新安装属性锁
+    const coreService = term._core?.coreService;
+    if (coreService && typeof coreService.reset === 'function') {
+      const origCoreReset = coreService.reset.bind(coreService);
+      coreService.reset = () => {
+        origCoreReset();
+        this._lockDecPrivateModes();
+      };
+    }
+    if (typeof term.reset === 'function') {
+      const origReset = term.reset.bind(term);
+      term.reset = () => {
+        origReset();
+        this._lockDecPrivateModes();
+      };
+    }
+
+    // 4. 初次锁定当前 decPrivateModes
+    this._lockDecPrivateModes();
+
+    // 5. 注册 CSI 处理器：动态读取当前激活的 decPrivateModes，精确解析 DECSCUSR 参数（规避重置后闭包失效）
+    if (term.parser?.registerCsiHandler) {
+      const d1 = term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
+        const decModes = term._core?.coreService?.decPrivateModes;
+        if (decModes) this._lockDecPrivateModes();
+        const param = params.length === 0 ? 1 : params[0];
+        if (param === 0) {
+          if (decModes) decModes.cursorStyle = undefined;
+        } else if (param === 1 || param === 2) {
+          if (decModes) decModes.cursorStyle = 'block';
+        } else if (param === 3 || param === 4) {
+          if (decModes) decModes.cursorStyle = 'underline';
+        } else if (param === 5 || param === 6) {
+          if (decModes) decModes.cursorStyle = 'bar';
+        }
+        return true;
+      });
+      const d2 = term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+        if (params.length === 1 && params[0] === 12) {
+          return true; // 拦截单一 DECSET 12 序列
+        }
+        return false;
+      });
+      this._csiDisposables = [d1, d2].filter(Boolean);
+    }
+  }
+
   /** Convert a string offset to xterm cell columns so CJK input remains aligned. */
   _lineColumn(line, charIndex) {
     if (!line?.getCell) return charIndex;
@@ -780,6 +883,8 @@ export class TerminalView {
       document.fonts.removeEventListener('loadingdone', this._fontLoadingListener);
       this._fontLoadingListener = null;
     }
+    for (const d of this._csiDisposables || []) d?.dispose?.();
+    this._csiDisposables = null;
     try { this.term.dispose(); } catch { /* 已 dispose */ }
   }
 
