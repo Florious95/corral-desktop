@@ -4,6 +4,11 @@ import AppKit
 /// systems and accessibility modes use a visible, opaque visual-effect fallback.
 @MainActor
 public final class GlassChrome: NSView {
+    /// The native titlebar is the only surface that needs behind-window glass.
+    /// Keeping this region bounded prevents the material from sampling the
+    /// terminal stage on every compositor update.
+    public static let headerHeight: CGFloat = 38
+
     public private(set) var usesSystemGlass = false
     public private(set) var usesOpaqueFallback = false
 
@@ -71,7 +76,11 @@ public final class GlassChrome: NSView {
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         usesOpaqueFallback = reduceTransparency || increaseContrast
-        fallback.isHidden = usesOpaqueFallback
+        // Exactly one material may be visible. On macOS 26 the system glass
+        // replaces the legacy visual effect; on older systems the legacy
+        // effect is the only translucent fallback. Accessibility always wins
+        // with the opaque surface.
+        fallback.isHidden = usesSystemGlass || usesOpaqueFallback
         glassContainer?.isHidden = !usesSystemGlass || usesOpaqueFallback
         solidFallback.isHidden = !usesOpaqueFallback
         solidFallback.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
