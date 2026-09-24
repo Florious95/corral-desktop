@@ -69,7 +69,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         let root = NSView(frame: .zero)
         root.autoresizingMask = [.width, .height]
         window.contentView = root
-        for view in [chrome, webView, dragSurface] {
+        chrome.frame = headerFrame(in: root.bounds)
+        chrome.autoresizingMask = [.width, .minYMargin]
+        root.addSubview(chrome)
+        for view in [webView, dragSurface] {
             view.frame = root.bounds
             view.autoresizingMask = [.width, .height]
             root.addSubview(view)
@@ -201,6 +204,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
 
     private func alignTrafficLights() {
         guard let window else { return }
+        updateChromeFrame()
         updateTitlebarDragSurfaceFrame()
         let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
         for buttonType in buttons {
@@ -223,6 +227,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         // still lets it cover the native titlebar area.
         contentView.addSubview(titlebarDragSurface)
         updateTitlebarDragSurfaceFrame()
+    }
+
+    private func updateChromeFrame() {
+        guard let contentView = chrome.superview else { return }
+        chrome.frame = headerFrame(in: contentView.bounds)
+    }
+
+    private func headerFrame(in bounds: NSRect) -> NSRect {
+        let height = min(GlassChrome.headerHeight, bounds.height)
+        return NSRect(x: bounds.minX,
+                      y: bounds.maxY - height,
+                      width: bounds.width,
+                      height: height)
     }
 
     private func updateTitlebarDragSurfaceFrame() {
