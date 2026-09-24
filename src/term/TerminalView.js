@@ -17,7 +17,7 @@
 // SyntaxError），`node --test` 就加载不了本模块 —— 两边指同一个文件才不用写互操作补丁。
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
-import { attachWebglRenderer } from './webglRenderer.js';
+import { attachWebglRenderer, webglSurfaceOk } from './webglRenderer.js';
 import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
 import { isCtrlV, isCtrlShiftV, isCtrlC, isCtrlShiftC, isCmdV } from './clipboard.js';
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
@@ -123,6 +123,8 @@ export class TerminalView {
     this.initialRows = initialRows;
     this._cellMetrics = opts.cellMetrics || null;
     this._disableWebgl = opts.disableWebgl ?? false;
+    this._onFirstPaint = opts.onFirstPaint || null;
+    this._firstPaintRendered = false;
 
     const theme = resolveTerminalTheme(opts);
     this.term = new TerminalCtor({
@@ -224,9 +226,21 @@ export class TerminalView {
   open() {
     this.term.open(this.container);
     this._traceRenderDisposable = this.term.onRender?.(({ start, end }) => {
-      if (!isGeomTraceEnabled()) return;
-      geomTrace('render', { ref: this.traceRef, write_seq: this._parsedSequence,
-        rows: this.term.rows, cols: this.term.cols, start_row: start, end_row: end });
+      if (!this._firstPaintRendered && this._hasPainted) {
+        this._firstPaintRendered = true;
+        this._onFirstPaint?.({
+          ref: this.traceRef,
+          renderer: this.rendererType,
+          canvasCount: this.canvasCount,
+          cols: this.cols,
+          rows: this.rows,
+        });
+        this._notifyRenderDiagnostics();
+      }
+      if (isGeomTraceEnabled()) {
+        geomTrace('render', { ref: this.traceRef, write_seq: this._parsedSequence,
+          rows: this.term.rows, cols: this.term.cols, start_row: start, end_row: end });
+      }
     });
     if (this.hideCursor) {
       this.term.write(HIDE_CURSOR);
@@ -264,10 +278,13 @@ export class TerminalView {
     }
     // 单一 textarea 唯一 paste 接缝（裁决 §5.2）
     const textarea = this.term.textarea;
-    if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' && textarea) {
+    const isTestMode = import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' || (typeof window !== 'undefined' && Boolean(window.__AGENTMIRROR_TEST_HOOKS__));
+    if (isTestMode && textarea) {
       window.__AGENTMIRROR_TEST_HOOKS__ ??= {};
       window.__AGENTMIRROR_TEST_HOOKS__.terminals ??= new Set();
       window.__AGENTMIRROR_TEST_HOOKS__.terminals.add(this.term);
+      window.__AGENTMIRROR_TEST_HOOKS__.activeViews ??= new Set();
+      window.__AGENTMIRROR_TEST_HOOKS__.activeViews.add(this);
       this._testFocus = () => {
         window.__AGENTMIRROR_TEST_HOOKS__ ??= {};
         window.__AGENTMIRROR_TEST_HOOKS__.activeTerminal = this.term;
@@ -321,6 +338,7 @@ export class TerminalView {
           this.term.refresh?.(0, this.term.rows - 1);
         } catch {}
       }
+      this._notifyRenderDiagnostics();
       return addon;
     });
 
@@ -527,7 +545,20 @@ export class TerminalView {
         this.term.reset();
         this._hasPainted = true;
       }
-      this.term.write(this.hideCursor ? withHiddenCursor(data) : data, done);
+      this.term.write(this.hideCursor ? withHiddenCursor(data) : data, () => {
+        done();
+        if (kind === 'snapshot' && !this._firstPaintRendered) {
+          this._firstPaintRendered = true;
+          this._onFirstPaint?.({
+            ref: this.traceRef,
+            renderer: this.rendererType,
+            canvasCount: this.canvasCount,
+            cols: this.cols,
+            rows: this.rows,
+          });
+          this._notifyRenderDiagnostics();
+        }
+      });
     } catch (error) {
       done();
       throw error;
@@ -840,6 +871,10 @@ export class TerminalView {
 
   dispose() {
     this._disposed = true;
+    if (typeof window !== 'undefined' && window.__AGENTMIRROR_TEST_HOOKS__?.activeViews) {
+      window.__AGENTMIRROR_TEST_HOOKS__.activeViews.delete(this);
+      this._notifyRenderDiagnostics();
+    }
     if (import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' && this._testFocus) {
       window.__AGENTMIRROR_TEST_HOOKS__?.terminals?.delete(this.term);
       this.term.textarea?.removeEventListener('focus', this._testFocus);
@@ -890,6 +925,57 @@ export class TerminalView {
 
   get rows() { return this.term.rows; }
   get cols() { return this.term.cols; }
+
+  get rendererType() {
+    const canvas = (this.term?.element || this.container)?.querySelector?.('.xterm-screen canvas');
+    const canvasOk = canvas ? (canvas.getBoundingClientRect?.()?.width ?? 2) >= 2 : false;
+    return Boolean(this._webglAddon && (webglSurfaceOk(this.term) || canvasOk)) ? 'webgl' : 'dom';
+  }
+
+  get canvasCount() {
+    const root = this.term?.element || this.container;
+    return root?.querySelectorAll?.('.xterm-screen canvas')?.length ?? 0;
+  }
+
+  get isFirstPaintRendered() {
+    return Boolean(this._firstPaintRendered || this._hasPainted);
+  }
+
+  _notifyRenderDiagnostics() {
+    if (typeof window === 'undefined') return;
+    const isTestMode = import.meta.env?.VITE_TERMINAL_TEST_HOOKS === '1' || Boolean(window.__AGENTMIRROR_TEST_HOOKS__);
+    if (!isTestMode) return;
+
+    window.__AGENTMIRROR_TEST_HOOKS__ ??= {};
+    window.__AGENTMIRROR_TEST_HOOKS__.activeViews ??= new Set();
+    window.__AGENTMIRROR_TEST_HOOKS__.activeViews.add(this);
+
+    const allViews = Array.from(window.__AGENTMIRROR_TEST_HOOKS__.activeViews).filter((v) => !v._disposed && v.container?.isConnected);
+    const panes = allViews.map((v) => ({
+      ref: v.traceRef || '',
+      ready: v.isFirstPaintRendered,
+      rendered: v.isFirstPaintRendered,
+      renderer: v.rendererType,
+      canvasCount: v.canvasCount,
+      cols: v.cols,
+      rows: v.rows,
+    }));
+    const webglCount = panes.filter((p) => p.renderer === 'webgl').length;
+    const diag = {
+      firstPaintRendered: panes.length > 0 && panes.every((p) => p.rendered),
+      activePanesCount: panes.length,
+      activeRenderer: panes.length === 0 ? 'unknown' : (webglCount === panes.length ? 'webgl' : (webglCount === 0 ? 'dom' : 'mixed')),
+      canvasCount: panes.reduce((acc, p) => acc + p.canvasCount, 0),
+      cols: panes[0]?.cols ?? 0,
+      rows: panes[0]?.rows ?? 0,
+      panes,
+    };
+    window.__AGENTMIRROR_TEST_HOOKS__.renderDiagnostics = diag;
+    window.__AGENTMIRROR_TEST_HOOKS__.getRenderDiagnostics = () => diag;
+    try {
+      window.dispatchEvent(new CustomEvent('agentmirror:terminal-render', { detail: diag }));
+    } catch {}
+  }
 
   _report() {
     const dims = `${this.term.rows}x${this.term.cols}`;

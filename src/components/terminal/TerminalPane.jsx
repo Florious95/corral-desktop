@@ -63,6 +63,7 @@ export default function TerminalPane({
   onResizeRef.current = onResize;
 
   const [ready, setReady] = useState(false);
+  const [renderDiag, setRenderDiag] = useState({ rendered: false, renderer: 'dom', canvasCount: 0 });
   const [history, setHistory] = useState(null);   // { fromLine, lineCount, text }
   const [hint, setHint] = useState('');
   const [presenceMode, setPresenceMode] = useState(PRESENCE_MODE.UNKNOWN);
@@ -222,6 +223,13 @@ export default function TerminalPane({
       fontSize,
       initialCols: currentMode === PRESENCE_MODE.TAKEOVER ? initialCols : null,
       initialRows: currentMode === PRESENCE_MODE.TAKEOVER ? initialRows : null,
+      onFirstPaint: (info) => {
+        setRenderDiag({
+          rendered: true,
+          renderer: info.renderer,
+          canvasCount: info.canvasCount,
+        });
+      },
       onResize: (rows, cols) => {
         const act = gate.settle(rows, cols);
         if (!isManualReflowing) {
@@ -246,6 +254,15 @@ export default function TerminalPane({
       onCtrlV: () => onCtrlVRef.current?.(),
       onForceTextPaste: () => onForceTextPasteRef.current?.(),
       onCopyError: () => setHint('复制失败，请重试'),
+    });
+    view.readyWebgl?.then(() => {
+      if (viewRef.current === view) {
+        setRenderDiag((prev) => ({
+          ...prev,
+          renderer: view.rendererType,
+          canvasCount: view.canvasCount,
+        }));
+      }
     });
     const wheel = new WheelAccumulator((delta) => {
       clientRef.current?.scrollWheel?.(target, delta);
@@ -522,6 +539,12 @@ export default function TerminalPane({
       className="terminalpane"
       data-platform={nativeCapabilities.platform}
       data-presence-mode={presenceMode}
+      data-ready={ready ? 'true' : 'false'}
+      data-rendered={renderDiag.rendered || ready ? 'true' : 'false'}
+      data-renderer={renderDiag.renderer}
+      data-canvas-count={renderDiag.canvasCount}
+      data-cols={viewRef.current?.cols ?? agent.cols ?? undefined}
+      data-rows={viewRef.current?.rows ?? agent.rows ?? undefined}
       onMouseDown={handlePaneMouseDown}
     >
       <div className={`terminalpane-body${presenceMode === PRESENCE_MODE.TAKEOVER ? ' is-takeover' : ''}`}>
