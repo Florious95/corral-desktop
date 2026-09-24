@@ -28,7 +28,9 @@ async function fakeHomes() {
   const base = await mkdtemp(join(fileURLToPath(root), '.wsl-ipc-'));
   const defaultHome = join(base, 'default');
   const ownerHome = join(base, 'home', 'alaudalancy');
+  await mkdir(join(defaultHome, '.config', 'corral'), { recursive: true });
   await mkdir(join(defaultHome, '.config', 'agentmirror'), { recursive: true });
+  await mkdir(join(ownerHome, '.config', 'corral'), { recursive: true });
   await mkdir(join(ownerHome, '.config', 'agentmirror'), { recursive: true });
   return { base, defaultHome, ownerHome };
 }
@@ -37,8 +39,10 @@ test('Issue 217 Tier 1: WSL token bridge uses root and all user-home fallbacks',
   const { rust, main, native, script } = await readSources();
   assert.match(rust, /run_wsl\(&\["-d", distribution, "-u", "root", "-e", "sh", "-lc", script\]\)/);
   assert.match(rust, /head -c 257/);
-  assert.match(script, /\$HOME\/\.config\/agentmirror\/token/);
-  assert.match(script, /\/home\/\*\/\.config\/agentmirror\/token/);
+  assert.match(script, /\$home\/\.config\/corral\/token/);
+  assert.match(script, /\$home\/\.config\/agentmirror\/token/);
+  assert.match(script, /migrate_token/);
+  assert.match(script, /for home in \/home\/\*;/);
   assert.match(script, /\/proc\/\$pid\/status/);
   assert.match(native, /invoke\('get_wsl_pairing_token'\)/);
   assert.match(native, /invoke\('read_wsl_service_token'\)/);
@@ -49,7 +53,7 @@ test('Issue 217 Tier 1: token file under configured HOME is readable with 0600 m
   const { base, defaultHome } = await fakeHomes();
   const { script } = await readSources();
   try {
-    const tokenPath = join(defaultHome, '.config', 'agentmirror', 'token');
+    const tokenPath = join(defaultHome, '.config', 'corral', 'token');
     await writeFile(tokenPath, 'HOME-TOKEN-123\n', { mode: 0o600 });
     await chmod(tokenPath, 0o600);
     const result = runScript(script, { home: defaultHome });
@@ -67,16 +71,14 @@ test('Issue 217 Tier 1: wrong default HOME falls through to another WSL user hom
     const tokenPath = join(ownerHome, '.config', 'agentmirror', 'token');
     await writeFile(tokenPath, 'OWNER-TOKEN-456\n', { mode: 0o600 });
     await chmod(tokenPath, 0o600);
-    const portableScript = script.replaceAll(
-      '/home/*/.config/agentmirror/token',
-      `${base}/home/*/.config/agentmirror/token`,
-    ).replaceAll(
-      '/root/.config/agentmirror/token',
-      `${base}/root/.config/agentmirror/token`,
-    );
+    const portableScript = script.replaceAll('/home/*', `${base}/home/*`);
     const result = runScript(portableScript, { home: defaultHome });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, 'OWNER-TOKEN-456\n');
+    assert.equal(
+      await readFile(join(ownerHome, '.config', 'corral', 'token'), 'utf8'),
+      'OWNER-TOKEN-456\n',
+    );
   } finally {
     await rm(base, { recursive: true, force: true });
   }
