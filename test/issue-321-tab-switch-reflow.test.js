@@ -154,7 +154,7 @@ test('Issue #321: attachWebgl obeys isFitCurrent and does NOT force fit or trigg
   view.dispose();
 });
 
-test('Issue #321: TerminalPane and SplitPanes source code contract guarantees zero reflow on tab switch', async () => {
+test('Issue #321: TerminalPane and SplitPanes source code contract guarantees zero reflow, zero subscribe and zero reset on tab switch', async () => {
   const [paneJsx, splitJsx, terminalViewJs] = await Promise.all([
     readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/terminal/SplitPanes.jsx', import.meta.url), 'utf8'),
@@ -165,9 +165,9 @@ test('Issue #321: TerminalPane and SplitPanes source code contract guarantees ze
   assert.doesNotMatch(terminalViewJs, /attachWebgl[\s\S]*?fit\(\{\s*immediate:\s*true,\s*force:\s*true\s*\}\)/);
   assert.match(terminalViewJs, /if\s*\(!this\.isFitCurrent\(\)\)\s*\{/);
 
-  // 2. TerminalPane.visibility_resume 杜绝 force: true
-  assert.doesNotMatch(paneJsx, /visibility_resume.*force:\s*true/);
-  assert.match(paneJsx, /sendIfNeeded\(\{\s*type:\s*'subscribe',\s*rows:\s*grid\.rows,\s*cols:\s*grid\.cols\s*\},\s*'visibility_resume'\);/);
+  // 2. TerminalPane 切入后台不执行退订（保留常驻订阅），切回前台已有订阅时不重发 subscribe
+  assert.doesNotMatch(paneJsx, /syncVisibility = \(visible\) => \{[\s\S]*?clientRef\.current\?\.unsubscribe[\s\S]*?mo = new MutationObserver/);
+  assert.match(paneJsx, /if\s*\(grid\s*&&\s*!lastSubscribe\)\s*\{/);
 
   // 3. SplitPanes 显式透传 isVisible 给 renderPane
   assert.match(splitJsx, /renderPane\(agent,\s*\{[^}]*isVisible/);

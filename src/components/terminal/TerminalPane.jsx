@@ -523,6 +523,7 @@ export default function TerminalPane({
     const syncVisibility = (visible) => {
       if (!view) return;
       const prevVisible = view.isVisible;
+      if (prevVisible === visible) return;
       view.setVisible(visible);
       setRenderDiag((prev) => ({
         ...prev,
@@ -545,17 +546,11 @@ export default function TerminalPane({
             view.fit({ immediate: true, sync: true });
           }
           const grid = gate.grid || (view.rows && view.cols ? { rows: view.rows, cols: view.cols } : null);
-          if (grid) {
+          if (grid && !lastSubscribe) {
             gate.settle(grid.rows, grid.cols);
             sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume');
             firstSub = false;
           }
-        }
-      } else {
-        if (prevVisible) {
-          // 切入后台：退订断流，防止后台持续产生数据流与 DOM 节点 (Issue #316)
-          clientRef.current?.unsubscribe(target);
-          lastSubscribe = null;
         }
       }
     };

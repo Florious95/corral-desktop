@@ -368,9 +368,8 @@ test('Issue #316: TerminalPane implements background disconnect and foreground r
   // 2. sendIfNeeded 拦截隐藏窗格的冗余 subscribe 发送
   assert.match(paneJsx, /if\s*\(view\s*&&\s*!view\.isVisible\)\s*\{[^}]*skipped:\s*'pane_hidden'/);
 
-  // 3. 切入后台立即退订断流
+  // 3. 卸载或关闭窗格时退订清理
   assert.match(paneJsx, /clientRef\.current\?\.unsubscribe\(target\);/);
-  assert.match(paneJsx, /lastSubscribe\s*=\s*null;/);
 
   // 4. 切回前台使用 visibility_resume 恢复订阅全量快照
   assert.match(paneJsx, /visibility_resume/);
