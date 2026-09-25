@@ -126,8 +126,13 @@ export class TerminalView {
     this._webglImporter = opts.webglImporter || undefined;
     this._visible = opts.isVisible !== false;
     this._attachingWebgl = null;
+    this._attachGeneration = 0;
     this._onFirstPaint = opts.onFirstPaint || null;
     this._firstPaintRendered = false;
+    this._resolveReadyWebgl = null;
+    this.readyWebgl = new Promise((resolve) => {
+      this._resolveReadyWebgl = resolve;
+    });
 
     const theme = resolveTerminalTheme(opts);
     this.term = new TerminalCtor({
@@ -321,7 +326,10 @@ export class TerminalView {
     }
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
     // 当初始可见性为 true 时启动 WebGL 附加；后台挂载（isVisible=false）则保持在轻量 DOM 渲染模式，避免后台占用 WebGL Canvas 与 IOSurface Backing Store
-    this.readyWebgl = this._visible ? this.attachWebgl() : Promise.resolve(null);
+    const initWebglPromise = this._visible ? this.attachWebgl() : Promise.resolve(null);
+    initWebglPromise.then((addon) => {
+      this._resolveReadyWebgl?.(addon);
+    });
 
     // 监听 Web 字体加载完成：强制清理 WebGL 纹理图集缓存并重绘，防止首帧未命中字体时将豆腐块永久缓存在 Texture Atlas 中
     if (typeof document !== 'undefined' && document.fonts) {
@@ -850,15 +858,20 @@ export class TerminalView {
     if (this._disposed || this._disableWebgl || !this._visible) {
       return Promise.resolve(null);
     }
+    // 终端尚未在 DOM 中 open 时，挂起等待 open 完成，杜绝无 element 提前挂载失败
+    if (!this.term?.element) {
+      return this.readyWebgl || Promise.resolve(null);
+    }
     if (this._webglAddon) {
       return Promise.resolve(this._webglAddon);
     }
     if (this._attachingWebgl) {
       return this._attachingWebgl;
     }
+    const gen = ++this._attachGeneration;
     const attachPromise = attachWebglRenderer(this.term, this._webglImporter, { disableWebgl: this._disableWebgl })
       .then((addon) => {
-        if (this._disposed || !this._visible) {
+        if (this._disposed || !this._visible || this._attachGeneration !== gen) {
           try { addon?.dispose(); } catch {}
           return null;
         }
@@ -874,8 +887,10 @@ export class TerminalView {
           }
         }
         this._notifyRenderDiagnostics();
+        this._resolveReadyWebgl?.(addon);
         return addon;
       })
+      .catch(() => null)
       .finally(() => {
         if (this._attachingWebgl === attachPromise) {
           this._attachingWebgl = null;
@@ -886,6 +901,8 @@ export class TerminalView {
   }
 
   detachWebgl() {
+    this._attachGeneration++;
+    this._attachingWebgl = null;
     if (this._webglAddon) {
       try {
         this._webglAddon.dispose();

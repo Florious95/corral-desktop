@@ -513,6 +513,17 @@ export default function TerminalPane({
           renderer: view.rendererType,
           canvasCount: view.canvasCount,
         }));
+        if (visible) {
+          view.attachWebgl()?.then(() => {
+            if (viewRef.current === view) {
+              setRenderDiag((prev) => ({
+                ...prev,
+                renderer: view.rendererType,
+                canvasCount: view.canvasCount,
+              }));
+            }
+          });
+        }
       });
       mo.observe(paneHost, { attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] });
     }
@@ -569,6 +580,17 @@ export default function TerminalPane({
       renderer: view.rendererType,
       canvasCount: view.canvasCount,
     }));
+    if (visible) {
+      view.attachWebgl()?.then(() => {
+        if (viewRef.current === view) {
+          setRenderDiag((prev) => ({
+            ...prev,
+            renderer: view.rendererType,
+            canvasCount: view.canvasCount,
+          }));
+        }
+      });
+    }
   }, [isVisible]);
 
   return (

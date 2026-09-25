@@ -74,7 +74,9 @@ export function webglSurfaceOk(term) {
   const canvas = el.querySelector('.xterm-screen canvas');
   if (!canvas) return false;
   const r = canvas.getBoundingClientRect();
-  return r.width >= 2 && r.height >= 2;
+  if (r.width >= 2 && r.height >= 2) return true;
+  if ((canvas.width || 0) >= 2 && (canvas.height || 0) >= 2) return true;
+  return false;
 }
 
 function defaultImporter() {
