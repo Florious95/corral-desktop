@@ -608,6 +608,8 @@ export class TabDragController {
     if (!this.overlayEl) return;
     this.overlayEl.style.opacity = '0';
     this.overlayEl.style.visibility = 'hidden';
+    this.overlayEl.style.width = '0px';
+    this.overlayEl.style.height = '0px';
   }
 
   _showGhost() {

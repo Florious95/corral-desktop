@@ -17,7 +17,7 @@
 // SyntaxError），`node --test` 就加载不了本模块 —— 两边指同一个文件才不用写互操作补丁。
 import { Terminal } from '@xterm/xterm/lib/xterm.mjs';
 
-import { attachWebglRenderer, webglSurfaceOk } from './webglRenderer.js';
+import { attachWebglRenderer, webglSurfaceOk, disposeWebglAddon } from './webglRenderer.js';
 import { resolveTerminalTheme, DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from './theme.js';
 import { isCtrlV, isCtrlShiftV, isCtrlC, isCtrlShiftC, isCmdV } from './clipboard.js';
 import { nativeCapabilities } from '../core/nativeCapabilities.js';
@@ -534,7 +534,8 @@ export class TerminalView {
         this.term.reset();
         this._hasPainted = true;
       }
-      this.term.write(this.hideCursor ? withHiddenCursor(data) : data, () => {
+      const payload = (this.hideCursor && kind === 'snapshot') ? withHiddenCursor(data) : data;
+      this.term.write(payload, () => {
         done();
         if (kind === 'snapshot') {
           this._markFirstPaint();
@@ -586,7 +587,7 @@ export class TerminalView {
 
   /** Keep Cursor's IME composition view on its software follow-up prompt. */
   _syncCursorAnchor() {
-    if (!this.hideCursor || this._disposed) return;
+    if (!this.hideCursor || this._disposed || !this._visible) return;
     const buffer = this.term.buffer?.active;
     const getLine = buffer?.getLine?.bind(buffer);
     if (!getLine) return;
@@ -872,7 +873,7 @@ export class TerminalView {
     const attachPromise = attachWebglRenderer(this.term, this._webglImporter, { disableWebgl: this._disableWebgl })
       .then((addon) => {
         if (this._disposed || !this._visible || this._attachGeneration !== gen) {
-          try { addon?.dispose(); } catch {}
+          try { disposeWebglAddon(addon); } catch {}
           return null;
         }
         this._webglAddon = addon;
@@ -905,7 +906,7 @@ export class TerminalView {
     this._attachingWebgl = null;
     if (this._webglAddon) {
       try {
-        this._webglAddon.dispose();
+        disposeWebglAddon(this._webglAddon);
       } catch {}
       this._webglAddon = null;
     }
@@ -918,6 +919,7 @@ export class TerminalView {
     this._visible = next;
     if (next) {
       this.attachWebgl();
+      this._syncCursorAnchor();
     } else {
       this.detachWebgl();
     }
@@ -944,7 +946,11 @@ export class TerminalView {
     this._queuedWriteBytes = 0;
     clearTimeout(this._resizeTimer);
     clearTimeout(this._gridTimer);
-    try { this._webglAddon?.dispose(); } catch { /* already gone */ }
+    try {
+      if (this._webglAddon) {
+        disposeWebglAddon(this._webglAddon);
+      }
+    } catch { /* already gone */ }
     this._webglAddon = null;
     if (this._themeMql && this._themeListener) {
       this._themeMql.removeEventListener?.('change', this._themeListener);

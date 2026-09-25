@@ -76,6 +76,9 @@ export default function TerminalPane({
   const onPasteRef = useRef(onPaste);
   const onForceTextPasteRef = useRef(onForceTextPaste);
   const pendingFocusRef = useRef(false);
+  const isVisibleRef = useRef(isVisible);
+  isVisibleRef.current = isVisible;
+  const syncVisibilityRef = useRef(null);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onBytesRef.current = onBytes;
@@ -197,6 +200,19 @@ export default function TerminalPane({
         });
         return;
       }
+      if (view && !view.isVisible) {
+        geomTrace('subscribe', {
+          ref: target,
+          rows: act ? act.rows : null,
+          cols: act ? act.cols : null,
+          reason,
+          ok: false,
+          skipped: 'pane_hidden',
+          grid_cols: gate.grid ? gate.grid.cols : null,
+          ...bookOf(target),
+        });
+        return;
+      }
       const subscribeKey = `${target}:${act.rows}x${act.cols}`;
       if (!force && lastSubscribe === subscribeKey) {
         geomTrace('subscribe', {
@@ -305,6 +321,8 @@ export default function TerminalPane({
     const handleBinary = (frame) => {
       // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
       if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
+      // 后台隐藏窗格彻底断流（Issue #316）：绝不向非激活终端写入任何帧，杜绝 DomRenderer 分配 DOM 节点与 TypedArray 堆积
+      if (!viewRef.current?.isVisible) return;
       switch (frame.kind) {
         case BINARY_KIND.SNAPSHOT: {
           const painted = gate.acceptSnapshot();
@@ -502,33 +520,59 @@ export default function TerminalPane({
       window.addEventListener('terminal:theme-change', handleThemeChange);
     }
 
+    const syncVisibility = (visible) => {
+      if (!view) return;
+      const prevVisible = view.isVisible;
+      view.setVisible(visible);
+      setRenderDiag((prev) => ({
+        ...prev,
+        renderer: view.rendererType,
+        canvasCount: view.canvasCount,
+      }));
+      if (visible) {
+        view.attachWebgl()?.then(() => {
+          if (viewRef.current === view) {
+            setRenderDiag((prev) => ({
+              ...prev,
+              renderer: view.rendererType,
+              canvasCount: view.canvasCount,
+            }));
+          }
+        });
+        if (!prevVisible) {
+          // 从后台切入前台：检查尺寸漂移并重新测量，恢复订阅拉取全量快照 (Issue #316)
+          if (!view.isFitCurrent?.()) {
+            view.fit({ immediate: true, sync: true });
+          }
+          const grid = gate.grid || (view.rows && view.cols ? { rows: view.rows, cols: view.cols } : null);
+          if (grid) {
+            gate.settle(grid.rows, grid.cols);
+            sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume', { force: true });
+            firstSub = false;
+          }
+        }
+      } else {
+        if (prevVisible) {
+          // 切入后台：退订断流，防止后台持续产生数据流与 DOM 节点 (Issue #316)
+          clientRef.current?.unsubscribe(target);
+          lastSubscribe = null;
+        }
+      }
+    };
+    syncVisibilityRef.current = syncVisibility;
+
     let mo = null;
     if (paneHost && typeof MutationObserver !== 'undefined') {
       mo = new MutationObserver(() => {
         const isHidden = Boolean(host.closest?.('.is-hidden') || paneHost.classList.contains('is-hidden') || paneHost.style.visibility === 'hidden');
-        const visible = !isHidden && (isVisible !== false);
-        view.setVisible(visible);
-        setRenderDiag((prev) => ({
-          ...prev,
-          renderer: view.rendererType,
-          canvasCount: view.canvasCount,
-        }));
-        if (visible) {
-          view.attachWebgl()?.then(() => {
-            if (viewRef.current === view) {
-              setRenderDiag((prev) => ({
-                ...prev,
-                renderer: view.rendererType,
-                canvasCount: view.canvasCount,
-              }));
-            }
-          });
-        }
+        const visible = !isHidden && (isVisibleRef.current !== false);
+        syncVisibility(visible);
       });
       mo.observe(paneHost, { attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] });
     }
 
     return () => {
+      syncVisibilityRef.current = null;
       mo?.disconnect();
       if (typeof window !== 'undefined') {
         window.removeEventListener('terminal:reflow', handleReflow);
@@ -566,31 +610,13 @@ export default function TerminalPane({
     }
   }, [fontFamily, fontSize]);
 
-  // 动态响应窗格可见性变更（Issue #314）：前台按需激活 WebGL，切入后台时注销 WebglAddon 释放 Canvas 与 IOSurface Backing Store
+  // 动态响应窗格可见性变更（Issue #314 & #316）：前台按需激活 WebGL 与快照订阅，切入后台时注销 WebGL 释放 Canvas 并退订断流
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
     const host = hostRef.current;
     const paneHost = host?.closest?.('.pane-host');
     const isHidden = Boolean(host?.closest?.('.is-hidden') || paneHost?.classList.contains('is-hidden') || paneHost?.style.visibility === 'hidden');
     const visible = !isHidden && (isVisible !== false);
-    view.setVisible(visible);
-    setRenderDiag((prev) => ({
-      ...prev,
-      renderer: view.rendererType,
-      canvasCount: view.canvasCount,
-    }));
-    if (visible) {
-      view.attachWebgl()?.then(() => {
-        if (viewRef.current === view) {
-          setRenderDiag((prev) => ({
-            ...prev,
-            renderer: view.rendererType,
-            canvasCount: view.canvasCount,
-          }));
-        }
-      });
-    }
+    syncVisibilityRef.current?.(visible);
   }, [isVisible]);
 
   return (

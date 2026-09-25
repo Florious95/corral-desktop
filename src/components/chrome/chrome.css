@@ -337,7 +337,6 @@
   opacity: 0;
   z-index: 9999;
   box-sizing: border-box;
-  will-change: transform, width, height, opacity;
   transition: opacity 0.12s ease;
 }
 
@@ -363,7 +362,6 @@
   box-sizing: border-box;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
   white-space: nowrap;
-  will-change: transform, opacity;
 }
 
 /* ---------- §4.5 ContextMenu ---------- */
