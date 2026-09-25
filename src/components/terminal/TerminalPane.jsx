@@ -318,11 +318,35 @@ export default function TerminalPane({
     };
     gRef.current = g;
 
-    const handleBinary = (frame) => {
-      // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
-      if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
-      // 后台隐藏窗格彻底断流（Issue #316）：绝不向非激活终端写入任何帧，杜绝 DomRenderer 分配 DOM 节点与 TypedArray 堆积
-      if (!viewRef.current?.isVisible) return;
+    const MAX_BACKGROUND_DELTA_BYTES = 2 * 1024 * 1024;
+    let pendingSnapshotFrame = null;
+    let pendingDeltaFrames = [];
+    let pendingDeltaBytes = 0;
+    let pendingFrameOverflow = false;
+    let pendingReflow = false;
+
+    const enqueueBackgroundFrame = (frame) => {
+      if (!frame) return;
+      if (frame.kind === BINARY_KIND.SNAPSHOT) {
+        pendingSnapshotFrame = frame;
+        pendingDeltaFrames = [];
+        pendingDeltaBytes = 0;
+        pendingFrameOverflow = false;
+      } else if (frame.kind === BINARY_KIND.DELTA) {
+        if (pendingFrameOverflow) return;
+        const len = frame.data ? (frame.data.byteLength || frame.data.length || 0) : 0;
+        if (pendingDeltaBytes + len <= MAX_BACKGROUND_DELTA_BYTES) {
+          pendingDeltaFrames.push(frame);
+          pendingDeltaBytes += len;
+        } else {
+          pendingDeltaFrames = [];
+          pendingDeltaBytes = 0;
+          pendingFrameOverflow = true;
+        }
+      }
+    };
+
+    const applyBinaryFrame = (frame) => {
       switch (frame.kind) {
         case BINARY_KIND.SNAPSHOT: {
           const painted = gate.acceptSnapshot();
@@ -361,6 +385,27 @@ export default function TerminalPane({
         default:
           break;
       }
+    };
+
+    const flushBackgroundFrames = () => {
+      const snap = pendingSnapshotFrame;
+      const deltas = pendingDeltaFrames;
+      pendingSnapshotFrame = null;
+      pendingDeltaFrames = [];
+      pendingDeltaBytes = 0;
+      if (snap) applyBinaryFrame(snap);
+      for (let i = 0; i < deltas.length; i += 1) {
+        applyBinaryFrame(deltas[i]);
+      }
+    };
+
+    const handleBinary = (frame) => {
+      // App 未按 uid 过滤时的二次防线：别把别的列的帧画进这一列。
+      if (frame.ref && frame.ref !== agent.ref && frame.ref !== target) return;
+      // 后台隐藏窗格暂存帧并彻底阻断直接写入（Issue #316 & #321）：绝不向非激活终端直接 write，杜绝 DomRenderer 分配 DOM 节点；切回前台时无损冲刷
+      if (!viewRef.current?.isVisible) enqueueBackgroundFrame(frame);
+      if (!viewRef.current?.isVisible) return;
+      applyBinaryFrame(frame);
     };
     // 订阅二进制帧：优先 subscribeBinary prop，其次 client 自带的 onBinary（App 的薄 shim 走这条）。
     const c = clientRef.current;
@@ -459,6 +504,7 @@ export default function TerminalPane({
       // observer may fire while a tab switches, but fitting them here only
       // repeats the same grid and can trigger an activation reflow.
       if (host.closest('.is-hidden')) return;
+      if (!view.isVisible) return;
       if (view.isFitCurrent?.()) return;
       if (currentMode === PRESENCE_MODE.TAKEOVER) {
         view.fit();
@@ -471,7 +517,7 @@ export default function TerminalPane({
 
     const handleLayoutSettled = () => {
       if (nativeCapabilities.platform !== 'macos' || currentMode !== PRESENCE_MODE.TAKEOVER
-          || host.closest('.is-hidden') || view.isFitCurrent?.()) return;
+          || !view.isVisible || host.closest('.is-hidden') || view.isFitCurrent?.()) return;
       view.fit({ immediate: true, sync: true });
     };
     const stage = host.closest('.terminal-stage');
@@ -481,6 +527,10 @@ export default function TerminalPane({
       const targetUid = ev?.detail?.uid;
       if (targetUid && targetUid !== target && targetUid !== agent.key && targetUid !== agent.ref) return;
       if (!viewRef.current || !hostRef.current) return;
+      if (!viewRef.current.isVisible) {
+        pendingReflow = true;
+        return;
+      }
 
       // R4 (P1): 手动“适应当前窗口”必须严格遵守当前 presence：
       // 当手机在线 (has_mobile: true) 或状态未知 (unknown) 时，严禁下发桌面大尺寸抢占！
@@ -520,6 +570,15 @@ export default function TerminalPane({
       window.addEventListener('terminal:theme-change', handleThemeChange);
     }
 
+    const needsResumeSubscribe = (grid) => {
+      if (!grid) return false;
+      const subscribeKey = `${target}:${grid.rows}x${grid.cols}`;
+      if (lastSubscribe !== subscribeKey) return true;
+      if (pendingFrameOverflow) return true;
+      if (!view.hasPainted && !gate.awaitingSnapshot) return true;
+      return false;
+    };
+
     const syncVisibility = (visible) => {
       if (!view) return;
       const prevVisible = view.isVisible;
@@ -541,16 +600,33 @@ export default function TerminalPane({
           }
         });
         if (!prevVisible) {
+          if (pendingReflow) {
+            pendingReflow = false;
+            pendingSnapshotFrame = null;
+            pendingDeltaFrames = [];
+            pendingDeltaBytes = 0;
+            pendingFrameOverflow = false;
+            handleReflow({});
+            return;
+          }
           // 从后台切入前台：检查尺寸漂移（仅当物理尺寸改变时才测量），若网格未变直接复用已有画面，绝不强行 force 重新拉取快照清屏 (Issue #301 & #321)
           if (!view.isFitCurrent?.()) {
             view.fit({ immediate: true, sync: true });
           }
+          flushBackgroundFrames();
           const grid = gate.grid || (view.rows && view.cols ? { rows: view.rows, cols: view.cols } : null);
           if (grid && !lastSubscribe) {
             gate.settle(grid.rows, grid.cols);
             sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume');
             firstSub = false;
+          } else if (grid && needsResumeSubscribe(grid)) {
+            const force = pendingFrameOverflow || (!view.hasPainted && !gate.awaitingSnapshot);
+            pendingFrameOverflow = false;
+            gate.settle(grid.rows, grid.cols);
+            sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume', { force });
+            firstSub = false;
           }
+          view.refreshViewport?.();
         }
       }
     };

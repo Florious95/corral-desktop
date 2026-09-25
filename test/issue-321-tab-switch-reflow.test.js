@@ -61,6 +61,17 @@ class FakeTerminalForWebgl {
     this._disposed = false;
     this.resizes = [];
     this.resets = 0;
+    this.refreshes = [];
+    this.clearedAtlasCount = 0;
+    this._core = {
+      _renderService: {
+        _isPaused: false,
+        _pausedResizeTask: {
+          flushed: 0,
+          flush() { this.flushed++; },
+        },
+      },
+    };
   }
   loadAddon(addon) {
     this.loadedAddons.push(addon);
@@ -80,8 +91,12 @@ class FakeTerminalForWebgl {
     this.rows = rows;
     this.resizes.push({ cols, rows });
   }
-  refresh() {}
-  clearTextureAtlas() {}
+  refresh(start, end) {
+    this.refreshes.push({ start, end });
+  }
+  clearTextureAtlas() {
+    this.clearedAtlasCount++;
+  }
   write(d) { this.writes.push(d); }
   focus() {}
   blur() {}
@@ -99,6 +114,17 @@ function createMockWebglImporter() {
         },
         _canvas: new FakeElement('canvas'),
         _renderLayers: [],
+        _glyphRenderer: {
+          value: {
+            _lastSeenPageLayoutVersion: 5,
+            invalidated: 0,
+            invalidateAtlasTextures() { this.invalidated++; },
+          },
+        },
+        clearedModels: [],
+        _clearModel(clearVertices) {
+          this.clearedModels.push(clearVertices);
+        },
       };
       this._renderer._canvas.clientWidth = 800;
       this._renderer._canvas.clientHeight = 600;
@@ -154,21 +180,73 @@ test('Issue #321: attachWebgl obeys isFitCurrent and does NOT force fit or trigg
   view.dispose();
 });
 
-test('Issue #321: TerminalPane and SplitPanes source code contract guarantees zero reflow, zero subscribe and zero reset on tab switch', async () => {
+test('Issue #321: switching back to foreground unpauses RenderService, invalidates WebGL model and refreshes all rows (0..rows-1) so static content is never blank', async () => {
+  const container = new FakeElement('div');
+  const { importer } = createMockWebglImporter();
+
+  const view = new TerminalView(container, {
+    TerminalCtor: FakeTerminalForWebgl,
+    webglImporter: importer,
+    isVisible: true,
+  });
+  view.open();
+  await view.readyWebgl;
+
+  // 写入静态快照内容
+  view.writeSnapshot(new Uint8Array([65, 66, 67]));
+  assert.equal(view.hasPainted, true);
+
+  // 模拟切入后台：content-visibility: hidden 导致 IntersectionObserver 将 _renderService._isPaused 置为 true
+  view.setVisible(false);
+  view.term._core._renderService._isPaused = true;
+  view.term.refreshes.length = 0;
+
+  // 模拟切回前台
+  view.setVisible(true);
+  const addon = await view.attachWebgl();
+
+  // 1. _renderService._isPaused 必须被立即解除并冲刷 _pausedResizeTask
+  assert.equal(view.term._core._renderService._isPaused, false, 'RenderService._isPaused must be cleared on visibility restore');
+  assert.ok(view.term._core._renderService._pausedResizeTask.flushed >= 1, '_pausedResizeTask must be flushed');
+
+  // 2. 新挂载的 WebGL 渲染器必须强制标记模型为脏（_lastSeenPageLayoutVersion = -1 且 _clearModel(true)），且不清空多窗格共享的 CharAtlas
+  assert.equal(addon._renderer._glyphRenderer.value._lastSeenPageLayoutVersion, -1);
+  assert.ok(addon._renderer._glyphRenderer.value.invalidated >= 1);
+  assert.ok(addon._renderer.clearedModels.includes(true));
+  assert.equal(view.term.clearedAtlasCount, 0, 'attachWebgl must not wipe shared CharAtlas across split panes');
+
+  // 3. 必须无条件调用 term.refresh(0, rows - 1) 刷新整屏所有静态与动态行
+  assert.ok(view.term.refreshes.length >= 1, 'term.refresh must be called unconditionally on WebGL re-attach');
+  const lastRefresh = view.term.refreshes.at(-1);
+  assert.deepEqual(lastRefresh, { start: 0, end: view.term.rows - 1 });
+
+  view.dispose();
+});
+
+test('Issue #321: TerminalPane and SplitPanes source code contract guarantees zero reflow, background frame buffering and full static content restore on tab switch', async () => {
   const [paneJsx, splitJsx, terminalViewJs] = await Promise.all([
     readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/terminal/SplitPanes.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/term/TerminalView.js', import.meta.url), 'utf8'),
   ]);
 
-  // 1. TerminalView.attachWebgl 杜绝 force: true
+  // 1. TerminalView.attachWebgl 杜绝 force: true，且无条件调用 refreshViewport 强制整屏刷新
   assert.doesNotMatch(terminalViewJs, /attachWebgl[\s\S]*?fit\(\{\s*immediate:\s*true,\s*force:\s*true\s*\}\)/);
   assert.match(terminalViewJs, /if\s*\(!this\.isFitCurrent\(\)\)\s*\{/);
+  assert.match(terminalViewJs, /refreshViewport\(\)\s*\{/);
+  assert.match(terminalViewJs, /this\.term\.refresh\?\.\(0,\s*endRow\)/);
 
-  // 2. TerminalPane 切入后台不执行退订（保留常驻订阅），切回前台已有订阅时不重发 subscribe
+  // 2. TerminalPane 切入后台不执行退订（保留常驻订阅），暂存后台帧并在切回前台时无损冲刷恢复
   assert.doesNotMatch(paneJsx, /syncVisibility = \(visible\) => \{[\s\S]*?clientRef\.current\?\.unsubscribe[\s\S]*?mo = new MutationObserver/);
+  assert.match(paneJsx, /if\s*\(!viewRef\.current\?\.isVisible\)\s*enqueueBackgroundFrame\(frame\);/);
+  assert.match(paneJsx, /if\s*\(!viewRef\.current\?\.isVisible\)\s*return;/);
+  assert.match(paneJsx, /flushBackgroundFrames\(\);/);
   assert.match(paneJsx, /if\s*\(grid\s*&&\s*!lastSubscribe\)\s*\{/);
 
-  // 3. SplitPanes 显式透传 isVisible 给 renderPane
+  // 3. ResizeObserver 与 handleLayoutSettled 均检查 !view.isVisible，防止 useLayoutEffect 阶段提前触发 reset 而丢弃 subscribe
+  assert.match(paneJsx, /if\s*\(!view\.isVisible\)\s*return;/);
+  assert.match(paneJsx, /\|\|\s*!view\.isVisible\s*\|\|\s*host\.closest\('\.is-hidden'\)/);
+
+  // 4. SplitPanes 显式透传 isVisible 给 renderPane
   assert.match(splitJsx, /renderPane\(agent,\s*\{[^}]*isVisible/);
 });
