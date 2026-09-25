@@ -540,14 +540,14 @@ export default function TerminalPane({
           }
         });
         if (!prevVisible) {
-          // 从后台切入前台：检查尺寸漂移并重新测量，恢复订阅拉取全量快照 (Issue #316)
+          // 从后台切入前台：检查尺寸漂移（仅当物理尺寸改变时才测量），若网格未变直接复用已有画面，绝不强行 force 重新拉取快照清屏 (Issue #301 & #321)
           if (!view.isFitCurrent?.()) {
             view.fit({ immediate: true, sync: true });
           }
           const grid = gate.grid || (view.rows && view.cols ? { rows: view.rows, cols: view.cols } : null);
           if (grid) {
             gate.settle(grid.rows, grid.cols);
-            sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume', { force: true });
+            sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume');
             firstSub = false;
           }
         }

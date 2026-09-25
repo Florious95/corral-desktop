@@ -156,7 +156,7 @@ test('Source contract: SplitPanes, App, and TerminalPane forward projected dimen
   ]);
 
   // 1. SplitPanes forwards containerWidth and containerHeight from projected layout
-  assert.match(splitPanesJsx, /renderPane\(agent,\s*\{\s*containerWidth:\s*currentRect\.w,\s*containerHeight:\s*currentRect\.h\s*\}\)/);
+  assert.match(splitPanesJsx, /renderPane\(agent,\s*\{\s*containerWidth:\s*currentRect\.w,\s*containerHeight:\s*currentRect\.h(?:,\s*isVisible)?\s*\}\)/);
 
   // 2. App renders pane with containerWidth and containerHeight
   assert.match(appJsx, /containerWidth=\{dimensions\?\.containerWidth\}/);
