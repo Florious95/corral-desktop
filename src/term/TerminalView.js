@@ -855,6 +855,37 @@ export class TerminalView {
     return this._visible;
   }
 
+  get hasPainted() {
+    return Boolean(this._hasPainted);
+  }
+
+  /**
+   * 强制标记整屏所有行为脏行并触发重绘（Issue #321）：
+   * 1. 解除后台 content-visibility: hidden 期间 IntersectionObserver 置位的 _renderService._isPaused；
+   * 2. 将当前 WebGL 渲染器模型与 _lastSeenPageLayoutVersion 重置为脏态，确保整屏静态历史行重绘（不清除多窗格共享的 CharAtlas）；
+   * 3. 显式调用 term.refresh(0, rows - 1) 刷新全部可视行。
+   */
+  refreshViewport() {
+    if (this._disposed || !this.term) return;
+    try {
+      const renderService = this.term._core?._renderService;
+      if (renderService && renderService._isPaused) {
+        renderService._isPaused = false;
+        renderService._pausedResizeTask?.flush?.();
+      }
+      const renderer = this._webglAddon?._renderer;
+      if (renderer) {
+        if (renderer._glyphRenderer?.value) {
+          renderer._glyphRenderer.value._lastSeenPageLayoutVersion = -1;
+          renderer._glyphRenderer.value.invalidateAtlasTextures?.();
+        }
+        renderer._clearModel?.(true);
+      }
+      const endRow = Math.max(0, (this.term.rows || 1) - 1);
+      this.term.refresh?.(0, endRow);
+    } catch {}
+  }
+
   attachWebgl() {
     if (this._disposed || this._disableWebgl || !this._visible) {
       return Promise.resolve(null);
@@ -864,6 +895,7 @@ export class TerminalView {
       return this.readyWebgl || Promise.resolve(null);
     }
     if (this._webglAddon) {
+      this.refreshViewport();
       return Promise.resolve(this._webglAddon);
     }
     if (this._attachingWebgl) {
@@ -882,12 +914,14 @@ export class TerminalView {
           if (!this.isFitCurrent()) {
             this.fit({ immediate: true, sync: true });
           }
-          if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
-            try {
-              if (typeof this.term.clearTextureAtlas === 'function') this.term.clearTextureAtlas();
-              else addon?.clearTextureAtlas?.();
-              this.term.refresh?.(0, this.term.rows - 1);
-            } catch {}
+          // 新 WebGL Canvas 挂载后强制对整屏所有行标记刷新，确保静态历史行 100% 显现 (Issue #321)
+          this.refreshViewport();
+          if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+              if (!this._disposed && this._visible && this._webglAddon === addon) {
+                this.refreshViewport();
+              }
+            });
           }
         }
         this._notifyRenderDiagnostics();
@@ -921,6 +955,7 @@ export class TerminalView {
     if (this._visible === next) return;
     this._visible = next;
     if (next) {
+      this.refreshViewport();
       this.attachWebgl();
       this._syncCursorAnchor();
     } else {
