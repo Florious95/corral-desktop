@@ -123,8 +123,16 @@ export class TerminalView {
     this.initialRows = initialRows;
     this._cellMetrics = opts.cellMetrics || null;
     this._disableWebgl = opts.disableWebgl ?? false;
+    this._webglImporter = opts.webglImporter || undefined;
+    this._visible = opts.isVisible !== false;
+    this._attachingWebgl = null;
+    this._attachGeneration = 0;
     this._onFirstPaint = opts.onFirstPaint || null;
     this._firstPaintRendered = false;
+    this._resolveReadyWebgl = null;
+    this.readyWebgl = new Promise((resolve) => {
+      this._resolveReadyWebgl = resolve;
+    });
 
     const theme = resolveTerminalTheme(opts);
     this.term = new TerminalCtor({
@@ -317,19 +325,10 @@ export class TerminalView {
       this._observeCursorAnchor();
     }
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
-    this.readyWebgl = attachWebglRenderer(this.term, undefined, { disableWebgl: this._disableWebgl }).then((addon) => {
-      this._webglAddon = addon;
-      // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
-      if (addon) this.fit({ immediate: true, force: true });
-      if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
-        try {
-          if (typeof this.term.clearTextureAtlas === 'function') this.term.clearTextureAtlas();
-          else addon?.clearTextureAtlas?.();
-          this.term.refresh?.(0, this.term.rows - 1);
-        } catch {}
-      }
-      this._notifyRenderDiagnostics();
-      return addon;
+    // 当初始可见性为 true 时启动 WebGL 附加；后台挂载（isVisible=false）则保持在轻量 DOM 渲染模式，避免后台占用 WebGL Canvas 与 IOSurface Backing Store
+    const initWebglPromise = this._visible ? this.attachWebgl() : Promise.resolve(null);
+    initWebglPromise.then((addon) => {
+      this._resolveReadyWebgl?.(addon);
     });
 
     // 监听 Web 字体加载完成：强制清理 WebGL 纹理图集缓存并重绘，防止首帧未命中字体时将豆腐块永久缓存在 Texture Atlas 中
@@ -851,8 +850,82 @@ export class TerminalView {
     }
   }
 
+  get isVisible() {
+    return this._visible;
+  }
+
+  attachWebgl() {
+    if (this._disposed || this._disableWebgl || !this._visible) {
+      return Promise.resolve(null);
+    }
+    // 终端尚未在 DOM 中 open 时，挂起等待 open 完成，杜绝无 element 提前挂载失败
+    if (!this.term?.element) {
+      return this.readyWebgl || Promise.resolve(null);
+    }
+    if (this._webglAddon) {
+      return Promise.resolve(this._webglAddon);
+    }
+    if (this._attachingWebgl) {
+      return this._attachingWebgl;
+    }
+    const gen = ++this._attachGeneration;
+    const attachPromise = attachWebglRenderer(this.term, this._webglImporter, { disableWebgl: this._disableWebgl })
+      .then((addon) => {
+        if (this._disposed || !this._visible || this._attachGeneration !== gen) {
+          try { addon?.dispose(); } catch {}
+          return null;
+        }
+        this._webglAddon = addon;
+        if (addon) {
+          this.fit({ immediate: true, force: true });
+          if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
+            try {
+              if (typeof this.term.clearTextureAtlas === 'function') this.term.clearTextureAtlas();
+              else addon?.clearTextureAtlas?.();
+              this.term.refresh?.(0, this.term.rows - 1);
+            } catch {}
+          }
+        }
+        this._notifyRenderDiagnostics();
+        this._resolveReadyWebgl?.(addon);
+        return addon;
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (this._attachingWebgl === attachPromise) {
+          this._attachingWebgl = null;
+        }
+      });
+    this._attachingWebgl = attachPromise;
+    return attachPromise;
+  }
+
+  detachWebgl() {
+    this._attachGeneration++;
+    this._attachingWebgl = null;
+    if (this._webglAddon) {
+      try {
+        this._webglAddon.dispose();
+      } catch {}
+      this._webglAddon = null;
+    }
+    this._notifyRenderDiagnostics();
+  }
+
+  setVisible(visible) {
+    const next = Boolean(visible);
+    if (this._visible === next) return;
+    this._visible = next;
+    if (next) {
+      this.attachWebgl();
+    } else {
+      this.detachWebgl();
+    }
+  }
+
   dispose() {
     this._disposed = true;
+    this._visible = false;
     if (typeof window !== 'undefined' && window.__AGENTMIRROR_TEST_HOOKS__?.activeViews) {
       window.__AGENTMIRROR_TEST_HOOKS__.activeViews.delete(this);
       this._notifyRenderDiagnostics();
