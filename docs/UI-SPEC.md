@@ -590,7 +590,7 @@ src/
  * @param {string} deviceLabel                    §7.2 规则算好的底部文案
  * @param {boolean} anyDeviceOnline
  * @param {() => void} onToggleDevices
- * @param {boolean} multiDevice                   勾选设备 > 1（决定是否显示徽章）
+ * @param {boolean} multiDevice                   多设备模式（当且仅当存在 >= 2 台活跃/就绪设备或工作区跨设备时为真，决定是否显示徽章；单主机场景完全隐去以释放 100% 视口，Issue #312，2026-09-25 裁定）
  */
 ```
 内部状态：无（全部提到 App）。
@@ -630,7 +630,7 @@ src/
 - 行样式：`display:flex; align-items:center; gap:10px; height:32px; flex:none; box-sizing:border-box; padding:0 10px; border-radius:var(--r-7); font-size:var(--fs-135); cursor:pointer; transition:background var(--d-hover); animation:rowIn var(--d-toggle) ease-out`；选中 `background:var(--sel-bg); font-weight:600`，未选 `background:transparent; font-weight:400`；hover `background:var(--hover-5)`。
 - 名字 span：`overflow:hidden; text-overflow:ellipsis; white-space:nowrap`。
 - 右侧（从右往左）：双列数字徽标（`.spaces-row-counts`），包含右侧总数（`count`，`font-size:var(--fs-12); color:var(--text-muted); font-weight:400; flex:none`）与左侧工作中数（`workingCount`，有会话工作时呈现为亮绿色数字 `.is-working.is-active`，无工作会话时呈现为灰色数字 `.is-idle.is-zero`）。行内原有聚合状态绿灯彻底退役（2026-09-17 裁定）。其左侧是：
-  - **设备徽章**（仅 `multiDevice` 时渲染）：pill，`font-size:var(--fs-10); font-weight:500; padding:1px 6px; border-radius:var(--r-pill); margin-right:6px; box-shadow:var(--ring-hairline)`；本机 `background:var(--badge-local-bg); color:var(--badge-local-fg)`，远端 `background:var(--badge-remote-bg); color:var(--badge-remote-fg)`。
+  - **设备徽章**（仅 `multiDevice` 时渲染，单主机场景完全隐去，Issue #312，2026-09-25 裁定）：pill，`font-size:var(--fs-10); font-weight:500; padding:1px 6px; border-radius:var(--r-pill); margin-right:6px; box-shadow:var(--ring-hairline); max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0`；优先展示极简别名（如 `Local` / `5090`，不再展示全量冗长 `[127.0.0.1:9900]`），悬浮提供 `title` 显示完整地址与设备名；本机 `background:var(--badge-local-bg); color:var(--badge-local-fg)`，远端 `background:var(--badge-remote-bg); color:var(--badge-remote-fg)`。
 - **重名消歧**：先按 `basename(cwd)` 分组；某个 basename 出现 >1 次时，这组内所有行的 `name` 改为 `` `${basename(dirname(cwd))}/${basename(cwd)}` ``；若仍冲突，再往上追加一级路径。逻辑放 `lib/aggregate.js`，SpacesList 只渲染 `space.name`。
 
 ### 5.3 `sidebar/AgentsList.jsx`
@@ -681,7 +681,7 @@ src/
     | unknown | `background:transparent; border:1.5px solid var(--ink-060)` | 状态未知 |
   - **核心 2：Provider 图标**：`<ProviderIcon provider={provider} size={18} active={state==='working'||state==='blocked'}/>`
   - **核心 3：会话名称**：`span.agents-row-title`（`flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap`）
-  - **尾部标记**：`margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；多设备徽章（`.agents-badge`，仅 `multiDevice` 时显示）。
+  - **尾部标记**：`margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；多设备徽章（`.agents-badge`，仅 `multiDevice` 时显示；单主机场景完全隐去释放 100% 横向宽度给会话名，多主机共存时限制 `max-width:64px; text-overflow:ellipsis; flex-shrink:0` 并优先展示极简别名 `Local`/`5090`，悬浮通过 `title` 展示完整地址，Issue #312，2026-09-25 裁定）。
   - **精简成效**：垂直单行居中排布，紧凑清晰，彻底消灭旧版第二行冗余重叠的文字，信噪比极大提升。
 - **空态**（`agents.length === 0`，渲染在轨道之后）：`padding:18px 10px; font-size:var(--fs-12); color:var(--text-faint); text-align:center`，两行：`这个空间还没有 Agent` / `{emptyHint}`（默认 `在 Space 上右键 → 新建 Agent`）。
 

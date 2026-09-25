@@ -249,13 +249,17 @@
   font-variant-numeric: tabular-nums;
 }
 .spaces-badge {
-  flex: none;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin-right: 6px;
   padding: 1px 6px;
   border-radius: var(--r-pill);
   font-size: var(--fs-10);
   font-weight: 500;
-  white-space: nowrap;
   box-shadow: var(--ring-hairline);
   background: var(--badge-remote-bg);
   color: var(--badge-remote-fg);
@@ -379,14 +383,21 @@
   background: transparent;
   border: 1.5px solid var(--ink-060);
 }
+.agents-row-marks:empty {
+  display: none;
+}
 .agents-badge {
-  flex: none;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin-left: auto;
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: var(--r-pill);
   font-size: var(--fs-10);
   font-weight: 500;
-  white-space: nowrap;
   box-shadow: var(--ring-hairline);
   background: var(--badge-remote-bg);
   color: var(--badge-remote-fg);
