@@ -749,6 +749,11 @@ src/
   xterm 选项：`fontFamily:'ui-monospace, SF Mono, Menlo, monospace'`、`fontSize:13`、`lineHeight: macOS/Windows 为 1.0，其余平台 1.25`、`cursorBlink:false`（严格关闭闪烁，彻底消除 WebGL 600ms 定时器空转重绘，2026-09-24 裁定）、`scrollback:0`（历史走协议 `scrollback` 帧）、`convertEol:false`。snapshot 重放在写入 xterm 前仅为每个裸 LF 补一个隐含 CR，使 capture-pane 的行间换行回到第 0 列；delta 仍按原始字节追加，不做该转换、不裁行、不改宽度计算。
   **2026-09-24（运行期光标协议硬锁策略）**：除构造默认 `cursorBlink:false` 外，前端在终端协议层实施运行期硬锁：彻底防御底层程序通过转义序列（`DECSCUSR`、`DECSET ?12h`）重新激活光标闪烁，避免 WebGL 渲染管线内部被动拉起 600ms `CursorBlinkStateManager` 定时重绘；同时完整保留合法光标形状（bar / block / underline）、`0` 参数重置恢复应用配置默认形状及其他 DEC 私有模式。本项属于协议层内部硬锁适配，系统级实际能耗与 GPU 占用需经由真实交付面与独立量具消融检验。
   **2026-09-25（可见性驱动的 WebGL 动态装卸载与显存削减，Issue #314）**：为彻底消除常驻平铺架构在多 Tab 场景下持有多 WebGL Retina 2x Canvas 引发的 IOSurface / Graphics 显存暴涨（单实例 50~70MB，多 Tab 驻留超 300MB），`TerminalPane` 与 `TerminalView` 实施可见性驱动的动态 WebGL 生命周期管理：前台激活状态按需加载 `WebglAddon` 享受 GPU 加速；切入后台非激活状态立即调用 `webglAddon.dispose()` 卸载 WebGL 渲染管线，从 DOM 中销毁后台 `<canvas>` 并向操作系统归还 IOSurface 显存，平滑无缝回退至轻量 DOM 渲染模式；DOM 节点树与 xterm 实例本身依然常驻挂载，严格保持 Issue #301 的即时切换与首帧尺寸预排布特性；切回前台时无损重新挂载 WebGL 并即时重绘。
+  **2026-09-25（全域内存收敛：后台窗格退订断流、WebGL 显存彻底释放与图集防冲突，Issue #316）**：为彻底根治长时间运行后 WebContent 进程 WebKit Malloc（膨胀至 298MB dirty + 150MB reclaimable）与 Owned Graphics（膨胀至 268MB dirty + 175MB reclaimable）的持续爬坡，实施全域收敛：
+  1. **后台窗格协议退订断流与前台快照原子重连**：当窗格被判定切入后台（非激活）时，通知 client 暂停/退订数据流（`client.unsubscribe(target)`），并在二进制帧分发入口对后台窗格彻底丢弃，消除后台 `DomRenderer` 在每个数据帧中持续向 WebKit 分配百万级 `HTMLSpanElement` C++ 对象引发的 `bmalloc` 膨胀；切回前台时发送一次性 `subscribe(force: true)` 携带当前落定几何拉取全量快照，瞬间原子对齐终态；
+  2. **WebGL 显存与 Canvas 彻底释放**：切入后台执行 `detachWebgl` 时，显式获取 `WEBGL_lose_context` 扩展并触发 `loseContext()`，同时设置 `canvas.width = canvas.height = 0`，强制驱动系统释放 `IOSurface` 与底层 Metal Texture；
+  3. **阻断 LinkRenderLayer 2048 图集颠簸冲突**：消除 `BaseRenderLayer (2048)` 与 `WebglRenderer (16384)` 在 `CharAtlasCache` 中的互踢冲突与孤儿 2D Canvas 泄漏，使相同字号多窗格 100% 共享单张清晰字形 Atlas；
+  4. **零拷贝游标隐藏与合成层清理**：消除 `withHiddenCursor` 逐帧拷贝与后台隐藏窗格的字符串全表扫描；拖拽浮层隐藏时归零宽高，移除静态常驻 `will-change` 合成层。
   `theme:{ background:'#fbfaf8', foreground:'#3a3835', cursor:'#3a3835', selectionBackground:'rgba(0,0,0,.12)' }`。
   首次几何就绪后立即完成首订；后续窗口拖拽的 `fit()` 目标 cols/rows 仍 **120ms 落定后再** `term.resize`（裁定 2026-09-17）。首帧立刻落到格子。
   **首帧几何前置纯数学投影与零延迟 Resize 体系（2026-09-22 裁定）**：
