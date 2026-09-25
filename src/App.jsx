@@ -1182,6 +1182,20 @@ export default function App({ seedDevices } = {}) {
     setDevices(dm.devices);
   }, [dm]);
 
+  const handleRenameDevice = useCallback((id, newName) => {
+    if (typeof dm.renameDevice === 'function') {
+      dm.renameDevice(id, newName);
+    } else {
+      dm.updateDevice(id, { name: newName });
+    }
+    setDevices(dm.devices);
+  }, [dm]);
+
+  const handleRemoveDevice = useCallback((id) => {
+    dm.removeDevice(id);
+    setDevices(dm.devices);
+  }, [dm]);
+
   const handlePairMobile = useCallback(async () => {
     setDevicesOpen(false);
     if (typeof dm.fetchLocalHostIdentity === 'function') {
@@ -1505,6 +1519,8 @@ export default function App({ seedDevices } = {}) {
           devices={popoverDevices}
           onToggle={handleToggleDevice}
           onToggleAll={handleToggleAllDevices}
+          onRenameDevice={handleRenameDevice}
+          onRemoveDevice={handleRemoveDevice}
           onAddDevice={() => { setDevicesOpen(false); setAddDeviceOpen(true) }}
           onPairMobile={handlePairMobile}
           onClose={() => setDevicesOpen(false)}

@@ -420,12 +420,14 @@ src/
  * @param {Device[]} devices
  * @param {(id:string, next:boolean) => void} onToggle       单设备勾选
  * @param {(next:boolean) => void} onToggleAll               All Devices 全选/全不选
+ * @param {(id:string, newName:string) => void} [onRenameDevice] 设备重命名（Issue #313）
+ * @param {(id:string) => void} [onRemoveDevice]             设备删除（Issue #313）
  * @param {() => void} onAddDevice                           打开 AddDeviceDialog
  * @param {() => void} onPairMobile                          打开移动端配对二维码
  * @param {() => void} onClose
  */
 ```
-内部状态：无。
+内部状态：`editing`（当前行重命名态）、`confirmDelete`（当前行删除二次确认态）。
 
 - **遮罩**：`position:fixed; inset:0; z-index:30`；`onClick` 与 `onContextMenu` 都调 `onClose`（右键也关，且 `preventDefault`）。
 - **弹层**：`position:absolute; left:10px; bottom:54px; z-index:31; width:300px; background:var(--glass-popover); backdrop-filter:var(--blur-popover)`（同时写 `-webkit-backdrop-filter`）；`border-radius:var(--r-12); box-shadow:var(--shadow-popover); padding:6px; animation:menuIn var(--d-pop) ease-out`。定位基准 = App 根元素 `position:relative`。
@@ -433,6 +435,9 @@ src/
 - **行**（All 行 + 每设备一行）：`display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:var(--r-8); cursor:pointer; transition:background-color var(--d-hover)`；hover `background-color:var(--hover-2)`。
   - 左图标 16px stroke `var(--icon-strong)` 1.8：All 行 = `<LayersIcon/>`，设备行 = `<MonitorIcon/>`。
   - 中间：`flex:1;min-width:0`。第一行 `font-size:var(--fs-13); font-weight:600; display:flex; gap:6px` = 名字 + 在线点（All 行**不显示**点）；在线点 `6px` 圆，在线 `background:var(--green)`，离线 `background:transparent;border:1.5px solid var(--dot-hollow)`。第二行 `font-size:var(--fs-11); color:var(--text-muted)` 省略号。
+  - **节点管理操作区（Issue #313 裁定）**：位于设备行右侧勾选框左侧，hover 时渐显（`.dp-actions`）：
+    - **重命名**：点击切换行内轻量输入框（`.dp-rename-input`），支持 `autoComplete="off"`，回车 / 失焦即时保存并持久化，ESC 取消；
+    - **删除节点**：点击后展示极简行内二次确认（`删除` / `取消`），确认后断开连接、清理工作区与缓存并持久化写回 `devices.json`；
   - 右勾选：选中 = `<CheckIcon size={15} stroke=var(--text) strokeWidth=2.2/>`；未选 = `<span style="width:14px;height:14px;border-radius:var(--r-4);border:1.5px solid var(--checkbox-border);box-sizing:border-box">`。
   - All 行 `sub` = `` `${devices.length} devices · ${onlineCount} connected` ``；`on = devices.every(d => d.checked)`。
 - **配对移动端行**：在 Add Device… 之前渲染，`display:flex; gap:10px; padding:8px 12px; font-size:var(--fs-13); color:var(--text-secondary); cursor:pointer; border-radius:var(--r-8)`；点击打开 PairingDialog；`<QrIcon size={14}/>`。
