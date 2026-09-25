@@ -340,6 +340,7 @@ export default function TabBar({
                 <input
                   className="chr-tab-title-input tb-tab-title-input"
                   type="text"
+                  autoComplete="off"
                   autoFocus
                   value={editingText}
                   data-tauri-drag-region="false"

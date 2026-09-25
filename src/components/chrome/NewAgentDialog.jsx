@@ -77,6 +77,7 @@ export default function NewAgentDialog({
       <div className="chr-scrim" onClick={loading ? undefined : onCancel} />
       <div className="chr-dialog-pos">
         <form
+          autoComplete="off"
           className="chr-dialog"
           role="dialog"
           aria-modal="true"
@@ -94,6 +95,7 @@ export default function NewAgentDialog({
             id="new-agent-name"
             name="new-agent-name"
             className="chr-input"
+            autoComplete="off"
             autoFocus
             required
             disabled={loading}
