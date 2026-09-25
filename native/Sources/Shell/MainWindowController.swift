@@ -36,6 +36,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     private var disposed = false
     private var fullscreenTarget: Bool?
     private var windowZoomState = WindowZoomState()
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
     public private(set) var acceptsMessages = false
     public var onLoadFailure: (() -> Void)?
     public var onLoadFinished: (() -> Void)?
@@ -45,6 +46,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         let content = try LocalContent(distURL: distURL)
         let config = WKWebViewConfiguration()
         config.websiteDataStore = websiteDataStore ?? WKWebsiteDataStore.default()
+        config.allowsInlinePredictions = false
+        config.allowsAirPlayForMediaPlayback = false
+        config.mediaTypesRequiringUserActionForPlayback = .all
+        config.preferences.isElementFullscreenEnabled = false
+        config.preferences.inactiveSchedulingPolicy = .suspend
         config.setURLSchemeHandler(LocalSchemeHandler(content: content), forURLScheme: "agentmirror")
         bridge = ShellBridge(services: services ?? DefaultShellServices.shared)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")
@@ -87,6 +93,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         let titlebarContainer = keepTitlebarControlsAboveContent(root)
         installTitlebarDragSurface(in: root, titlebarContainer: titlebarContainer)
         alignTrafficLights()
+        installMemoryPressureHandling()
         reload()
     }
 
@@ -144,6 +151,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         webView.navigationDelegate = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "native", contentWorld: .page)
         webView.configuration.userContentController.removeAllUserScripts()
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSApplication.willResignActiveNotification,
+            object: NSApp
+        )
+        memoryPressureSource?.setEventHandler {}
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
     }
 
     public override func close() { dispose(); super.close() }
@@ -206,8 +221,48 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
     public func windowDidExitFullScreen(_ notification: Notification) { fullscreenTarget = nil; geometryChanged(); bridge.emitResizeSettled() }
     public func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullscreenTarget = nil; geometryChanged() }
     public func windowDidFailToExitFullScreen(_ window: NSWindow) { fullscreenTarget = nil; geometryChanged() }
-    public func windowDidMiniaturize(_ notification: Notification) { geometryChanged() }
+    public func windowDidMiniaturize(_ notification: Notification) {
+        geometryChanged()
+        purgeTransientWebKitData()
+    }
     public func windowDidDeminiaturize(_ notification: Notification) { geometryChanged() }
+
+    private func installMemoryPressureHandling() {
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.purgeTransientWebKitData()
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillResignActive(_:)),
+            name: NSApplication.willResignActiveNotification,
+            object: NSApp
+        )
+    }
+
+    @objc private func applicationWillResignActive(_ notification: Notification) {
+        purgeTransientWebKitData()
+    }
+
+    private func purgeTransientWebKitData() {
+        guard !disposed else { return }
+        let transientDataTypes: Set<String> = [
+            WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeDiskCache,
+        ]
+        webView.configuration.websiteDataStore.removeData(
+            ofTypes: transientDataTypes,
+            modifiedSince: .distantPast,
+            completionHandler: {}
+        )
+    }
 
     @discardableResult
     private func keepTitlebarControlsAboveContent(_ contentView: NSView) -> NSView? {
