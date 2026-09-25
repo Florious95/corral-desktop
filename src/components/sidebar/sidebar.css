@@ -249,6 +249,7 @@
   font-variant-numeric: tabular-nums;
 }
 .spaces-badge {
+  box-sizing: border-box;
   flex: 0 0 auto;
   flex-shrink: 0;
   max-width: 64px;
@@ -387,6 +388,7 @@
   display: none;
 }
 .agents-badge {
+  box-sizing: border-box;
   flex: 0 0 auto;
   flex-shrink: 0;
   max-width: 64px;
