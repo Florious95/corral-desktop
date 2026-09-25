@@ -51,6 +51,7 @@ export default function TerminalPane({
   onCtrlV, onPaste, onForceTextPaste,
   fontFamily, fontSize,
   containerWidth, containerHeight,
+  isVisible = true,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -217,10 +218,14 @@ export default function TerminalPane({
       lastSubscribe = subscribeKey;
       gate.noteSent(act.rows, act.cols);
     };
+    const paneHost = host.closest?.('.pane-host');
+    const isPaneVisible = (paneHost ? !paneHost.classList.contains('is-hidden') && paneHost.style.visibility !== 'hidden' : true) && (isVisible !== false);
+
     view = new TerminalView(host, {
       traceRef: target,
       fontFamily,
       fontSize,
+      isVisible: isPaneVisible,
       initialCols: currentMode === PRESENCE_MODE.TAKEOVER ? initialCols : null,
       initialRows: currentMode === PRESENCE_MODE.TAKEOVER ? initialRows : null,
       onFirstPaint: (info) => {
@@ -497,7 +502,23 @@ export default function TerminalPane({
       window.addEventListener('terminal:theme-change', handleThemeChange);
     }
 
+    let mo = null;
+    if (paneHost && typeof MutationObserver !== 'undefined') {
+      mo = new MutationObserver(() => {
+        const isHidden = Boolean(host.closest?.('.is-hidden') || paneHost.classList.contains('is-hidden') || paneHost.style.visibility === 'hidden');
+        const visible = !isHidden && (isVisible !== false);
+        view.setVisible(visible);
+        setRenderDiag((prev) => ({
+          ...prev,
+          renderer: view.rendererType,
+          canvasCount: view.canvasCount,
+        }));
+      });
+      mo.observe(paneHost, { attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] });
+    }
+
     return () => {
+      mo?.disconnect();
       if (typeof window !== 'undefined') {
         window.removeEventListener('terminal:reflow', handleReflow);
         window.removeEventListener('terminal:theme-change', handleThemeChange);
@@ -533,6 +554,22 @@ export default function TerminalPane({
       viewRef.current.updateFont({ fontFamily, fontSize });
     }
   }, [fontFamily, fontSize]);
+
+  // 动态响应窗格可见性变更（Issue #314）：前台按需激活 WebGL，切入后台时注销 WebglAddon 释放 Canvas 与 IOSurface Backing Store
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const host = hostRef.current;
+    const paneHost = host?.closest?.('.pane-host');
+    const isHidden = Boolean(host?.closest?.('.is-hidden') || paneHost?.classList.contains('is-hidden') || paneHost?.style.visibility === 'hidden');
+    const visible = !isHidden && (isVisible !== false);
+    view.setVisible(visible);
+    setRenderDiag((prev) => ({
+      ...prev,
+      renderer: view.rendererType,
+      canvasCount: view.canvasCount,
+    }));
+  }, [isVisible]);
 
   return (
     <div
