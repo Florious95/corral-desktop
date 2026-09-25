@@ -878,7 +878,10 @@ export class TerminalView {
         }
         this._webglAddon = addon;
         if (addon) {
-          this.fit({ immediate: true, force: true });
+          // 仅在真实未 fit 或尺寸发生偏离时才测量；绝不 force: true，杜绝切 Tab 诱发网格颠簸与 reset (Issue #321)
+          if (!this.isFitCurrent()) {
+            this.fit({ immediate: true, sync: true });
+          }
           if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
             try {
               if (typeof this.term.clearTextureAtlas === 'function') this.term.clearTextureAtlas();

@@ -523,6 +523,7 @@ export default function TerminalPane({
     const syncVisibility = (visible) => {
       if (!view) return;
       const prevVisible = view.isVisible;
+      if (prevVisible === visible) return;
       view.setVisible(visible);
       setRenderDiag((prev) => ({
         ...prev,
@@ -540,22 +541,16 @@ export default function TerminalPane({
           }
         });
         if (!prevVisible) {
-          // 从后台切入前台：检查尺寸漂移并重新测量，恢复订阅拉取全量快照 (Issue #316)
+          // 从后台切入前台：检查尺寸漂移（仅当物理尺寸改变时才测量），若网格未变直接复用已有画面，绝不强行 force 重新拉取快照清屏 (Issue #301 & #321)
           if (!view.isFitCurrent?.()) {
             view.fit({ immediate: true, sync: true });
           }
           const grid = gate.grid || (view.rows && view.cols ? { rows: view.rows, cols: view.cols } : null);
-          if (grid) {
+          if (grid && !lastSubscribe) {
             gate.settle(grid.rows, grid.cols);
-            sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume', { force: true });
+            sendIfNeeded({ type: 'subscribe', rows: grid.rows, cols: grid.cols }, 'visibility_resume');
             firstSub = false;
           }
-        }
-      } else {
-        if (prevVisible) {
-          // 切入后台：退订断流，防止后台持续产生数据流与 DOM 节点 (Issue #316)
-          clientRef.current?.unsubscribe(target);
-          lastSubscribe = null;
         }
       }
     };
