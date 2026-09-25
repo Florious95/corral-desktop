@@ -1,6 +1,7 @@
 // Spaces 列表（UI-SPEC §5.2）。虚拟行 All Spaces / 收藏 置顶，其后是真实 workspace 行。
 import { FolderIcon, GridIcon, StarIcon, PlusIcon } from '../../lib/icons.jsx';
 import { isSameSpaceKey } from '../../lib/wslPath.js';
+import { formatDeviceBadge, getDeviceBadgeTitle } from '../../lib/deviceBadge.js';
 
 function SpaceRow({
   icon,
@@ -9,6 +10,7 @@ function SpaceRow({
   workingCount = 0,
   selected,
   badge,
+  badgeTitle,
   badgeLocal,
   spaceKey,
   onClick,
@@ -38,7 +40,12 @@ function SpaceRow({
         </button>
       ) : null}
       {badge ? (
-        <span className={`spaces-badge${badgeLocal ? ' is-local' : ''}`}>{badge}</span>
+        <span
+          className={`spaces-badge${badgeLocal ? ' is-local' : ''}`}
+          title={badgeTitle || badge}
+        >
+          {badge}
+        </span>
       ) : null}
       <div className="spaces-row-counts">
         <span
@@ -104,6 +111,13 @@ export default function SpacesList({
       />
       {spaces.map((sp) => {
         const workingCount = sp.workingCount ?? (sp.sessions?.filter((s) => s.state === 'working' || s.status === 'working').length || 0);
+        const badgeLabel = multiDevice
+          ? formatDeviceBadge(sp.deviceName, { deviceLocal: sp.deviceLocal, deviceUrl: sp.deviceUrl })
+          : null;
+        const badgeTitle = multiDevice
+          ? getDeviceBadgeTitle(sp.deviceName, { deviceUrl: sp.deviceUrl })
+          : null;
+
         return (
           <SpaceRow
             key={sp.key}
@@ -112,7 +126,8 @@ export default function SpacesList({
             count={sp.count}
             workingCount={workingCount}
             selected={isSameSpaceKey(selected, sp.key)}
-            badge={multiDevice ? sp.deviceName : null}
+            badge={badgeLabel}
+            badgeTitle={badgeTitle}
             badgeLocal={sp.deviceLocal}
             spaceKey={sp.key}
             onClick={() => onSelect(sp.key)}
