@@ -276,3 +276,17 @@ test('MVP M2: TerminalPane & TerminalView source contract verifies Render Sleep 
   assert.doesNotMatch(paneJsx, /syncRenderSleep\s*=\s*\([^)]*\)\s*=>\s*\{[^}]*unsubscribe/);
   assert.doesNotMatch(paneJsx, /if\s*\(!viewRef\.current\?\.isVisible\)\s*return;/);
 });
+
+test('MVP M2: TerminalPane props destructuring safely declares isVisible = true and avoids ReferenceError', async () => {
+  const [paneJsx, appJsx] = await Promise.all([
+    readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/App.jsx', import.meta.url), 'utf8'),
+  ]);
+
+  // TerminalPane must safely destructure isVisible = true
+  assert.match(paneJsx, /export default function TerminalPane\(\{[\s\S]*?isVisible = true,[\s\S]*?\}\)/);
+
+  // App safely forwards isVisible if present or defaults to true
+  assert.match(appJsx, /isVisible=\{dimensions\?\.isVisible !== undefined \? dimensions\.isVisible : true\}/);
+});
+

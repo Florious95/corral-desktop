@@ -51,6 +51,7 @@ export default function TerminalPane({
   onCtrlV, onPaste, onForceTextPaste,
   fontFamily, fontSize,
   containerWidth, containerHeight,
+  isVisible = true,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);

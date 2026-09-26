@@ -1129,6 +1129,7 @@ export default function App({ seedDevices } = {}) {
       client={clientFor(agent)}
       containerWidth={dimensions?.containerWidth}
       containerHeight={dimensions?.containerHeight}
+      isVisible={dimensions?.isVisible !== undefined ? dimensions.isVisible : true}
       fontFamily={settings['terminal.fontFamily']}
       fontSize={settings['terminal.fontSize']}
       focused={activeAgent ? agent.key === activeAgent.key : false}
