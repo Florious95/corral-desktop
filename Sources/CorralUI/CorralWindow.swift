@@ -12,6 +12,7 @@ public final class CorralWindow: NSWindow {
         self.title = title
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
+        titlebarSeparatorStyle = .none
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         backgroundColor = CorralAestheticTokens.surface0
@@ -39,6 +40,8 @@ public final class CorralWindow: NSWindow {
 
 @MainActor
 public final class CorralWindowController: NSWindowController {
+    public private(set) var savedFrameBeforeZoom: NSRect?
+
     public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1180, height: 760)) {
         let window = CorralWindow(contentRect: contentRect)
         super.init(window: window)
@@ -50,11 +53,33 @@ public final class CorralWindowController: NSWindowController {
     public required init?(coder: NSCoder) {
         fatalError("CorralWindowController is created programmatically")
     }
+
+    public func toggleZoom() {
+        guard let window, let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        toggleZoom(to: visibleFrame)
+    }
+
+    /// Uses the target screen's visible frame and remembers the exact pre-zoom window frame.
+    public func toggleZoom(to visibleFrame: NSRect) {
+        guard let window else { return }
+        if let originalFrame = savedFrameBeforeZoom {
+            window.setFrame(originalFrame, display: true, animate: false)
+            savedFrameBeforeZoom = nil
+        } else {
+            savedFrameBeforeZoom = window.frame
+            window.setFrame(visibleFrame, display: true, animate: false)
+        }
+    }
 }
 
 @MainActor
 final class CorralWindowDragRegion: NSView {
     override func mouseDown(with event: NSEvent) {
-        window?.performDrag(with: event)
+        guard let window else { return }
+        if event.clickCount == 2, let controller = window.windowController as? CorralWindowController {
+            controller.toggleZoom()
+        } else {
+            window.performDrag(with: event)
+        }
     }
 }
