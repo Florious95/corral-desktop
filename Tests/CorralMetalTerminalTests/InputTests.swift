@@ -1,0 +1,184 @@
+import AppKit
+import CorralContracts
+import CorralMetalTerminal
+import XCTest
+
+final class InputTests: XCTestCase {
+    @MainActor
+    func testMarkedTextTransitionsToCommittedUTF8Text() async {
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("ime"), inputRouting: router)
+
+        view.setMarkedText(NSAttributedString(string: "にほん"), selectedRange: NSRange(location: 3, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertTrue(view.hasMarkedText())
+        XCTAssertEqual(view.markedRange(), NSRange(location: 0, length: 3))
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 3, length: 0))
+        XCTAssertEqual(view.attributedSubstring(forProposedRange: NSRange(location: 1, length: 2), actualRange: nil)?.string, "ほん")
+        XCTAssertEqual(view.attributedSubstring(forProposedRange: NSRange(location: 100, length: 10), actualRange: nil)?.string, "")
+
+        view.insertText("日本", replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertFalse(view.hasMarkedText())
+        let committed = await waitForInputs(router, count: 1)
+        XCTAssertEqual(committed, [Data("日本".utf8)])
+    }
+
+    @MainActor
+    func testCompositionEnterCannotSubmitCR() async {
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("ime"), inputRouting: router)
+        view.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        let enter = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        )!
+        view.keyDown(with: enter)
+        view.doCommand(by: NSSelectorFromString("insertNewline:"))
+        for _ in 0..<20 { await Task.yield() }
+        let beforeCommit = await router.inputs()
+        XCTAssertTrue(beforeCommit.isEmpty)
+        XCTAssertTrue(view.hasMarkedText())
+
+        view.insertText("仮名", replacementRange: NSRange(location: NSNotFound, length: 0))
+        view.keyDown(with: enter)
+        let committedAndSubmitted = await waitForInputs(router, count: 2)
+        XCTAssertEqual(committedAndSubmitted, [Data("仮名".utf8), Data("\r".utf8)])
+    }
+
+    @MainActor
+    func testUserTextRoutesInSubmissionOrder() async {
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("ordering"), inputRouting: router)
+        view.insertText("あ", replacementRange: NSRange(location: NSNotFound, length: 0))
+        view.insertText("い", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        let inputs = await waitForInputs(router, count: 2)
+        XCTAssertEqual(inputs, [Data("あ".utf8), Data("い".utf8)])
+    }
+
+    @MainActor
+    func testCandidateCaretAndCharacterIndexUseTerminalCellGeometry() {
+        let view = TerminalTextInputView(frame: NSRect(x: 0, y: 0, width: 40, height: 60), sessionKey: sessionKey("geometry"), inputRouting: RecordingInputRouter())
+        view.configure(grid: GridSize(rows: 3, columns: 4), cellSize: NSSize(width: 10, height: 20), cursor: CursorDescriptor(row: 1, column: 2))
+
+        XCTAssertEqual(view.caretRectInView, NSRect(x: 20, y: 20, width: 10, height: 20))
+        XCTAssertEqual(view.characterIndex(for: NSPoint(x: 25, y: 25)), 6)
+        view.setSelection(TerminalCellSelection(anchor: TerminalCellPosition(row: 0, column: 1), focus: TerminalCellPosition(row: 1, column: 2)))
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 1, length: 6))
+    }
+
+    @MainActor
+    func testRectangularSelectionCopyAndHighlightGeometry() {
+        let snapshot = makeSnapshot(rows: ["ABCD", "EFGH"])
+        let selection = TerminalCellSelection(
+            anchor: TerminalCellPosition(row: 0, column: 1),
+            focus: TerminalCellPosition(row: 1, column: 2),
+            mode: .rectangular
+        )
+
+        XCTAssertEqual(selection.selectedText(in: snapshot), "BC\nFG")
+        XCTAssertEqual(
+            selection.highlightRects(grid: snapshot.size, cellSize: NSSize(width: 10, height: 10), in: NSRect(x: 10, y: 20, width: 40, height: 20)),
+            [NSRect(x: 20, y: 30, width: 20, height: 10), NSRect(x: 20, y: 20, width: 20, height: 10)]
+        )
+    }
+
+    @MainActor
+    func testCopySkipsWideCharacterContinuationCells() {
+        let snapshot = TerminalGridSnapshot(
+            size: GridSize(rows: 1, columns: 3),
+            cells: [
+                TerminalCell(content: .cluster("界", columns: .two), foreground: .indexed(7), background: .indexed(0)),
+                TerminalCell(content: .continuation, foreground: .indexed(7), background: .indexed(0)),
+                TerminalCell(content: .cluster("x", columns: .one), foreground: .indexed(7), background: .indexed(0))
+            ],
+            cursor: CursorDescriptor(row: 0, column: 0),
+            generation: .initial
+        )
+        let selection = TerminalCellSelection(anchor: TerminalCellPosition(row: 0, column: 0), focus: TerminalCellPosition(row: 0, column: 2))
+
+        XCTAssertEqual(selection.selectedText(in: snapshot), "界x")
+    }
+
+    @MainActor
+    func testCopyPreservesExtendedGraphemeClusters() {
+        let grapheme = "👩🏽‍💻"
+        let snapshot = TerminalGridSnapshot(
+            size: GridSize(rows: 1, columns: 2),
+            cells: [
+                TerminalCell(content: .cluster(grapheme, columns: .two), foreground: .indexed(7), background: .indexed(0)),
+                TerminalCell(content: .continuation, foreground: .indexed(7), background: .indexed(0))
+            ],
+            cursor: CursorDescriptor(row: 0, column: 0),
+            generation: .initial
+        )
+        let selection = TerminalCellSelection(anchor: TerminalCellPosition(row: 0, column: 0), focus: TerminalCellPosition(row: 0, column: 1))
+
+        XCTAssertEqual(selection.selectedText(in: snapshot), grapheme)
+    }
+
+    @MainActor
+    func testAccessibilitySnapshotIsBounded() {
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("accessibility"), inputRouting: RecordingInputRouter())
+        view.updateTerminalSnapshot(makeSnapshot(rows: ["ABCD", "EFGH"]), accessibilityCharacterLimit: 6)
+
+        XCTAssertEqual(view.accessibilityLabel(), "Terminal")
+        XCTAssertEqual(view.accessibilityValue() as? String, "ABCD\nE")
+
+        view.updateTerminalSnapshot(makeSnapshot(rows: [String(repeating: "A", count: 5000)]), accessibilityCharacterLimit: 5000)
+        XCTAssertEqual((view.accessibilityValue() as? String)?.unicodeScalars.count, 4096)
+    }
+
+    private func sessionKey(_ reference: String) -> SessionKey {
+        SessionKey(deviceID: DeviceID("test-device"), reference: try! SessionReference(reference))
+    }
+
+    private func makeSnapshot(rows: [String]) -> TerminalGridSnapshot {
+        let columns = rows.first?.count ?? 0
+        let cells = rows.flatMap { row in
+            row.map { character in
+                TerminalCell(
+                    content: .cluster(String(character), columns: .one),
+                    foreground: .indexed(7),
+                    background: .indexed(0)
+                )
+            }
+        }
+        return TerminalGridSnapshot(
+            size: GridSize(rows: rows.count, columns: columns),
+            cells: cells,
+            cursor: CursorDescriptor(row: 0, column: 0),
+            generation: .initial
+        )
+    }
+
+    @MainActor
+    private func waitForInputs(_ router: RecordingInputRouter, count: Int) async -> [Data] {
+        for _ in 0..<200 {
+            let inputs = await router.inputs()
+            if inputs.count >= count { return inputs }
+            await Task.yield()
+        }
+        return await router.inputs()
+    }
+}
+
+private actor RecordingInputRouter: TerminalInputRouting {
+    private var recorded: [Data] = []
+
+    func route(_ input: TerminalInput, to session: SessionKey) async throws -> UInt32 {
+        guard case let .userBytes(bytes) = input else { return 0 }
+        recorded.append(bytes.data)
+        return UInt32(recorded.count)
+    }
+
+    func inputs() -> [Data] { recorded }
+}
