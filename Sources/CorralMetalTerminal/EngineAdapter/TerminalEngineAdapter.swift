@@ -35,7 +35,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
             options: TerminalOptions(
                 cols: initialSize.columns,
                 rows: initialSize.rows,
-                convertEol: false,
+                convertEol: true,
                 termName: "xterm-256color",
                 cursorStyle: .steadyBlock,
                 scrollback: 500,
@@ -51,6 +51,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
             guard accept(origin.connectionEpoch, resetOnEpochChange: false) else { return [] }
             terminal.resetToInitialState()
             delegate.resetCursor()
+            terminal.feed(byteArray: [0x1B, 0x5B, 0x48])
             terminal.feed(byteArray: Array(ansi))
         case let .delta(_, ansi, origin):
             guard accept(origin.connectionEpoch, resetOnEpochChange: true) else { return [] }
@@ -108,13 +109,15 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
         }
 
         let position = terminal.getCursorLocation()
+        let wrapPending = position.x >= dimensions.cols
         return TerminalGridSnapshot(
             size: GridSize(rows: dimensions.rows, columns: dimensions.cols),
             cells: cells,
             cursor: CursorDescriptor(
-                row: position.y,
-                column: position.x,
+                row: min(max(position.y, 0), dimensions.rows - 1),
+                column: min(max(position.x, 0), dimensions.cols - 1),
                 isVisible: delegate.isCursorVisible,
+                wrapPending: wrapPending,
                 shape: delegate.cursorShape
             ),
             generation: generation

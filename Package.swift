@@ -41,7 +41,7 @@ let package = Package(
             resources: [.process("WireCodecTests/Fixtures")]
         ),
         .testTarget(name: "CorralServicesTests", dependencies: ["CorralServices", "CorralContracts"]),
-        .testTarget(name: "CorralMetalTerminalTests", dependencies: ["CorralMetalTerminal", "CorralContracts"]),
+        .testTarget(name: "CorralMetalTerminalTests", dependencies: ["CorralMetalTerminal", "CorralContracts", "CorralProtocol"]),
         .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts", "CorralMetalTerminal"]),
         .testTarget(
             name: "CorralRegressionTests",
