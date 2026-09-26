@@ -11,16 +11,22 @@ public enum CorralAppIdentity {
 
 @MainActor
 private struct AppCompositionRoot {
-    let wireCodec: any WireCodecProtocol = BinaryV1Codec()
+    let wireCodec: any WireCodecProtocol = ProtocolV1Codec()
     let geometryPolicy: any GeometryPolicy = DefaultGeometryPolicy()
     let initialConnectionState = ConnectionState.disconnected
-    let initialStage = StagePresentation(
-        viewport: StageViewportRect(x: 0, y: 0, width: 0, height: 0),
-        sleepState: .applicationInactive,
-        dirtyGeneration: .initial
-    )
+    let stageID = UUID()
+    let initialStage: StagePresentation
 
     init() {
+        initialStage = StagePresentation(
+            viewportStageID: stageID,
+            viewport: StageViewportRect(x: 0, y: 0, width: 0, height: 0),
+            layoutGeneration: LayoutGeneration(0),
+            metricsGeneration: MetricsGeneration(0),
+            visibility: .visible,
+            applicationActivity: .inactive,
+            sleepState: .paused
+        )
         _ = CorralAppIdentity.bundleIdentifier
         _ = initialConnectionState
         _ = initialStage

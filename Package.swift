@@ -15,9 +15,9 @@ let package = Package(
     targets: [
         .target(name: "CorralContracts"),
         .target(name: "CorralProtocol", dependencies: ["CorralContracts"]),
-        .target(name: "CorralServices", dependencies: ["CorralContracts", "CorralProtocol"]),
+        .target(name: "CorralServices", dependencies: ["CorralContracts"]),
         .target(name: "CorralMetalTerminal", dependencies: ["CorralContracts"]),
-        .target(name: "CorralUI", dependencies: ["CorralContracts", "CorralServices", "CorralMetalTerminal"]),
+        .target(name: "CorralUI", dependencies: ["CorralContracts"]),
         .executableTarget(
             name: "CorralApp",
             dependencies: [
@@ -32,7 +32,7 @@ let package = Package(
         .testTarget(name: "CorralProtocolTests", dependencies: ["CorralProtocol", "CorralContracts"]),
         .testTarget(name: "CorralServicesTests", dependencies: ["CorralServices", "CorralContracts"]),
         .testTarget(name: "CorralMetalTerminalTests", dependencies: ["CorralMetalTerminal", "CorralContracts"]),
-        .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts", "CorralMetalTerminal"])
+        .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts"])
     ]
 )
-// M0 intentionally has no external package dependencies. Production releases use a distinct bundle identity.
+// M0 intentionally has no external package dependencies. The App target is the sole concrete composition root.

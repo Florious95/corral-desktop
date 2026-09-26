@@ -1,37 +1,31 @@
 import CorralContracts
 import Foundation
-import CorralMetalTerminal
-import CorralServices
 
+/// Stable UI value for one owning window/stage; visibility is separate from app focus and session lifetime.
 public struct StagePresentation: ViewportStageIdentifiable, Sendable {
     public let viewportStageID: UUID
     public let viewport: StageViewportRect
+    public let layoutGeneration: LayoutGeneration
+    public let metricsGeneration: MetricsGeneration
+    public let visibility: StageVisibility
+    public let applicationActivity: ApplicationActivity
     public let sleepState: RenderSleepState
-    public let dirtyGeneration: DirtyGeneration
 
     public init(
-        viewportStageID: UUID = UUID(),
+        viewportStageID: UUID,
         viewport: StageViewportRect,
-        sleepState: RenderSleepState,
-        dirtyGeneration: DirtyGeneration
+        layoutGeneration: LayoutGeneration,
+        metricsGeneration: MetricsGeneration,
+        visibility: StageVisibility,
+        applicationActivity: ApplicationActivity,
+        sleepState: RenderSleepState
     ) {
         self.viewportStageID = viewportStageID
         self.viewport = viewport
+        self.layoutGeneration = layoutGeneration
+        self.metricsGeneration = metricsGeneration
+        self.visibility = visibility
+        self.applicationActivity = applicationActivity
         self.sleepState = sleepState
-        self.dirtyGeneration = dirtyGeneration
-    }
-}
-
-/// Injected policy and renderer are shared by every stage; tab visibility only changes presentation state.
-public struct CorralUIComposition: Sendable {
-    public let geometryPolicy: any GeometryPolicy
-    public let renderer: any TerminalRendering
-
-    public init(
-        renderer: any TerminalRendering,
-        geometryPolicy: any GeometryPolicy = DefaultGeometryPolicy()
-    ) {
-        self.renderer = renderer
-        self.geometryPolicy = geometryPolicy
     }
 }

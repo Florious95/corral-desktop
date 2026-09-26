@@ -1,6 +1,4 @@
 import CorralContracts
 
-public protocol TerminalRendering: Sendable {
-    func present(_ snapshot: TerminalGridSnapshot, in viewport: StageViewportRect, dirtyGeneration: DirtyGeneration) async
-    func setSleepState(_ state: RenderSleepState) async
-}
+/// Metal-specific implementations render one stage batch through the shared resource domain.
+public protocol MetalTerminalRenderer: StageRendererProtocol {}

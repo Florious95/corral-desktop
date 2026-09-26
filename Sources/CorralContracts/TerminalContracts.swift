@@ -9,8 +9,12 @@ public struct GridSize: Codable, Hashable, Sendable {
         self.columns = columns
     }
 
-    public static let zero = GridSize(rows: 0, columns: 0)
+    /// Local geometry validity is distinct from the v1 UInt16 wire representation.
     public var isValid: Bool { rows > 0 && columns > 0 }
+    public var fitsProtocolV1: Bool {
+        isValid && rows <= Int(UInt16.max) && columns <= Int(UInt16.max)
+    }
+    public static let zero = GridSize(rows: 0, columns: 0)
 }
 
 public struct RGBAColor: Codable, Hashable, Sendable {
@@ -42,22 +46,33 @@ public struct TerminalAttributes: OptionSet, Codable, Hashable, Sendable {
     public static let inverse = Self(rawValue: 1 << 3)
 }
 
-public struct TerminalCell: Codable, Hashable, Sendable {
-    public let codepoint: UInt32
-    public let isWide: Bool
+public enum CellSpan: UInt8, Codable, Sendable {
+    case one = 1
+    case two = 2
+}
+
+/// Cluster boundaries and terminal column width are supplied by the engine; never infer width from String.count.
+public enum CellContent: Codable, Equatable, Sendable {
+    case blank
+    case cluster(String, columns: CellSpan)
+    case continuation
+
+    public var isValid: Bool {
+        switch self {
+        case .blank, .continuation: true
+        case let .cluster(text, _): !text.isEmpty
+        }
+    }
+}
+
+public struct TerminalCell: Codable, Equatable, Sendable {
+    public let content: CellContent
     public let foreground: TerminalColor
     public let background: TerminalColor
     public let attributes: TerminalAttributes
 
-    public init(
-        codepoint: UInt32,
-        isWide: Bool = false,
-        foreground: TerminalColor,
-        background: TerminalColor,
-        attributes: TerminalAttributes = []
-    ) {
-        self.codepoint = codepoint
-        self.isWide = isWide
+    public init(content: CellContent, foreground: TerminalColor, background: TerminalColor, attributes: TerminalAttributes = []) {
+        self.content = content
         self.foreground = foreground
         self.background = background
         self.attributes = attributes
@@ -74,12 +89,14 @@ public struct CursorDescriptor: Codable, Hashable, Sendable {
     public let row: Int
     public let column: Int
     public let isVisible: Bool
+    public let wrapPending: Bool
     public let shape: CursorShape
 
-    public init(row: Int, column: Int, isVisible: Bool = true, shape: CursorShape = .block) {
+    public init(row: Int, column: Int, isVisible: Bool = true, wrapPending: Bool = false, shape: CursorShape = .block) {
         self.row = row
         self.column = column
         self.isVisible = isVisible
+        self.wrapPending = wrapPending
         self.shape = shape
     }
 }
@@ -98,20 +115,81 @@ public struct TerminalGridSnapshot: Codable, Equatable, Sendable {
     }
 
     public var isValid: Bool {
-        guard size.isValid else { return false }
+        guard size.isValid,
+              cursor.row >= 0, cursor.row < size.rows,
+              cursor.column >= 0, cursor.column < size.columns,
+              !cursor.wrapPending || cursor.column == size.columns - 1 else { return false }
         let (cellCount, overflow) = size.rows.multipliedReportingOverflow(by: size.columns)
-        return !overflow && cells.count == cellCount
+        guard !overflow, cells.count == cellCount, cells.allSatisfy({ $0.content.isValid }) else { return false }
+
+        for row in 0..<size.rows {
+            for column in 0..<size.columns {
+                let content = cells[row * size.columns + column].content
+                switch content {
+                case .blank, .cluster(_, columns: .one): break
+                case .cluster(_, columns: .two):
+                    guard column + 1 < size.columns,
+                          cells[row * size.columns + column + 1].content == .continuation else { return false }
+                case .continuation:
+                    guard column > 0 else { return false }
+                    if case .cluster(_, columns: .two) = cells[row * size.columns + column - 1].content {
+                        break
+                    }
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    public func isValid(with budget: TerminalSnapshotBudget) -> Bool {
+        guard isValid, UInt64(cells.count) <= budget.maximumCells else { return false }
+        var clusterBytes: UInt64 = 0
+        for cell in cells {
+            guard case let .cluster(text, _) = cell.content else { continue }
+            let (next, overflow) = clusterBytes.addingReportingOverflow(UInt64(text.utf8.count))
+            guard !overflow, next <= budget.maximumClusterBytesTotal else { return false }
+            clusterBytes = next
+        }
+        return true
     }
 }
 
-public enum TerminalUpdate: Codable, Equatable, Sendable {
-    case snapshot(data: Data, epoch: ConnectionEpoch)
-    case delta(data: Data, epoch: ConnectionEpoch)
-    case scrollback(requestID: UInt32, data: Data, epoch: ConnectionEpoch)
+public struct TerminalSnapshotBudget: Codable, Hashable, Sendable {
+    public let maximumCells: UInt64
+    public let maximumClusterBytesTotal: UInt64
+
+    public init(maximumCells: UInt64, maximumClusterBytesTotal: UInt64) {
+        self.maximumCells = maximumCells
+        self.maximumClusterBytesTotal = maximumClusterBytesTotal
+    }
 }
 
-/// VT-generated DA/CPR/DSR replies are deliberately not accepted by any SessionLink input API.
-public struct TerminalAutoReplyBytes: Codable, Hashable, Sendable {
+public struct TerminalBufferBudget: Codable, Hashable, Sendable {
+    public let maximumPendingBytesPerSession: UInt64
+    public let maximumPendingBytesApplicationWide: UInt64
+    public let maximumSnapshotCells: UInt64
+
+    public init(maximumPendingBytesPerSession: UInt64, maximumPendingBytesApplicationWide: UInt64, maximumSnapshotCells: UInt64) {
+        self.maximumPendingBytesPerSession = maximumPendingBytesPerSession
+        self.maximumPendingBytesApplicationWide = maximumPendingBytesApplicationWide
+        self.maximumSnapshotCells = maximumSnapshotCells
+    }
+}
+
+public enum TerminalUpdate: Equatable, Sendable {
+    case snapshot(reference: SessionReference, ansi: Data, origin: SessionEventOrigin)
+    case delta(reference: SessionReference, ansi: Data, origin: SessionEventOrigin)
+    case scrollback(reference: SessionReference, metadata: ScrollbackMetadata, ansi: Data, origin: SessionEventOrigin)
+}
+
+/// A prevention type for accidental routing, not an unforgeable capability. Effects must use the local policy sink.
+public struct UserInputBytes: Hashable, Sendable {
+    public let data: Data
+    public init(_ data: Data) { self.data = data }
+}
+
+public struct TerminalAutoReplyBytes: Hashable, Sendable {
     public let data: Data
     public init(_ data: Data) { self.data = data }
 }
@@ -123,8 +201,8 @@ public enum TerminalKey: String, Codable, Equatable, Sendable {
     case function7, function8, function9, function10, function11, function12
 }
 
-/// Platform input intent stays typed until converted to user-originated bytes.
-public enum TerminalInput: Codable, Equatable, Sendable {
+/// UI intent stays distinct from its v1 wire representation.
+public enum TerminalInput: Equatable, Sendable {
     case userText(String)
     case namedKey(TerminalKey)
     case userBytes(UserInputBytes)
@@ -134,14 +212,10 @@ public enum TerminalInput: Codable, Equatable, Sendable {
 public struct LinkMetadata: Codable, Equatable, Sendable {
     public let label: String
     public let destination: String
-
-    public init(label: String, destination: String) {
-        self.label = label
-        self.destination = destination
-    }
+    public init(label: String, destination: String) { self.label = label; self.destination = destination }
 }
 
-public enum TerminalEffect: Codable, Equatable, Sendable {
+public enum TerminalEffect: Equatable, Sendable {
     case autoReply(TerminalAutoReplyBytes)
     case bell
     case title(String)
@@ -149,9 +223,14 @@ public enum TerminalEffect: Codable, Equatable, Sendable {
     case deniedExternalEffect(String)
 }
 
+public protocol TerminalEffectPolicySink: Sendable {
+    /// Consumes engine effects locally; this interface has no SessionLink/uplink return channel.
+    func consume(_ effects: [TerminalEffect], for session: SessionKey) async
+}
+
 public protocol TerminalEngineSubmitting: Sendable {
-    func apply(_ update: TerminalUpdate) async throws -> [TerminalAutoReplyBytes]
-    func submitUserInput(_ input: UserInputBytes) async throws
+    /// Applies only server-originated bytes and returns effects; user input is sent by the input route, not locally echoed.
+    func apply(_ update: TerminalUpdate) async throws -> [TerminalEffect]
     func resize(to size: GridSize) async throws
 }
 
@@ -159,99 +238,6 @@ public protocol TerminalSnapshotProviding: Sendable {
     func snapshot() async -> TerminalGridSnapshot
 }
 
-public protocol ViewportStageIdentifiable: Sendable {
-    var viewportStageID: UUID { get }
-}
-
-/// Top-left-origin stage coordinates in points, not device pixels.
-public struct StageViewportRect: Codable, Hashable, Sendable {
-    public let x: Double
-    public let y: Double
-    public let width: Double
-    public let height: Double
-
-    public init(x: Double, y: Double, width: Double, height: Double) {
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-    }
-
-    public var isValid: Bool {
-        x.isFinite && y.isFinite && width.isFinite && height.isFinite && width >= 0 && height >= 0
-    }
-}
-
-public enum RenderSleepState: String, Codable, Sendable {
-    case active
-    case tabHidden
-    case applicationInactive
-
-    public var allowsDrawing: Bool { self == .active }
-}
-
-public struct DirtyGeneration: RawRepresentable, Codable, Hashable, Sendable, Comparable {
-    public let rawValue: UInt64
-
-    public init(_ rawValue: UInt64) { self.rawValue = rawValue }
-    public init(rawValue: UInt64) { self.rawValue = rawValue }
-    public static let initial = DirtyGeneration(0)
-    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
-    public func next() -> Self { DirtyGeneration(rawValue &+ 1) }
-}
-
-public struct GlyphKey: Codable, Hashable, Sendable {
-    public let fontPostScriptName: String
-    public let codepoint: UInt32
-    public let pixelSize: UInt16
-    public let isBold: Bool
-    public let isItalic: Bool
-
-    public init(fontPostScriptName: String, codepoint: UInt32, pixelSize: UInt16, isBold: Bool = false, isItalic: Bool = false) {
-        self.fontPostScriptName = fontPostScriptName
-        self.codepoint = codepoint
-        self.pixelSize = pixelSize
-        self.isBold = isBold
-        self.isItalic = isItalic
-    }
-}
-
-/// A zero-sized coordinate is the cleared/evicted sentinel; eviction must zero every coordinate field.
-public struct AtlasCoordinates: Codable, Hashable, Sendable {
-    public let page: UInt16
-    public let x: UInt16
-    public let y: UInt16
-    public let width: UInt16
-    public let height: UInt16
-
-    public init(page: UInt16, x: UInt16, y: UInt16, width: UInt16, height: UInt16) {
-        self.page = page
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-    }
-
-    public static let zero = AtlasCoordinates(page: 0, x: 0, y: 0, width: 0, height: 0)
-    public var isZeroed: Bool { self == .zero }
-}
-
-public struct AtlasMemoryBudget: Codable, Hashable, Sendable {
-    public let maximumBytes: UInt64
-    public let maximumPages: UInt32
-
-    public init(maximumBytes: UInt64, maximumPages: UInt32) {
-        self.maximumBytes = maximumBytes
-        self.maximumPages = maximumPages
-    }
-
-    public func allowsAllocation(currentBytes: UInt64, additionalBytes: UInt64) -> Bool {
-        let (total, overflow) = currentBytes.addingReportingOverflow(additionalBytes)
-        return !overflow && total <= maximumBytes
-    }
-
-    public func allowsPageAllocation(currentPages: UInt32, additionalPages: UInt32 = 1) -> Bool {
-        let (total, overflow) = currentPages.addingReportingOverflow(additionalPages)
-        return !overflow && total <= maximumPages
-    }
+public protocol TerminalInputRouting: Sendable {
+    func route(_ input: TerminalInput, to session: SessionKey) async throws -> UInt32
 }

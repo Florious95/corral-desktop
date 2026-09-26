@@ -1,6 +1,6 @@
 # Corral Native
 
-Independent Swift 6 / macOS 14+ application workspace. Contracts v0 is the shared compile-time boundary for the six production targets.
+Independent Swift 6 / macOS 14+ application workspace. Contracts v0.1 is the shared compile-time boundary for the six production targets; see [Contracts-v0.1.md](Contracts-v0.1.md).
 
 ## Safety boundary
 

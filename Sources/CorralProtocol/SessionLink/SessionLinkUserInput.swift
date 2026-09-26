@@ -1,8 +1,8 @@
 import CorralContracts
 
 public extension SessionLinkProtocol {
-    /// The sole terminal-byte uplink helper accepts user-originated bytes, never VT auto-replies.
-    func sendUserInput(_ input: UserInputBytes, to sessionID: SessionID) async throws {
-        try await send(.input(sessionID: sessionID, bytes: input))
+    /// User input is a sequenced client command; server-only control messages and engine effects are not accepted.
+    func sendUserInput(_ request: ClientInputRequest) async throws -> CommandSendReceipt {
+        try await send(.input(request))
     }
 }

@@ -3,33 +3,40 @@ import CorralServices
 import XCTest
 
 final class GeometryPolicyTests: XCTestCase {
-    func testSubTwoPixelJitterIsDebouncedButCrossGridChangeIsNot() {
+    func testSubTwoPixelNoiseDebouncesButGridAndMetricsChangesDoNot() {
         let policy = DefaultGeometryPolicy()
-        let old = sample(width: 100, grid: GridSize(rows: 24, columns: 80))
-        let jitter = sample(width: 101.5, grid: GridSize(rows: 24, columns: 80))
-        let crossGrid = sample(width: 100.5, grid: GridSize(rows: 24, columns: 81))
+        let old = sample(width: 100, grid: GridSize(rows: 24, columns: 80), metrics: 1)
+        let jitter = sample(width: 101.5, grid: GridSize(rows: 24, columns: 80), metrics: 1)
+        let crossGrid = sample(width: 100.5, grid: GridSize(rows: 24, columns: 81), metrics: 1)
+        let fontChange = sample(width: 100, grid: GridSize(rows: 24, columns: 80), metrics: 2)
 
         XCTAssertTrue(policy.shouldDebounceViewportDelta(from: old, to: jitter))
         XCTAssertFalse(policy.shouldDebounceViewportDelta(from: old, to: crossGrid))
-        XCTAssertTrue(policy.shouldPublishResize(from: old, to: crossGrid))
+        XCTAssertFalse(policy.shouldDebounceViewportDelta(from: old, to: fontChange))
+        XCTAssertTrue(policy.shouldPublishResize(lastCommittedServerGrid: old.grid, proposed: crossGrid))
     }
 
-    func testExactlyTwoPixelsIsNotDebouncedAndAuthoritativeSizeWins() {
-        let policy = DefaultGeometryPolicy(authoritativeGridSize: GridSize(rows: 40, columns: 120))
-        let old = sample(width: 100, grid: GridSize(rows: 24, columns: 80))
-        let changed = sample(width: 102, grid: GridSize(rows: 25, columns: 81))
+    func testAuthorityChangeComparesAgainstPreviouslyCommittedServerGrid() {
+        let oldGrid = GridSize(rows: 30, columns: 100)
+        let newAuthority = DefaultGeometryPolicy(authoritativeGridSize: GridSize(rows: 40, columns: 120))
+        let unchangedMeasurement = sample(width: 900, grid: GridSize(rows: 24, columns: 80), metrics: 1)
 
-        XCTAssertEqual(policy.resolvedGridSize(proposed: changed.grid), GridSize(rows: 40, columns: 120))
-        XCTAssertFalse(policy.shouldDebounceViewportDelta(from: old, to: changed))
-        XCTAssertFalse(policy.shouldPublishResize(from: old, to: changed))
+        XCTAssertTrue(newAuthority.shouldPublishResize(lastCommittedServerGrid: oldGrid, proposed: unchangedMeasurement))
+        XCTAssertFalse(newAuthority.shouldPublishResize(lastCommittedServerGrid: GridSize(rows: 40, columns: 120), proposed: unchangedMeasurement))
     }
 
-    private func sample(width: Double, grid: GridSize) -> GeometrySample {
+    func testGridDimensionsHaveSeparateWireRepresentabilityCheck() {
+        XCTAssertTrue(GridSize(rows: 65_535, columns: 80).fitsProtocolV1)
+        XCTAssertFalse(GridSize(rows: 65_536, columns: 80).fitsProtocolV1)
+        XCTAssertFalse(GridSize(rows: 0, columns: 80).fitsProtocolV1)
+    }
+
+    private func sample(width: Double, grid: GridSize, metrics: UInt64) -> GeometrySample {
         GeometrySample(
             viewport: StageViewportRect(x: 0, y: 0, width: width, height: 100),
             backingScale: 1,
             grid: grid,
-            metricsGeneration: 1
+            metricsGeneration: MetricsGeneration(metrics)
         )
     }
 }
