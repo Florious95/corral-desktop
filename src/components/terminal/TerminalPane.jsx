@@ -75,6 +75,9 @@ export default function TerminalPane({
   const onPasteRef = useRef(onPaste);
   const onForceTextPasteRef = useRef(onForceTextPaste);
   const pendingFocusRef = useRef(false);
+  const isVisibleRef = useRef(isVisible);
+  isVisibleRef.current = isVisible;
+  const syncRenderSleepRef = useRef(null);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
   onBytesRef.current = onBytes;
@@ -217,10 +220,14 @@ export default function TerminalPane({
       lastSubscribe = subscribeKey;
       gate.noteSent(act.rows, act.cols);
     };
+    const paneHost = host.closest?.('.pane-host');
+    const isPaneVisible = (paneHost ? !paneHost.classList.contains('is-hidden') && paneHost.style.visibility !== 'hidden' : true) && (isVisible !== false);
+
     view = new TerminalView(host, {
       traceRef: target,
       fontFamily,
       fontSize,
+      renderSleep: !isPaneVisible,
       initialCols: currentMode === PRESENCE_MODE.TAKEOVER ? initialCols : null,
       initialRows: currentMode === PRESENCE_MODE.TAKEOVER ? initialRows : null,
       onFirstPaint: (info) => {
@@ -497,7 +504,18 @@ export default function TerminalPane({
       window.addEventListener('terminal:theme-change', handleThemeChange);
     }
 
+    let mo = null;
+    if (paneHost && typeof MutationObserver !== 'undefined') {
+      mo = new MutationObserver(() => {
+        const isHidden = Boolean(host.closest?.('.is-hidden') || paneHost.classList.contains('is-hidden') || paneHost.style.visibility === 'hidden');
+        const sleeping = isHidden || (isVisibleRef.current === false);
+        syncRenderSleepRef.current?.(sleeping);
+      });
+      mo.observe(paneHost, { attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] });
+    }
+
     return () => {
+      mo?.disconnect();
       if (typeof window !== 'undefined') {
         window.removeEventListener('terminal:reflow', handleReflow);
         window.removeEventListener('terminal:theme-change', handleThemeChange);
@@ -533,6 +551,22 @@ export default function TerminalPane({
       viewRef.current.updateFont({ fontFamily, fontSize });
     }
   }, [fontFamily, fontSize]);
+
+  const syncRenderSleep = useCallback((sleeping) => {
+    const v = viewRef.current;
+    if (!v) return;
+    v.setRenderSleep(sleeping);
+  }, []);
+  syncRenderSleepRef.current = syncRenderSleep;
+
+  // 动态响应窗格可见性变更：驱动后台窗格进入/退出 Render Sleep（MVP Phase M2）
+  useEffect(() => {
+    const host = hostRef.current;
+    const paneHost = host?.closest?.('.pane-host');
+    const isHidden = Boolean(host?.closest?.('.is-hidden') || paneHost?.classList.contains('is-hidden') || paneHost?.style.visibility === 'hidden');
+    const sleeping = isHidden || (isVisible === false);
+    syncRenderSleep(sleeping);
+  }, [isVisible, syncRenderSleep]);
 
   return (
     <div

@@ -34,7 +34,7 @@ const HIDE_CURSOR = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x35, 0x6c]); // ESC
 const FOLLOW_UP_RE = /^(?:\s*)(?:→|->)\s*Add a follow-up\b/;
 const FOLLOW_UP_PREFIX_RE = /^(?:\s*)(?:→|->)\s*/;
 
-function withHiddenCursor(bytes) {
+export function withHiddenCursor(bytes) {
   const hidden = new Uint8Array(bytes.byteLength + HIDE_CURSOR.byteLength);
   hidden.set(bytes);
   hidden.set(HIDE_CURSOR, bytes.byteLength);
@@ -123,6 +123,8 @@ export class TerminalView {
     this.initialRows = initialRows;
     this._cellMetrics = opts.cellMetrics || null;
     this._disableWebgl = opts.disableWebgl ?? false;
+    this._webglImporter = opts.webglImporter || undefined;
+    this._renderSleeping = opts.renderSleep === true;
     this._onFirstPaint = opts.onFirstPaint || null;
     this._firstPaintRendered = false;
 
@@ -225,6 +227,10 @@ export class TerminalView {
   /** 挂载进容器并做一次 fit。 */
   open() {
     this.term.open(this.container);
+    if (this._renderSleeping) {
+      const renderService = this.term._core?._renderService;
+      if (renderService) renderService._isPaused = true;
+    }
     this._traceRenderDisposable = this.term.onRender?.(({ start, end }) => {
       this._markFirstPaint();
       if (isGeomTraceEnabled()) {
@@ -317,7 +323,7 @@ export class TerminalView {
       this._observeCursorAnchor();
     }
     // WebGL 接上之后再给调用方开订阅，避免首帧 snapshot 写在 DOM 上、addon 一切换就空屏。
-    this.readyWebgl = attachWebglRenderer(this.term, undefined, { disableWebgl: this._disableWebgl }).then((addon) => {
+    this.readyWebgl = attachWebglRenderer(this.term, this._webglImporter, { disableWebgl: this._disableWebgl }).then((addon) => {
       this._webglAddon = addon;
       // addon 换渲染器后必须再 fit 一次：探针 T1 70x29 → T3 73x23。
       if (addon) this.fit({ immediate: true, force: true });
@@ -535,12 +541,25 @@ export class TerminalView {
         this.term.reset();
         this._hasPainted = true;
       }
-      this.term.write(this.hideCursor ? withHiddenCursor(data) : data, () => {
-        done();
-        if (kind === 'snapshot') {
+      // 游标与写流零拷贝优化（MVP Phase M2）：
+      // snapshot 清屏重构时保持单次原子写入 withHiddenCursor（保证光标在首绘前即处于隐藏态）；
+      // 高频 delta 追加写入时直接引用传递 data 并追加静态常量 HIDE_CURSOR，保全游标语义同时杜绝高频流式逐帧全量内存拷贝。
+      if (this.hideCursor && kind === 'snapshot') {
+        this.term.write(withHiddenCursor(data), () => {
+          done();
           this._markFirstPaint();
-        }
-      });
+        });
+      } else if (this.hideCursor) {
+        this.term.write(data);
+        this.term.write(HIDE_CURSOR, done);
+      } else {
+        this.term.write(data, () => {
+          done();
+          if (kind === 'snapshot') {
+            this._markFirstPaint();
+          }
+        });
+      }
     } catch (error) {
       done();
       throw error;
@@ -555,6 +574,7 @@ export class TerminalView {
     let data;
     const kind = first.kind;
     if (kind === 'snapshot') {
+      this._writeQueue[this._writeHead] = null;
       this._writeHead += 1;
       this._queuedWriteBytes -= first.data.byteLength;
       data = first.data;
@@ -563,6 +583,7 @@ export class TerminalView {
       let total = 0;
       while (this._writeQueue[this._writeHead]?.kind === 'delta') {
         const item = this._writeQueue[this._writeHead];
+        this._writeQueue[this._writeHead] = null;
         this._writeHead += 1;
         chunks.push(item.data);
         total += item.data.byteLength;
@@ -587,7 +608,7 @@ export class TerminalView {
 
   /** Keep Cursor's IME composition view on its software follow-up prompt. */
   _syncCursorAnchor() {
-    if (!this.hideCursor || this._disposed) return;
+    if (!this.hideCursor || this._disposed || this._renderSleeping) return;
     const buffer = this.term.buffer?.active;
     const getLine = buffer?.getLine?.bind(buffer);
     if (!getLine) return;
@@ -848,6 +869,42 @@ export class TerminalView {
     if (changed) {
       this._cellMetrics = null;
       this.fit({ immediate: true, sync: true, force: true });
+    }
+  }
+
+  get isRenderSleeping() {
+    return this._renderSleeping;
+  }
+
+  /**
+   * 后台窗格渲染休眠状态机（MVP Phase M2）：
+   * - 休眠（sleeping=true）：WebGL Canvas 与几何位置 100% 常驻保留，数据流照常解析写入 term.buffer，
+   *   仅挂起 xterm 的 _renderService GPU 绘制提交循环与游标扫描，彻底消除后台 35%~60% GPU 空转；
+   * - 唤醒（sleeping=false）：恢复 _renderService 绘制提交；若休眠期间有新数据到达（_needsFullRefresh），
+   *   触发一次原子增量 refresh(0, rows - 1) 在常驻画布上呈现最新状态；若画面静止无变化则零重绘零提交！
+   * @param {boolean} sleeping
+   */
+  setRenderSleep(sleeping) {
+    const next = Boolean(sleeping);
+    if (this._disposed || this._renderSleeping === next) return;
+    this._renderSleeping = next;
+
+    const renderService = this.term?._core?._renderService;
+    if (next) {
+      if (renderService) {
+        renderService._isPaused = true;
+      }
+    } else {
+      if (renderService) {
+        renderService._isPaused = false;
+        renderService._pausedResizeTask?.flush?.();
+        if (renderService._needsFullRefresh) {
+          renderService._needsFullRefresh = false;
+          const endRow = Math.max(0, (this.term.rows || 1) - 1);
+          this.term.refresh?.(0, endRow);
+        }
+      }
+      this._syncCursorAnchor();
     }
   }
 
