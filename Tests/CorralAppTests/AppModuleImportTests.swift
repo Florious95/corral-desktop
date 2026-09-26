@@ -345,16 +345,25 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(connectCount, 1)
         let listSent = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
         XCTAssertTrue(listSent)
-        let launcher = AgentLauncher(provider: "codex", displayName: "Codex", supportsBypass: true, naming: .cli)
-        try await link.emit(.control(.authAck(ok: true, reason: nil, launchers: [launcher])))
-        let launcherReceived = await waitUntil { coordinator.availableAgentLaunchers == [launcher] }
+        let authAck = try codec.decodeControlMessage(Data(#"{"v":1,"type":"auth_ack","payload":{"ok":true,"agent_launchers":[{"provider":"pi","display_name":"Pi","supports_bypass":true,"naming":"cli"},{"provider":"codex","display_name":"Codex","supports_bypass":true,"naming":"cli"},{"provider":"cursor","display_name":"Cursor","supports_bypass":false,"naming":"cli"},{"provider":"grok","display_name":"Grok","supports_bypass":false,"naming":"cli"}]}}"#.utf8))
+        guard case let .authAck(ok, reason, launchers) = authAck else {
+            return XCTFail("The real auth_ack fixture must decode with its advertised launchers")
+        }
+        XCTAssertTrue(ok)
+        XCTAssertNil(reason)
+        XCTAssertEqual(launchers.map(\.provider), ["pi", "codex", "cursor", "grok"])
+        try await link.emit(.control(authAck))
+        let launcherReceived = await waitUntil { coordinator.availableAgentLaunchers == launchers }
         XCTAssertTrue(launcherReceived)
+        XCTAssertEqual(coordinator.availableAgentLaunchers.count, 4)
 
         coordinator.showNewAgentDialog()
         let newAgentSheet = try XCTUnwrap(window.attachedSheet as? NSPanel)
         XCTAssertEqual(newAgentSheet.identifier?.rawValue, "corral.newagent.window")
         let newAgentDialog = try XCTUnwrap(newAgentSheet.contentViewController as? NewAgentDialogViewController)
-        XCTAssertEqual(newAgentDialog.view.accessibilityIdentifier(), "corral.newagent.dialog")
+        XCTAssertEqual(newAgentDialog.launchers, launchers.map {
+            CorralAgentLauncher(provider: $0.provider, displayName: $0.displayName, supportsBypass: $0.supportsBypass)
+        })
         newAgentDialog.cancelButton?.performClick(nil)
         let newAgentSheetDismissed = await waitUntil { window.attachedSheet == nil }
         XCTAssertTrue(newAgentSheetDismissed)
