@@ -220,11 +220,26 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         stageLayer.contentsScale = backingScale
         stageLayer.drawableSize = CGSize(width: nextSize.width, height: nextSize.height)
         scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
+        scheduleCachedRender()
     }
 
     public var maximumInFlightFrames: UInt32 { get async { maximumFrameCount } }
 
     public func render(_ request: StageFrameRequest) async -> FrameReceipt {
+        await render(request, outputTexture: nil)
+    }
+
+    func renderOffscreenForTesting(_ request: StageFrameRequest, into texture: MTLTexture) async -> FrameReceipt {
+        guard texture.device.registryID == device.registryID,
+              texture.pixelFormat == .bgra8Unorm,
+              texture.width == stageSize.width, texture.height == stageSize.height,
+              texture.usage.contains(.renderTarget) else {
+            return Self.receipt(for: request, outcome: .failed(.invalidRequest))
+        }
+        return await render(request, outputTexture: texture)
+    }
+
+    private func render(_ request: StageFrameRequest, outputTexture: MTLTexture?) async -> FrameReceipt {
         guard request.isValid else { return Self.receipt(for: request, outcome: .failed(.invalidRequest)) }
         if let stageID, stageID != request.stageID {
             return Self.receipt(for: request, outcome: .failed(.invalidRequest))
@@ -263,7 +278,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         }
         guard scheduler.shouldSubmit else { return Self.receipt(for: request, outcome: .deferred) }
 
-        return await submit(request)
+        return await submit(request, outputTexture: outputTexture)
     }
 
     public func setSleepState(_ state: RenderSleepState, for stageID: UUID) async {
@@ -323,7 +338,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         return true
     }
 
-    private func submit(_ request: StageFrameRequest) async -> FrameReceipt {
+    private func submit(_ request: StageFrameRequest, outputTexture: MTLTexture?) async -> FrameReceipt {
         guard stageSize.width > 0, stageSize.height > 0 else {
             return Self.receipt(for: request, outcome: .failed(.noDrawable))
         }
@@ -358,7 +373,15 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
             if let frameLease { await releaseFrameLease(frameLease) }
             return Self.receipt(for: request, outcome: .deferred)
         }
-        guard let drawable = stageLayer.nextDrawable() else {
+        let drawable: CAMetalDrawable?
+        let targetTexture: MTLTexture
+        if let outputTexture {
+            drawable = nil
+            targetTexture = outputTexture
+        } else if let nextDrawable = stageLayer.nextDrawable() {
+            drawable = nextDrawable
+            targetTexture = nextDrawable.texture
+        } else {
             if let frameLease { await releaseFrameLease(frameLease) }
             return Self.receipt(for: request, outcome: .failed(.noDrawable))
         }
@@ -367,7 +390,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
             return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate command buffer")))
         }
         let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].texture = targetTexture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         let clearColor = palette.background.components
@@ -417,7 +440,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
             }
         }
         encoder.endEncoding()
-        commandBuffer.present(drawable)
+        if let drawable { commandBuffer.present(drawable) }
 
         inFlightFrames += 1
         scheduler.markSubmitted()
@@ -446,6 +469,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
                     let outcome: FrameOutcome
                     if succeeded {
                         outcome = .completed
+                        if self.scheduler.shouldSubmit { self.scheduleCachedRender() }
                     } else {
                         outcome = .failed(.commandBuffer(failureMessage ?? "Metal command buffer failed"))
                         self.scheduler.invalidate(generation: self.scheduler.latestGeneration, force: true)
