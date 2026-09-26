@@ -72,21 +72,155 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
-    func testProductionPortIsRejectedBeforeConnecting() async throws {
+    func testExplicitProductionEndpointConnectsThroughFakeLink() async throws {
         let link = RecordingSessionLink()
-        let atlas = GlyphAtlasPool.shared
-        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9900/ws",
             "CORRAL_NATIVE_TOKEN": "fixture-only-token"
         ])
 
         await coordinator.start()
 
-        XCTAssertFalse(coordinator.connected)
+        XCTAssertTrue(coordinator.connected)
+        XCTAssertTrue(coordinator.workspaceView.sidebar.devices.contains(where: { $0.isOnline }))
+        XCTAssertNil(coordinator.lastConnectionError)
         let connectCount = await link.connectCount()
-        XCTAssertEqual(connectCount, 0)
-        XCTAssertTrue(coordinator.lastConnectionError?.contains("productionEndpointForbidden") == true)
+        XCTAssertEqual(connectCount, 1)
         await coordinator.stop()
+    }
+
+    func testLive9919VerticalSliceConnectsListsRendersAndEchoesInput() async throws {
+        guard let tokenPath = ProcessInfo.processInfo.environment["CORRAL_NATIVE_E2E_TOKEN_FILE"] else {
+            throw XCTSkip("Set CORRAL_NATIVE_E2E_TOKEN_FILE to the isolated 9919 fixture token file")
+        }
+        let tokenURL = URL(fileURLWithPath: tokenPath).standardizedFileURL
+        guard tokenURL.path == "/tmp/corral-gw-test-home/test-token",
+              FileManager.default.isReadableFile(atPath: tokenURL.path) else {
+            throw XCTSkip("Only the isolated fixture token at /tmp/corral-gw-test-home/test-token is accepted")
+        }
+        let token = try String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw XCTSkip("The isolated fixture token is empty") }
+
+        let endpointText = "ws://127.0.0.1:9919/ws"
+        let link = ObservingSessionLink(URLSessionSessionLink())
+        let supportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-native-live-e2e-\(UUID().uuidString)", isDirectory: true)
+        let telemetryURL = supportDirectory.appendingPathComponent("telemetry.json")
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": endpointText,
+            "CORRAL_NATIVE_TOKEN": token,
+            "CORRAL_NATIVE_BACKGROUND": "1",
+            "CORRAL_NATIVE_TELEMETRY_OUT": telemetryURL.path
+        ], supportDirectory: supportDirectory)
+        guard let window = coordinator.windowController.window else {
+            return XCTFail("coordinator must own a real window")
+        }
+        window.setFrame(NSRect(x: 40, y: 40, width: 1500, height: 1000), display: false)
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        coordinator.stageView.configureStage(sizeInPoints: NSSize(width: 1200, height: 800), backingScale: 1)
+
+        await coordinator.start()
+        let connectedEndpoint = await link.connectedEndpoint()
+        XCTAssertEqual(connectedEndpoint?.url.absoluteString, endpointText)
+        XCTAssertTrue(coordinator.connected)
+        XCTAssertTrue(coordinator.workspaceView.sidebar.devices.contains(where: \.isOnline), "successful auth_ack must immediately mark the device online")
+
+        let listed = await waitUntil(timeout: .seconds(12)) {
+            coordinator.sessionCount == 6 && coordinator.workspaceView.sidebar.agents.count == 6
+        }
+        let eventKinds = await link.observedEvents().map { envelope -> String in
+            switch envelope.event {
+            case .connectionChanged: "connection"
+            case .failed: "failed"
+            case .control(.listing): "listing"
+            case .control(.inputAck): "input_ack"
+            case .frame(.snapshot): "snapshot"
+            case .frame(.delta): "delta"
+            default: "other"
+            }
+        }
+        let listSent = await link.sentCommands().contains { if case .list = $0 { true } else { false } }
+        XCTAssertTrue(listed, "the real 9919 listing must populate six sidebar agents; count=\(coordinator.sessionCount), agents=\(coordinator.workspaceView.sidebar.agents.count), connected=\(coordinator.connected), listSent=\(listSent), error=\(coordinator.lastConnectionError ?? "none"), events=\(eventKinds)")
+        guard listed,
+              let agent = coordinator.workspaceView.sidebar.agents.first(where: { $0.name.contains("static-long-text") }) else {
+            await coordinator.stop()
+            window.close()
+            return
+        }
+
+        coordinator.workspaceView.sidebar.onSelectAgent?(agent.id)
+        let subscribed = await waitUntil(timeout: .seconds(8)) {
+            coordinator.subscribedSessionIDs.count == 1 && coordinator.stageView.activeInputSession != nil
+        }
+        XCTAssertTrue(subscribed, "opening a listed sidebar session must persist the tab and subscribe")
+        guard subscribed, let session = coordinator.stageView.activeInputSession else {
+            await coordinator.stop()
+            window.close()
+            return
+        }
+
+        let renderedSnapshot = await waitUntil(timeout: .seconds(12)) {
+            coordinator.stageView.presentedSubmissions.contains {
+                $0.session == session && self.snapshotText($0.snapshot).contains("STATIC-LINE-")
+            }
+        }
+        XCTAssertTrue(renderedSnapshot, "the real SNAPSHOT must traverse SwiftTerm and reach the Metal stage")
+        guard let initial = coordinator.stageView.presentedSubmissions.first(where: { $0.session == session }) else {
+            await coordinator.stop()
+            window.close()
+            return
+        }
+        XCTAssertTrue(initial.snapshot.isValid)
+        XCTAssertTrue(snapshotText(initial.snapshot).contains("STATIC-LINE-"))
+        let initialGeneration = initial.snapshot.generation
+        let snapshotReceived = await waitUntil(timeout: .seconds(4)) {
+            await link.observedEvents().contains { envelope in
+                if case let .frame(.snapshot(reference, _)) = envelope.event { return reference == session.reference }
+                return false
+            }
+        }
+        XCTAssertTrue(snapshotReceived)
+
+        guard let inputView = coordinator.stageView.inputView(for: session) else {
+            await coordinator.stop()
+            window.close()
+            return XCTFail("the active real session must own a text input view")
+        }
+        let marker = "NATIVE-E2E-\(UUID().uuidString)"
+        inputView.insertText(marker, replacementRange: NSRange(location: NSNotFound, length: 0))
+        inputView.insertText("\r", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        let inputSent = await waitUntil(timeout: .seconds(8)) {
+            let payloads = await link.sentCommands().compactMap { command -> ClientInputPayload? in
+                guard case let .input(request) = command, request.reference == session.reference else { return nil }
+                return request.payload
+            }
+            return payloads.contains(.text(marker, attachmentPath: nil)) && payloads.contains(.bareEnter)
+        }
+        XCTAssertTrue(inputSent, "typed text and Enter must become real ClientCommand.input messages")
+        let ackReceived = await waitUntil(timeout: .seconds(8)) {
+            guard let acknowledgement = coordinator.lastInputAcknowledgement else { return false }
+            return acknowledgement.succeeded && acknowledgement.sequence >= 2
+        }
+        XCTAssertTrue(ackReceived, "the coordinator must receive a successful input_ack")
+        let deltaReceived = await waitUntil(timeout: .seconds(8)) {
+            await link.observedEvents().contains { envelope in
+                if case let .frame(.delta(reference, _)) = envelope.event { return reference == session.reference }
+                return false
+            }
+        }
+        XCTAssertTrue(deltaReceived, "PTY echo must arrive as an incremental DELTA frame")
+        let echoed = await waitUntil(timeout: .seconds(8)) {
+            guard let submission = coordinator.stageView.presentedSubmissions.first(where: { $0.session == session }) else { return false }
+            return submission.snapshot.generation > initialGeneration && self.snapshotText(submission.snapshot).contains(marker)
+        }
+        XCTAssertTrue(echoed, "the DELTA must update the rendered terminal grid with the typed text")
+
+        await coordinator.stop()
+        window.close()
     }
 
     func testGoldenFramesDriveThreeRealMetalPanesAndInputRouting() async throws {
@@ -330,11 +464,12 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        link: RecordingSessionLink,
+        link: any SessionLinkProtocol,
         atlas: GlyphAtlasPool,
-        environment: [String: String]
+        environment: [String: String],
+        supportDirectory: URL? = nil
     ) async throws -> CorralApplicationCoordinator {
-        let supportDirectory = FileManager.default.temporaryDirectory
+        let supportDirectory = supportDirectory ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("corral-native-coordinator-store-\(UUID().uuidString)", isDirectory: true)
         let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
         let userPreferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
@@ -351,6 +486,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             glyphAtlas: atlas,
             environment: environment
         )
+    }
+
+    private func snapshotText(_ snapshot: TerminalGridSnapshot) -> String {
+        snapshot.cells.compactMap { cell in
+            guard case let .cluster(text, _) = cell.content else { return nil }
+            return text
+        }.joined()
     }
 
     private func waitUntil(
@@ -414,6 +556,50 @@ private extension Data {
             index = next
         }
         self = data
+    }
+}
+
+private actor ObservingSessionLink: SessionLinkProtocol {
+    private let base: any SessionLinkProtocol
+    private var endpoint: ApprovedEndpoint?
+    private var commands: [ClientCommand] = []
+    private var events: [SessionEventEnvelope] = []
+
+    init(_ base: any SessionLinkProtocol) { self.base = base }
+
+    func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
+        self.endpoint = endpoint
+        return try await base.connect(to: endpoint, deviceID: deviceID, credential: credential)
+    }
+
+    func eventStream() async throws -> any SessionEventStream {
+        ObservingSessionEventStream(base: try await base.eventStream(), observer: self)
+    }
+
+    func send(_ command: ClientCommand) async throws -> CommandSendReceipt {
+        commands.append(command)
+        return try await base.send(command)
+    }
+
+    func disconnect() async { await base.disconnect() }
+    func connectedEndpoint() -> ApprovedEndpoint? { endpoint }
+    func sentCommands() -> [ClientCommand] { commands }
+    func observedEvents() -> [SessionEventEnvelope] { events }
+    func record(_ event: SessionEventEnvelope) { events.append(event) }
+}
+
+private struct ObservingSessionEventStream: SessionEventStream {
+    let base: any SessionEventStream
+    let observer: ObservingSessionLink
+
+    var budget: SessionEventStreamBudget {
+        get async { await base.budget }
+    }
+
+    func next() async throws -> SessionEventEnvelope? {
+        guard let event = try await base.next() else { return nil }
+        await observer.record(event)
+        return event
     }
 }
 

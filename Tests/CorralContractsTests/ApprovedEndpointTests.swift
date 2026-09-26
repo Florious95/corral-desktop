@@ -45,6 +45,25 @@ final class ApprovedEndpointTests: XCTestCase {
         }
     }
 
+    func testProductionLoopbackRequiresExplicitOptInAndCannotBePersisted() throws {
+        let url = try XCTUnwrap(URL(string: "ws://127.0.0.1:9900/ws"))
+        let endpoint = try ApprovedEndpoint(url: url, allowingProduction: true)
+        XCTAssertTrue(endpoint.isProductionEndpoint)
+        XCTAssertEqual(endpoint.url, url)
+        XCTAssertThrowsError(try ApprovedEndpoint(url: url)) {
+            XCTAssertEqual($0 as? EndpointSafetyError, .productionEndpointForbidden)
+        }
+        XCTAssertThrowsError(try ApprovedEndpoint(
+            url: XCTUnwrap(URL(string: "ws://production.example:9900/ws")),
+            allowingProduction: true
+        )) {
+            XCTAssertEqual($0 as? EndpointSafetyError, .productionEndpointForbidden)
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(ApprovedEndpoint.self, from: JSONEncoder().encode(endpoint))) {
+            XCTAssertEqual($0 as? EndpointSafetyError, .productionEndpointForbidden)
+        }
+    }
+
     func testDecodingCannotBypassTheEndpointFence() {
         let data = Data(#"{"scheme":"ws","host":"production.example","port":9919,"path":"/ws"}"#.utf8)
         XCTAssertThrowsError(try JSONDecoder().decode(ApprovedEndpoint.self, from: data)) {

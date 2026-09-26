@@ -358,6 +358,7 @@ public final class CorralApplicationCoordinator {
     public private(set) var availableAgentLaunchers: [AgentLauncher] = []
     public private(set) var lastCreateAgentResult: CreateAgentResult?
     public private(set) var lastCloseSessionResult: CloseSessionResult?
+    private(set) var lastInputAcknowledgement: (sequence: UInt32, succeeded: Bool)?
     private var configuredDeviceID: DeviceID?
     private var configuredDeviceName = "Development endpoint"
     private var sessionOrder: [SessionKey] = []
@@ -539,6 +540,7 @@ public final class CorralApplicationCoordinator {
             connected = false
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
+            updateSidebar(devices: cachedDevices)
             await writeTelemetry()
         }
     }
@@ -1349,6 +1351,7 @@ public final class CorralApplicationCoordinator {
             listingRequestedEpoch = nil
             connected = false
             lastConnectionError = String(describing: error)
+            updateSidebar(devices: cachedDevices)
         }
     }
 
@@ -1366,6 +1369,7 @@ public final class CorralApplicationCoordinator {
         configuredDeviceName = configuration.deviceName
         connected = true
         lastConnectionError = nil
+        updateSidebar(devices: cachedDevices)
         await deviceSessionLifecycle.markConnected(configuration.deviceID)
         if !eventStreamClaimed {
             let stream = try await sessionLink.eventStream()
@@ -1380,7 +1384,9 @@ public final class CorralApplicationCoordinator {
         let environmentToken = environment["CORRAL_NATIVE_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let text = environment["CORRAL_NATIVE_ENDPOINT"], !text.isEmpty {
             guard let url = URL(string: text) else { throw EndpointSafetyError.invalidEndpoint }
-            let endpoint = try ApprovedEndpoint(url: url)
+            let allowsProduction = environment["CORRAL_ALLOW_PRODUCTION"] == "1"
+                || text == "ws://127.0.0.1:9900/ws"
+            let endpoint = try ApprovedEndpoint(url: url, allowingProduction: allowsProduction)
             let existing = devices.first { $0.endpoint == endpoint }
             let storedToken: String?
             if let existing { storedToken = try await credentialVault.resolve(existing.credential) }
@@ -1409,6 +1415,7 @@ public final class CorralApplicationCoordinator {
             connected = false
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
+            updateSidebar(devices: cachedDevices)
             await writeTelemetry()
         }
     }
@@ -1437,8 +1444,9 @@ public final class CorralApplicationCoordinator {
                 connected = false
                 await deviceSessionLifecycle.markDisconnected()
             case .transportOpen, .authenticating:
-                connected = false
+                if envelope.origin.connectionEpoch != current.connectionEpoch { connected = false }
             }
+            updateSidebar(devices: cachedDevices)
             await writeTelemetry()
             return
         }
@@ -1450,6 +1458,7 @@ public final class CorralApplicationCoordinator {
             connected = false
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
+            updateSidebar(devices: cachedDevices)
             await writeTelemetry()
         case let .control(control):
             switch control {
@@ -1525,7 +1534,11 @@ public final class CorralApplicationCoordinator {
             case let .error(_, reason):
                 lastConnectionError = reason
                 await writeTelemetry()
-            case .level2Frame, .level2Heartbeat, .overlayFrame, .inputAck, .paneModeChanged:
+            case let .inputAck(sequence, ok, reason):
+                lastInputAcknowledgement = (sequence, ok)
+                if !ok { lastConnectionError = "input_ack failed: \(reason?.rawValue ?? "unknown")" }
+                await writeTelemetry()
+            case .level2Frame, .level2Heartbeat, .overlayFrame, .paneModeChanged:
                 await writeTelemetry()
             }
         case let .frame(frame): await applyFrame(frame, origin: envelope.origin)
@@ -1868,6 +1881,7 @@ public final class CorralApplicationCoordinator {
         connection = nil
         connected = false
         await deviceSessionLifecycle.markDisconnected()
+        updateSidebar(devices: cachedDevices)
         await writeTelemetry()
     }
 

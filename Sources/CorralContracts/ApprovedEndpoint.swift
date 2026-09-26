@@ -5,7 +5,7 @@ public enum EndpointSafetyError: Error, Equatable, Sendable {
     case invalidEndpoint
 }
 
-/// A validated development WebSocket URL. Only loopback port 9919 at `/ws` is admitted.
+/// A validated WebSocket URL. Production access is limited to an explicit opt-in for loopback port 9900.
 public struct ApprovedEndpoint: Codable, Hashable, Sendable {
     public static let productionPort = 9900
     public static let developmentPort = 9919
@@ -16,9 +16,16 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
     public let host: String
     public let port: Int
     public let path: String
+    public let isProductionEndpoint: Bool
     private let validatedURL: URL
 
-    public init(scheme: String = "ws", host: String, port: Int, path: String = Self.webSocketPath) throws {
+    public init(
+        scheme: String = "ws",
+        host: String,
+        port: Int,
+        path: String = Self.webSocketPath,
+        allowingProduction: Bool = false
+    ) throws {
         let normalizedScheme = scheme.lowercased()
         let inputHost = host.lowercased()
         let normalizedHost: String
@@ -37,13 +44,21 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         let canonicalHost = normalizedHost == "localhost" ? "127.0.0.1" : normalizedHost
 
         guard !canonicalHost.isEmpty else { throw EndpointSafetyError.invalidEndpoint }
-        guard port != Self.productionPort, Self.allowedHosts.contains(canonicalHost) else {
+        guard Self.allowedHosts.contains(canonicalHost) else {
             throw EndpointSafetyError.productionEndpointForbidden
         }
-        guard normalizedScheme == "ws" || normalizedScheme == "wss",
-              (1...65_535).contains(port), port == Self.developmentPort,
-              path.isEmpty || path == Self.webSocketPath else {
-            throw EndpointSafetyError.invalidEndpoint
+        let isProductionEndpoint = port == Self.productionPort
+        if isProductionEndpoint {
+            guard allowingProduction, canonicalHost == "127.0.0.1",
+                  normalizedScheme == "ws", path == Self.webSocketPath else {
+                throw EndpointSafetyError.productionEndpointForbidden
+            }
+        } else {
+            guard normalizedScheme == "ws" || normalizedScheme == "wss",
+                  (1...65_535).contains(port), port == Self.developmentPort,
+                  path.isEmpty || path == Self.webSocketPath else {
+                throw EndpointSafetyError.invalidEndpoint
+            }
         }
 
         let hostLiteral = canonicalHost.contains(":") ? "[\(canonicalHost)]" : canonicalHost
@@ -57,10 +72,11 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         self.host = canonicalHost
         self.port = port
         self.path = Self.webSocketPath
+        self.isProductionEndpoint = isProductionEndpoint
         self.validatedURL = url
     }
 
-    public init(url: URL) throws {
+    public init(url: URL, allowingProduction: Bool = false) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let host = components.host,
               components.user == nil,
@@ -71,7 +87,13 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         }
         let scheme = components.scheme ?? ""
         let port = components.port ?? (scheme.lowercased() == "wss" ? 443 : 80)
-        try self.init(scheme: scheme, host: host, port: port, path: components.percentEncodedPath)
+        try self.init(
+            scheme: scheme,
+            host: host,
+            port: port,
+            path: components.percentEncodedPath,
+            allowingProduction: allowingProduction
+        )
     }
 
     public var url: URL { validatedURL }
