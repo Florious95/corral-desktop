@@ -56,11 +56,14 @@ extension BinaryV1Codec {
 
     public func decodeControlMessage(from data: Data) throws -> ControlMessage {
         let envelope = try JSONDecoder().decode(ControlEnvelope.self, from: data)
+        if let version = envelope.version, version != 1 {
+            throw envelope.malformed("unsupported control envelope version: \(version)")
+        }
         switch envelope.type {
         case "auth":
             return .auth(credential: CredentialHandle(try envelope.required(envelope.token, "token")))
         case "auth_ack":
-            return .authAck(accepted: try envelope.required(envelope.success, "success"))
+            return .authAck(accepted: try envelope.required(envelope.success ?? envelope.payload?.ok, "success/payload.ok"))
         case "subscribe":
             let sessionID = SessionID(try envelope.required(envelope.sessionID, "session_id"))
             switch (envelope.cols, envelope.rows) {
@@ -88,8 +91,16 @@ extension BinaryV1Codec {
         case "pong": return .pong(nonce: envelope.nonce ?? 0)
         case "list": return .sessionList(requestID: envelope.requestID ?? 0)
         case "listing":
-            let sessions = try envelope.required(envelope.sessions, "sessions").map { try $0.model() }
-            return .sessionListResult(requestID: envelope.requestID ?? 0, sessions: sessions)
+            let wireSessions: [SessionEnvelope]?
+            if let sessions = envelope.sessions {
+                wireSessions = sessions
+            } else if let workspaces = envelope.payload?.workspaces {
+                wireSessions = try workspaces.flatMap { try envelope.required($0.sessions, "workspace.sessions") }
+            } else {
+                wireSessions = nil
+            }
+            let sessions = try envelope.required(wireSessions, "sessions/workspaces").map { try $0.model() }
+            return .sessionListResult(requestID: envelope.requestID ?? envelope.payload?.requestID ?? 0, sessions: sessions)
         case "create_session":
             return .createSession(
                 requestID: try envelope.required(envelope.requestID, "request_id"),
@@ -109,6 +120,8 @@ extension BinaryV1Codec {
 
 private struct ControlEnvelope: Codable {
     let type: String
+    var version: Int?
+    var payload: ControlPayload?
     var token: String?
     var success: Bool?
     var sessionID: String?
@@ -127,6 +140,8 @@ private struct ControlEnvelope: Codable {
 
     init(
         type: String,
+        version: Int? = nil,
+        payload: ControlPayload? = nil,
         token: String? = nil,
         success: Bool? = nil,
         sessionID: String? = nil,
@@ -144,6 +159,8 @@ private struct ControlEnvelope: Codable {
         message: String? = nil
     ) {
         self.type = type
+        self.version = version
+        self.payload = payload
         self.token = token
         self.success = success
         self.sessionID = sessionID
@@ -171,7 +188,8 @@ private struct ControlEnvelope: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case type, token, success, data, cols, rows, nonce, sessions, name, session, code, message
+        case type, payload, token, success, data, cols, rows, nonce, sessions, name, session, code, message
+        case version = "v"
         case sessionID = "session_id"
         case requestID = "request_id"
         case deviceID = "device_id"
@@ -179,36 +197,72 @@ private struct ControlEnvelope: Codable {
     }
 }
 
+private struct ControlPayload: Codable {
+    var ok: Bool?
+    var requestID: UInt64?
+    var sequence: UInt64?
+    var workspaces: [WorkspaceEnvelope]?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, workspaces
+        case requestID = "req_id"
+        case sequence = "seq"
+    }
+}
+
+private struct WorkspaceEnvelope: Codable {
+    var cwd: String?
+    var sessionCount: Int?
+    var aggregateState: String?
+    var sessions: [SessionEnvelope]?
+
+    enum CodingKeys: String, CodingKey {
+        case cwd, sessions
+        case sessionCount = "session_count"
+        case aggregateState = "aggregate_state"
+    }
+}
+
 private struct SessionEnvelope: Codable {
-    let id: String
-    let deviceID: String
-    let name: String
+    var id: String?
+    var ref: String?
+    var deviceID: String?
+    var name: String?
     var workingDirectory: String?
-    var state: String
+    var cwd: String?
+    var state: String?
+    var rows: Int?
+    var cols: Int?
 
     init(_ session: SessionDescriptor) {
         id = session.id.rawValue
+        ref = nil
         deviceID = session.deviceID.rawValue
         name = session.name
         workingDirectory = session.workingDirectory
+        cwd = nil
         state = session.state.rawValue
+        rows = nil
+        cols = nil
     }
 
     func model() throws -> SessionDescriptor {
-        guard let state = SessionLifecycleState(rawValue: state) else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "unknown session state: \(state)"))
+        guard let id = id ?? ref, let name else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "session requires id/ref and name"))
         }
+        // Contracts v0 has no device ID and does not know server states such as "idle".
+        let lifecycle = state.flatMap(SessionLifecycleState.init(rawValue:)) ?? .unknown
         return SessionDescriptor(
             id: SessionID(id),
-            deviceID: DeviceID(deviceID),
+            deviceID: DeviceID(deviceID ?? ""),
             name: name,
-            workingDirectory: workingDirectory,
-            state: state
+            workingDirectory: workingDirectory ?? cwd,
+            state: lifecycle
         )
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, state
+        case id, ref, name, state, cwd, rows, cols
         case deviceID = "device_id"
         case workingDirectory = "working_directory"
     }

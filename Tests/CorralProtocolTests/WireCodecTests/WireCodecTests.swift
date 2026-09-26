@@ -138,10 +138,71 @@ final class WireCodecTests: XCTestCase {
             #"{"type":"input","session_id":"term-1","data":"%%%"}"#,
             #"{"type":"resize","session_id":"term-1","cols":"wide","rows":24}"#,
             #"{"type":"failure","code":"denied"}"#,
-            #"{"type":"listing"}"#
+            #"{"type":"listing"}"#,
+            #"{"v":2,"type":"auth_ack","payload":{"ok":true}}"#,
+            #"{"v":1,"type":"listing","payload":{"req_id":1,"workspaces":[{"cwd":"/tmp"}]}}"#
         ]
         for json in malformed {
             XCTAssertThrowsError(try codec.decodeControlMessage(from: Data(json.utf8)))
         }
+    }
+
+    func testRealServerGoldenFramesReconcileWithCodec() throws {
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/golden-frames.json")
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as? [String: Any])
+        XCTAssertEqual(document["protocol_version"] as? Int, 1)
+        let fixtures = try XCTUnwrap(document["frames"] as? [String: [String: Any]])
+
+        let auth = try XCTUnwrap(fixtures["auth_ok"])
+        let authBytes = try capturedBytes(auth)
+        XCTAssertEqual(String(decoding: authBytes, as: UTF8.self), auth["raw_utf8"] as? String)
+        XCTAssertEqual(try codec.decodeControlMessage(from: authBytes), .authAck(accepted: true))
+
+        let listing = try XCTUnwrap(fixtures["session_list"])
+        let listingBytes = try capturedBytes(listing)
+        guard case let .sessionListResult(requestID, sessions) = try codec.decodeControlMessage(from: listingBytes) else {
+            return XCTFail("Expected the captured listing response")
+        }
+        XCTAssertEqual(requestID, 1)
+        XCTAssertEqual(sessions.count, listing["fixture_session_count"] as? Int)
+        XCTAssertTrue(sessions.allSatisfy { $0.name == "codex" && $0.state == .unknown })
+        XCTAssertTrue(sessions.first?.id.rawValue.contains("\u{1F}%0") ?? false)
+
+        for (name, expectedKind) in [("snapshot", FrameKind.snapshot), ("delta", .delta)] {
+            let capture = try XCTUnwrap(fixtures[name])
+            let bytes = try capturedBytes(capture)
+            let frame = try codec.decodeBinaryFrame(bytes)
+            XCTAssertEqual(frame.kind, expectedKind)
+            XCTAssertEqual(frame.reference, capture["ref"] as? String)
+            XCTAssertEqual(frame.reference.utf8.count, capture["ref_length"] as? Int)
+            XCTAssertEqual(try codec.encodeBinaryFrame(frame), bytes)
+        }
+    }
+
+    private func capturedBytes(_ fixture: [String: Any]) throws -> Data {
+        let base64 = try XCTUnwrap(fixture["raw_base64"] as? String)
+        let bytes = try XCTUnwrap(Data(base64Encoded: base64))
+        XCTAssertEqual(bytes.count, fixture["byte_length"] as? Int)
+        XCTAssertEqual(bytes, try data(fromHex: XCTUnwrap(fixture["raw_hex"] as? String)))
+        return bytes
+    }
+
+    private func data(fromHex hex: String) throws -> Data {
+        guard hex.count.isMultiple(of: 2) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "odd-length hex in golden fixture"))
+        }
+        var bytes: [UInt8] = []
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let end = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<end], radix: 16) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "invalid hex in golden fixture"))
+            }
+            bytes.append(byte)
+            index = end
+        }
+        return Data(bytes)
     }
 }
