@@ -356,3 +356,4 @@ private struct WireSessionPayload: Decodable {
     let provider: String?
     let activity: String?
     enum CodingKeys: String, CodingKey { case reference = "ref", name, workingDirectory = "cwd", state, rows, columns = "cols", provider, activity }
+}

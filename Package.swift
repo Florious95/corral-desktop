@@ -29,7 +29,11 @@ let package = Package(
             ]
         ),
         .testTarget(name: "CorralContractsTests", dependencies: ["CorralContracts"]),
-        .testTarget(name: "CorralProtocolTests", dependencies: ["CorralProtocol", "CorralContracts"]),
+        .testTarget(
+            name: "CorralProtocolTests",
+            dependencies: ["CorralProtocol", "CorralContracts"],
+            resources: [.process("WireCodecTests/Fixtures")]
+        ),
         .testTarget(name: "CorralServicesTests", dependencies: ["CorralServices", "CorralContracts"]),
         .testTarget(name: "CorralMetalTerminalTests", dependencies: ["CorralMetalTerminal", "CorralContracts"]),
         .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts"])
