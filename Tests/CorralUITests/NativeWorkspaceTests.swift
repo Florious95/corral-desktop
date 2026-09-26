@@ -14,12 +14,11 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(DesignTokens.Color.surface0, 0x171B22)
 
         let workspace = CorralWorkspaceView()
-        for button in [workspace.tabBar.settingsButton, workspace.sidebar.settingsButton] {
-            XCTAssertEqual(button.contentTintColor, CorralAestheticTokens.text)
-            XCTAssertEqual(button.layer?.borderWidth, 1)
-            XCTAssertEqual(button.layer?.borderColor, CorralAestheticTokens.border.cgColor)
-            XCTAssertEqual(button.layer?.backgroundColor, CorralAestheticTokens.surface2.cgColor)
-        }
+        let settingsButton = workspace.sidebar.settingsButton
+        XCTAssertEqual(settingsButton.contentTintColor, CorralAestheticTokens.text)
+        XCTAssertEqual(settingsButton.layer?.borderWidth, 1)
+        XCTAssertEqual(settingsButton.layer?.borderColor, CorralAestheticTokens.border.cgColor)
+        XCTAssertEqual(settingsButton.layer?.backgroundColor, CorralAestheticTokens.surface2.cgColor)
         XCTAssertEqual(workspace.titleBar.layer?.backgroundColor, CorralAestheticTokens.surface0.cgColor)
         XCTAssertEqual(workspace.sidebar.layer?.backgroundColor, CorralAestheticTokens.surface0.cgColor)
 
@@ -58,15 +57,81 @@ final class NativeWorkspaceTests: XCTestCase {
 
     func testWorkspaceHasLegacyLeftSidebarAndIndependentHeaders() {
         let workspace = CorralWorkspaceView()
-        workspace.frame = NSRect(x: 0, y: 0, width: 1400, height: 860)
-        workspace.layoutSubtreeIfNeeded()
         XCTAssertEqual(CorralWorkspaceView.sidebarWidth, 280)
         XCTAssertEqual(CorralWorkspaceView.headerHeight, 38)
-        XCTAssertEqual(workspace.titleBar.frame.height, 38, accuracy: 0.1)
+        for size in [NSSize(width: 1100, height: 700), NSSize(width: 1400, height: 860), NSSize(width: 1920, height: 1080)] {
+            workspace.frame = NSRect(origin: .zero, size: size)
+            workspace.layoutSubtreeIfNeeded()
+            XCTAssertEqual(workspace.titleBar.frame.height, 38, accuracy: 0.1)
+            XCTAssertEqual(workspace.tabBar.frame.height, 38, accuracy: 0.1)
+            XCTAssertEqual(workspace.titleBar.frame.width, 280, accuracy: 0.1)
+            XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+            XCTAssertEqual(workspace.tabBar.frame.width, size.width - 280, accuracy: 0.1)
+            XCTAssertEqual(workspace.stageContainer.frame.height, size.height - 38, accuracy: 0.1)
+        }
+        workspace.setSidebarCollapsed(true)
+        workspace.layoutSubtreeIfNeeded()
+        XCTAssertEqual(workspace.sidebar.frame.width, 0, accuracy: 0.1)
+        XCTAssertEqual(workspace.tabBar.frame.width, 1920, accuracy: 0.1)
         XCTAssertEqual(workspace.tabBar.frame.height, 38, accuracy: 0.1)
-        XCTAssertEqual(workspace.titleBar.frame.width, 280, accuracy: 0.1)
-        XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
-        XCTAssertEqual(workspace.tabBar.frame.width, 1120, accuracy: 0.1)
+        XCTAssertEqual(workspace.stageContainer.frame.height, 1080 - 38, accuracy: 0.1)
+    }
+
+    func testHeaderActionSetMatchesLegacyChrome() throws {
+        let workspace = CorralWorkspaceView()
+        workspace.frame = NSRect(x: 0, y: 0, width: 1400, height: 860)
+        workspace.layoutSubtreeIfNeeded()
+        let rightButtons = descendants(of: workspace.tabBar).compactMap { $0 as? NSButton }.filter { !$0.isHidden }
+        XCTAssertEqual(rightButtons.count, 1)
+        XCTAssertTrue(rightButtons[0] === workspace.tabBar.createButton)
+        XCTAssertEqual(workspace.tabBar.createButton.toolTip, "新建工作台标签页 (⌘T)")
+        let leftButtons = descendants(of: workspace.titleBar).compactMap { $0 as? NSButton }
+        XCTAssertEqual(leftButtons.count, 1)
+        XCTAssertEqual(leftButtons[0].frame.minX, 88, accuracy: 0.1)
+        XCTAssertEqual(leftButtons[0].frame.midY, 19, accuracy: 0.1)
+        XCTAssertTrue(workspace.tabBar.sidebarToggleButton === leftButtons[0])
+        XCTAssertTrue(workspace.tabBar.devicesButton === workspace.sidebar.devicesButton)
+
+        workspace.tabBar.sidebarToggleButton.performClick(nil)
+        workspace.layoutSubtreeIfNeeded()
+        let collapsedButtons = descendants(of: workspace.tabBar).compactMap { $0 as? NSButton }.filter { !$0.isHidden }
+        XCTAssertEqual(collapsedButtons.count, 2)
+        let expandButton = try XCTUnwrap(collapsedButtons.first { $0.toolTip == "展开侧栏" })
+        XCTAssertEqual(expandButton.frame.minX, 88, accuracy: 0.1)
+        XCTAssertEqual(expandButton.frame.midY, 19, accuracy: 0.1)
+        XCTAssertTrue(workspace.titleBar.isHidden)
+        XCTAssertTrue(workspace.sidebar.isHidden)
+        expandButton.performClick(nil)
+        XCTAssertFalse(workspace.isSidebarCollapsed)
+        XCTAssertFalse(workspace.titleBar.isHidden)
+    }
+
+    func testWindowOwnsFixedDefaultAndMinimumGeometryAcrossContentChanges() throws {
+        let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "Initial", contentView: NSView())])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window as? CorralWindow)
+        let initialFrame = window.frame
+        let initialContentBounds = try XCTUnwrap(window.contentView).bounds
+        XCTAssertEqual(initialContentBounds.size, NSSize(width: 1400, height: 860))
+        XCTAssertEqual(window.minSize, NSSize(width: 1100, height: 700))
+
+        let spaces = (0..<12).map { CorralSidebarSpace(id: UUID(), name: "Space \($0) · \(String(repeating: "Long", count: 8))") }
+        workspace.sidebar.setSpaces(spaces)
+        workspace.sidebar.setAgents((0..<40).map { CorralSidebarAgent(name: "Agent \($0) · \(String(repeating: "X", count: 48))") })
+        workspace.sidebar.spacesTable.selectRowIndexes(IndexSet(integer: 2), byExtendingSelection: false)
+        XCTAssertEqual(workspace.sidebar.selectedSpaceID, spaces[0].id)
+        for index in 0..<12 {
+            workspace.addTab(CorralTab(title: "Long workspace title \(index) · \(String(repeating: "T", count: 24))", contentView: NSView()), select: false)
+        }
+        workspace.setSidebarCollapsed(true)
+        workspace.setSidebarCollapsed(false)
+        workspace.setTheme(.light)
+        workspace.layoutSubtreeIfNeeded()
+        workspace.tabBar.layoutSubtreeIfNeeded()
+        let plusFrame = workspace.tabBar.convert(workspace.tabBar.createButton.bounds, from: workspace.tabBar.createButton)
+        XCTAssertLessThanOrEqual(plusFrame.maxX, workspace.tabBar.bounds.maxX)
+        XCTAssertEqual(window.frame, initialFrame)
+        XCTAssertEqual(window.contentView?.bounds, initialContentBounds)
     }
 
     func testSidebarHasSpacesAndAgentsAndExactAgentContextMenu() throws {

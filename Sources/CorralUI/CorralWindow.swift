@@ -47,6 +47,7 @@ public final class CorralWindowController: NSWindowController, NSWindowDelegate 
         let window = CorralWindow(contentRect: contentRect)
         super.init(window: window)
         window.contentView = workspaceView
+        workspaceView.autoresizingMask = [.width, .height]
         window.delegate = self
         window.center()
         window.positionTrafficLights()

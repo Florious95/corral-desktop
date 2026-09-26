@@ -43,21 +43,20 @@ public final class CorralTabBarView: NSView {
     public var onCloseTab: ((UUID) -> Void)?
     public var onRenameTab: ((UUID, String) -> Void)?
     public var onToggleSidebar: (() -> Void)?
-    public var onSettings: (() -> Void)?
-    public var onSplit: (() -> Void)?
-    public var onDevices: (() -> Void)?
     public var onReorderTabs: ((UUID, Int) -> Void)?
     public var onContextAction: ((UUID, String) -> Void)?
 
     private let itemsStack = NSStackView()
     private let activeCapsule = NSView()
-    private let spacer = NSView()
+    private let trafficLightsSpacer = NSView()
+    private let expandSidebarButton = NSButton(title: "▤", target: nil, action: nil)
+    private let dragRegion = CorralWindowDragRegion()
+    private var itemsLeadingConstraint: NSLayoutConstraint!
     public private(set) var activeCapsuleFrame: NSRect?
+    public private(set) var isSidebarCollapsed = false
+    public private(set) var sidebarToggleButton = NSButton(title: "▤", target: nil, action: nil)
+    public private(set) var devicesButton = NSButton(title: "设备", target: nil, action: nil)
     public let createButton = NSButton(title: "+", target: nil, action: nil)
-    public let sidebarToggleButton = NSButton(title: "▤", target: nil, action: nil)
-    public let splitButton = NSButton(title: "◫", target: nil, action: nil)
-    public let devicesButton = NSButton(title: "⌘", target: nil, action: nil)
-    public let settingsButton = CorralSettingsButton()
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -65,7 +64,7 @@ public final class CorralTabBarView: NSView {
         layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         itemsStack.orientation = .horizontal
         itemsStack.alignment = .centerY
-        itemsStack.spacing = 3
+        itemsStack.spacing = 4
         itemsStack.translatesAutoresizingMaskIntoConstraints = false
         activeCapsule.wantsLayer = true
         activeCapsule.layer?.cornerRadius = 6
@@ -74,50 +73,45 @@ public final class CorralTabBarView: NSView {
         activeCapsule.layer?.borderWidth = 1
         activeCapsule.isHidden = true
         itemsStack.addSubview(activeCapsule, positioned: .below, relativeTo: nil)
+        addSubview(dragRegion)
+        addSubview(trafficLightsSpacer)
+        addSubview(expandSidebarButton)
         addSubview(itemsStack)
-        let controls = NSStackView(views: [sidebarToggleButton, spacer, splitButton, devicesButton, createButton, settingsButton])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 6
-        controls.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(controls)
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        for button in [sidebarToggleButton, splitButton, devicesButton, createButton] {
-            button.isBordered = false
-            button.font = .systemFont(ofSize: 13, weight: .medium)
-            button.contentTintColor = CorralAestheticTokens.textSecondary
-            button.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 25), button.heightAnchor.constraint(equalToConstant: 26)])
-        }
-        sidebarToggleButton.image = CorralLegacyIcon.image(.sidebar, size: 15)
-        splitButton.image = CorralLegacyIcon.image(.split, size: 15)
-        devicesButton.image = CorralLegacyIcon.image(.monitor, size: 15)
-        createButton.image = CorralLegacyIcon.image(.plus, size: 15)
-        for button in [sidebarToggleButton, splitButton, devicesButton, createButton] {
-            button.title = ""
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-        }
-        sidebarToggleButton.toolTip = "显示/隐藏侧边栏"
-        splitButton.toolTip = "向右分屏"
-        devicesButton.toolTip = "设备管理"
-        createButton.toolTip = "新建标签页 (⌘T)"
-        sidebarToggleButton.setAccessibilityLabel("显示/隐藏侧边栏")
-        splitButton.setAccessibilityLabel("向右分屏")
-        devicesButton.setAccessibilityLabel("设备管理")
-        createButton.setAccessibilityLabel("新建标签页")
-        sidebarToggleButton.target = self; sidebarToggleButton.action = #selector(toggleSidebar)
-        splitButton.target = self; splitButton.action = #selector(splitActive)
-        devicesButton.target = self; devicesButton.action = #selector(openDevices)
+
+        trafficLightsSpacer.translatesAutoresizingMaskIntoConstraints = false
+        expandSidebarButton.translatesAutoresizingMaskIntoConstraints = false
+        expandSidebarButton.isBordered = false
+        expandSidebarButton.image = CorralLegacyIcon.image(.sidebar, size: 16)
+        expandSidebarButton.imagePosition = .imageOnly
+        expandSidebarButton.imageScaling = .scaleProportionallyDown
+        expandSidebarButton.contentTintColor = CorralAestheticTokens.textSecondary
+        expandSidebarButton.toolTip = "展开侧栏"
+        expandSidebarButton.setAccessibilityLabel("展开侧栏")
+        expandSidebarButton.target = self; expandSidebarButton.action = #selector(toggleSidebar)
+        expandSidebarButton.isHidden = true
+
+        createButton.isBordered = false
+        createButton.title = ""
+        createButton.image = CorralLegacyIcon.image(.plus, size: 14)
+        createButton.imagePosition = .imageOnly
+        createButton.imageScaling = .scaleProportionallyDown
+        createButton.contentTintColor = CorralAestheticTokens.textSecondary
+        createButton.toolTip = "新建工作台标签页 (⌘T)"
+        createButton.setAccessibilityLabel("新建工作台标签页")
         createButton.target = self; createButton.action = #selector(createTab)
-        settingsButton.target = self; settingsButton.action = #selector(openSettings)
+        createButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([createButton.widthAnchor.constraint(equalToConstant: 26), createButton.heightAnchor.constraint(equalToConstant: 26)])
+
+        trafficLightsSpacer.isHidden = true
+        dragRegion.translatesAutoresizingMaskIntoConstraints = false
+        itemsLeadingConstraint = itemsStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
         NSLayoutConstraint.activate([
-            controls.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
-            controls.centerYAnchor.constraint(equalTo: centerYAnchor),
-            itemsStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            itemsStack.trailingAnchor.constraint(lessThanOrEqualTo: controls.leadingAnchor, constant: -8),
-            itemsStack.centerYAnchor.constraint(equalTo: centerYAnchor)
+            trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
+            expandSidebarButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), expandSidebarButton.centerYAnchor.constraint(equalTo: centerYAnchor), expandSidebarButton.widthAnchor.constraint(equalToConstant: 28), expandSidebarButton.heightAnchor.constraint(equalToConstant: 26),
+            itemsLeadingConstraint, itemsStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dragRegion.leadingAnchor.constraint(equalTo: itemsStack.trailingAnchor, constant: 8), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+        dragRegion.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         registerForDraggedTypes([.string])
     }
 
@@ -133,6 +127,7 @@ public final class CorralTabBarView: NSView {
         for tab in self.tabs {
             itemsStack.addArrangedSubview(CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self))
         }
+        itemsStack.addArrangedSubview(createButton)
         itemsStack.needsLayout = true
         needsLayout = true
     }
@@ -146,12 +141,22 @@ public final class CorralTabBarView: NSView {
         activeCapsule.isHidden = false
         activeCapsuleFrame = item.frame
     }
+    public func bindSidebarToggleButton(_ button: NSButton) { sidebarToggleButton = button }
+    public func bindDevicesButton(_ button: NSButton) { devicesButton = button }
+    public func setSidebarCollapsed(_ collapsed: Bool) {
+        isSidebarCollapsed = collapsed
+        trafficLightsSpacer.isHidden = !collapsed
+        expandSidebarButton.isHidden = !collapsed
+        expandSidebarButton.toolTip = collapsed ? "展开侧栏" : nil
+        itemsLeadingConstraint.constant = collapsed ? 124 : 10
+        needsLayout = true
+    }
     public func refreshTheme() {
         layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         activeCapsule.layer?.backgroundColor = CorralAestheticTokens.tabActiveBackground.cgColor
         activeCapsule.layer?.borderColor = CorralAestheticTokens.inputBorder.cgColor
-        for button in [sidebarToggleButton, splitButton, devicesButton, createButton] { button.contentTintColor = CorralAestheticTokens.textSecondary }
-        settingsButton.refreshTheme()
+        expandSidebarButton.contentTintColor = CorralAestheticTokens.textSecondary
+        createButton.contentTintColor = CorralAestheticTokens.textSecondary
         setTabs(tabs, selectedTabID: selectedTabID)
     }
     public func rename(_ tabID: UUID) {
@@ -163,10 +168,7 @@ public final class CorralTabBarView: NSView {
     fileprivate func commitRename(_ id: UUID, _ title: String) { onRenameTab?(id, title) }
     fileprivate func performContextAction(_ id: UUID, _ action: String) { onContextAction?(id, action) }
     @objc private func toggleSidebar() { onToggleSidebar?() }
-    @objc private func splitActive() { onSplit?() }
-    @objc private func openDevices() { onDevices?() }
     @objc private func createTab() { onCreateTab?() }
-    @objc private func openSettings() { onSettings?() }
 
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .move }
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -521,6 +523,7 @@ public final class CorralSidebarView: NSView {
     public let spacesTable = NSTableView()
     public let agentsTable = NSTableView()
     public let deviceBadgeView = CorralDeviceBadgeView()
+    public let devicesButton = NSButton(title: "设备", target: nil, action: nil)
     public let settingsButton = CorralSettingsButton()
     public var onSettings: (() -> Void)?
     public var onCreateAgent: ((UUID?) -> Void)?
@@ -557,12 +560,12 @@ public final class CorralSidebarView: NSView {
         spacesHeader.onToggle = { [weak self] in self?.setSpacesExpanded(!(self?.spacesExpanded ?? true)) }
         agentsHeader.onToggle = { [weak self] in self?.setAgentsExpanded(!(self?.agentsExpanded ?? true)) }
         let footer = NSView(); footer.wantsLayer = true; footer.layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor; footer.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor; footer.layer?.borderWidth = 1
-        let devices = NSButton(title: "设备", target: self, action: #selector(toggleDevices)); devices.image = CorralLegacyIcon.image(.layers, size: 15); devices.imagePosition = .imageLeading; devices.isBordered = false; devices.contentTintColor = CorralAestheticTokens.text; devices.setAccessibilityLabel("设备管理"); devices.translatesAutoresizingMaskIntoConstraints = false
+        devicesButton.target = self; devicesButton.action = #selector(toggleDevices); devicesButton.image = CorralLegacyIcon.image(.layers, size: 15); devicesButton.imagePosition = .imageLeading; devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("设备管理"); devicesButton.translatesAutoresizingMaskIntoConstraints = false
         footerStatus.font = .systemFont(ofSize: 10); footerStatus.textColor = CorralAestheticTokens.textMuted; footerStatus.translatesAutoresizingMaskIntoConstraints = false
         footerStatusDot.wantsLayer = true; footerStatusDot.layer?.cornerRadius = 3.5; footerStatusDot.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.target = self; settingsButton.action = #selector(openSettings); settingsButton.translatesAutoresizingMaskIntoConstraints = false
-        footer.addSubview(devices); footer.addSubview(footerStatus); footer.addSubview(footerStatusDot); footer.addSubview(settingsButton)
-        NSLayoutConstraint.activate([devices.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devices.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatus.leadingAnchor.constraint(equalTo: devices.trailingAnchor, constant: 5), footerStatus.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatusDot.leadingAnchor.constraint(equalTo: footerStatus.trailingAnchor, constant: 6), footerStatusDot.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatusDot.widthAnchor.constraint(equalToConstant: 7), footerStatusDot.heightAnchor.constraint(equalToConstant: 7), settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -10), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 30), settingsButton.heightAnchor.constraint(equalToConstant: 28)])
+        footer.addSubview(devicesButton); footer.addSubview(footerStatus); footer.addSubview(footerStatusDot); footer.addSubview(settingsButton)
+        NSLayoutConstraint.activate([devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatus.leadingAnchor.constraint(equalTo: devicesButton.trailingAnchor, constant: 5), footerStatus.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatusDot.leadingAnchor.constraint(equalTo: footerStatus.trailingAnchor, constant: 6), footerStatusDot.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatusDot.widthAnchor.constraint(equalToConstant: 7), footerStatusDot.heightAnchor.constraint(equalToConstant: 7), settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -10), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 30), settingsButton.heightAnchor.constraint(equalToConstant: 28)])
         let stack = NSStackView(views: [spacesHeader, spacesScroll, agentsHeader, agentsScroll, footer])
         stack.orientation = .vertical; stack.alignment = .width; stack.distribution = .fill; stack.spacing = 0; stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -872,23 +875,25 @@ private final class CorralNativeSplitView: NSSplitView {
 @MainActor
 public final class CorralSidebarTitleBarView: NSView {
     public var onToggleSidebar: (() -> Void)?
-    public var onCreate: (() -> Void)?
-    private let collapse = NSButton(title: "▤", target: nil, action: nil)
-    private let add = NSButton(title: "+", target: nil, action: nil)
+    private let trafficLightsSpacer = NSView()
+    public let collapseButton = NSButton(title: "▤", target: nil, action: nil)
     private let dragRegion = CorralWindowDragRegion()
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect); wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
-        dragRegion.translatesAutoresizingMaskIntoConstraints = false; addSubview(dragRegion)
-        collapse.image = CorralLegacyIcon.image(.sidebar, size: 15); add.image = CorralLegacyIcon.image(.plus, size: 15)
-        for button in [collapse, add] { button.title = ""; button.imagePosition = .imageOnly; button.imageScaling = .scaleProportionallyDown; button.isBordered = false; button.contentTintColor = CorralAestheticTokens.textSecondary; button.font = .systemFont(ofSize: 14); button.translatesAutoresizingMaskIntoConstraints = false; NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 26), button.heightAnchor.constraint(equalToConstant: 26)]); addSubview(button) }
-        collapse.target = self; collapse.action = #selector(toggle); collapse.toolTip = "隐藏侧边栏"; collapse.setAccessibilityLabel("隐藏侧边栏")
-        add.target = self; add.action = #selector(create); add.toolTip = "新建 Agent"; add.setAccessibilityLabel("新建 Agent")
-        NSLayoutConstraint.activate([dragRegion.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 72), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor), collapse.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 72), collapse.centerYAnchor.constraint(equalTo: centerYAnchor), add.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8), add.centerYAnchor.constraint(equalTo: centerYAnchor)])
+        trafficLightsSpacer.translatesAutoresizingMaskIntoConstraints = false
+        dragRegion.translatesAutoresizingMaskIntoConstraints = false; addSubview(dragRegion); addSubview(trafficLightsSpacer); addSubview(collapseButton)
+        collapseButton.image = CorralLegacyIcon.image(.sidebar, size: 16)
+        collapseButton.title = ""; collapseButton.imagePosition = .imageOnly; collapseButton.imageScaling = .scaleProportionallyDown; collapseButton.isBordered = false; collapseButton.contentTintColor = CorralAestheticTokens.textSecondary; collapseButton.translatesAutoresizingMaskIntoConstraints = false
+        collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏")
+        NSLayoutConstraint.activate([
+            trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
+            collapseButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), collapseButton.centerYAnchor.constraint(equalTo: centerYAnchor), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 26),
+            dragRegion.leadingAnchor.constraint(equalTo: collapseButton.trailingAnchor, constant: 8), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
     }
     public required init?(coder: NSCoder) { fatalError("CorralSidebarTitleBarView is created programmatically") }
-    public func refreshTheme() { layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor }
+    public func refreshTheme() { layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor; collapseButton.contentTintColor = CorralAestheticTokens.textSecondary }
     @objc private func toggle() { onToggleSidebar?() }
-    @objc private func create() { onCreate?() }
 }
 
 public typealias CorralTitleBarView = CorralSidebarTitleBarView
@@ -957,9 +962,10 @@ public final class CorralWorkspaceView: NSView {
             tabBar.leadingAnchor.constraint(equalTo: right.leadingAnchor), tabBar.trailingAnchor.constraint(equalTo: right.trailingAnchor), tabBar.topAnchor.constraint(equalTo: right.topAnchor), tabBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
             stageContainer.leadingAnchor.constraint(equalTo: right.leadingAnchor), stageContainer.trailingAnchor.constraint(equalTo: right.trailingAnchor), stageContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor), stageContainer.bottomAnchor.constraint(equalTo: right.bottomAnchor)
         ])
-        titleBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }; titleBar.onCreate = { [weak self] in self?.onCreateAgent?(nil) }
-        tabBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }; tabBar.onSettings = { [weak self] in self?.onSettings?() }; tabBar.onDevices = { [weak self] in self?.onDevices?() }
-        tabBar.onSplit = { [weak self] in if let id = self?.activeTabID { self?.onSplit?(id, .right) } }
+        titleBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
+        tabBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
+        tabBar.bindSidebarToggleButton(titleBar.collapseButton)
+        tabBar.bindDevicesButton(sidebar.devicesButton)
         sidebar.onSettings = { [weak self] in self?.onSettings?() }; sidebar.onCreateAgent = { [weak self] in self?.onCreateAgent?($0) }; sidebar.onToggleDevices = { [weak self] in self?.onDevices?() }
         sidebar.onSelectAgent = { [weak self] id in self?.smartOpenSession(id); self?.onSelectAgent?(id) }
         tabBar.onSelectTab = { [weak self] in self?.selectTab(id: $0) }; tabBar.onCreateTab = { [weak self] in self?.onCreateTab?() }; tabBar.onCloseTab = { [weak self] in self?.closeTab(id: $0) }
@@ -991,6 +997,7 @@ public final class CorralWorkspaceView: NSView {
         guard sidebarIsVisible != isVisible else { return }
         sidebarIsVisible = isVisible
         sidebarColumnWidth.constant = isVisible ? Self.sidebarWidth : 0
+        tabBar.setSidebarCollapsed(collapsed)
         titleBar.isHidden = !isVisible
         sidebar.isHidden = !isVisible
     }
