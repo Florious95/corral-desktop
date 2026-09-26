@@ -16,6 +16,8 @@ public struct SharedMetalTerminalRendererStatistics: Sendable, Equatable {
     public let lastFrameSampledGlyphs: Int
     public let submittedCommandBuffers: UInt64
     public let metalDrawCalls: UInt64
+    public let atlasFrameLeasesAcquired: UInt64
+    public let atlasFrameLeasesReleased: UInt64
     /// Always zero: the renderer has no stage-sized CPU bitmap or upload path.
     public let fullStageBitmapUploads: UInt64
 
@@ -24,6 +26,8 @@ public struct SharedMetalTerminalRendererStatistics: Sendable, Equatable {
         lastFrameSampledGlyphs: 0,
         submittedCommandBuffers: 0,
         metalDrawCalls: 0,
+        atlasFrameLeasesAcquired: 0,
+        atlasFrameLeasesReleased: 0,
         fullStageBitmapUploads: 0
     )
 }
@@ -72,9 +76,18 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         var generation: DirtyGeneration
     }
 
+    private struct PreparedFrame {
+        let vertices: [QuadVertex]
+        let panes: [PaneDrawPlan]
+        let referencedPageIndices: Set<Int>
+        let sampledGlyphs: Int
+    }
+
     public let stageLayer: CAMetalLayer
     public let device: MTLDevice
     public let glyphAtlasPool: GlyphAtlasPool
+    public private(set) var appearance: TerminalThemeAppearance = .dark
+    public private(set) var palette = TerminalThemePalette.dark
     public private(set) var statistics = SharedMetalTerminalRendererStatistics.zero
 
     private let maximumFrameCount: UInt32 = 3
@@ -100,7 +113,11 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
     private var cursorBlinkVisible = true
 
 
-    public init(device suppliedDevice: MTLDevice? = nil, glyphAtlas: GlyphAtlasPool? = nil) throws {
+    public init(
+        device suppliedDevice: MTLDevice? = nil,
+        glyphAtlas: GlyphAtlasPool? = nil,
+        appearance: TerminalThemeAppearance = .dark
+    ) throws {
         guard let device = suppliedDevice ?? MTLCreateSystemDefaultDevice() else {
             throw SharedMetalTerminalRendererError.noMetalDevice
         }
@@ -163,12 +180,22 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
 
         self.device = device
         self.glyphAtlasPool = glyphAtlas ?? .shared
+        self.appearance = appearance
+        self.palette = appearance == .dark ? .dark : .light
         self.commandQueue = commandQueue
         self.fillPipeline = fillPipeline
         self.coveragePipeline = coveragePipeline
         self.colorPipeline = colorPipeline
         self.samplerState = samplerState
         self.stageLayer = stageLayer
+    }
+
+    public func setAppearance(_ appearance: TerminalThemeAppearance) {
+        guard appearance != self.appearance else { return }
+        self.appearance = appearance
+        palette = appearance == .dark ? .dark : .light
+        scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
+        scheduleCachedRender()
     }
 
     public func configureStage(sizeInPoints: CGSize, backingScale: CGFloat) {
@@ -236,9 +263,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         }
         guard scheduler.shouldSubmit else { return Self.receipt(for: request, outcome: .deferred) }
 
-        return await withCheckedContinuation { continuation in
-            submit(request, continuation: continuation)
-        }
+        return await submit(request)
     }
 
     public func setSleepState(_ state: RenderSleepState, for stageID: UUID) async {
@@ -298,20 +323,15 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         return true
     }
 
-    private func submit(_ request: StageFrameRequest, continuation: CheckedContinuation<FrameReceipt, Never>) {
+    private func submit(_ request: StageFrameRequest) async -> FrameReceipt {
         guard stageSize.width > 0, stageSize.height > 0 else {
-            continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.noDrawable)))
-            return
+            return Self.receipt(for: request, outcome: .failed(.noDrawable))
         }
         guard inFlightFrames < maximumFrameCount else {
-            continuation.resume(returning: Self.receipt(for: request, outcome: .deferred))
-            return
+            return Self.receipt(for: request, outcome: .deferred)
         }
-        guard let drawable = stageLayer.nextDrawable() else {
-            continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.noDrawable)))
-            return
-        }
-
+        let frameSize = stageSize
+        let frameScale = backingScale
         let prepared = prepareDraws(for: request.panes)
         let vertexBuffer: MTLBuffer?
         if prepared.vertices.isEmpty {
@@ -319,21 +339,45 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         } else if let allocated = makeVertexBuffer(prepared.vertices) {
             vertexBuffer = allocated
         } else {
-            continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate pane vertices"))))
-            return
+            return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate pane vertices")))
+        }
+
+        let frameLease: FrameAtlasLease?
+        if prepared.referencedPageIndices.isEmpty {
+            frameLease = nil
+        } else {
+            do {
+                frameLease = try await glyphAtlasPool.acquireFrameLease(forPages: prepared.referencedPageIndices)
+                recordFrameLeaseAcquired()
+            } catch {
+                return Self.receipt(for: request, outcome: .deferred)
+            }
+        }
+        guard latestRequest == request, stageSize == frameSize, backingScale == frameScale,
+              inFlightFrames < maximumFrameCount else {
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .deferred)
+        }
+        guard let drawable = stageLayer.nextDrawable() else {
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .failed(.noDrawable))
         }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate command buffer"))))
-            return
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate command buffer")))
         }
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let clearColor = palette.background.components
+        pass.colorAttachments[0].clearColor = MTLClearColor(
+            red: Double(clearColor.x), green: Double(clearColor.y),
+            blue: Double(clearColor.z), alpha: Double(clearColor.w)
+        )
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
-            continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to create render encoder"))))
-            return
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to create render encoder")))
         }
 
         if let vertexBuffer { encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0) }
@@ -378,39 +422,75 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         inFlightFrames += 1
         scheduler.markSubmitted()
         statistics = SharedMetalTerminalRendererStatistics(
-            lastFrameReferencedAtlasPages: prepared.referencedPages,
+            lastFrameReferencedAtlasPages: prepared.referencedPageIndices.count,
             lastFrameSampledGlyphs: prepared.sampledGlyphs,
             submittedCommandBuffers: statistics.submittedCommandBuffers &+ 1,
             metalDrawCalls: statistics.metalDrawCalls &+ UInt64(drawCalls),
+            atlasFrameLeasesAcquired: statistics.atlasFrameLeasesAcquired,
+            atlasFrameLeasesReleased: statistics.atlasFrameLeasesReleased,
             fullStageBitmapUploads: 0
         )
-        commandBuffer.addCompletedHandler { [weak self] completedBuffer in
-            let succeeded = completedBuffer.status == .completed
-            let failureMessage = completedBuffer.error.map(String.init(describing:))
-            Task { @MainActor [weak self] in
-                guard let self else {
-                    continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.commandBuffer("Renderer was released"))))
-                    return
+        return await withCheckedContinuation { continuation in
+            let glyphAtlasPool = self.glyphAtlasPool
+            commandBuffer.addCompletedHandler { [weak self, glyphAtlasPool] completedBuffer in
+                let succeeded = completedBuffer.status == .completed
+                let failureMessage = completedBuffer.error.map(String.init(describing:))
+                Task { @MainActor [weak self, glyphAtlasPool] in
+                    if let frameLease { await glyphAtlasPool.releaseFrameLease(frameLease) }
+                    guard let self else {
+                        continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.commandBuffer("Renderer was released"))))
+                        return
+                    }
+                    if frameLease != nil { self.recordFrameLeaseReleased() }
+                    self.inFlightFrames -= 1
+                    let outcome: FrameOutcome
+                    if succeeded {
+                        outcome = .completed
+                    } else {
+                        outcome = .failed(.commandBuffer(failureMessage ?? "Metal command buffer failed"))
+                        self.scheduler.invalidate(generation: self.scheduler.latestGeneration, force: true)
+                    }
+                    continuation.resume(returning: Self.receipt(for: request, outcome: outcome))
                 }
-                self.inFlightFrames -= 1
-                let outcome: FrameOutcome
-                if succeeded {
-                    outcome = .completed
-                } else {
-                    outcome = .failed(.commandBuffer(failureMessage ?? "Metal command buffer failed"))
-                    self.scheduler.invalidate(generation: self.scheduler.latestGeneration, force: true)
-                }
-                continuation.resume(returning: Self.receipt(for: request, outcome: outcome))
             }
+            commandBuffer.commit()
         }
-        commandBuffer.commit()
     }
 
-    private func prepareDraws(for paneSnapshots: [PaneFrameSnapshot]) -> (vertices: [QuadVertex], panes: [PaneDrawPlan], referencedPages: Int, sampledGlyphs: Int) {
+    private func recordFrameLeaseAcquired() {
+        statistics = SharedMetalTerminalRendererStatistics(
+            lastFrameReferencedAtlasPages: statistics.lastFrameReferencedAtlasPages,
+            lastFrameSampledGlyphs: statistics.lastFrameSampledGlyphs,
+            submittedCommandBuffers: statistics.submittedCommandBuffers,
+            metalDrawCalls: statistics.metalDrawCalls,
+            atlasFrameLeasesAcquired: statistics.atlasFrameLeasesAcquired &+ 1,
+            atlasFrameLeasesReleased: statistics.atlasFrameLeasesReleased,
+            fullStageBitmapUploads: 0
+        )
+    }
+
+    private func recordFrameLeaseReleased() {
+        statistics = SharedMetalTerminalRendererStatistics(
+            lastFrameReferencedAtlasPages: statistics.lastFrameReferencedAtlasPages,
+            lastFrameSampledGlyphs: statistics.lastFrameSampledGlyphs,
+            submittedCommandBuffers: statistics.submittedCommandBuffers,
+            metalDrawCalls: statistics.metalDrawCalls,
+            atlasFrameLeasesAcquired: statistics.atlasFrameLeasesAcquired,
+            atlasFrameLeasesReleased: statistics.atlasFrameLeasesReleased &+ 1,
+            fullStageBitmapUploads: 0
+        )
+    }
+
+    private func releaseFrameLease(_ lease: FrameAtlasLease) async {
+        await glyphAtlasPool.releaseFrameLease(lease)
+        recordFrameLeaseReleased()
+    }
+
+    private func prepareDraws(for paneSnapshots: [PaneFrameSnapshot]) -> PreparedFrame {
         var vertices: [QuadVertex] = []
         var panePlans: [PaneDrawPlan] = []
         var pageTextures: [UInt16: MTLTexture] = [:]
-        var referencedPages = Set<UInt16>()
+        var referencedPages = Set<Int>()
         var sampledGlyphs = 0
 
         for pane in paneSnapshots {
@@ -452,7 +532,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
                     into: &vertices,
                     rect: CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth * span, height: cellHeight),
                     viewport: viewport,
-                    color: terminalColor(cell.attributes.contains(.inverse) ? cell.background : cell.foreground)
+                    color: palette.cursor.components
                 )
             }
             let blockCursorRange = DrawRange(start: blockCursorStart, count: vertices.count - blockCursorStart)
@@ -498,7 +578,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
                         && snapshot.cursor.row == row && snapshot.cursor.column == column
                     let inverse = cell.attributes.contains(.inverse)
                     let textColor = cursorHere && snapshot.cursor.shape == .block
-                        ? terminalColor(inverse ? cell.foreground : cell.background)
+                        ? palette.cursorAccent.components
                         : terminalColor(inverse ? cell.background : cell.foreground)
                     let tint = entry.format == .coverageR8 ? textColor : SIMD4<Float>(1, 1, 1, 1)
                     guard let quad = glyphQuad(
@@ -511,7 +591,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
                     ) else { continue }
                     let format: GlyphFormat = entry.format == .coverageR8 ? .coverageR8 : .colorBGRA8
                     groupedGlyphs[GlyphBatchKey(page: page, format: format), default: []].append(contentsOf: quad)
-                    referencedPages.insert(page)
+                    referencedPages.insert(Int(page))
                     sampledGlyphs += 1
                 }
             }
@@ -550,7 +630,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
                     let cursorSpan: Double
                     if case .cluster(_, columns: .two) = cell.content { cursorSpan = 2 } else { cursorSpan = 1 }
                     let cursorRect = CGRect(x: cellRect.minX, y: cellRect.minY, width: cellWidth * cursorSpan, height: cellHeight)
-                    let cursorColor = visibleForeground
+                    let cursorColor = palette.cursor.components
                     switch snapshot.cursor.shape {
                     case .block:
                         break
@@ -571,7 +651,7 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
                 overlays: overlayRange
             ))
         }
-        return (vertices, panePlans, referencedPages.count, sampledGlyphs)
+        return PreparedFrame(vertices: vertices, panes: panePlans, referencedPageIndices: referencedPages, sampledGlyphs: sampledGlyphs)
     }
 
     private func appendSolidQuad(into vertices: inout [QuadVertex], rect: CGRect, viewport: MetalPixelViewport, color: SIMD4<Float>) {
@@ -637,28 +717,9 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         switch color {
         case .rgba(let value): rgb = (value.red, value.green, value.blue, value.alpha)
         case .indexed(let index):
-            let value = indexedColor(index)
-            rgb = (value.0, value.1, value.2, 255)
+            return palette.color(forANSIIndex: index).components
         }
         return SIMD4<Float>(Float(rgb.0) / 255, Float(rgb.1) / 255, Float(rgb.2) / 255, Float(rgb.3) / 255)
-    }
-
-    private func indexedColor(_ index: UInt8) -> (UInt8, UInt8, UInt8) {
-        let ansi: [(UInt8, UInt8, UInt8)] = [
-            (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
-            (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
-            (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-            (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255)
-        ]
-        let value = Int(index)
-        if value < 16 { return ansi[value] }
-        if value < 232 {
-            let levels: [UInt8] = [0, 95, 135, 175, 215, 255]
-            let cube = value - 16
-            return (levels[cube / 36], levels[(cube / 6) % 6], levels[cube % 6])
-        }
-        let gray = UInt8(8 + (value - 232) * 10)
-        return (gray, gray, gray)
     }
 
     private static func receipt(for request: StageFrameRequest, outcome: FrameOutcome) -> FrameReceipt {

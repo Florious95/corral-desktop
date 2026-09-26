@@ -9,6 +9,10 @@ final class SharedMetalTerminalRendererTests: XCTestCase {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal is unavailable on this machine") }
         let renderer = try SharedMetalTerminalRenderer(device: device)
         XCTAssertTrue(renderer.glyphAtlasPool === GlyphAtlasPool.shared)
+        XCTAssertEqual(renderer.appearance, .dark)
+        renderer.setAppearance(.light)
+        XCTAssertEqual(renderer.palette.background.hexRGB, "#fbfaf8")
+        renderer.setAppearance(.dark)
         let stageID = UUID()
         let request = StageFrameRequest(
             stageID: stageID,
@@ -71,6 +75,8 @@ final class SharedMetalTerminalRendererTests: XCTestCase {
         XCTAssertEqual(renderer.statistics.lastFrameSampledGlyphs, 3)
         XCTAssertGreaterThan(renderer.statistics.metalDrawCalls, 0)
         XCTAssertEqual(renderer.statistics.fullStageBitmapUploads, 0)
+        XCTAssertEqual(renderer.statistics.atlasFrameLeasesAcquired, 1)
+        XCTAssertEqual(renderer.statistics.atlasFrameLeasesReleased, 1)
         XCTAssertGreaterThanOrEqual(atlas.statistics.rasterizedGlyphs, 3)
 
         let idleReceipt = await renderer.render(request)
