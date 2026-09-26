@@ -84,6 +84,35 @@ final class SharedMetalTerminalRendererTests: XCTestCase {
         XCTAssertEqual(renderer.statistics.submittedCommandBuffers, 1)
     }
 
+    func testCellGridTopMapsToViewportTopInMetalNDC() throws {
+        let mapping = try XCTUnwrap(MetalViewportMapper.map(
+            StageViewportRect(x: 10, y: 20, width: 100, height: 60),
+            stage: MetalStagePixelSize(width: 300, height: 200),
+            backingScale: 1
+        ))
+        let viewport = mapping.viewport
+        let topLeft = viewport.normalizedDevicePosition(x: viewport.x, y: viewport.y)
+        let bottomRight = viewport.normalizedDevicePosition(x: viewport.x + viewport.width, y: viewport.y + viewport.height)
+
+        XCTAssertEqual(topLeft.x, -1, accuracy: 0.0001)
+        XCTAssertEqual(topLeft.y, 1, accuracy: 0.0001)
+        XCTAssertEqual(bottomRight.x, 1, accuracy: 0.0001)
+        XCTAssertEqual(bottomRight.y, -1, accuracy: 0.0001)
+    }
+
+    func testGlyphAtlasUVFlipsOnlyWithinTheGlyphRectangle() throws {
+        let uv = try XCTUnwrap(MetalAtlasUVMapper.map(
+            coordinates: AtlasCoordinates(page: 0, x: 7, y: 13, width: 4, height: 6),
+            textureSize: MetalStagePixelSize(width: 64, height: 128)
+        ))
+
+        XCTAssertEqual(uv.topLeft.x, Float(7.5 / 64), accuracy: 0.0001)
+        XCTAssertEqual(uv.topLeft.y, Float(18.5 / 128), accuracy: 0.0001)
+        XCTAssertEqual(uv.bottomRight.x, Float(10.5 / 64), accuracy: 0.0001)
+        XCTAssertEqual(uv.bottomRight.y, Float(13.5 / 128), accuracy: 0.0001)
+        XCTAssertGreaterThan(uv.topLeft.y, uv.bottomRight.y)
+    }
+
     func testSinglePaneMapsPointsToPhysicalViewportAndScissor() throws {
         let mapped = try XCTUnwrap(MetalViewportMapper.map(
             StageViewportRect(x: 10, y: 20, width: 300, height: 150),

@@ -670,10 +670,14 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         guard !clipped.isNull, clipped.width > 0, clipped.height > 0,
               imageRect.width > 0, imageRect.height > 0,
               textureSize.width > 0, textureSize.height > 0 else { return nil }
-        let uStart = (CGFloat(coordinates.x) + 0.5) / textureSize.width
-        let uEnd = (CGFloat(coordinates.x + coordinates.width) - 0.5) / textureSize.width
-        let vTop = (CGFloat(coordinates.y + coordinates.height) - 0.5) / textureSize.height
-        let vBottom = (CGFloat(coordinates.y) + 0.5) / textureSize.height
+        guard let atlasUV = MetalAtlasUVMapper.map(
+            coordinates: coordinates,
+            textureSize: MetalStagePixelSize(width: Int(textureSize.width), height: Int(textureSize.height))
+        ) else { return nil }
+        let uStart = Double(atlasUV.topLeft.x)
+        let uEnd = Double(atlasUV.bottomRight.x)
+        let vTop = Double(atlasUV.topLeft.y)
+        let vBottom = Double(atlasUV.bottomRight.y)
         let leftRatio = (clipped.minX - imageRect.minX) / imageRect.width
         let rightRatio = (clipped.maxX - imageRect.minX) / imageRect.width
         let topRatio = (clipped.minY - imageRect.minY) / imageRect.height
@@ -690,14 +694,14 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         uvTopLeft: SIMD2<Float>,
         uvBottomRight: SIMD2<Float>
     ) -> [QuadVertex] {
-        let left = Float((Double(rect.minX) - viewport.x) / viewport.width * 2 - 1)
-        let right = Float((Double(rect.maxX) - viewport.x) / viewport.width * 2 - 1)
-        let top = Float(1 - (Double(rect.minY) - viewport.y) / viewport.height * 2)
-        let bottom = Float(1 - (Double(rect.maxY) - viewport.y) / viewport.height * 2)
-        let topLeft = QuadVertex(position: SIMD2(left, top), textureCoordinate: uvTopLeft, color: color)
-        let topRight = QuadVertex(position: SIMD2(right, top), textureCoordinate: SIMD2(uvBottomRight.x, uvTopLeft.y), color: color)
-        let bottomLeft = QuadVertex(position: SIMD2(left, bottom), textureCoordinate: SIMD2(uvTopLeft.x, uvBottomRight.y), color: color)
-        let bottomRight = QuadVertex(position: SIMD2(right, bottom), textureCoordinate: uvBottomRight, color: color)
+        let topLeftPosition = viewport.normalizedDevicePosition(x: Double(rect.minX), y: Double(rect.minY))
+        let topRightPosition = viewport.normalizedDevicePosition(x: Double(rect.maxX), y: Double(rect.minY))
+        let bottomLeftPosition = viewport.normalizedDevicePosition(x: Double(rect.minX), y: Double(rect.maxY))
+        let bottomRightPosition = viewport.normalizedDevicePosition(x: Double(rect.maxX), y: Double(rect.maxY))
+        let topLeft = QuadVertex(position: topLeftPosition, textureCoordinate: uvTopLeft, color: color)
+        let topRight = QuadVertex(position: topRightPosition, textureCoordinate: SIMD2(uvBottomRight.x, uvTopLeft.y), color: color)
+        let bottomLeft = QuadVertex(position: bottomLeftPosition, textureCoordinate: SIMD2(uvTopLeft.x, uvBottomRight.y), color: color)
+        let bottomRight = QuadVertex(position: bottomRightPosition, textureCoordinate: uvBottomRight, color: color)
         return [topLeft, bottomLeft, topRight, topRight, bottomLeft, bottomRight]
     }
 
