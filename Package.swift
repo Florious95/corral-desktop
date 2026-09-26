@@ -46,7 +46,8 @@ let package = Package(
         .testTarget(
             name: "CorralRegressionTests",
             dependencies: ["CorralContracts", "CorralServices", "CorralUI", "CorralMetalTerminal"]
-        )
+        ),
+        .testTarget(name: "CorralAppTests", dependencies: ["CorralApp", "CorralContracts", "CorralProtocol", "CorralServices", "CorralMetalTerminal", "CorralUI"])
     ]
 )
 // Production releases use a distinct bundle identity from the development app.
