@@ -178,7 +178,8 @@ public struct WorkspaceRecord: Codable, Equatable, Sendable {
         workingDirectory = try values.decode(String.self, forKey: .workingDirectory)
         sessionCount = try values.decode(Int.self, forKey: .sessionCount)
         workingCount = try values.decodeIfPresent(Int.self, forKey: .workingCount) ?? 0
-        aggregateState = try values.decode(WireAgentState.self, forKey: .aggregateState)
+        aggregateState = try values.decodeIfPresent(WireAgentState.self, forKey: .aggregateState)
+            ?? (workingCount > 0 ? .working : .idle)
         sessions = try values.decodeIfPresent([WireSessionRecord].self, forKey: .sessions) ?? []
     }
 

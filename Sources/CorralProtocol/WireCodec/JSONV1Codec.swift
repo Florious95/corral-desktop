@@ -240,11 +240,12 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
     }
 
     private func decodeWorkspace(_ payload: WorkspacePayload) throws -> WorkspaceRecord {
+        let workingCount = payload.workingCount ?? 0
         let record = WorkspaceRecord(
             workingDirectory: payload.workingDirectory,
             sessionCount: payload.sessionCount,
-            aggregateState: payload.aggregateState,
-            workingCount: payload.workingCount ?? 0,
+            aggregateState: payload.aggregateState ?? (workingCount > 0 ? .working : .idle),
+            workingCount: workingCount,
             sessions: try (payload.sessions ?? []).map(decodeSession)
         )
         guard record.isValid else { throw V1ControlCodecError.invalidField("workspace") }
@@ -524,7 +525,7 @@ private struct WorkspacePayload: Decodable {
     let workingDirectory: String
     let sessionCount: Int
     let workingCount: Int?
-    let aggregateState: WireAgentState
+    let aggregateState: WireAgentState?
     let sessions: [WireSessionPayload]?
     enum CodingKeys: String, CodingKey {
         case workingDirectory = "cwd"

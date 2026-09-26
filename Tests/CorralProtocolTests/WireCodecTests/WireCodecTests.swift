@@ -107,6 +107,20 @@ final class WireCodecTests: XCTestCase {
         XCTAssertThrowsError(try codec.decodeControlMessage(Data(#"{"v":1,"type":"close_session_result","payload":{"req_id":18,"ok":true,"reason":"close_failed"}}"#.utf8)))
     }
 
+    func testListingDefaultsMissingAggregateStateFromWorkingCount() throws {
+        let frame = Data(#"{"v":1,"type":"listing","payload":{"req_id":1,"seq":2,"workspaces":[{"cwd":"/workspace","session_count":1,"working_count":1,"sessions":[{"ref":"s1","name":"agent","window_name":"agent","window_index":"0","cwd":"/workspace","title":"title","provider":"codex","activity":"working","health":"normal","status":"working","rows":24,"cols":80}]},{"cwd":"/idle","session_count":0,"working_count":0,"sessions":[]}]}}"#.utf8)
+        guard case let .listing(listing) = try JSONV1Codec().decodeControlMessage(frame) else {
+            return XCTFail("Expected listing")
+        }
+        XCTAssertEqual(listing.workspaces.map(\.aggregateState), [.working, .idle])
+
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: frame) as? [String: Any])
+        let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+        let payloadData = try JSONSerialization.data(withJSONObject: payload)
+        let contractListing = try JSONDecoder().decode(SessionListing.self, from: payloadData)
+        XCTAssertEqual(contractListing.workspaces.map(\.aggregateState), [.working, .idle])
+    }
+
     func testListingPreservesFullAgentMirrordSessionAndWorkspaceFields() throws {
         let json = Data(#"{"v":1,"type":"listing","payload":{"req_id":7,"seq":42,"workspaces":[{"cwd":"/workspace","session_count":1,"working_count":1,"aggregate_state":"working","sessions":[{"ref":"socket\u001f%1","name":"Codex task","window_name":"Codex task","window_index":"3","cwd":"/workspace","title":"Exact OSC title","provider":"codex","activity":"working","session_name":"tmux-a","health":"normal","status":"working","rows":40,"cols":100}]}]}}"#.utf8)
         guard case let .listing(listing) = try JSONV1Codec().decodeControlMessage(json) else {
@@ -116,6 +130,7 @@ final class WireCodecTests: XCTestCase {
         XCTAssertEqual(listing.sequence, 42)
         let workspace = try XCTUnwrap(listing.workspaces.first)
         XCTAssertEqual(workspace.workingCount, 1)
+        XCTAssertEqual(workspace.aggregateState, .working)
         let session = try XCTUnwrap(workspace.sessions.first)
         XCTAssertEqual(session.reference.rawValue, "socket\u{1F}%1")
         XCTAssertEqual(session.windowName, "Codex task")
