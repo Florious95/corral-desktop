@@ -14,6 +14,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: CorralApplicationCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let environment = ProcessInfo.processInfo.environment
         do {
             let sessionLink = URLSessionSessionLink(codec: ProtocolV1Codec())
             let lifecycle = CoordinatorDeviceSessionLifecycle(sessionLink: sessionLink)
@@ -40,7 +41,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                         userPreferencesStore: userPreferencesStore,
                         initialWorkspaceState: initialWorkspaceState,
                         initialUserPreferences: initialUserPreferences,
-                        glyphAtlas: atlas
+                        glyphAtlas: atlas,
+                        environment: environment
                     )
                     self.coordinator = coordinator
                     if coordinator.backgroundMode {

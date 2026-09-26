@@ -124,12 +124,12 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
                 requiresPruning = true
                 continue
             }
-            if raw.endpoint.port == ApprovedEndpoint.productionPort {
-                requiresPruning = true
-                continue
-            }
             guard !raw.id.isEmpty,
-                  let endpoint = try? ApprovedEndpoint(scheme: raw.endpoint.scheme, host: raw.endpoint.host, port: raw.endpoint.port) else {
+                  let endpoint = try? ApprovedEndpoint(
+                    scheme: raw.endpoint.scheme,
+                    host: raw.endpoint.host,
+                    port: raw.endpoint.port
+                  ) else {
                 requiresPruning = true
                 continue
             }

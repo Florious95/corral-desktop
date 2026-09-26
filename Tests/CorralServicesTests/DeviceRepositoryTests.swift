@@ -88,7 +88,7 @@ final class DeviceRepositoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: support.appendingPathComponent(DeviceRepository.storageFilename).path))
     }
 
-    func testProductionPortIsPrunedAndApprovedDeviceSurvivesLoad() async throws {
+    func testNonLoopbackDeviceIsPrunedAndApprovedDeviceSurvivesLoad() async throws {
         let support = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: support) }
         let namespace = support.appendingPathComponent(DeviceRepository.namespace, isDirectory: true)
@@ -96,7 +96,7 @@ final class DeviceRepositoryTests: XCTestCase {
         let invalidProductionDevice: [String: Any] = [
             "id": "production",
             "name": "Must be pruned",
-            "endpoint": ["scheme": "ws", "host": "127.0.0.1", "port": 9900],
+            "endpoint": ["scheme": "ws", "host": "production.example", "port": 9900],
             "credentialHandle": "keychain-item:production"
         ]
         let approvedDevice: [String: Any] = [
@@ -116,6 +116,41 @@ final class DeviceRepositoryTests: XCTestCase {
         XCTAssertFalse(stored.contains("9900"))
         let permissions = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(permissions?.intValue, 0o600)
+    }
+
+    func testLoopback9900LoadsAndSavesWithoutAFeatureFlag() async throws {
+        let support = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let namespace = support.appendingPathComponent(DeviceRepository.namespace, isDirectory: true)
+        try FileManager.default.createDirectory(at: namespace, withIntermediateDirectories: true)
+        let localProductionDevice: [String: Any] = [
+            "id": "local-production",
+            "name": "Local manual acceptance",
+            "endpoint": ["scheme": "ws", "host": "127.0.0.1", "port": 9900],
+            "credentialHandle": "keychain-item:local-production"
+        ]
+        let remoteProductionDevice: [String: Any] = [
+            "id": "remote-production",
+            "name": "Must still be pruned",
+            "endpoint": ["scheme": "ws", "host": "production.example", "port": 9900],
+            "credentialHandle": "keychain-item:remote-production"
+        ]
+        let file = namespace.appendingPathComponent(DeviceRepository.storageFilename)
+        try JSONSerialization.data(withJSONObject: [localProductionDevice, remoteProductionDevice]).write(to: file)
+
+        let repository = try DeviceRepository(applicationSupportDirectory: support)
+        let loaded = try await repository.listDevices()
+        XCTAssertEqual(loaded.map(\.id), [DeviceID("local-production")])
+        XCTAssertEqual(loaded[0].endpoint.url.absoluteString, "ws://127.0.0.1:9900/ws")
+        let afterPruning = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+        XCTAssertTrue(afterPruning.contains("9900"))
+        XCTAssertFalse(afterPruning.contains("remote-production"))
+
+        try await repository.save(loaded[0])
+        let reloaded = try DeviceRepository(applicationSupportDirectory: support)
+        let reloadedDevices = try await reloaded.listDevices()
+        XCTAssertEqual(reloadedDevices, loaded)
+        XCTAssertTrue(String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("9900"))
     }
 
     private func makeDevice(id: String, name: String) throws -> DeviceRecord {

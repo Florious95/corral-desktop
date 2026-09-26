@@ -89,8 +89,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             scheme: endpoint.scheme,
             host: endpoint.host,
             port: endpoint.port,
-            path: endpoint.path,
-            allowingProduction: endpoint.isProductionEndpoint
+            path: endpoint.path
         )
         lifecycle &+= 1
         let currentLifecycle = lifecycle

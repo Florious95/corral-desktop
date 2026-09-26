@@ -72,7 +72,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
-    func testExplicitProductionEndpointConnectsThroughFakeLink() async throws {
+    func testLoopback9900ConnectsThroughFakeLink() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9900/ws",
@@ -86,6 +86,37 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.lastConnectionError)
         let connectCount = await link.connectCount()
         XCTAssertEqual(connectCount, 1)
+        await coordinator.stop()
+    }
+
+    func testEnvironmentTokenOverridesStoredCredential() async throws {
+        let handle = CredentialHandle("keychain-item:production-test")
+        let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9900)
+        let repository = FixedDeviceRepository([DeviceRecord(
+            id: DeviceID("production-device"),
+            name: "Local manual acceptance",
+            endpoint: endpoint,
+            credential: handle
+        )])
+        let vault = TestDeviceCredentialVault()
+        try await vault.store("stale-keychain-token", for: handle)
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(
+            link: link,
+            atlas: .shared,
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9900/ws",
+                "CORRAL_NATIVE_TOKEN": "environment-token"
+            ],
+            deviceRepository: repository,
+            credentialVault: vault
+        )
+
+        await coordinator.start()
+
+        let forwardedCredential = await link.lastConnectedCredential()
+        XCTAssertTrue(forwardedCredential?.rawValue == "environment-token", "explicit environment token must reach SessionLink auth")
+        XCTAssertTrue(coordinator.connected)
         await coordinator.stop()
     }
 
@@ -124,7 +155,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
 
         await coordinator.start()
         let connectedEndpoint = await link.connectedEndpoint()
+        let connectedCredential = await link.connectedCredential()
         XCTAssertEqual(connectedEndpoint?.url.absoluteString, endpointText)
+        XCTAssertTrue(connectedCredential?.rawValue == token, "fixture token must reach URLSessionSessionLink auth without being logged")
         XCTAssertTrue(coordinator.connected)
         XCTAssertTrue(coordinator.workspaceView.sidebar.devices.contains(where: \.isOnline), "successful auth_ack must immediately mark the device online")
 
@@ -467,15 +500,17 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         link: any SessionLinkProtocol,
         atlas: GlyphAtlasPool,
         environment: [String: String],
-        supportDirectory: URL? = nil
+        supportDirectory: URL? = nil,
+        deviceRepository: any DeviceRepositoryProtocol = EmptyDeviceRepository(),
+        credentialVault: any DeviceCredentialVault = TestDeviceCredentialVault()
     ) async throws -> CorralApplicationCoordinator {
         let supportDirectory = supportDirectory ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("corral-native-coordinator-store-\(UUID().uuidString)", isDirectory: true)
         let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
         let userPreferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
         return CorralApplicationCoordinator(
-            deviceRepository: EmptyDeviceRepository(),
-            credentialVault: TestDeviceCredentialVault(),
+            deviceRepository: deviceRepository,
+            credentialVault: credentialVault,
             sessionLink: link,
             deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
             renderer: try SharedMetalTerminalRenderer(glyphAtlas: atlas),
@@ -562,6 +597,7 @@ private extension Data {
 private actor ObservingSessionLink: SessionLinkProtocol {
     private let base: any SessionLinkProtocol
     private var endpoint: ApprovedEndpoint?
+    private var credential: CredentialHandle?
     private var commands: [ClientCommand] = []
     private var events: [SessionEventEnvelope] = []
 
@@ -569,6 +605,7 @@ private actor ObservingSessionLink: SessionLinkProtocol {
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         self.endpoint = endpoint
+        self.credential = credential
         return try await base.connect(to: endpoint, deviceID: deviceID, credential: credential)
     }
 
@@ -583,6 +620,7 @@ private actor ObservingSessionLink: SessionLinkProtocol {
 
     func disconnect() async { await base.disconnect() }
     func connectedEndpoint() -> ApprovedEndpoint? { endpoint }
+    func connectedCredential() -> CredentialHandle? { credential }
     func sentCommands() -> [ClientCommand] { commands }
     func observedEvents() -> [SessionEventEnvelope] { events }
     func record(_ event: SessionEventEnvelope) { events.append(event) }
@@ -603,6 +641,14 @@ private struct ObservingSessionEventStream: SessionEventStream {
     }
 }
 
+private actor FixedDeviceRepository: DeviceRepositoryProtocol {
+    private let devices: [DeviceRecord]
+    init(_ devices: [DeviceRecord]) { self.devices = devices }
+    func listDevices() async throws -> [DeviceRecord] { devices }
+    func save(_ device: DeviceRecord) async throws {}
+    func delete(id: DeviceID) async throws {}
+}
+
 private actor EmptyDeviceRepository: DeviceRepositoryProtocol {
     func listDevices() async throws -> [DeviceRecord] { [] }
     func save(_ device: DeviceRecord) async throws {}
@@ -614,10 +660,12 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     private var authenticated: AuthenticatedConnection?
     private var commandsSent: [ClientCommand] = []
     private var connectCalls = 0
+    private var lastCredential: CredentialHandle?
     private var ordinal: UInt64 = 0
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         connectCalls += 1
+        lastCredential = credential
         let connection = try AuthenticatedConnection(
             linkInstanceID: LinkInstanceID(),
             deviceID: deviceID,
@@ -646,6 +694,7 @@ private actor RecordingSessionLink: SessionLinkProtocol {
         await stream.finish()
     }
     func connectCount() -> Int { connectCalls }
+    func lastConnectedCredential() -> CredentialHandle? { lastCredential }
     func commands() -> [ClientCommand] { commandsSent }
 
     func emit(_ event: SessionEvent) async throws {

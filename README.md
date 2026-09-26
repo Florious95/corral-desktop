@@ -5,8 +5,8 @@ Independent Swift 6 / macOS 14+ application workspace. Contracts v0.1 is the sha
 ## Safety boundary
 
 - Development identity: `com.corral.native.dev`
-- Default endpoint policy: loopback only, port `9919`; all non-loopback endpoints are rejected.
-- Manual acceptance can explicitly opt into only `ws://127.0.0.1:9900/ws` with `CORRAL_NATIVE_ENDPOINT` set to that exact URL or `CORRAL_ALLOW_PRODUCTION=1`. This runtime endpoint is not persisted; stored devices remain subject to the default policy.
+- Endpoint validation accepts WebSocket URLs on `127.0.0.1` or `::1` at `/ws` on any valid port, including `9900`; there is no product-level port block.
+- Live integration traffic uses only the isolated `127.0.0.1:9919` fixture. Tests may validate or mock `9900`, but never send network traffic to it.
 - No production app, service, or credentials are part of this workspace.
 
 ## Build

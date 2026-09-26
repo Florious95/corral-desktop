@@ -1384,14 +1384,13 @@ public final class CorralApplicationCoordinator {
         let environmentToken = environment["CORRAL_NATIVE_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let text = environment["CORRAL_NATIVE_ENDPOINT"], !text.isEmpty {
             guard let url = URL(string: text) else { throw EndpointSafetyError.invalidEndpoint }
-            let allowsProduction = environment["CORRAL_ALLOW_PRODUCTION"] == "1"
-                || text == "ws://127.0.0.1:9900/ws"
-            let endpoint = try ApprovedEndpoint(url: url, allowingProduction: allowsProduction)
+            let endpoint = try ApprovedEndpoint(url: url)
             let existing = devices.first { $0.endpoint == endpoint }
             let storedToken: String?
             if let existing { storedToken = try await credentialVault.resolve(existing.credential) }
             else { storedToken = nil }
-            guard let token = storedToken.flatMap({ $0.isEmpty ? nil : $0 }) ?? environmentToken, !token.isEmpty else { return nil }
+            guard let token = environmentToken.flatMap({ $0.isEmpty ? nil : $0 })
+                ?? storedToken.flatMap({ $0.isEmpty ? nil : $0 }) else { return nil }
             return ConnectionConfiguration(
                 endpoint: endpoint,
                 token: token,
@@ -1402,7 +1401,8 @@ public final class CorralApplicationCoordinator {
         let selected = selectedDeviceIDs.count == 1 ? selectedDeviceIDs.first : nil
         guard let device = devices.first(where: { $0.id == selected }) ?? devices.first else { return nil }
         let storedToken = try await credentialVault.resolve(device.credential)
-        guard let token = storedToken.flatMap({ $0.isEmpty ? nil : $0 }) ?? environmentToken, !token.isEmpty else { return nil }
+        guard let token = environmentToken.flatMap({ $0.isEmpty ? nil : $0 })
+            ?? storedToken.flatMap({ $0.isEmpty ? nil : $0 }) else { return nil }
         return ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id, deviceName: device.name)
     }
 

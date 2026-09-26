@@ -79,20 +79,15 @@ final class URLSessionSessionLinkTests: XCTestCase {
         }
     }
 
-    func testApprovedEndpointRejectsProductionPortByDefault() {
-        XCTAssertThrowsError(try ApprovedEndpoint(host: "127.0.0.1", port: 9900)) {
-            XCTAssertEqual($0 as? EndpointSafetyError, .productionEndpointForbidden)
-        }
+    func testApprovedEndpointAcceptsLoopback9900() throws {
+        XCTAssertEqual(try ApprovedEndpoint(host: "127.0.0.1", port: 9900).url.absoluteString, "ws://127.0.0.1:9900/ws")
     }
 
-    func testExplicitlyApprovedProductionEndpointUsesMockSocket() async throws {
+    func testLoopback9900UsesMockSocket() async throws {
         let socket = MockWebSocket()
         let factory = MockWebSocketFactory(sockets: [socket])
         let link = URLSessionSessionLink(configuration: .init()) { factory.make($0) }
-        let endpoint = try ApprovedEndpoint(
-            url: XCTUnwrap(URL(string: "ws://127.0.0.1:9900/ws")),
-            allowingProduction: true
-        )
+        let endpoint = try ApprovedEndpoint(url: XCTUnwrap(URL(string: "ws://127.0.0.1:9900/ws")))
         let connect = Task {
             try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: CredentialHandle("test"))
         }
