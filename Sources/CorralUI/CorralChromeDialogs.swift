@@ -110,7 +110,7 @@ open class CorralDialogViewController: NSViewController {
 
     public func rootView(size: NSSize) -> NSView {
         let root = NSView(frame: NSRect(origin: .zero, size: size))
-        root.wantsLayer = true; root.layer?.backgroundColor = CorralAestheticTokens.surface1.cgColor; root.layer?.cornerRadius = 10
+        root.wantsLayer = true; root.layer?.backgroundColor = CorralAestheticTokens.surface1.cgColor; root.layer?.cornerRadius = 14
         return root
     }
 
@@ -136,12 +136,13 @@ open class CorralDialogViewController: NSViewController {
         return field
     }
 
-    public func addActionButtons(to root: NSView, cancel: Selector, primary: Selector, primaryTitle: String = "完成", primaryEnabled: Bool = true) {
+    @discardableResult public func addActionButtons(to root: NSView, cancel: Selector, primary: Selector, primaryTitle: String = "完成", primaryEnabled: Bool = true) -> (cancel: NSButton, primary: NSButton) {
         let cancelButton = NSButton(title: "取消", target: self, action: cancel); cancelButton.bezelStyle = .rounded; cancelButton.translatesAutoresizingMaskIntoConstraints = false
         let primaryButton = NSButton(title: primaryTitle, target: self, action: primary); primaryButton.bezelStyle = .rounded; primaryButton.keyEquivalent = "\r"; primaryButton.isEnabled = primaryEnabled; primaryButton.translatesAutoresizingMaskIntoConstraints = false
         stylePrimary(primaryButton)
         root.addSubview(cancelButton); root.addSubview(primaryButton)
         NSLayoutConstraint.activate([cancelButton.trailingAnchor.constraint(equalTo: primaryButton.leadingAnchor, constant: -8), cancelButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20), cancelButton.widthAnchor.constraint(equalToConstant: 74), primaryButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), primaryButton.bottomAnchor.constraint(equalTo: cancelButton.bottomAnchor), primaryButton.widthAnchor.constraint(equalToConstant: 84)])
+        return (cancelButton, primaryButton)
     }
 
     public func stylePrimary(_ button: NSButton) {
@@ -166,7 +167,8 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
     public var onCreate: ((CorralNewAgentRequest) -> Void)?
     public var onCancel: (() -> Void)?
     private let errorLabel = NSTextField(labelWithString: "")
-    private let createButton = NSButton(title: "创建", target: nil, action: nil)
+    public private(set) weak var cancelButton: NSButton?
+    public private(set) weak var createButton: NSButton?
     private let launcherStack = NSStackView()
     private var launcherButtons: [NSButton] = []
 
@@ -182,7 +184,7 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         super.init()
     }
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 460, height: 488)); view = root
+        let root = rootView(size: NSSize(width: 420, height: 488)); view = root
         var y = addHeader(to: root, title: "新建 Agent", subtitle: "在「\(spaceName)」中创建")
         _ = addLabel("任务名称", to: root, y: y); y += 20
         nameField.placeholderString = "任务名称"; nameField.font = .systemFont(ofSize: 12); nameField.textColor = CorralAestheticTokens.text; nameField.backgroundColor = CorralAestheticTokens.surface0; nameField.isBezeled = true; nameField.bezelStyle = .roundedBezel; nameField.delegate = self; nameField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(nameField)
@@ -212,8 +214,8 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         NSLayoutConstraint.activate([bypassLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), bypassLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: y), description.leadingAnchor.constraint(equalTo: bypassLabel.leadingAnchor), description.topAnchor.constraint(equalTo: bypassLabel.bottomAnchor, constant: 4), bypassSwitch.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), bypassSwitch.centerYAnchor.constraint(equalTo: bypassLabel.centerYAnchor)])
         y += 52
         errorLabel.textColor = CorralAestheticTokens.danger; errorLabel.font = .systemFont(ofSize: 10); errorLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(errorLabel); errorLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: y).isActive = true; errorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true
-        addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(create), primaryTitle: "创建")
-        createButton.isHidden = true
+        let buttons = addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(create), primaryTitle: "创建")
+        cancelButton = buttons.cancel; createButton = buttons.primary
         updateControls()
     }
     public var isCreateEnabled: Bool { validationMessage == nil && !nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedLauncher != nil && !isLoading }
@@ -226,7 +228,7 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
     @objc private func selectLauncher(_ sender: NSButton) { selectedProvider = sender.identifier?.rawValue; if sender.tag == 0 { bypassSwitch.state = .off }; updateControls() }
     @objc private func toggleBypass() { updateControls() }
     public override func handleEscape() { guard !isLoading else { return }; onCancel?(); dismiss() }
-    @objc private func cancel() { onCancel?(); dismiss() }
+    @objc private func cancel() { guard !isLoading else { return }; onCancel?(); dismiss() }
     @objc private func create() { submit() }
     private func validateName() {
         let name = nameField.stringValue
@@ -238,7 +240,9 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         bypassSwitch.isEnabled = !isLoading && selectedLauncher?.supportsBypass == true
         for button in launcherButtons { button.isEnabled = !isLoading; button.state = button.identifier?.rawValue == selectedProvider ? .on : .off }
         nameField.isEnabled = !isLoading
-        if let button = view.subviews.compactMap({ $0 as? NSButton }).first(where: { $0.title == "创建" }) { button.isEnabled = isCreateEnabled; button.title = isLoading ? "创建中…" : "创建" }
+        cancelButton?.isEnabled = !isLoading
+        createButton?.isEnabled = isCreateEnabled
+        createButton?.title = isLoading ? "创建中…" : "创建"
     }
     private func providerSymbol(_ provider: String) -> String { switch provider.lowercased() { case "claude": "sparkle"; case "codex": "chevron.left.forwardslash.chevron.right"; case "pi": "p.circle"; default: "terminal" } }
 }
@@ -273,11 +277,11 @@ public final class SettingsDialogViewController: CorralDialogViewController {
         NSLayoutConstraint.activate([fontFamilyPopup.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), fontFamilyPopup.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), fontFamilyPopup.topAnchor.constraint(equalTo: root.topAnchor, constant: 175), fontFamilyPopup.heightAnchor.constraint(equalToConstant: 28)])
         fontFamilyPopup.selectItem(withTitle: fonts.first(where: { values.fontFamily.hasPrefix($0.components(separatedBy: ",").first ?? $0) }) ?? fonts[0]); fontFamilyPopup.target = self; fontFamilyPopup.action = #selector(fontChanged)
         _ = addLabel("字号", to: root, y: 222)
-        fontSizeSlider.doubleValue = values.fontSize; fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeSlider); fontSizeSlider.target = self; fontSizeSlider.action = #selector(sizeChanged)
+        fontSizeSlider.doubleValue = values.fontSize; fontSizeSlider.numberOfTickMarks = 15; fontSizeSlider.allowsTickMarkValuesOnly = true; fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeSlider); fontSizeSlider.target = self; fontSizeSlider.action = #selector(sizeChanged)
         fontSizeField.stringValue = String(values.fontSize); fontSizeField.alignment = .right; fontSizeField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeField); fontSizeField.target = self; fontSizeField.action = #selector(sizeFieldChanged)
-        fontSizeStepper.minValue = 10; fontSizeStepper.maxValue = 24; fontSizeStepper.increment = 0.5; fontSizeStepper.doubleValue = values.fontSize; fontSizeStepper.target = self; fontSizeStepper.action = #selector(sizeStepperChanged); fontSizeStepper.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeStepper)
+        fontSizeStepper.minValue = 10; fontSizeStepper.maxValue = 24; fontSizeStepper.increment = 1; fontSizeStepper.doubleValue = values.fontSize; fontSizeStepper.target = self; fontSizeStepper.action = #selector(sizeStepperChanged); fontSizeStepper.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeStepper)
         NSLayoutConstraint.activate([fontSizeSlider.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), fontSizeSlider.trailingAnchor.constraint(equalTo: fontSizeField.leadingAnchor, constant: -10), fontSizeSlider.topAnchor.constraint(equalTo: root.topAnchor, constant: 244), fontSizeField.trailingAnchor.constraint(equalTo: fontSizeStepper.leadingAnchor, constant: -5), fontSizeField.centerYAnchor.constraint(equalTo: fontSizeSlider.centerYAnchor), fontSizeField.widthAnchor.constraint(equalToConstant: 42), fontSizeStepper.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18), fontSizeStepper.centerYAnchor.constraint(equalTo: fontSizeSlider.centerYAnchor)])
-        let preview = NSTextField(labelWithString: "The quick brown fox · 终端预览"); preview.font = .monospacedSystemFont(ofSize: values.fontSize, weight: .regular); preview.textColor = CorralAestheticTokens.text; preview.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(preview); fontPreviewLabel = preview
+        let preview = NSTextField(labelWithString: "The quick brown fox · 终端预览"); preview.textColor = CorralAestheticTokens.text; preview.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(preview); fontPreviewLabel = preview; updatePreviewFont()
         NSLayoutConstraint.activate([preview.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), preview.topAnchor.constraint(equalTo: root.topAnchor, constant: 278), preview.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), preview.heightAnchor.constraint(equalToConstant: 42)])
         _ = addLabel("目录跟踪", to: root, y: 346)
         let trackingLabel = NSTextField(labelWithString: "根据终端目录变化更新工作区路径"); trackingLabel.font = .systemFont(ofSize: 11); trackingLabel.textColor = CorralAestheticTokens.textSecondary; trackingLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(trackingLabel)
@@ -289,15 +293,20 @@ public final class SettingsDialogViewController: CorralDialogViewController {
         NSLayoutConstraint.activate([saved.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), saved.centerYAnchor.constraint(equalTo: done.centerYAnchor)])
     }
     public func setTheme(_ theme: CorralThemeMode) { values.theme = theme; themeControl.selectedSegment = CorralThemeMode.allCases.firstIndex(of: theme) ?? 2; apply() }
-    public func setFontFamily(_ family: String) { values.fontFamily = family; if fonts.contains(family) { fontFamilyPopup.selectItem(withTitle: family) }; apply() }
+    public func setFontFamily(_ family: String) { values.fontFamily = family; if fonts.contains(family) { fontFamilyPopup.selectItem(withTitle: family) }; updatePreviewFont(); apply() }
     public func setFontSize(_ size: Double) { values.fontSize = min(24, max(10, size)); updateFontSizeControls(); apply() }
     public func setDirectoryTracking(_ enabled: Bool) { values.directoryTracking = enabled; directoryTrackingSwitch.state = enabled ? .on : .off; apply() }
     @objc private func themeChanged() { values.theme = CorralThemeMode.allCases[themeControl.selectedSegment]; apply() }
-    @objc private func fontChanged() { values.fontFamily = fontFamilyPopup.titleOfSelectedItem ?? fonts[0]; apply() }
+    @objc private func fontChanged() { values.fontFamily = fontFamilyPopup.titleOfSelectedItem ?? fonts[0]; updatePreviewFont(); apply() }
     @objc private func sizeChanged() { values.fontSize = min(24, max(10, fontSizeSlider.doubleValue)); updateFontSizeControls(); apply() }
     @objc private func sizeFieldChanged() { values.fontSize = min(24, max(10, Double(fontSizeField.stringValue) ?? 13)); updateFontSizeControls(); apply() }
     @objc private func sizeStepperChanged() { values.fontSize = min(24, max(10, fontSizeStepper.doubleValue)); updateFontSizeControls(); apply() }
-    private func updateFontSizeControls() { fontSizeSlider.doubleValue = values.fontSize; fontSizeStepper.doubleValue = values.fontSize; fontSizeField.stringValue = String(values.fontSize); fontPreviewLabel?.font = .monospacedSystemFont(ofSize: values.fontSize, weight: .regular) }
+    private func updateFontSizeControls() { fontSizeSlider.doubleValue = values.fontSize; fontSizeStepper.doubleValue = values.fontSize; fontSizeField.stringValue = String(values.fontSize); updatePreviewFont() }
+    private func updatePreviewFont() {
+        let selectedFamily = fontFamilyPopup.titleOfSelectedItem ?? fonts[0]
+        let preferredName = selectedFamily.split(separator: ",", maxSplits: 1).first.map(String.init)?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) ?? selectedFamily
+        fontPreviewLabel?.font = NSFont(name: preferredName, size: CGFloat(values.fontSize)) ?? .monospacedSystemFont(ofSize: values.fontSize, weight: .regular)
+    }
     @objc private func trackingChanged() { values.directoryTracking = directoryTrackingSwitch.state == .on; apply() }
     public override func handleEscape() { onClose?(); dismiss() }
     @objc private func close() { onClose?(); dismiss() }
