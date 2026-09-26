@@ -12,6 +12,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public private(set) var selectedDeviceIDs = Set<DeviceID>()
     public private(set) var readyDeviceIDs = Set<DeviceID>()
     public var onDevicesChanged: (([DeviceRecord]) -> Void)?
+    public var onSelectionChanged: ((Set<DeviceID>) -> Void)?
     public var onAddDevice: (() -> Void)?
     public var onPairMobile: (() -> Void)?
 
@@ -260,6 +261,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public func setDevice(_ id: DeviceID, selected: Bool) {
         if selected { selectedDeviceIDs.insert(id) } else { selectedDeviceIDs.remove(id) }
         tableView.reloadData(); updateSelectionSummary()
+        onSelectionChanged?(selectedDeviceIDs)
     }
 
     private func updateSelectionSummary() {
@@ -269,7 +271,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         connectionStatus.status = readyDeviceIDs.isEmpty ? .offline : .working
     }
 
-    @objc private func toggleAllDevices() { selectedDeviceIDs = allDevicesButton.state == .on ? Set(devices.map(\.id)) : []; tableView.reloadData(); updateSelectionSummary() }
+    @objc private func toggleAllDevices() { selectedDeviceIDs = allDevicesButton.state == .on ? Set(devices.map(\.id)) : []; tableView.reloadData(); updateSelectionSummary(); onSelectionChanged?(selectedDeviceIDs) }
     @objc private func addDevice() { onAddDevice?() }
     @objc private func pairMobile() { onPairMobile?() }
 

@@ -1,8 +1,507 @@
+import AppKit
+import CorralContracts
+import CorralMetalTerminal
+import CorralProtocol
+import CorralServices
+import CorralUI
 import XCTest
 @testable import CorralApp
 
-final class AppModuleImportTests: XCTestCase {
-    func testDevelopmentIdentity() {
-        XCTAssertEqual(CorralAppIdentity.bundleIdentifier, "com.corral.native.dev")
+@MainActor
+final class CorralApplicationCoordinatorTests: XCTestCase {
+    func testUnconfiguredCoordinatorDoesNotConnect() async throws {
+        let link = RecordingSessionLink()
+        let atlas = GlyphAtlasPool.shared
+        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [:])
+
+        await coordinator.start()
+
+        XCTAssertFalse(coordinator.connected)
+        let connectCount = await link.connectCount()
+        XCTAssertEqual(connectCount, 0)
+        let preferences = UserPreferences(theme: .light, fontFamily: "Menlo, monospace", fontSize: 16, followDirectory: true, sidebarCollapsed: true)
+        try await coordinator.updateUserPreferences(preferences)
+        XCTAssertEqual(coordinator.userPreferences, preferences)
+        let persistedPreferences = await coordinator.userPreferencesStore.snapshot()
+        XCTAssertEqual(persistedPreferences, preferences)
+        XCTAssertTrue(coordinator.workspaceView.sidebar.isHidden)
+        await coordinator.stop()
+    }
+
+    func testWorkspaceChromeActionsPersistThroughCoordinator() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [:])
+        await coordinator.start()
+
+        coordinator.workspaceView.onCreateTab?()
+        let created = await waitUntil { coordinator.workspaceState.tabs.count == 2 }
+        XCTAssertTrue(created)
+        let newTabID = coordinator.workspaceState.activeTabID
+        coordinator.workspaceView.tabBar.onRenameTab?(newTabID, "Review")
+        let renamed = await waitUntil { coordinator.workspaceState.tabs.first(where: { $0.id == newTabID })?.title == "Review" }
+        XCTAssertTrue(renamed)
+        coordinator.workspaceView.tabBar.onCloseTab?(newTabID)
+        let closed = await waitUntil { coordinator.workspaceState.tabs.count == 1 }
+        XCTAssertTrue(closed)
+
+        coordinator.workspaceView.tabBar.sidebarToggleButton.performClick(nil)
+        let collapsed = await waitUntil { await coordinator.userPreferencesStore.snapshot().sidebarCollapsed }
+        XCTAssertTrue(collapsed)
+        XCTAssertTrue(coordinator.workspaceView.isSidebarCollapsed)
+        await coordinator.stop()
+    }
+
+    func testTelemetryReceiptRefreshesPeriodicallyWithoutConnecting() async throws {
+        let link = RecordingSessionLink()
+        let atlas = GlyphAtlasPool.shared
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-periodic-\(UUID().uuidString).json")
+        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: ["CORRAL_NATIVE_TELEMETRY_OUT": url.path])
+
+        await coordinator.start()
+        let initial = try Data(contentsOf: url)
+        let initialDate = try XCTUnwrap((try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date)
+        try await Task.sleep(for: .milliseconds(650))
+        let refreshed = try Data(contentsOf: url)
+        let refreshedDate = try XCTUnwrap((try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date)
+
+        XCTAssertFalse(initial.isEmpty)
+        XCTAssertFalse(refreshed.isEmpty)
+        XCTAssertGreaterThan(refreshedDate, initialDate)
+        XCTAssertFalse(try JSONDecoder().decode(CorralApplicationTelemetry.self, from: refreshed).connected)
+        await coordinator.stop()
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func testProductionPortIsRejectedBeforeConnecting() async throws {
+        let link = RecordingSessionLink()
+        let atlas = GlyphAtlasPool.shared
+        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9900/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token"
+        ])
+
+        await coordinator.start()
+
+        XCTAssertFalse(coordinator.connected)
+        let connectCount = await link.connectCount()
+        XCTAssertEqual(connectCount, 0)
+        XCTAssertTrue(coordinator.lastConnectionError?.contains("productionEndpointForbidden") == true)
+        await coordinator.stop()
+    }
+
+    func testGoldenFramesDriveThreeRealMetalPanesAndInputRouting() async throws {
+        let fixture = try GoldenFrameFixture.load()
+        let codec = ProtocolV1Codec()
+        let goldenSnapshot = try codec.decodeBinaryFrame(fixture.snapshot)
+        guard case let .snapshot(goldenReference, ansi) = goldenSnapshot else {
+            return XCTFail("golden fixture must contain a SNAPSHOT frame")
+        }
+        let goldenDelta = try codec.decodeBinaryFrame(fixture.delta)
+        guard case .delta = goldenDelta else { return XCTFail("golden fixture must contain a DELTA frame") }
+
+        let references = [goldenReference, try SessionReference("fixture-pane-2"), try SessionReference("fixture-pane-3")]
+        let records = references.enumerated().map { index, reference in
+            WireSessionRecord(
+                reference: reference,
+                name: "Fixture \(index + 1)",
+                workingDirectory: "/fixture/workspace",
+                state: .idle,
+                rows: 24,
+                columns: 80
+            )
+        }
+        let link = RecordingSessionLink()
+        let atlas = GlyphAtlasPool.shared
+        let renderer = try SharedMetalTerminalRenderer(glyphAtlas: atlas)
+        let supportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-native-coordinator-store-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
+        let userPreferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
+        let fixtureDeviceID = DeviceID("corral-native-development-endpoint")
+        let workspaceSessionIDs = references.map {
+            SessionID("\(fixtureDeviceID.rawValue.utf8.count):\(fixtureDeviceID.rawValue)\($0.rawValue)")
+        }
+        _ = try await workspaceStore.smartOpenSession(workspaceSessionIDs[0], gesture: .doubleClick)
+        _ = try await workspaceStore.splitSession(workspaceSessionIDs[1], target: workspaceSessionIDs[0], edge: .right)
+        _ = try await workspaceStore.splitSession(workspaceSessionIDs[2], target: workspaceSessionIDs[0], edge: .bottom)
+        let initialWorkspaceState = await workspaceStore.snapshot()
+        let initialUserPreferences = await userPreferencesStore.snapshot()
+        let telemetryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-native-telemetry-\(UUID().uuidString).json")
+        let coordinator = CorralApplicationCoordinator(
+            deviceRepository: EmptyDeviceRepository(),
+            credentialVault: TestDeviceCredentialVault(),
+            sessionLink: link,
+            deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
+            renderer: renderer,
+            workspaceStore: workspaceStore,
+            userPreferencesStore: userPreferencesStore,
+            initialWorkspaceState: initialWorkspaceState,
+            initialUserPreferences: initialUserPreferences,
+            glyphAtlas: atlas,
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+                "CORRAL_NATIVE_BACKGROUND": "1",
+                "CORRAL_NATIVE_TELEMETRY_OUT": telemetryURL.path
+            ],
+            maximumVisiblePanes: 3
+        )
+        var createdSession: SessionKey?
+        var closedSession: SessionKey?
+        coordinator.onAgentCreated = { createdSession = $0 }
+        coordinator.onAgentClosed = { closedSession = $0 }
+        guard let window = coordinator.windowController.window else { return XCTFail("coordinator must own a real window") }
+        window.setFrame(NSRect(x: 40, y: 40, width: 1500, height: 1000), display: false)
+        window.orderBack(nil)
+        XCTAssertFalse(window.isKeyWindow)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        coordinator.stageView.configureStage(sizeInPoints: NSSize(width: 1200, height: 800), backingScale: 1)
+
+        await coordinator.start()
+        XCTAssertTrue(coordinator.backgroundMode)
+        let connectCount = await link.connectCount()
+        XCTAssertEqual(connectCount, 1)
+        let listSent = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
+        XCTAssertTrue(listSent)
+        let launcher = AgentLauncher(provider: "codex", displayName: "Codex", supportsBypass: true, naming: .cli)
+        try await link.emit(.control(.authAck(ok: true, reason: nil, launchers: [launcher])))
+        let launcherReceived = await waitUntil { coordinator.availableAgentLaunchers == [launcher] }
+        XCTAssertTrue(launcherReceived)
+
+        let listing = SessionListing(
+            requestID: 1,
+            sequence: 1,
+            workspaces: [WorkspaceRecord(
+                workingDirectory: "/fixture/workspace",
+                sessionCount: records.count,
+                aggregateState: .idle,
+                sessions: records
+            )]
+        )
+        try await link.emit(.control(.listing(listing)))
+        let subscribed = await waitUntil {
+            await link.commands().filter { if case .subscribe = $0 { true } else { false } }.count == 3
+        }
+        XCTAssertTrue(subscribed)
+        let selectedWorkspaceTab = try XCTUnwrap(coordinator.workspaceView.tabs.first(where: { $0.id == coordinator.workspaceState.activeTabID }))
+        XCTAssertEqual(selectedWorkspaceTab.contentView.subviews.compactMap { $0 as? SplitWorkspaceView }.first?.splitterCount, 2)
+
+        try await link.emit(.frame(goldenSnapshot))
+        for reference in references.dropFirst() {
+            let frame = try codec.encodeBinaryFrame(.snapshot(reference: reference, ansi: ansi))
+            try await link.emit(.frame(codec.decodeBinaryFrame(frame)))
+        }
+        try await link.emit(.frame(goldenDelta))
+
+        let rendered = await waitUntil {
+            coordinator.telemetry.renderedPaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 45
+        }
+        XCTAssertTrue(rendered)
+        let submitted = await waitUntil { coordinator.telemetry.metalSubmissionCount > 0 }
+        XCTAssertTrue(submitted)
+        XCTAssertGreaterThan(coordinator.telemetry.atlasPageCount, 0)
+
+        let paneKey = SessionKey(deviceID: fixtureDeviceID, reference: references[1])
+        let commandsBeforeSwitch = await link.commands()
+        let subscribedBeforeSwitch = commandsBeforeSwitch.filter { if case .subscribe = $0 { true } else { false } }.count
+        let resizeBeforeSwitch = commandsBeforeSwitch.filter { if case .resize = $0 { true } else { false } }.count
+        let targetSidebarID = try XCTUnwrap(
+            coordinator.workspaceView.sidebar.devices.flatMap(\.sessions).first(where: { $0.name == "Fixture 2" })?.id
+        )
+        coordinator.selectSidebarSession(id: targetSidebarID)
+        XCTAssertEqual(coordinator.stageView.activeInputSession, paneKey)
+        let commandsAfterSwitch = await link.commands()
+        XCTAssertEqual(commandsAfterSwitch.filter { if case .subscribe = $0 { true } else { false } }.count, subscribedBeforeSwitch)
+        XCTAssertEqual(commandsAfterSwitch.filter { if case .resize = $0 { true } else { false } }.count, resizeBeforeSwitch)
+
+        let inputView = try XCTUnwrap(coordinator.stageView.inputView(for: paneKey))
+        inputView.insertText("typed", replacementRange: NSRange(location: NSNotFound, length: 0))
+        let inputSent = await waitUntil {
+            await link.commands().contains { command in
+                guard case let .input(request) = command else { return false }
+                return request.reference == paneKey.reference && request.payload == .text("typed", attachmentPath: nil)
+            }
+        }
+        XCTAssertTrue(inputSent)
+        let userInputCount = await link.commands().filter { if case .input = $0 { true } else { false } }.count
+        try await link.emit(.frame(.delta(reference: references[0], ansi: Data("\u{1b}[5n".utf8))))
+        let localReplyProduced = await waitUntil { coordinator.discardedAutoReplyByteCount > 0 }
+        XCTAssertTrue(localReplyProduced)
+        let inputCountAfterTerminalReply = await link.commands().filter { if case .input = $0 { true } else { false } }.count
+        XCTAssertEqual(inputCountAfterTerminalReply, userInputCount)
+        let stillPresented = await waitUntil {
+            coordinator.telemetry.renderedPaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 45
+        }
+        XCTAssertTrue(stillPresented)
+
+        await coordinator.flushTelemetry()
+        let receiptData = try Data(contentsOf: telemetryURL)
+        let receipt = try JSONDecoder().decode(CorralApplicationTelemetry.self, from: receiptData)
+        XCTAssertEqual(receipt.pid, ProcessInfo.processInfo.processIdentifier)
+        XCTAssertTrue(receipt.connected)
+        XCTAssertEqual(receipt.sessionCount, 3)
+        XCTAssertEqual(receipt.subscribedSessionIDs.count, 3)
+        XCTAssertEqual(receipt.renderedPaneCount, 3)
+        XCTAssertGreaterThanOrEqual(receipt.nonEmptyLineCount, 45)
+        XCTAssertGreaterThan(receipt.metalSubmissionCount, 0)
+        XCTAssertGreaterThan(receipt.atlasPageCount, 0)
+        let idleSubmissionCount = coordinator.telemetry.metalSubmissionCount
+        try await Task.sleep(for: .milliseconds(650))
+        XCTAssertEqual(coordinator.telemetry.metalSubmissionCount, idleSubmissionCount)
+
+        let createRequestID = try await coordinator.createAgent(
+            workspace: "/fixture/workspace",
+            anchorReference: references[0],
+            provider: "codex",
+            name: "Created Agent",
+            bypass: true
+        )
+        let createCommand = ClientCommand.createAgent(CreateAgentRequest(
+            requestID: createRequestID,
+            workspace: "/fixture/workspace",
+            anchorReference: references[0],
+            provider: "codex",
+            name: "Created Agent",
+            bypass: true
+        ))
+        let commandsAfterCreate = await link.commands()
+        XCTAssertTrue(commandsAfterCreate.contains(createCommand))
+        try await link.emit(.control(.createAgentResult(CreateAgentResult(
+            requestID: createRequestID,
+            ok: true,
+            reference: try SessionReference("created-agent"),
+            name: "Created Agent",
+            naming: .cli
+        ))))
+        let createResultReceived = await waitUntil { coordinator.lastCreateAgentResult?.requestID == createRequestID }
+        XCTAssertTrue(createResultReceived)
+        XCTAssertEqual(coordinator.telemetry.sessionCount, records.count, "create ACK does not synthesize a client-side session")
+
+        let paneKeyToClose = SessionKey(deviceID: fixtureDeviceID, reference: references[2])
+        let closeRequestID = try await coordinator.closeAgent(paneKeyToClose)
+        let commandsAfterClose = await link.commands()
+        XCTAssertTrue(commandsAfterClose.contains(.closeSession(CloseSessionRequest(requestID: closeRequestID, reference: references[2]))))
+        try await link.emit(.control(.closeSessionResult(CloseSessionResult(requestID: closeRequestID, ok: true))))
+        let closeResultReceived = await waitUntil { coordinator.lastCloseSessionResult?.requestID == closeRequestID }
+        XCTAssertTrue(closeResultReceived)
+        XCTAssertEqual(coordinator.telemetry.sessionCount, records.count, "close ACK waits for authoritative listing removal")
+
+        let createdRecord = WireSessionRecord(reference: try SessionReference("created-agent"), name: "Created Agent", workingDirectory: "/fixture/workspace", state: .working, rows: 24, columns: 80, provider: "codex", activity: "working", health: "normal")
+        let refreshedListing = SessionListing(requestID: 1, sequence: 2, workspaces: [WorkspaceRecord(
+            workingDirectory: "/fixture/workspace",
+            sessionCount: records.count,
+            aggregateState: .idle,
+            sessions: Array(records.dropLast()) + [createdRecord]
+        )])
+        try await link.emit(.control(.listing(refreshedListing)))
+        let staleSessionRemoved = await waitUntil(timeout: .seconds(2)) {
+            let commands = await link.commands()
+            return coordinator.telemetry.sessionCount == records.count &&
+                coordinator.telemetry.subscribedSessionIDs.count == records.count &&
+                createdSession?.reference == (try? SessionReference("created-agent")) &&
+                closedSession == paneKeyToClose &&
+                commands.contains(.unsubscribe(reference: references[2]))
+        }
+        XCTAssertTrue(staleSessionRemoved)
+        XCTAssertEqual(createdSession?.reference, try SessionReference("created-agent"))
+        XCTAssertEqual(closedSession, paneKeyToClose)
+        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 3, removedReferences: [references[1]]))))
+        let deltaRemovalApplied = await waitUntil {
+            let commands = await link.commands()
+            return coordinator.telemetry.sessionCount == records.count - 1 &&
+                coordinator.telemetry.subscribedSessionIDs.count == records.count - 1 &&
+                coordinator.stageView.activeInputSession?.reference == (try? SessionReference("created-agent")) &&
+                commands.contains(.unsubscribe(reference: references[1]))
+        }
+        XCTAssertTrue(deltaRemovalApplied)
+        XCTAssertEqual(coordinator.stageView.activeInputSession?.reference, try SessionReference("created-agent"))
+        let remoteCloseCountBeforePresentationClose = await link.commands().filter { if case .closeSession = $0 { true } else { false } }.count
+        await coordinator.closeWorkspaceTab(id: coordinator.workspaceState.activeTabID)
+        await coordinator.closeWorkspacePane(workspaceSessionIDs[0])
+        let remoteCloseCountAfterPresentationClose = await link.commands().filter { if case .closeSession = $0 { true } else { false } }.count
+        XCTAssertEqual(remoteCloseCountAfterPresentationClose, remoteCloseCountBeforePresentationClose, "closing a tab or pane must not terminate an Agent")
+
+        await coordinator.stop()
+        window.close()
+        try? FileManager.default.removeItem(at: telemetryURL)
+    }
+
+    private func makeCoordinator(
+        link: RecordingSessionLink,
+        atlas: GlyphAtlasPool,
+        environment: [String: String]
+    ) async throws -> CorralApplicationCoordinator {
+        let supportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-native-coordinator-store-\(UUID().uuidString)", isDirectory: true)
+        let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
+        let userPreferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
+        return CorralApplicationCoordinator(
+            deviceRepository: EmptyDeviceRepository(),
+            credentialVault: TestDeviceCredentialVault(),
+            sessionLink: link,
+            deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
+            renderer: try SharedMetalTerminalRenderer(glyphAtlas: atlas),
+            workspaceStore: workspaceStore,
+            userPreferencesStore: userPreferencesStore,
+            initialWorkspaceState: await workspaceStore.snapshot(),
+            initialUserPreferences: await userPreferencesStore.snapshot(),
+            glyphAtlas: atlas,
+            environment: environment
+        )
+    }
+
+    private func waitUntil(
+        timeout: Duration = .seconds(8),
+        condition: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await condition()
+    }
+}
+
+private actor TestDeviceCredentialVault: DeviceCredentialVault {
+    private var secrets: [CredentialHandle: String] = [:]
+    func store(_ secret: String, for handle: CredentialHandle) async throws { secrets[handle] = secret }
+    func resolve(_ handle: CredentialHandle) async throws -> String? { secrets[handle] }
+    func delete(_ handle: CredentialHandle) async throws { secrets.removeValue(forKey: handle) }
+}
+
+private struct GoldenFrameFixture {
+    let snapshot: Data
+    let delta: Data
+
+    private struct Envelope: Decodable {
+        struct Frames: Decodable {
+            struct Frame: Decodable {
+                let rawHex: String
+                enum CodingKeys: String, CodingKey { case rawHex = "raw_hex" }
+            }
+            let snapshot: Frame
+            let delta: Frame
+        }
+        let frames: Frames
+    }
+
+    static func load() throws -> Self {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let fixtureURL = repositoryRoot.appendingPathComponent("TestSupport/Fixtures/golden-frames.json")
+        let envelope = try JSONDecoder().decode(Envelope.self, from: Data(contentsOf: fixtureURL))
+        return Self(
+            snapshot: try Data(hex: envelope.frames.snapshot.rawHex),
+            delta: try Data(hex: envelope.frames.delta.rawHex)
+        )
+    }
+}
+
+private extension Data {
+    init(hex: String) throws {
+        guard hex.count.isMultiple(of: 2) else { throw CocoaError(.fileReadCorruptFile) }
+        var data = Data()
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else { throw CocoaError(.fileReadCorruptFile) }
+            data.append(byte)
+            index = next
+        }
+        self = data
+    }
+}
+
+private actor EmptyDeviceRepository: DeviceRepositoryProtocol {
+    func listDevices() async throws -> [DeviceRecord] { [] }
+    func save(_ device: DeviceRecord) async throws {}
+    func delete(id: DeviceID) async throws {}
+}
+
+private actor RecordingSessionLink: SessionLinkProtocol {
+    private let stream = RecordingEventStream()
+    private var authenticated: AuthenticatedConnection?
+    private var commandsSent: [ClientCommand] = []
+    private var connectCalls = 0
+    private var ordinal: UInt64 = 0
+
+    func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
+        connectCalls += 1
+        let connection = try AuthenticatedConnection(
+            linkInstanceID: LinkInstanceID(),
+            deviceID: deviceID,
+            connectionEpoch: ConnectionEpoch(1)
+        )
+        authenticated = connection
+        return connection
+    }
+
+    func eventStream() async throws -> any SessionEventStream { stream }
+
+    func send(_ command: ClientCommand) async throws -> CommandSendReceipt {
+        commandsSent.append(command)
+        let requestID: UInt32? = switch command {
+        case let .list(requestID): requestID
+        case let .input(request): request.sequence
+        case let .createAgent(request): request.requestID
+        case let .closeSession(request): request.requestID
+        default: nil
+        }
+        return CommandSendReceipt(requestID: requestID, socketWritten: true)
+    }
+
+    func disconnect() async {
+        authenticated = nil
+        await stream.finish()
+    }
+    func connectCount() -> Int { connectCalls }
+    func commands() -> [ClientCommand] { commandsSent }
+
+    func emit(_ event: SessionEvent) async throws {
+        guard let authenticated else { throw SessionLinkFailure.disconnected }
+        ordinal += 1
+        let origin = SessionEventOrigin(
+            linkInstanceID: authenticated.linkInstanceID,
+            deviceID: authenticated.deviceID,
+            connectionEpoch: authenticated.connectionEpoch,
+            receiveOrdinal: ReceiveOrdinal(ordinal)
+        )
+        await stream.yield(try SessionEventEnvelope(origin: origin, wireByteCount: 0, event: event))
+    }
+}
+
+private actor RecordingEventStream: SessionEventStream {
+    private var queued: [SessionEventEnvelope] = []
+    private var waiter: CheckedContinuation<SessionEventEnvelope?, Never>?
+    private var finished = false
+
+    var budget: SessionEventStreamBudget {
+        get async { SessionEventStreamBudget(maximumBufferedBytes: 1_000_000, maximumBufferedEvents: 128, maximumBufferedControls: 32) }
+    }
+
+    func next() async throws -> SessionEventEnvelope? {
+        if !queued.isEmpty { return queued.removeFirst() }
+        if finished { return nil }
+        return await withCheckedContinuation { waiter = $0 }
+    }
+
+    func yield(_ event: SessionEventEnvelope) {
+        if let waiter {
+            self.waiter = nil
+            waiter.resume(returning: event)
+        } else if !finished {
+            queued.append(event)
+        }
+    }
+
+    func finish() {
+        finished = true
+        waiter?.resume(returning: nil)
+        waiter = nil
     }
 }

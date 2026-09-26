@@ -624,6 +624,10 @@ public final class CorralSidebarView: NSView {
         refreshVisibleAgents(); updateSpaceCounts(); updateSectionHeaders()
     }
     public func setSpacesExpanded(_ expanded: Bool) { spacesExpanded = expanded; spacesScroll.isHidden = !expanded; updateSectionHeaders() }
+    public func selectSpace(id: UUID) {
+        guard let space = spaces.first(where: { $0.id == id }) else { return }
+        selectSpace(space)
+    }
     public func setAgentsExpanded(_ expanded: Bool) { agentsExpanded = expanded; agentsScroll.isHidden = !expanded; updateSectionHeaders() }
     public func refreshTheme() {
         layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
@@ -768,11 +772,28 @@ public final class SplitWorkspaceView: NSView, NSSplitViewDelegate {
     public private(set) var focusedSessionID: SessionID?
     private var splitViews: [NSSplitView] = []
     private var splitPaths: [ObjectIdentifier: [Int]] = [:]
+    private var initialRatios: [ObjectIdentifier: Double] = [:]
+    private var latestRatios: [ObjectIdentifier: Double] = [:]
 
     public init(root: WorkspaceLayoutNode?, stageViews: [SessionID: NSView]) {
         self.root = root; self.stageViews = stageViews
-        super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.background.cgColor
+        super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = NSColor.clear.cgColor
         rebuild()
+    }
+    public override var isOpaque: Bool { false }
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        for split in splitViews {
+            guard let first = split.arrangedSubviews.first else { continue }
+            let local = split.convert(point, from: self)
+            let divider = split.isVertical ? first.frame.maxX : first.frame.maxY
+            let position = split.isVertical ? local.x : local.y
+            let crossAxis = split.isVertical ? local.y : local.x
+            let crossExtent = split.isVertical ? split.bounds.height : split.bounds.width
+            if crossAxis >= 0, crossAxis <= crossExtent, abs(position - divider) <= max(5, split.dividerThickness) {
+                return split
+            }
+        }
+        return nil
     }
     public required init?(coder: NSCoder) { fatalError("SplitWorkspaceView is created programmatically") }
     public func updateRoot(_ root: WorkspaceLayoutNode?) { self.root = root; rebuild() }
@@ -792,14 +813,22 @@ public final class SplitWorkspaceView: NSView, NSSplitViewDelegate {
         let divider = split.dividerThickness
         let usable = max(1, extent - divider)
         let ratio = Double((split.isVertical ? split.arrangedSubviews[0].frame.width : split.arrangedSubviews[0].frame.height) / usable)
-        onRatioChange?(splitPaths[ObjectIdentifier(split)] ?? [], min(0.95, max(0.05, ratio)))
+        latestRatios[ObjectIdentifier(split)] = min(0.95, max(0.05, ratio))
     }
     private func build(_ node: WorkspaceLayoutNode, path: [Int] = []) -> NSView {
         switch node {
         case .session(let id): return stageViews[id] ?? NSView()
         case .split(let direction, let ratio, let first, let second):
             let split = CorralNativeSplitView(); split.isVertical = direction == .horizontal; split.dividerStyle = .thin; split.delegate = self; splitViews.append(split)
-            splitPaths[ObjectIdentifier(split)] = path
+            let splitID = ObjectIdentifier(split)
+            splitPaths[splitID] = path
+            initialRatios[splitID] = ratio
+            split.onResizeFinished = { [weak self, weak split] in
+                guard let self, let split else { return }
+                let id = ObjectIdentifier(split)
+                guard let ratio = self.latestRatios[id], abs(ratio - (self.initialRatios[id] ?? ratio)) >= 0.0001 else { return }
+                self.onRatioChange?(self.splitPaths[id] ?? [], ratio)
+            }
             split.addArrangedSubview(build(first, path: path + [0])); split.addArrangedSubview(build(second, path: path + [1])); splitterCount += 1
             DispatchQueue.main.async { [weak split] in guard let split else { return }; let extent = split.isVertical ? split.bounds.width : split.bounds.height; let usable = extent - split.dividerThickness; if usable > 0 { split.setPosition(usable * CGFloat(ratio), ofDividerAt: 0) } }
             return split
@@ -821,7 +850,7 @@ public final class SplitWorkspaceView: NSView, NSSplitViewDelegate {
         }
     }
     private func rebuild() {
-        subviews.forEach { $0.removeFromSuperview() }; splitViews.removeAll(); splitPaths.removeAll(); splitterCount = 0
+        subviews.forEach { $0.removeFromSuperview() }; splitViews.removeAll(); splitPaths.removeAll(); initialRatios.removeAll(); latestRatios.removeAll(); splitterCount = 0
         guard let root else { return }
         let content = build(root); content.translatesAutoresizingMaskIntoConstraints = false; addSubview(content)
         if let focusedSessionID { focus(focusedSessionID) }
@@ -831,8 +860,13 @@ public final class SplitWorkspaceView: NSView, NSSplitViewDelegate {
 
 @MainActor
 private final class CorralNativeSplitView: NSSplitView {
+    var onResizeFinished: (() -> Void)?
     override var dividerThickness: CGFloat { 6 }
     override func drawDivider(in rect: NSRect) { CorralAestheticTokens.borderSubtle.setFill(); NSBezierPath(rect: rect).fill() }
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onResizeFinished?()
+    }
 }
 
 @MainActor
@@ -889,6 +923,7 @@ public final class CorralWorkspaceView: NSView {
     public var onCreateTab: (() -> Void)?
     public var onSettings: (() -> Void)?
     public var onCreateAgent: ((UUID?) -> Void)?
+    public var onToggleSidebar: (() -> Void)?
     public var onSelectAgent: ((UUID) -> Void)?
     public var onSplit: ((UUID, SplitDropZoneView.Edge) -> Void)?
     public var onDropTab: ((UUID, UUID?, SplitDropZoneView.Edge) -> Void)?
@@ -897,6 +932,7 @@ public final class CorralWorkspaceView: NSView {
     public var onDevices: (() -> Void)?
     public var onTabContextAction: ((UUID, String) -> Void)?
     public private(set) var previewSessionID: UUID?
+    public var isSidebarCollapsed: Bool { !sidebarIsVisible }
     public static let sidebarWidth: CGFloat = 280
     public static let headerHeight: CGFloat = 38
     private var sidebarColumnWidth: NSLayoutConstraint!
@@ -906,12 +942,21 @@ public final class CorralWorkspaceView: NSView {
         self.sidebar = sidebar
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.background.cgColor
-        let left = NSStackView(views: [titleBar, sidebar]); left.orientation = .vertical; left.alignment = .width; left.distribution = .fill; left.spacing = 0; left.translatesAutoresizingMaskIntoConstraints = false
-        let right = NSStackView(views: [tabBar, stageContainer]); right.orientation = .vertical; right.alignment = .width; right.distribution = .fill; right.spacing = 0; right.translatesAutoresizingMaskIntoConstraints = false
-        let root = NSStackView(views: [left, right]); root.orientation = .horizontal; root.alignment = .height; root.distribution = .fill; root.spacing = 0; root.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(root)
-        sidebarColumnWidth = left.widthAnchor.constraint(equalToConstant: Self.sidebarWidth); sidebarColumnWidth.isActive = true
-        NSLayoutConstraint.activate([titleBar.widthAnchor.constraint(equalTo: left.widthAnchor), sidebar.widthAnchor.constraint(equalTo: left.widthAnchor), titleBar.heightAnchor.constraint(equalToConstant: Self.headerHeight), tabBar.heightAnchor.constraint(equalToConstant: Self.headerHeight), root.leadingAnchor.constraint(equalTo: leadingAnchor), root.trailingAnchor.constraint(equalTo: trailingAnchor), root.topAnchor.constraint(equalTo: topAnchor), root.bottomAnchor.constraint(equalTo: bottomAnchor)])
+        let left = NSView(); left.translatesAutoresizingMaskIntoConstraints = false
+        let right = NSView(); right.translatesAutoresizingMaskIntoConstraints = false
+        for view in [left, right] { addSubview(view) }
+        for view in [titleBar, sidebar] { view.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(view) }
+        for view in [tabBar, stageContainer] { view.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(view) }
+        sidebarColumnWidth = left.widthAnchor.constraint(equalToConstant: Self.sidebarWidth)
+        NSLayoutConstraint.activate([
+            sidebarColumnWidth,
+            left.leadingAnchor.constraint(equalTo: leadingAnchor), left.topAnchor.constraint(equalTo: topAnchor), left.bottomAnchor.constraint(equalTo: bottomAnchor),
+            right.leadingAnchor.constraint(equalTo: left.trailingAnchor), right.trailingAnchor.constraint(equalTo: trailingAnchor), right.topAnchor.constraint(equalTo: topAnchor), right.bottomAnchor.constraint(equalTo: bottomAnchor),
+            titleBar.leadingAnchor.constraint(equalTo: left.leadingAnchor), titleBar.trailingAnchor.constraint(equalTo: left.trailingAnchor), titleBar.topAnchor.constraint(equalTo: left.topAnchor), titleBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            sidebar.leadingAnchor.constraint(equalTo: left.leadingAnchor), sidebar.trailingAnchor.constraint(equalTo: left.trailingAnchor), sidebar.topAnchor.constraint(equalTo: titleBar.bottomAnchor), sidebar.bottomAnchor.constraint(equalTo: left.bottomAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: right.leadingAnchor), tabBar.trailingAnchor.constraint(equalTo: right.trailingAnchor), tabBar.topAnchor.constraint(equalTo: right.topAnchor), tabBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            stageContainer.leadingAnchor.constraint(equalTo: right.leadingAnchor), stageContainer.trailingAnchor.constraint(equalTo: right.trailingAnchor), stageContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor), stageContainer.bottomAnchor.constraint(equalTo: right.bottomAnchor)
+        ])
         titleBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }; titleBar.onCreate = { [weak self] in self?.onCreateAgent?(nil) }
         tabBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }; tabBar.onSettings = { [weak self] in self?.onSettings?() }; tabBar.onDevices = { [weak self] in self?.onDevices?() }
         tabBar.onSplit = { [weak self] in if let id = self?.activeTabID { self?.onSplit?(id, .right) } }
@@ -929,6 +974,26 @@ public final class CorralWorkspaceView: NSView {
     }
     public required init?(coder: NSCoder) { fatalError("CorralWorkspaceView is created programmatically") }
     public func addTab(_ tab: CorralTab, select: Bool = true) { guard !tabs.contains(where: { $0.id == tab.id }) else { return }; attach(tab); tabs.append(tab); stageContainer.showEmptyState(false, action: nil); tabBar.setTabs(tabs, selectedTabID: activeTabID); if select || activeTabID == nil { selectTab(id: tab.id) } }
+    public func synchronizeWorkspaceTabs(_ tabs: [CorralTab], selectedTabID: UUID, previewSessionID: UUID?) {
+        let ordered = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
+        let ids = Set(ordered.map(\.id))
+        for tab in self.tabs where !ids.contains(tab.id) { tab.contentView.removeFromSuperview() }
+        for tab in ordered where !self.tabs.contains(where: { $0.id == tab.id }) { attach(tab) }
+        self.tabs = ordered
+        activeTabID = selectedTabID
+        self.previewSessionID = previewSessionID
+        stageContainer.activeTabID = selectedTabID
+        for tab in ordered { tab.contentView.isHidden = tab.id != selectedTabID }
+        tabBar.setTabs(ordered, selectedTabID: selectedTabID)
+    }
+    public func setSidebarCollapsed(_ collapsed: Bool) {
+        let isVisible = !collapsed
+        guard sidebarIsVisible != isVisible else { return }
+        sidebarIsVisible = isVisible
+        sidebarColumnWidth.constant = isVisible ? Self.sidebarWidth : 0
+        titleBar.isHidden = !isVisible
+        sidebar.isHidden = !isVisible
+    }
     public func selectTab(id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         tabSwitchTelemetry.beginSwitch(); defer { tabSwitchTelemetry.endSwitch() }
@@ -1001,10 +1066,13 @@ public final class CorralWorkspaceView: NSView {
         onCreateTab?()
         return true
     }
-    private func toggleSidebar() { sidebarIsVisible.toggle(); sidebarColumnWidth.constant = sidebarIsVisible ? Self.sidebarWidth : 0; titleBar.isHidden = !sidebarIsVisible; sidebar.isHidden = !sidebarIsVisible }
+    private func toggleSidebar() {
+        setSidebarCollapsed(sidebarIsVisible)
+        onToggleSidebar?()
+    }
     private func handleDrop(_ id: UUID, edge: SplitDropZoneView.Edge) {
         guard let activeTabID, activeTabID != id else { return }
-        if edge == .center { selectTab(id: id) } else { onDropTab?(id, activeTabID, edge); onSplit?(id, edge) }
+        if edge == .center { tabBar.onSelectTab?(id) } else { onDropTab?(id, activeTabID, edge); onSplit?(id, edge) }
     }
     private func attach(_ tab: CorralTab) {
         let view = tab.contentView; view.translatesAutoresizingMaskIntoConstraints = false; view.isHidden = true; stageContainer.addSubview(view)
