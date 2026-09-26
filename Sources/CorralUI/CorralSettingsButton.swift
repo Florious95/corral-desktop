@@ -15,8 +15,10 @@ public final class CorralSettingsButton: NSButton {
         fatalError("CorralSettingsButton is created programmatically")
     }
 
+    public func refreshTheme() { configure() }
+
     private func configure() {
-        image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        image = CorralLegacyIcon.image(.gear, size: 16, tint: CorralAestheticTokens.text)
         imagePosition = .imageOnly
         imageScaling = .scaleProportionallyDown
         isBordered = false

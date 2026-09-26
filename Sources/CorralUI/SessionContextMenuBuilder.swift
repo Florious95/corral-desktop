@@ -4,25 +4,28 @@ import AppKit
 public final class SessionContextMenuController: NSObject {
     public let sessionID: UUID
     public let menu: NSMenu
-
-    private let rename: (UUID) -> Void
+    private let favorite: (UUID, Bool) -> Void
     private let close: (UUID) -> Void
+    private let isFavorite: Bool
 
-    public init(sessionID: UUID, onRename: @escaping (UUID) -> Void, onClose: @escaping (UUID) -> Void) {
+    public init(sessionID: UUID, isFavorite: Bool, onFavorite: @escaping (UUID, Bool) -> Void, onClose: @escaping (UUID) -> Void) {
         self.sessionID = sessionID
-        self.rename = onRename
-        self.close = onClose
-        self.menu = NSMenu(title: "Session")
+        self.isFavorite = isFavorite
+        favorite = onFavorite
+        close = onClose
+        menu = NSMenu(title: "Agent")
         super.init()
-
         menu.autoenablesItems = false
-        let renameItem = menu.addItem(withTitle: "Rename Session…", action: #selector(renameSession), keyEquivalent: "")
-        renameItem.target = self
-        let closeItem = menu.addItem(withTitle: "Close Session", action: #selector(closeSession), keyEquivalent: "")
+        let favoriteItem = menu.addItem(withTitle: isFavorite ? "取消收藏" : "收藏", action: #selector(toggleFavorite), keyEquivalent: "")
+        favoriteItem.target = self
+        favoriteItem.image = CorralLegacyIcon.image(isFavorite ? .star : .starOutline, size: 15)
+        menu.addItem(.separator())
+        let closeItem = menu.addItem(withTitle: "关闭", action: #selector(closeSession), keyEquivalent: "")
         closeItem.target = self
+        closeItem.image = CorralLegacyIcon.image(.trash, size: 15)
     }
 
-    @objc private func renameSession() { rename(sessionID) }
+    @objc private func toggleFavorite() { favorite(sessionID, !isFavorite) }
     @objc private func closeSession() { close(sessionID) }
 }
 
@@ -30,9 +33,10 @@ public final class SessionContextMenuController: NSObject {
 public enum SessionContextMenuBuilder {
     public static func makeMenu(
         for sessionID: UUID,
-        onRename: @escaping (UUID) -> Void,
+        isFavorite: Bool = false,
+        onFavorite: @escaping (UUID, Bool) -> Void,
         onClose: @escaping (UUID) -> Void
     ) -> SessionContextMenuController {
-        SessionContextMenuController(sessionID: sessionID, onRename: onRename, onClose: onClose)
+        SessionContextMenuController(sessionID: sessionID, isFavorite: isFavorite, onFavorite: onFavorite, onClose: onClose)
     }
 }
