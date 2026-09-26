@@ -101,7 +101,7 @@ public final class CorralTabBarView: NSView {
         expandSidebarButton.imageScaling = .scaleProportionallyDown
         expandSidebarButton.contentTintColor = CorralAestheticTokens.icon
         expandSidebarButton.toolTip = "展开侧栏"
-        expandSidebarButton.setAccessibilityLabel("展开侧栏")
+        expandSidebarButton.setAccessibilityLabel("展开侧栏"); expandSidebarButton.setAccessibilityIdentifier("corral.sidebar.expand")
         expandSidebarButton.target = self; expandSidebarButton.action = #selector(toggleSidebar)
         expandSidebarButton.isHidden = true
 
@@ -112,7 +112,7 @@ public final class CorralTabBarView: NSView {
         createButton.imageScaling = .scaleProportionallyDown
         createButton.contentTintColor = CorralAestheticTokens.icon
         createButton.toolTip = "新建工作台标签页 (⌘T)"
-        createButton.setAccessibilityLabel("新建工作台标签页")
+        createButton.setAccessibilityLabel("新建工作台标签页"); createButton.setAccessibilityIdentifier("corral.tab.new")
         createButton.target = self; createButton.action = #selector(createTab)
         createButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([createButton.widthAnchor.constraint(equalToConstant: 26), createButton.heightAnchor.constraint(equalToConstant: 26)])
@@ -253,7 +253,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         closeButton.isBordered = false
         closeButton.contentTintColor = CorralAestheticTokens.textMuted
         closeButton.toolTip = "关闭工作台"
-        closeButton.setAccessibilityLabel("关闭工作台")
+        closeButton.setAccessibilityLabel("关闭工作台"); closeButton.setAccessibilityIdentifier("corral.tab.close")
         closeButton.target = self
         closeButton.action = #selector(closeTab)
         closeButton.alphaValue = selected ? 0.7 : 0
@@ -294,8 +294,16 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
             ])
         }
         toolTip = tab.title
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(tab.title)
+        setAccessibilityIdentifier("corral.tab")
+        setAccessibilitySelected(selected)
         registerForDraggedTypes([.string])
     }
+    override func accessibilityPerformPress() -> Bool { owner?.select(tab.id); return true }
+    override func accessibilityPerformShowMenu() -> Bool { makeContextMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self); return true }
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { CorralAccessibilityMenuActions.actions(for: makeContextMenu()) }
 
     required init?(coder: NSCoder) { nil }
     override func mouseDown(with event: NSEvent) {
@@ -332,7 +340,8 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         closeButton.alphaValue = selected ? 0.7 : 0
         if !selected { layer?.backgroundColor = NSColor.clear.cgColor; title.textColor = CorralAestheticTokens.textSecondary }
     }
-    override func rightMouseDown(with event: NSEvent) {
+    override func rightMouseDown(with event: NSEvent) { NSMenu.popUpContextMenu(makeContextMenu(), with: event, for: self) }
+    private func makeContextMenu() -> NSMenu {
         let menu = NSMenu(title: tab.title)
         addMenuItem(menu, title: "适应当前窗口", action: "reflow")
         if tab.isCustomTitle { addMenuItem(menu, title: "恢复自动标题", action: "resetTitle") }
@@ -342,7 +351,8 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         let unpinnedCount = owner?.tabs.filter { !$0.isPinned }.count ?? 0
         let others = addMenuItem(menu, title: "关闭其他工作台", action: "closeOthers"); others.isEnabled = unpinnedCount > 1 && !tab.isPinned
         let right = addMenuItem(menu, title: "关闭右侧所有工作台", action: "closeRight"); right.isEnabled = (owner?.tabs.firstIndex(where: { $0.id == tab.id }) ?? 0) < (owner?.tabs.count ?? 1) - 1
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
+        menu.autoenablesItems = false
+        return menu
     }
     @discardableResult
     private func addMenuItem(_ menu: NSMenu, title: String, action: String) -> NSMenuItem {
@@ -434,6 +444,29 @@ public final class CorralSidebarDevice: Identifiable, Sendable {
     public let sessions: [CorralSidebarSession]
     public let isOnline: Bool
     public init(id: UUID = UUID(), name: String, sessions: [CorralSidebarSession] = [], isOnline: Bool = false) { self.id = id; self.name = name; self.sessions = sessions; self.isOnline = isOnline }
+}
+
+/// Maps enabled context-menu items to AX custom actions so headless automation never needs a modal menu.
+@MainActor
+enum CorralAccessibilityMenuActions {
+    static func actions(for menu: NSMenu?) -> [NSAccessibilityCustomAction]? {
+        menu?.items.filter { !$0.isSeparatorItem && $0.isEnabled && $0.action != nil }.map { item in
+            NSAccessibilityCustomAction(name: item.title) { NSApp.sendAction(item.action!, to: item.target, from: item) }
+        }
+    }
+}
+
+/// Sidebar row content: an AX button whose press opens/selects the row and whose custom actions mirror its menu.
+@MainActor
+final class CorralSidebarCellView: NSTableCellView {
+    var onPress: (() -> Void)?
+    var menuProvider: (() -> NSMenu?)?
+    override func accessibilityPerformPress() -> Bool { onPress?(); return onPress != nil }
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let menu = menuProvider?() else { return false }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self); return true
+    }
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { CorralAccessibilityMenuActions.actions(for: menuProvider?()) }
 }
 
 /// Draws `.spaces-row` / `.agents-row` backgrounds: list padding 10px, agents add a 2px transparent border.
@@ -539,7 +572,20 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
         return rowView
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = NSTableCellView()
+        let cell = CorralSidebarCellView()
+        cell.setAccessibilityElement(true)
+        cell.setAccessibilityRole(.button)
+        if kind == .spaces, spaces.indices.contains(row) {
+            let space = spaces[row]
+            cell.setAccessibilityIdentifier("corral.sidebar.space"); cell.setAccessibilityLabel(space.name)
+            cell.onPress = { [weak self] in self?.sidebar?.selectSpace(id: space.id) }
+            cell.menuProvider = { [weak self] in self?.sidebar?.spaceContextMenu(for: space.id) }
+        } else if agents.indices.contains(row) {
+            let agent = agents[row]
+            cell.setAccessibilityIdentifier("corral.sidebar.agent"); cell.setAccessibilityLabel(agent.name)
+            cell.onPress = { [weak self] in self?.sidebar?.onSelectAgent?(agent.id) }
+            cell.menuProvider = { [weak self] in self?.sidebar?.agentContextMenu(for: agent.id) }
+        }
         let rowStack = NSStackView()
         rowStack.orientation = .horizontal; rowStack.alignment = .centerY; rowStack.spacing = 10; rowStack.translatesAutoresizingMaskIntoConstraints = false
         let contentInset: CGFloat
@@ -662,9 +708,10 @@ public final class CorralSidebarView: NSView {
         let footer = NSView()
         footerBorder.wantsLayer = true; footerBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor; footerBorder.translatesAutoresizingMaskIntoConstraints = false
         devicesButton.target = self; devicesButton.action = #selector(toggleDevices); devicesButton.image = CorralLegacyIcon.image(.layers, size: 15, tint: CorralAestheticTokens.text); devicesButton.imagePosition = .imageLeading; devicesButton.imageHugsTitle = true
-        devicesButton.font = .systemFont(ofSize: 13, weight: .semibold); devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("设备管理"); devicesButton.translatesAutoresizingMaskIntoConstraints = false
+        devicesButton.font = .systemFont(ofSize: 13, weight: .semibold); devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("设备管理"); devicesButton.setAccessibilityIdentifier("corral.sidebar.devices"); devicesButton.translatesAutoresizingMaskIntoConstraints = false
         footerStatus.font = .systemFont(ofSize: 11); footerStatus.textColor = CorralAestheticTokens.textMuted; footerStatus.translatesAutoresizingMaskIntoConstraints = false
         footerStatusDot.wantsLayer = true; footerStatusDot.layer?.cornerRadius = 3.5; footerStatusDot.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton.setAccessibilityIdentifier("corral.sidebar.settings")
         settingsButton.target = self; settingsButton.action = #selector(openSettings); settingsButton.translatesAutoresizingMaskIntoConstraints = false
         for view in [footerBorder, devicesButton, footerStatus, footerStatusDot, settingsButton] { footer.addSubview(view) }
         NSLayoutConstraint.activate([
@@ -699,13 +746,11 @@ public final class CorralSidebarView: NSView {
     public convenience init(devices: [CorralSidebarDevice]) { self.init(frame: .zero); setDevices(devices) }
     public func setSpaces(_ spaces: [CorralSidebarSpace]) {
         let workspaces = spaces.filter { $0.kind == .workspace && !$0.isVirtual }
-        let count = allAgents.count
-        let workingCount = allAgents.filter { $0.status == .working }.count
-        let favorites = allAgents.filter(\.isFavorite)
         self.spaces = [
-            CorralSidebarSpace(id: CorralSidebarSpace.allSpacesID, name: "All Spaces", workingCount: workingCount, agentCount: count, kind: .allSpaces),
-            CorralSidebarSpace(id: CorralSidebarSpace.favoritesID, name: "收藏", workingCount: favorites.filter { $0.status == .working }.count, agentCount: favorites.count, kind: .favorites)
+            CorralSidebarSpace(id: CorralSidebarSpace.allSpacesID, name: "All Spaces", kind: .allSpaces),
+            CorralSidebarSpace(id: CorralSidebarSpace.favoritesID, name: "收藏", kind: .favorites)
         ] + workspaces
+        applyAgentCounts()
         spaceData.spaces = self.spaces
         if !self.spaces.contains(where: { $0.id == selectedSpaceID }) { selectedSpaceID = CorralSidebarSpace.allSpacesID }
         spacesTable.reloadData()
@@ -787,13 +832,21 @@ public final class CorralSidebarView: NSView {
         }.map(\.element)
         agentData.agents = agents; agentsTable.reloadData()
     }
+    /// Every row's `working / total` is derived from the agents themselves, including real workspace rows.
+    private func applyAgentCounts() {
+        for index in spaces.indices {
+            let members: [CorralSidebarAgent] = switch spaces[index].kind {
+            case .allSpaces: allAgents
+            case .favorites: allAgents.filter(\.isFavorite)
+            case .workspace: allAgents.filter { $0.spaceID == spaces[index].id }
+            }
+            spaces[index].agentCount = members.count
+            spaces[index].workingCount = members.filter { $0.status == .working }.count
+        }
+    }
     private func updateSpaceCounts() {
         guard spaces.count >= 2 else { return }
-        spaces[0].agentCount = allAgents.count
-        spaces[0].workingCount = allAgents.filter { $0.status == .working }.count
-        let favorites = allAgents.filter(\.isFavorite)
-        spaces[1].agentCount = favorites.count
-        spaces[1].workingCount = favorites.filter { $0.status == .working }.count
+        applyAgentCounts()
         spaceData.spaces = spaces
         spacesTable.reloadData(forRowIndexes: IndexSet(integersIn: 0..<spaces.count), columnIndexes: IndexSet(integer: 0))
     }
@@ -1008,7 +1061,7 @@ public final class CorralSidebarTitleBarView: NSView {
         dragRegion.translatesAutoresizingMaskIntoConstraints = false; addSubview(dragRegion); addSubview(trafficLightsSpacer); addSubview(collapseButton); addSubview(bottomBorder)
         collapseButton.image = CorralLegacyIcon.image(.sidebar, size: 16)
         collapseButton.title = ""; collapseButton.imagePosition = .imageOnly; collapseButton.imageScaling = .scaleProportionallyDown; collapseButton.isBordered = false; collapseButton.contentTintColor = CorralAestheticTokens.icon; collapseButton.translatesAutoresizingMaskIntoConstraints = false
-        collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏")
+        collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏"); collapseButton.setAccessibilityIdentifier("corral.sidebar.toggle")
         NSLayoutConstraint.activate([
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
             collapseButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), collapseButton.centerYAnchor.constraint(equalTo: centerYAnchor), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 26),

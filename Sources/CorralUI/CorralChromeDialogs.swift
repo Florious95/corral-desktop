@@ -146,7 +146,10 @@ open class CorralDialogViewController: NSViewController {
     }
 
     public func stylePrimary(_ button: NSButton) {
-        button.contentTintColor = CorralAestheticTokens.background; button.wantsLayer = true; button.layer?.backgroundColor = CorralAestheticTokens.accent.cgColor; button.layer?.cornerRadius = 8; button.layer?.borderWidth = 0
+        // `.chr-btn-primary`: action-primary fill, 8px radius, no bezel.
+        button.isBordered = false; button.wantsLayer = true; button.layer?.backgroundColor = CorralAestheticTokens.actionPrimaryBackground.cgColor; button.layer?.cornerRadius = 8; button.layer?.borderWidth = 0
+        button.attributedTitle = NSAttributedString(string: button.title, attributes: [.foregroundColor: CorralAestheticTokens.actionPrimaryForeground, .font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
+        button.contentTintColor = CorralAestheticTokens.actionPrimaryForeground
     }
 
     public func dismiss() { closeDialog() }
@@ -243,6 +246,7 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         cancelButton?.isEnabled = !isLoading
         createButton?.isEnabled = isCreateEnabled
         createButton?.title = isLoading ? "创建中…" : "创建"
+        if let createButton { stylePrimary(createButton) }
     }
     private func providerSymbol(_ provider: String) -> String { switch provider.lowercased() { case "claude": "sparkle"; case "codex": "chevron.left.forwardslash.chevron.right"; case "pi": "p.circle"; default: "terminal" } }
 }
@@ -253,64 +257,216 @@ public final class SettingsDialogViewController: CorralDialogViewController {
     public private(set) var values: CorralSettingsValues
     public var onChange: ((CorralSettingsValues) -> Void)?
     public var onClose: (() -> Void)?
-    public let themeControl = NSSegmentedControl(labels: ["浅色", "深色", "跟随系统"], trackingMode: .selectOne, target: nil, action: nil)
-    public let fontFamilyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// `TERMINAL_FONT_FAMILIES` presets; each pill is labelled with its primary family.
+    public static let fontPresets = ["Cascadia Code, Consolas", "JetBrains Mono, \"Andale Mono\", Menlo, \"Lucida Console\"", "Fira Code, Monaco, \"Courier New\"", "Menlo, \"Segoe UI Mono\"", "Consolas, \"Andale Mono\"", "Courier New"]
+    public private(set) var themeButtons: [NSButton] = []
+    public private(set) var fontPresetButtons: [NSButton] = []
+    public let fontFamilyField = NSTextField(string: "")
     public let fontSizeSlider = NSSlider(value: 13, minValue: 10, maxValue: 24, target: nil, action: nil)
     public let fontSizeField = NSTextField(string: "13")
-    public let fontSizeStepper = NSStepper()
+    public let fontSizeDecrementButton = NSButton(title: "−", target: nil, action: nil)
+    public let fontSizeIncrementButton = NSButton(title: "+", target: nil, action: nil)
     public let directoryTrackingSwitch = NSSwitch()
     public private(set) var fontPreviewLabel: NSTextField?
-    private let fonts = ["Cascadia Code, Consolas", "JetBrains Mono, \"Andale Mono\", Menlo, \"Lucida Console\"", "Fira Code, Monaco, \"Courier New\"", "Menlo, \"Segoe UI Mono\"", "Consolas, \"Andale Mono\"", "Courier New"]
+    private let previewSizeCaption = NSTextField(labelWithString: "")
+    public static let width: CGFloat = 560
 
     public init(values: CorralSettingsValues = CorralSettingsValues(), onChange: ((CorralSettingsValues) -> Void)? = nil, onClose: (() -> Void)? = nil) {
         self.values = values; self.onChange = onChange; self.onClose = onClose; super.init()
     }
+
+    // Mirrors `SettingsDialog.jsx`: header, three titled cards (界面外观 / 终端外观 / 工作区行为), footer.
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 500, height: 510)); view = root
-        _ = addHeader(to: root, title: "设置", subtitle: "修改即时保存")
-        _ = addLabel("主题", to: root, y: 87)
-        themeControl.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(themeControl)
-        NSLayoutConstraint.activate([themeControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), themeControl.topAnchor.constraint(equalTo: root.topAnchor, constant: 108), themeControl.widthAnchor.constraint(equalToConstant: 270), themeControl.heightAnchor.constraint(equalToConstant: 28)])
-        themeControl.target = self; themeControl.action = #selector(themeChanged); themeControl.selectedSegment = CorralThemeMode.allCases.firstIndex(of: values.theme) ?? 2
-        _ = addLabel("终端字体", to: root, y: 154)
-        fonts.forEach { fontFamilyPopup.addItem(withTitle: $0) }; fontFamilyPopup.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontFamilyPopup)
-        NSLayoutConstraint.activate([fontFamilyPopup.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), fontFamilyPopup.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), fontFamilyPopup.topAnchor.constraint(equalTo: root.topAnchor, constant: 175), fontFamilyPopup.heightAnchor.constraint(equalToConstant: 28)])
-        fontFamilyPopup.selectItem(withTitle: fonts.first(where: { values.fontFamily.hasPrefix($0.components(separatedBy: ",").first ?? $0) }) ?? fonts[0]); fontFamilyPopup.target = self; fontFamilyPopup.action = #selector(fontChanged)
-        _ = addLabel("字号", to: root, y: 222)
-        fontSizeSlider.doubleValue = values.fontSize; fontSizeSlider.numberOfTickMarks = 15; fontSizeSlider.allowsTickMarkValuesOnly = true; fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeSlider); fontSizeSlider.target = self; fontSizeSlider.action = #selector(sizeChanged)
-        fontSizeField.stringValue = String(values.fontSize); fontSizeField.alignment = .right; fontSizeField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeField); fontSizeField.target = self; fontSizeField.action = #selector(sizeFieldChanged)
-        fontSizeStepper.minValue = 10; fontSizeStepper.maxValue = 24; fontSizeStepper.increment = 1; fontSizeStepper.doubleValue = values.fontSize; fontSizeStepper.target = self; fontSizeStepper.action = #selector(sizeStepperChanged); fontSizeStepper.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(fontSizeStepper)
-        NSLayoutConstraint.activate([fontSizeSlider.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), fontSizeSlider.trailingAnchor.constraint(equalTo: fontSizeField.leadingAnchor, constant: -10), fontSizeSlider.topAnchor.constraint(equalTo: root.topAnchor, constant: 244), fontSizeField.trailingAnchor.constraint(equalTo: fontSizeStepper.leadingAnchor, constant: -5), fontSizeField.centerYAnchor.constraint(equalTo: fontSizeSlider.centerYAnchor), fontSizeField.widthAnchor.constraint(equalToConstant: 42), fontSizeStepper.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18), fontSizeStepper.centerYAnchor.constraint(equalTo: fontSizeSlider.centerYAnchor)])
-        let preview = NSTextField(labelWithString: "The quick brown fox · 终端预览"); preview.textColor = CorralAestheticTokens.text; preview.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(preview); fontPreviewLabel = preview; updatePreviewFont()
-        NSLayoutConstraint.activate([preview.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), preview.topAnchor.constraint(equalTo: root.topAnchor, constant: 278), preview.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), preview.heightAnchor.constraint(equalToConstant: 42)])
-        _ = addLabel("目录跟踪", to: root, y: 346)
-        let trackingLabel = NSTextField(labelWithString: "根据终端目录变化更新工作区路径"); trackingLabel.font = .systemFont(ofSize: 11); trackingLabel.textColor = CorralAestheticTokens.textSecondary; trackingLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(trackingLabel)
-        directoryTrackingSwitch.state = values.directoryTracking ? .on : .off; directoryTrackingSwitch.target = self; directoryTrackingSwitch.action = #selector(trackingChanged); directoryTrackingSwitch.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(directoryTrackingSwitch)
-        NSLayoutConstraint.activate([trackingLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), trackingLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 368), directoryTrackingSwitch.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), directoryTrackingSwitch.centerYAnchor.constraint(equalTo: trackingLabel.centerYAnchor)])
-        let done = NSButton(title: "完成", target: self, action: #selector(close)); done.bezelStyle = .rounded; done.keyEquivalent = "\r"; done.translatesAutoresizingMaskIntoConstraints = false; stylePrimary(done); root.addSubview(done)
-        NSLayoutConstraint.activate([done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), done.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20), done.widthAnchor.constraint(equalToConstant: 84)])
-        let saved = NSTextField(labelWithString: "✓  修改即时保存"); saved.font = .systemFont(ofSize: 10); saved.textColor = CorralAestheticTokens.success; saved.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(saved)
-        NSLayoutConstraint.activate([saved.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), saved.centerYAnchor.constraint(equalTo: done.centerYAnchor)])
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 600))
+        root.wantsLayer = true; root.layer?.backgroundColor = CorralAestheticTokens.dialogBackground.cgColor; root.layer?.cornerRadius = 18
+        root.setAccessibilityIdentifier("corral.settings.dialog")
+
+        let title = label("设置", size: 20, weight: .semibold, color: CorralAestheticTokens.text)
+        let subtitle = label("微调终端外观，让工作区更顺手。", size: 12, color: CorralAestheticTokens.textSecondary)
+        let heading = vertical([title, subtitle], spacing: 6)
+        let closeButton = NSButton(image: CorralLegacyIcon.image(.close, size: 12) ?? NSImage(), target: self, action: #selector(close))
+        closeButton.isBordered = false; closeButton.contentTintColor = CorralAestheticTokens.textSecondary; closeButton.wantsLayer = true
+        closeButton.layer?.backgroundColor = CorralAestheticTokens.fillSubtle.cgColor; closeButton.layer?.cornerRadius = 15
+        closeButton.setAccessibilityLabel("关闭设置"); closeButton.setAccessibilityIdentifier("corral.settings.close")
+        pin(closeButton, width: 30, height: 30)
+        let header = horizontal([heading, spacer(), closeButton], alignment: .top)
+
+        let modes: [(CorralThemeMode, String, CorralLegacyIcon)] = [(.light, "浅色", .sun), (.dark, "深色", .moon), (.system, "跟随系统", .monitor)]
+        themeButtons = modes.map { mode, title, icon in
+            let button = NSButton(title: title, image: CorralLegacyIcon.image(icon, size: 14) ?? NSImage(), target: self, action: #selector(themeButtonPressed(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(mode.rawValue); button.setAccessibilityIdentifier("corral.settings.theme.\(mode.rawValue)")
+            button.isBordered = false; button.imagePosition = .imageLeading; button.imageHugsTitle = true; button.wantsLayer = true; button.layer?.cornerRadius = 6
+            button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+            return button
+        }
+        let segmented = horizontal(themeButtons, spacing: 4, distribution: .fillEqually)
+        segmented.edgeInsets = NSEdgeInsets(top: 3, left: 3, bottom: 3, right: 3)
+        segmented.wantsLayer = true; segmented.layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor; segmented.layer?.cornerRadius = 8
+        segmented.layer?.borderWidth = 1; segmented.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor
+        let themeCard = card([fieldHeading("主题模式", hint: "浅色、深色或跟随系统外观"), segmented])
+
+        fontPresetButtons = Self.fontPresets.map { preset in
+            let name = Self.primaryFamily(preset)
+            let button = NSButton(title: name, target: self, action: #selector(fontPresetPressed(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(preset); button.setAccessibilityIdentifier("corral.settings.font.\(name)")
+            button.isBordered = false; button.wantsLayer = true; button.layer?.cornerRadius = 14; button.layer?.borderWidth = 1
+            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            return button
+        }
+        let presetRows = stride(from: 0, to: fontPresetButtons.count, by: 3).map { horizontal(Array(fontPresetButtons[$0..<min($0 + 3, fontPresetButtons.count)]), spacing: 7, distribution: .fillEqually) }
+        let customLabel = label("自定义字体栈", size: 11, color: CorralAestheticTokens.textSecondary)
+        fontFamilyField.font = .monospacedSystemFont(ofSize: 11, weight: .regular); fontFamilyField.textColor = CorralAestheticTokens.text
+        fontFamilyField.isBezeled = false; fontFamilyField.drawsBackground = false; fontFamilyField.lineBreakMode = .byTruncatingTail; fontFamilyField.cell?.usesSingleLineMode = true
+        fontFamilyField.target = self; fontFamilyField.action = #selector(fontFieldCommitted); fontFamilyField.setAccessibilityIdentifier("corral.settings.font.custom")
+        let fontInput = inputBox(fontFamilyField, insets: NSEdgeInsets(top: 7, left: 10, bottom: 7, right: 10))
+
+        fontSizeSlider.target = self; fontSizeSlider.action = #selector(sizeChanged); fontSizeSlider.setAccessibilityIdentifier("corral.settings.fontsize.slider")
+        for (button, action, name) in [(fontSizeDecrementButton, #selector(decrementSize), "减小字号"), (fontSizeIncrementButton, #selector(incrementSize), "增大字号")] {
+            button.isBordered = false; button.font = .systemFont(ofSize: 15); button.target = self; button.action = action; button.setAccessibilityLabel(name)
+            pin(button, width: 26, height: 26)
+        }
+        fontSizeField.isBezeled = false; fontSizeField.drawsBackground = false; fontSizeField.alignment = .center; fontSizeField.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        fontSizeField.textColor = CorralAestheticTokens.text; fontSizeField.target = self; fontSizeField.action = #selector(sizeFieldChanged); fontSizeField.setAccessibilityIdentifier("corral.settings.fontsize")
+        fontSizeField.widthAnchor.constraint(equalToConstant: 26).isActive = true
+        let unit = label("px", size: 11, color: CorralAestheticTokens.textSecondary)
+        let stepper = inputBox(horizontal([fontSizeDecrementButton, fontSizeField, unit, fontSizeIncrementButton], spacing: 2), insets: NSEdgeInsets(top: 2, left: 2, bottom: 2, right: 2))
+        stepper.setContentHuggingPriority(.required, for: .horizontal)
+        let sizeRow = horizontal([fontSizeSlider, stepper], spacing: 20)
+        let divider = NSView(); divider.wantsLayer = true; divider.layer?.backgroundColor = CorralAestheticTokens.border.cgColor
+        divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+
+        let previewTitle = label("即时预览", size: 10, color: CorralAestheticTokens.previewCaption)
+        previewSizeCaption.font = .systemFont(ofSize: 10); previewSizeCaption.textColor = CorralAestheticTokens.previewCaption
+        let sample = NSTextField(labelWithString: ""); sample.lineBreakMode = .byTruncatingTail; fontPreviewLabel = sample
+        let preview = vertical([horizontal([previewTitle, spacer(), previewSizeCaption]), sample], spacing: 8, insets: NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14))
+        preview.wantsLayer = true; preview.layer?.backgroundColor = CorralAestheticTokens.previewBackground.cgColor; preview.layer?.cornerRadius = 8
+        preview.layer?.borderWidth = 1; preview.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor
+        preview.setAccessibilityIdentifier("corral.settings.preview")
+
+        let typographyCard = card([fieldHeading("字体", hint: "使用本机已安装的字体"), vertical(presetRows, spacing: 7), customLabel, fontInput, divider, fieldHeading("字号", hint: "10–24 px"), sizeRow, preview],
+                                  spacing: [10, 10, 6, 10, 10, 8, 10])
+
+        let trackingTitle = label("目录跟踪", size: 13, weight: .semibold, color: CorralAestheticTokens.text)
+        let trackingHint = label("切换 Agent 时，自动定位并展开左侧目录。", size: 11, color: CorralAestheticTokens.textSecondary)
+        directoryTrackingSwitch.target = self; directoryTrackingSwitch.action = #selector(trackingChanged); directoryTrackingSwitch.setAccessibilityIdentifier("corral.settings.tracking")
+        let trackingCard = card([horizontal([vertical([trackingTitle, trackingHint], spacing: 4), spacer(), directoryTrackingSwitch])])
+
+        let body = vertical([section("界面外观", themeCard), section("终端外观", typographyCard), section("工作区行为", trackingCard)], spacing: 12)
+        let top = vertical([header, body], spacing: 14, insets: NSEdgeInsets(top: 18, left: 24, bottom: 14, right: 24))
+
+        let savedIcon = NSImageView(image: CorralLegacyIcon.image(.check, size: 12) ?? NSImage()); savedIcon.contentTintColor = CorralAestheticTokens.success
+        let saved = horizontal([savedIcon, label("修改即时保存", size: 11, color: CorralAestheticTokens.textSecondary)], spacing: 6)
+        let done = NSButton(title: "完成", target: self, action: #selector(close)); done.keyEquivalent = "\r"; done.setAccessibilityIdentifier("corral.settings.done")
+        stylePrimary(done); pin(done, width: 76, height: 32)
+        let footer = horizontal([saved, spacer(), done])
+        footer.edgeInsets = NSEdgeInsets(top: 12, left: 24, bottom: 12, right: 24)
+        let footerBorder = NSView(); footerBorder.wantsLayer = true; footerBorder.layer?.backgroundColor = CorralAestheticTokens.borderSubtle.cgColor
+        footerBorder.heightAnchor.constraint(equalToConstant: 1).isActive = true
+
+        let content = vertical([top, footerBorder, footer], spacing: 0)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(content)
+        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: root.leadingAnchor), content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: root.topAnchor), content.widthAnchor.constraint(equalToConstant: Self.width)])
+        root.setFrameSize(NSSize(width: Self.width, height: ceil(content.fittingSize.height)))
+        view = root
+        syncControls()
     }
-    public func setTheme(_ theme: CorralThemeMode) { values.theme = theme; themeControl.selectedSegment = CorralThemeMode.allCases.firstIndex(of: theme) ?? 2; apply() }
-    public func setFontFamily(_ family: String) { values.fontFamily = family; if fonts.contains(family) { fontFamilyPopup.selectItem(withTitle: family) }; updatePreviewFont(); apply() }
-    public func setFontSize(_ size: Double) { values.fontSize = min(24, max(10, size)); updateFontSizeControls(); apply() }
-    public func setDirectoryTracking(_ enabled: Bool) { values.directoryTracking = enabled; directoryTrackingSwitch.state = enabled ? .on : .off; apply() }
-    @objc private func themeChanged() { values.theme = CorralThemeMode.allCases[themeControl.selectedSegment]; apply() }
-    @objc private func fontChanged() { values.fontFamily = fontFamilyPopup.titleOfSelectedItem ?? fonts[0]; updatePreviewFont(); apply() }
-    @objc private func sizeChanged() { values.fontSize = min(24, max(10, fontSizeSlider.doubleValue)); updateFontSizeControls(); apply() }
-    @objc private func sizeFieldChanged() { values.fontSize = min(24, max(10, Double(fontSizeField.stringValue) ?? 13)); updateFontSizeControls(); apply() }
-    @objc private func sizeStepperChanged() { values.fontSize = min(24, max(10, fontSizeStepper.doubleValue)); updateFontSizeControls(); apply() }
-    private func updateFontSizeControls() { fontSizeSlider.doubleValue = values.fontSize; fontSizeStepper.doubleValue = values.fontSize; fontSizeField.stringValue = String(values.fontSize); updatePreviewFont() }
-    private func updatePreviewFont() {
-        let selectedFamily = fontFamilyPopup.titleOfSelectedItem ?? fonts[0]
-        let preferredName = selectedFamily.split(separator: ",", maxSplits: 1).first.map(String.init)?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) ?? selectedFamily
-        fontPreviewLabel?.font = NSFont(name: preferredName, size: CGFloat(values.fontSize)) ?? .monospacedSystemFont(ofSize: values.fontSize, weight: .regular)
+
+    public func setTheme(_ theme: CorralThemeMode) { values.theme = theme; syncControls(); apply() }
+    public func setFontFamily(_ family: String) { values.fontFamily = family; syncControls(); apply() }
+    public func setFontSize(_ size: Double) { values.fontSize = min(24, max(10, size.rounded())); syncControls(); apply() }
+    public func setDirectoryTracking(_ enabled: Bool) { values.directoryTracking = enabled; syncControls(); apply() }
+
+    public static func primaryFamily(_ stack: String) -> String {
+        (stack.split(separator: ",", maxSplits: 1).first.map(String.init) ?? stack).trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
     }
-    @objc private func trackingChanged() { values.directoryTracking = directoryTrackingSwitch.state == .on; apply() }
+    public var selectedFontPreset: String? { Self.fontPresets.first { Self.primaryFamily($0).lowercased() == Self.primaryFamily(values.fontFamily).lowercased() } }
+
+    @objc private func themeButtonPressed(_ sender: NSButton) { setTheme(CorralThemeMode(rawValue: sender.identifier?.rawValue ?? "") ?? .system) }
+    @objc private func fontPresetPressed(_ sender: NSButton) { setFontFamily(sender.identifier?.rawValue ?? Self.fontPresets[0]) }
+    @objc private func fontFieldCommitted() { let stack = fontFamilyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); if !stack.isEmpty { setFontFamily(stack) } }
+    @objc private func sizeChanged() { setFontSize(fontSizeSlider.doubleValue) }
+    @objc private func sizeFieldChanged() { setFontSize(Double(fontSizeField.stringValue) ?? values.fontSize) }
+    @objc private func decrementSize() { setFontSize(values.fontSize - 1) }
+    @objc private func incrementSize() { setFontSize(values.fontSize + 1) }
+    @objc private func trackingChanged() { setDirectoryTracking(directoryTrackingSwitch.state == .on) }
     public override func handleEscape() { onClose?(); dismiss() }
     @objc private func close() { onClose?(); dismiss() }
     private func apply() { CorralAestheticTokens.themeMode = values.theme; onChange?(values) }
+
+    private func syncControls() {
+        for button in themeButtons {
+            let active = button.identifier?.rawValue == values.theme.rawValue
+            button.layer?.backgroundColor = active ? CorralAestheticTokens.surface3.cgColor : NSColor.clear.cgColor
+            button.layer?.borderWidth = active ? 1 : 0; button.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor
+            let color = active ? CorralAestheticTokens.text : CorralAestheticTokens.textSecondary
+            button.contentTintColor = color; button.state = active ? .on : .off; button.setAccessibilitySelected(active)
+            button.attributedTitle = NSAttributedString(string: button.title, attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 12.5, weight: active ? .semibold : .regular)])
+        }
+        let selectedPreset = selectedFontPreset
+        for button in fontPresetButtons {
+            let preset = button.identifier?.rawValue ?? ""
+            let active = preset == selectedPreset
+            button.state = active ? .on : .off; button.setAccessibilitySelected(active)
+            button.layer?.backgroundColor = (active ? CorralAestheticTokens.choiceSelectedBackground : CorralAestheticTokens.fieldBackground).cgColor
+            button.layer?.borderColor = (active ? CorralAestheticTokens.choiceSelectedBorder : CorralAestheticTokens.inputBorder).cgColor
+            let font = NSFont(name: Self.primaryFamily(preset), size: 11).map { active ? NSFontManager.shared.convert($0, toHaveTrait: .boldFontMask) : $0 } ?? .monospacedSystemFont(ofSize: 11, weight: active ? .semibold : .regular)
+            button.attributedTitle = NSAttributedString(string: button.title, attributes: [.foregroundColor: active ? CorralAestheticTokens.choiceSelectedForeground : CorralAestheticTokens.text, .font: font])
+        }
+        if fontFamilyField.currentEditor() == nil { fontFamilyField.stringValue = values.fontFamily }
+        fontSizeSlider.doubleValue = values.fontSize
+        fontSizeField.stringValue = String(Int(values.fontSize))
+        fontSizeDecrementButton.isEnabled = values.fontSize > 10; fontSizeIncrementButton.isEnabled = values.fontSize < 24
+        previewSizeCaption.stringValue = "\(Int(values.fontSize)) px"
+        directoryTrackingSwitch.state = values.directoryTracking ? .on : .off
+        let previewFont = NSFont(name: Self.primaryFamily(values.fontFamily), size: CGFloat(values.fontSize)) ?? .monospacedSystemFont(ofSize: values.fontSize, weight: .regular)
+        let sample = NSMutableAttributedString(string: "❯ ", attributes: [.foregroundColor: CorralAestheticTokens.success, .font: previewFont])
+        sample.append(NSAttributedString(string: "Aa Bb 012345 · 清晰可见", attributes: [.foregroundColor: CorralAestheticTokens.previewForeground, .font: previewFont]))
+        fontPreviewLabel?.attributedStringValue = sample
+        fontPreviewLabel?.font = previewFont
+    }
+
+    // MARK: Layout helpers (`.settings-*` tokens)
+    private func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor) -> NSTextField {
+        let field = NSTextField(labelWithString: text); field.font = .systemFont(ofSize: size, weight: weight); field.textColor = color; return field
+    }
+    private func spacer() -> NSView { let view = NSView(); view.setContentHuggingPriority(.init(1), for: .horizontal); return view }
+    private func pin(_ view: NSView, width: CGFloat, height: CGFloat) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([view.widthAnchor.constraint(equalToConstant: width), view.heightAnchor.constraint(equalToConstant: height)])
+    }
+    private func horizontal(_ views: [NSView], spacing: CGFloat = 8, alignment: NSLayoutConstraint.Attribute = .centerY, distribution: NSStackView.Distribution = .fill) -> NSStackView {
+        let stack = NSStackView(views: views); stack.orientation = .horizontal; stack.alignment = alignment; stack.spacing = spacing; stack.distribution = distribution; return stack
+    }
+    private func vertical(_ views: [NSView], spacing: CGFloat, insets: NSEdgeInsets = NSEdgeInsets()) -> NSStackView {
+        let stack = NSStackView(views: views); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = spacing; stack.edgeInsets = insets
+        for view in views { view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -(stack.edgeInsets.left + stack.edgeInsets.right)).isActive = true }
+        return stack
+    }
+    private func fieldHeading(_ title: String, hint: String) -> NSView {
+        horizontal([label(title, size: 13, weight: .semibold, color: CorralAestheticTokens.text), spacer(), label(hint, size: 11, color: CorralAestheticTokens.textSecondary)])
+    }
+    private func section(_ title: String, _ card: NSView) -> NSView {
+        let heading = label(title, size: 12, weight: .semibold, color: CorralAestheticTokens.textSecondary)
+        let stack = vertical([heading, card], spacing: 9)
+        return stack
+    }
+    private func card(_ rows: [NSView], spacing: [CGFloat] = []) -> NSView {
+        let stack = NSStackView(views: rows); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        for row in rows { row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true }
+        for (index, value) in spacing.enumerated() where index < rows.count - 1 { stack.setCustomSpacing(value, after: rows[index]) }
+        stack.wantsLayer = true; stack.layer?.backgroundColor = CorralAestheticTokens.cardBackground.cgColor; stack.layer?.cornerRadius = 12
+        stack.layer?.borderWidth = 1; stack.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor
+        stack.shadow = NSShadow(); stack.layer?.shadowColor = NSColor.black.cgColor; stack.layer?.shadowOpacity = 0.08; stack.layer?.shadowRadius = 1; stack.layer?.shadowOffset = NSSize(width: 0, height: -1)
+        return stack
+    }
+    private func inputBox(_ content: NSView, insets: NSEdgeInsets) -> NSStackView {
+        let box = NSStackView(views: [content]); box.orientation = .horizontal; box.edgeInsets = insets
+        box.wantsLayer = true; box.layer?.backgroundColor = CorralAestheticTokens.fieldBackground.cgColor; box.layer?.cornerRadius = 8
+        box.layer?.borderWidth = 1; box.layer?.borderColor = CorralAestheticTokens.inputBorder.cgColor
+        return box
+    }
 }
 
 @MainActor

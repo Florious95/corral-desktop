@@ -182,6 +182,89 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertNil((sidebar.spacesTable.rowView(atRow: 1, makeIfNecessary: true) as? CorralSidebarRowView)?.fillColor)
     }
 
+    func testWorkspaceSpaceRowsCountTheirOwnAgents() throws {
+        // Coordinator order: spaces arrive with zero counts, agents follow.
+        let project = CorralSidebarSpace(name: "corral-gw-test-home")
+        let other = CorralSidebarSpace(name: "other")
+        let sidebar = CorralSidebarView()
+        sidebar.setSpaces([project, other])
+        sidebar.setAgents((0..<6).map { CorralSidebarAgent(name: "fixture-\($0)", status: $0 == 0 ? .working : .idle, spaceID: project.id) })
+        XCTAssertEqual(sidebar.spaces.map(\.agentCount), [6, 0, 6, 0])
+        XCTAssertEqual(sidebar.spaces.map(\.workingCount), [1, 0, 1, 0])
+        let row = try XCTUnwrap(sidebar.spacesTable.delegate?.tableView?(sidebar.spacesTable, viewFor: nil, row: 2))
+        XCTAssertEqual(descendants(of: row).compactMap { ($0 as? NSTextField)?.stringValue }.suffix(2), ["1", "6"])
+        // Re-sending spaces after agents keeps the derived counts.
+        sidebar.setSpaces([project, other])
+        XCTAssertEqual(sidebar.spaces[2].agentCount, 6)
+    }
+
+    func testCollapsedSidebarLetsStageAndTabContentFillFullWidth() throws {
+        let content = NSView()
+        let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "Stage", contentView: content)])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window)
+        window.layoutIfNeeded()
+        XCTAssertEqual(content.frame.width, 1400 - 280, accuracy: 0.1)
+        workspace.setSidebarCollapsed(true)
+        window.layoutIfNeeded()
+        XCTAssertEqual(workspace.stageContainer.frame, NSRect(x: 0, y: 0, width: 1400, height: 860 - 38))
+        XCTAssertEqual(content.convert(content.bounds, to: nil), NSRect(x: 0, y: 0, width: 1400, height: 860 - 38))
+        workspace.setSidebarCollapsed(false)
+        window.layoutIfNeeded()
+        XCTAssertEqual(content.frame.width, 1400 - 280, accuracy: 0.1)
+    }
+
+    func testChromeExposesStableAccessibilityIdentifiersAndActions() throws {
+        let first = CorralTab(title: "First")
+        let second = CorralTab(title: "Second")
+        let workspace = CorralWorkspaceView(tabs: [first, second])
+        workspace.frame = NSRect(x: 0, y: 0, width: 1400, height: 860)
+        workspace.layoutSubtreeIfNeeded()
+        XCTAssertEqual(workspace.titleBar.collapseButton.accessibilityIdentifier(), "corral.sidebar.toggle")
+        XCTAssertEqual(workspace.tabBar.createButton.accessibilityIdentifier(), "corral.tab.new")
+        XCTAssertEqual(workspace.sidebar.devicesButton.accessibilityIdentifier(), "corral.sidebar.devices")
+        XCTAssertEqual(workspace.sidebar.settingsButton.accessibilityIdentifier(), "corral.sidebar.settings")
+
+        // Tabs are AX buttons: AXPress selects, custom actions mirror the context menu.
+        let tabs = descendants(of: workspace.tabBar).filter { $0.accessibilityIdentifier() == "corral.tab" }
+        XCTAssertEqual(tabs.map { $0.accessibilityLabel() }, ["First", "Second"])
+        XCTAssertEqual(tabs[1].accessibilityRole(), .button)
+        XCTAssertTrue(tabs[1].isAccessibilityElement())
+        XCTAssertTrue(tabs[1].accessibilityPerformPress())
+        XCTAssertEqual(workspace.activeTabID, second.id)
+        let secondTab = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == "Second" })
+        let close = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "关闭工作台" })
+        XCTAssertTrue(close.handler?() ?? false)
+        XCTAssertEqual(workspace.tabs.map(\.id), [first.id])
+
+        // Sidebar rows: AXPress opens / selects, custom actions mirror the row context menus.
+        let space = CorralSidebarSpace(name: "Project")
+        let agent = CorralSidebarAgent(name: "leader", spaceID: space.id)
+        let sidebar = workspace.sidebar
+        sidebar.setSpaces([space]); sidebar.setAgents([agent])
+        var selectedAgent: UUID?; var favorite: (UUID, Bool)?; var closed: UUID?; var created: UUID??
+        sidebar.onSelectAgent = { selectedAgent = $0 }
+        sidebar.onToggleFavorite = { favorite = ($0, $1) }
+        sidebar.onCloseAgent = { closed = $0 }
+        sidebar.onCreateAgent = { created = $0 }
+        let agentCell = try XCTUnwrap(sidebar.agentsTable.delegate?.tableView?(sidebar.agentsTable, viewFor: nil, row: 0))
+        XCTAssertEqual(agentCell.accessibilityIdentifier(), "corral.sidebar.agent")
+        XCTAssertEqual(agentCell.accessibilityLabel(), "leader")
+        XCTAssertEqual(agentCell.accessibilityRole(), .button)
+        XCTAssertTrue(agentCell.accessibilityPerformPress())
+        XCTAssertEqual(selectedAgent, agent.id)
+        XCTAssertEqual(agentCell.accessibilityCustomActions()?.map(\.name), ["收藏", "关闭"])
+        XCTAssertTrue(agentCell.accessibilityCustomActions()?[0].handler?() ?? false)
+        XCTAssertTrue(agentCell.accessibilityCustomActions()?[1].handler?() ?? false)
+        XCTAssertEqual(favorite?.0, agent.id); XCTAssertEqual(favorite?.1, true); XCTAssertEqual(closed, agent.id)
+        let spaceCell = try XCTUnwrap(sidebar.spacesTable.delegate?.tableView?(sidebar.spacesTable, viewFor: nil, row: 2))
+        XCTAssertEqual(spaceCell.accessibilityIdentifier(), "corral.sidebar.space")
+        XCTAssertTrue(spaceCell.accessibilityPerformPress())
+        XCTAssertEqual(sidebar.selectedSpaceID, space.id)
+        XCTAssertTrue(spaceCell.accessibilityCustomActions()?.first { $0.name == "新建 Agent" }?.handler?() ?? false)
+        XCTAssertEqual(created, space.id)
+    }
+
     func testTabPillsMatchLegacyChromeCSS() throws {
         let first = CorralTab(title: "全自动编排leader")
         let second = CorralTab(title: "Second")
@@ -499,8 +582,8 @@ final class NativeWorkspaceTests: XCTestCase {
         let dialog = SettingsDialogViewController(onChange: { changes.append($0) })
         dialog.loadViewIfNeeded()
         dialog.setTheme(.light)
-        dialog.fontFamilyPopup.selectItem(withTitle: "Courier New")
-        XCTAssertTrue(dialog.fontFamilyPopup.sendAction(dialog.fontFamilyPopup.action, to: dialog.fontFamilyPopup.target))
+        let courier = try XCTUnwrap(dialog.fontPresetButtons.first { $0.title == "Courier New" })
+        courier.performClick(nil)
         dialog.setFontSize(99)
         dialog.setDirectoryTracking(true)
         XCTAssertEqual(dialog.values.theme, .light)
@@ -508,18 +591,44 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(dialog.fontPreviewLabel?.font?.fontName, NSFont(name: "Courier New", size: 24)?.fontName)
         XCTAssertEqual(dialog.values.fontSize, 24)
         XCTAssertTrue(dialog.values.directoryTracking)
-        XCTAssertEqual(dialog.themeControl.selectedSegment, 0)
+        XCTAssertEqual(dialog.themeButtons.filter { $0.state == .on }.map(\.title), ["浅色"])
+        XCTAssertEqual(dialog.fontPresetButtons.filter { $0.state == .on }.map(\.title), ["Courier New"])
         XCTAssertEqual(dialog.fontSizeSlider.doubleValue, 24)
-        XCTAssertEqual(dialog.fontSizeStepper.doubleValue, 24)
-        XCTAssertEqual(dialog.fontSizeStepper.increment, 1)
-        XCTAssertEqual(dialog.fontSizeStepper.minValue, 10)
-        XCTAssertEqual(dialog.fontSizeStepper.maxValue, 24)
+        XCTAssertEqual(dialog.fontSizeField.stringValue, "24")
+        XCTAssertFalse(dialog.fontSizeIncrementButton.isEnabled)
+        dialog.fontSizeDecrementButton.performClick(nil)
+        XCTAssertEqual(dialog.values.fontSize, 23)
         XCTAssertEqual(dialog.fontSizeSlider.minValue, 10)
         XCTAssertEqual(dialog.fontSizeSlider.maxValue, 24)
-        XCTAssertTrue(dialog.fontSizeSlider.allowsTickMarkValuesOnly)
-        XCTAssertEqual(changes.count, 4)
-        XCTAssertEqual(dialog.fontPreviewLabel?.font?.pointSize, 24)
-        XCTAssertEqual(dialog.fontFamilyPopup.numberOfItems, 6)
+        XCTAssertEqual(changes.count, 5)
+        XCTAssertEqual(dialog.fontPreviewLabel?.font?.pointSize, 23)
+        XCTAssertEqual(dialog.fontPresetButtons.map(\.title), ["Cascadia Code", "JetBrains Mono", "Fira Code", "Menlo", "Consolas", "Courier New"])
+        dialog.fontFamilyField.stringValue = "Menlo, monospace"
+        XCTAssertTrue(dialog.fontFamilyField.sendAction(dialog.fontFamilyField.action, to: dialog.fontFamilyField.target))
+        XCTAssertEqual(dialog.values.fontFamily, "Menlo, monospace")
+        XCTAssertEqual(dialog.fontPresetButtons.filter { $0.state == .on }.map(\.title), ["Menlo"])
+    }
+
+    func testSettingsDialogUsesLegacyCardLayout() throws {
+        CorralAestheticTokens.themeMode = .light
+        defer { CorralAestheticTokens.themeMode = .dark }
+        let dialog = SettingsDialogViewController()
+        dialog.loadViewIfNeeded()
+        XCTAssertEqual(dialog.view.frame.width, 560)
+        XCTAssertLessThanOrEqual(dialog.view.frame.height, 700 - 16, "Must fit the 1100×700 minimum window")
+        XCTAssertEqual(dialog.view.layer?.cornerRadius, 18)
+        XCTAssertEqual(dialog.view.accessibilityIdentifier(), "corral.settings.dialog")
+        let labels = descendants(of: dialog.view).compactMap { ($0 as? NSTextField)?.stringValue }
+        for title in ["界面外观", "终端外观", "工作区行为", "主题模式", "字体", "自定义字体栈", "字号", "即时预览", "目录跟踪", "修改即时保存"] {
+            XCTAssertTrue(labels.contains(title), "Missing \(title)")
+        }
+        let cards = descendants(of: dialog.view).filter { $0.layer?.cornerRadius == 12 && $0.layer?.borderWidth == 1 }
+        XCTAssertEqual(cards.count, 3)
+        let preview = try XCTUnwrap(descendants(of: dialog.view).first { $0.accessibilityIdentifier() == "corral.settings.preview" })
+        XCTAssertEqual(rgb(preview.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)) ?? .clear), 0x3A3835)
+        XCTAssertEqual(dialog.themeButtons.map(\.title), ["浅色", "深色", "跟随系统"])
+        XCTAssertEqual(dialog.themeButtons.first { $0.state == .on }?.title, "跟随系统")
+        XCTAssertEqual(dialog.fontPresetButtons.first { $0.state == .on }?.title, "Cascadia Code")
     }
 
     func testToastUsesSingleReplaceableSlotAnd2500MillisecondDefault() throws {
@@ -607,6 +716,40 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(controller.devices.first?.name, "Renamed Device")
         let savedAfterRename = await repository.savedDevices()
         XCTAssertEqual(savedAfterRename.first?.name, "Renamed Device")
+    }
+
+    func testDevicePopoverMatchesLegacyLayoutAndIsAXDrivable() async throws {
+        let local = try makeDeviceRecord(id: "local", name: "Local")
+        let remote = try makeDeviceRecord(id: "remote", name: "Remote")
+        let controller = DevicesPopoverViewController(repository: TestDeviceRepository(records: [local, remote]))
+        var added = 0, paired = 0
+        var selection: Set<DeviceID> = []
+        controller.onAddDevice = { added += 1 }; controller.onPairMobile = { paired += 1 }
+        controller.onSelectionChanged = { selection = $0 }
+        controller.loadViewIfNeeded()
+        try await controller.reloadDevices()
+        controller.setReadyDevices([local.id])
+        XCTAssertEqual(controller.preferredContentSize.width, 300)
+        XCTAssertEqual(controller.view.accessibilityIdentifier(), "corral.devices.popover")
+        XCTAssertEqual(controller.selectionSummary.stringValue, "2 devices · 1 connected")
+        XCTAssertTrue(controller.allDevicesRow.isChecked)
+        XCTAssertEqual(controller.allDevicesRow.accessibilityIdentifier(), "corral.devices.all")
+
+        let row = try XCTUnwrap(controller.tableView(controller.tableView, viewFor: nil, row: 0))
+        XCTAssertEqual(row.accessibilityIdentifier(), "corral.devices.row")
+        XCTAssertEqual(row.accessibilityLabel(), "Local")
+        let texts = descendants(of: row).compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(texts.contains("127.0.0.1:\(ApprovedEndpoint.developmentPort) · WebSocket"))
+        XCTAssertEqual(descendants(of: row).compactMap { $0 as? CorralStatusIndicatorView }.first?.status, .working)
+        XCTAssertEqual(row.accessibilityCustomActions()?.map(\.name), ["重命名", "删除"])
+        XCTAssertTrue(row.accessibilityPerformPress())
+        XCTAssertEqual(selection, [remote.id])
+        XCTAssertFalse(controller.allDevicesRow.isChecked)
+        XCTAssertTrue(controller.allDevicesRow.accessibilityPerformPress())
+        XCTAssertEqual(selection, [local.id, remote.id])
+        XCTAssertTrue(controller.pairRow.accessibilityPerformPress())
+        XCTAssertTrue(controller.addRow.accessibilityPerformPress())
+        XCTAssertEqual(added, 1); XCTAssertEqual(paired, 1)
     }
 
     func testDevicePopoverRequiresSecondConfirmationBeforeCascadeDelete() async throws {

@@ -35,6 +35,17 @@ public enum CorralAestheticTokens {
     public static var icon: NSColor { palette(0xAAB6C5, 0x8A867E) }
     public static var hover: NSColor { isDark ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.06) }
     public static var hoverSubtle: NSColor { isDark ? NSColor.white.withAlphaComponent(0.04) : NSColor.black.withAlphaComponent(0.04) }
+    public static var fieldBackground: NSColor { palette(0x171B22, 0xFFFFFF) }
+    public static var cardBackground: NSColor { isDark ? color(0x272F3A).withAlphaComponent(0.98) : color(0xFCFBF9).withAlphaComponent(0.85) }
+    public static var dialogBackground: NSColor { isDark ? color(0x1E242D).withAlphaComponent(0.98) : color(0xFCFBF9).withAlphaComponent(0.92) }
+    public static var previewBackground: NSColor { palette(0x0F1115, 0x3A3835) }
+    public static var previewForeground: NSColor { palette(0xD5DCE6, 0xFBFAF8) }
+    public static var previewCaption: NSColor { palette(0x9DAABB, 0xC4C0B7) }
+    public static var choiceSelectedBackground: NSColor { palette(0x28374C, 0x3A3835) }
+    public static var choiceSelectedForeground: NSColor { palette(0xDCE8FF, 0xFFFFFF) }
+    public static var choiceSelectedBorder: NSColor { palette(0x5C79A3, 0x3A3835) }
+    public static var actionPrimaryBackground: NSColor { palette(0x8FAADC, 0x3A3835) }
+    public static var actionPrimaryForeground: NSColor { palette(0x111722, 0xFFFFFF) }
     public static var fillSubtle: NSColor { isDark ? color(0x1E242D) : NSColor.black.withAlphaComponent(0.04) }
     public static var selectionBackground: NSColor { isDark ? color(0x28374C) : NSColor.black.withAlphaComponent(0.07) }
     public static var accent: NSColor { palette(0x8FAADC, 0x2E5898) }

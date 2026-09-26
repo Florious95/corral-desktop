@@ -17,15 +17,23 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public var onPairMobile: (() -> Void)?
 
     public let tableView = NSTableView()
+    /// Retained for API compatibility; the visible control is `allDevicesRow` (`.dp-row` "All Devices").
     public let allDevicesButton = NSButton(checkboxWithTitle: "All Devices", target: nil, action: nil)
+    public let allDevicesRow = DevicesMenuRowView(icon: .layers, title: "All Devices")
+    public let pairRow = DevicesMenuRowView(icon: .qr, title: "配对移动端…", secondary: true)
+    public let addRow = DevicesMenuRowView(icon: .plus, title: "Add Device…", secondary: true)
     public let connectionStatus = CorralStatusIndicatorView()
-    public let selectionSummary = NSTextField(labelWithString: "未添加设备")
+    public let selectionSummary = NSTextField(labelWithString: "0 devices · 0 connected")
     private let errorLabel = NSTextField(labelWithString: "")
+    private var tableHeight: NSLayoutConstraint!
+    /// `.dp`: 300px wide, 6px padding, 12px radius.
+    public static let width: CGFloat = 300
+    public static let rowHeight: CGFloat = 50
 
     public init(repository: any DeviceRepositoryProtocol) {
         self.repository = repository
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = NSSize(width: 520, height: 430)
+        preferredContentSize = NSSize(width: Self.width, height: 240)
     }
 
     public required init?(coder: NSCoder) {
@@ -37,45 +45,58 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 48
+        tableView.rowHeight = Self.rowHeight
+        tableView.intercellSpacing = .zero
+        tableView.backgroundColor = .clear
+        tableView.selectionHighlightStyle = .none
+        tableView.style = .plain
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.setAccessibilityIdentifier("corral.devices.list")
 
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
-        let title = NSTextField(labelWithString: "设备")
-        title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.textColor = CorralAestheticTokens.text
+        let title = NSTextField(labelWithString: "")
+        title.attributedStringValue = NSAttributedString(string: "DEVICES", attributes: [.font: NSFont.systemFont(ofSize: 10.5, weight: .semibold), .kern: 0.5, .foregroundColor: CorralAestheticTokens.textMuted])
+        let titleRow = NSStackView(views: [title]); titleRow.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 6, right: 12)
+
         allDevicesButton.target = self; allDevicesButton.action = #selector(toggleAllDevices)
-        allDevicesButton.font = .systemFont(ofSize: 11); allDevicesButton.contentTintColor = CorralAestheticTokens.textSecondary
-        let toolbar = NSStackView(views: [title, NSView(), allDevicesButton]); toolbar.orientation = .horizontal; toolbar.alignment = .centerY; toolbar.spacing = 8
-        let addButton = NSButton(title: "添加设备", target: self, action: #selector(addDevice)); addButton.bezelStyle = .rounded
-        let pairButton = NSButton(title: "配对移动端", target: self, action: #selector(pairMobile)); pairButton.bezelStyle = .rounded
-        let actions = NSStackView(views: [addButton, pairButton]); actions.orientation = .horizontal; actions.alignment = .centerY; actions.spacing = 8
+        allDevicesRow.accessory = connectionStatus
+        allDevicesRow.subtitleField = selectionSummary
+        allDevicesRow.setAccessibilityIdentifier("corral.devices.all")
+        allDevicesRow.onPress = { [weak self] in
+            guard let self else { return }
+            self.allDevicesButton.state = self.allDevicesRow.isChecked ? .off : .on
+            self.toggleAllDevices()
+        }
+        pairRow.setAccessibilityIdentifier("corral.devices.pair"); pairRow.onPress = { [weak self] in self?.pairMobile() }
+        addRow.setAccessibilityIdentifier("corral.devices.add"); addRow.onPress = { [weak self] in self?.addDevice() }
         connectionStatus.status = .offline
-        selectionSummary.font = .systemFont(ofSize: 10); selectionSummary.textColor = CorralAestheticTokens.textMuted
-        let footer = NSStackView(views: [connectionStatus, selectionSummary, NSView(), actions]); footer.orientation = .horizontal; footer.alignment = .centerY; footer.spacing = 7
+        connectionStatus.translatesAutoresizingMaskIntoConstraints = false
+        connectionStatus.widthAnchor.constraint(equalToConstant: 6).isActive = true; connectionStatus.heightAnchor.constraint(equalToConstant: 6).isActive = true
+        let separator = NSView(); separator.wantsLayer = true; separator.layer?.backgroundColor = CorralAestheticTokens.border.cgColor
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
         errorLabel.font = .systemFont(ofSize: 11)
         errorLabel.textColor = CorralAestheticTokens.danger
         errorLabel.isHidden = true
 
-        let content = NSStackView(views: [toolbar, scrollView, footer, errorLabel])
+        let content = NSStackView(views: [titleRow, allDevicesRow, scrollView, pairRow, separator, addRow, errorLabel])
         content.orientation = .vertical
         content.alignment = .width
         content.distribution = .fill
-        content.spacing = 10
-        content.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 14, right: 16)
-        content.wantsLayer = true
-        content.layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
+        content.spacing = 0
+        content.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        content.setCustomSpacing(4, after: pairRow); content.setCustomSpacing(4, after: separator)
+        content.setAccessibilityIdentifier("corral.devices.popover")
         view = content
-        scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
-        toolbar.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        footer.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        errorLabel.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        tableHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([content.widthAnchor.constraint(equalToConstant: Self.width), tableHeight])
+        updateSelectionSummary()
     }
 
     public override func viewDidLoad() {
@@ -89,6 +110,14 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         tableView.reloadData()
         updateSelectionSummary()
         onDevicesChanged?(devices)
+    }
+
+    /// Lists up to five devices before scrolling; the popover resizes to its content.
+    private func updateContentSize() {
+        guard isViewLoaded else { return }
+        tableHeight.constant = CGFloat(min(devices.count, 5)) * Self.rowHeight
+        view.layoutSubtreeIfNeeded()
+        preferredContentSize = NSSize(width: Self.width, height: ceil(view.fittingSize.height))
     }
 
     public static func shouldCommitReturn(hasMarkedText: Bool) -> Bool {
@@ -107,7 +136,8 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
             editing: editing,
             confirmingDelete: confirmingDelete,
             deleting: deletionInProgressDeviceID == record.id,
-            selected: selectedDeviceIDs.contains(record.id)
+            selected: selectedDeviceIDs.contains(record.id),
+            online: readyDeviceIDs.contains(record.id)
         )
         rowView.nameField.delegate = self
         rowView.onSelection = { [weak self] id, selected in self?.setDevice(id, selected: selected) }
@@ -255,7 +285,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
 
     public func setReadyDevices(_ ids: Set<DeviceID>) {
         readyDeviceIDs = ids.intersection(Set(devices.map(\.id)))
-        connectionStatus.status = readyDeviceIDs.isEmpty ? .offline : .working
+        tableView.reloadData(); updateSelectionSummary()
     }
 
     public func setDevice(_ id: DeviceID, selected: Bool) {
@@ -265,15 +295,17 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     }
 
     private func updateSelectionSummary() {
-        let names = devices.filter { selectedDeviceIDs.contains($0.id) }.map(\.name)
-        selectionSummary.stringValue = devices.isEmpty ? "未添加设备" : names.isEmpty ? "未勾选设备" : names.count == devices.count ? "全部设备" : names.joined(separator: " · ")
-        allDevicesButton.state = names.isEmpty ? .off : names.count == devices.count ? .on : .mixed
+        let selectedCount = devices.filter { selectedDeviceIDs.contains($0.id) }.count
+        selectionSummary.stringValue = "\(devices.count) devices · \(readyDeviceIDs.count) connected"
+        allDevicesButton.state = selectedCount == 0 ? .off : selectedCount == devices.count ? .on : .mixed
+        allDevicesRow.isChecked = !devices.isEmpty && selectedCount == devices.count
         connectionStatus.status = readyDeviceIDs.isEmpty ? .offline : .working
+        updateContentSize()
     }
 
     @objc private func toggleAllDevices() { selectedDeviceIDs = allDevicesButton.state == .on ? Set(devices.map(\.id)) : []; tableView.reloadData(); updateSelectionSummary(); onSelectionChanged?(selectedDeviceIDs) }
-    @objc private func addDevice() { onAddDevice?() }
-    @objc private func pairMobile() { onPairMobile?() }
+    private func addDevice() { onAddDevice?() }
+    private func pairMobile() { onPairMobile?() }
 
     private func show(_ error: Error) {
         errorMessage = String(describing: error)
@@ -287,6 +319,59 @@ private final class DeviceNameTextField: NSTextField {
     var deviceID: DeviceID?
 }
 
+/// `.dp-row` / `.dp-add`: icon, 13px semibold title (+ status dot), 11px muted subtitle, trailing check or actions.
+@MainActor
+public final class DevicesMenuRowView: NSView {
+    public var onPress: (() -> Void)?
+    public var isChecked = false { didSet { check.isHidden = !isChecked; setAccessibilitySelected(isChecked) } }
+    let titleField = NSTextField(labelWithString: "")
+    private let iconView = NSImageView()
+    private let check = NSImageView()
+    private let textStack = NSStackView()
+    private let titleRow = NSStackView()
+    private let trailing = NSStackView()
+    private var isHovered = false { didSet { layer?.backgroundColor = (isHovered ? CorralAestheticTokens.hoverSubtle : NSColor.clear).cgColor } }
+    var accessory: NSView? { didSet { if let accessory { titleRow.addArrangedSubview(accessory) } } }
+    var subtitleField: NSTextField? {
+        didSet {
+            guard let subtitleField else { return }
+            subtitleField.font = .systemFont(ofSize: 11); subtitleField.textColor = CorralAestheticTokens.textMuted; subtitleField.lineBreakMode = .byTruncatingTail
+            textStack.addArrangedSubview(subtitleField)
+        }
+    }
+
+    public init(icon: CorralLegacyIcon, title: String, secondary: Bool = false) {
+        super.init(frame: .zero)
+        wantsLayer = true; layer?.cornerRadius = 8
+        iconView.image = CorralLegacyIcon.image(icon, size: 16); iconView.contentTintColor = secondary ? CorralAestheticTokens.textSecondary : CorralAestheticTokens.text
+        titleField.stringValue = title; titleField.lineBreakMode = .byTruncatingTail
+        titleField.font = .systemFont(ofSize: 13, weight: secondary ? .regular : .semibold); titleField.textColor = secondary ? CorralAestheticTokens.textSecondary : CorralAestheticTokens.text
+        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        check.image = CorralLegacyIcon.image(.check, size: 14); check.contentTintColor = CorralAestheticTokens.text; check.isHidden = true
+        titleRow.orientation = .horizontal; titleRow.alignment = .centerY; titleRow.spacing = 6; titleRow.addArrangedSubview(titleField)
+        textStack.orientation = .vertical; textStack.alignment = .leading; textStack.spacing = 2; textStack.addArrangedSubview(titleRow)
+        textStack.setHuggingPriority(.init(1), for: .horizontal)
+        trailing.orientation = .horizontal; trailing.alignment = .centerY; trailing.spacing = 3; trailing.addArrangedSubview(check)
+        let row = NSStackView(views: [iconView, textStack, trailing]); row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10; row.distribution = .fill
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12); row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor), row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor), iconView.widthAnchor.constraint(equalToConstant: 16)])
+        setAccessibilityElement(true); setAccessibilityRole(.button); setAccessibilityLabel(title)
+    }
+    required init?(coder: NSCoder) { nil }
+    func addTrailing(_ view: NSView) { trailing.insertArrangedSubview(view, at: 0) }
+    public override func accessibilityPerformPress() -> Bool { onPress?(); return onPress != nil }
+    public override func mouseUp(with event: NSEvent) { if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress?() } }
+    public override func mouseDown(with event: NSEvent) {}
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    public override func mouseEntered(with event: NSEvent) { isHovered = true }
+    public override func mouseExited(with event: NSEvent) { isHovered = false }
+}
+
 @MainActor
 private final class DeviceManagementRowView: NSView {
     let nameField = DeviceNameTextField(labelWithString: "")
@@ -298,19 +383,21 @@ private final class DeviceManagementRowView: NSView {
     var onConfirmDelete: ((DeviceID) -> Void)?
     var onCancelDelete: ((DeviceID) -> Void)?
 
-    private let selectionButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let primaryButton = NSButton(title: "", target: nil, action: nil)
     private let secondaryButton = NSButton(title: "", target: nil, action: nil)
     private let deviceID: DeviceID
     private let editing: Bool
     private let confirmingDelete: Bool
     private let selected: Bool
+    private let actions = NSStackView()
+    private let persistentActions: Bool
 
-    init(record: DeviceRecord, editing: Bool, confirmingDelete: Bool, deleting: Bool, selected: Bool) {
+    init(record: DeviceRecord, editing: Bool, confirmingDelete: Bool, deleting: Bool, selected: Bool, online: Bool) {
         deviceID = record.id
         self.editing = editing
         self.confirmingDelete = confirmingDelete
         self.selected = selected
+        persistentActions = editing || confirmingDelete || deleting
         super.init(frame: .zero)
 
         nameField.deviceID = record.id
@@ -319,62 +406,84 @@ private final class DeviceManagementRowView: NSView {
         nameField.isSelectable = editing
         nameField.isBordered = editing
         nameField.drawsBackground = editing
-        nameField.backgroundColor = CorralAestheticTokens.surface1
+        nameField.backgroundColor = CorralAestheticTokens.fieldBackground
         nameField.textColor = CorralAestheticTokens.text
-        nameField.font = .systemFont(ofSize: 12)
+        nameField.font = .systemFont(ofSize: 13, weight: .semibold)
         nameField.lineBreakMode = .byTruncatingTail
-        nameField.translatesAutoresizingMaskIntoConstraints = false
+        nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        selectionButton.state = selected ? .on : .off
-        selectionButton.target = self; selectionButton.action = #selector(toggleSelection)
-        primaryButton.isBordered = false
-        primaryButton.contentTintColor = confirmingDelete ? CorralAestheticTokens.danger : CorralAestheticTokens.text
-        primaryButton.target = self
-        primaryButton.action = #selector(primaryAction)
-        secondaryButton.isBordered = false
-        secondaryButton.contentTintColor = CorralAestheticTokens.textSecondary
-        secondaryButton.target = self
-        secondaryButton.action = #selector(secondaryAction)
+        let dot = CorralStatusIndicatorView(); dot.status = online ? .working : .offline; dot.fillsIdle = false
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.widthAnchor.constraint(equalToConstant: 6).isActive = true; dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
+        dot.setAccessibilityLabel(online ? "在线" : "离线")
+        let sub = NSTextField(labelWithString: "\(record.endpoint.host):\(record.endpoint.port) · WebSocket")
+        sub.font = .systemFont(ofSize: 11); sub.textColor = CorralAestheticTokens.textMuted; sub.lineBreakMode = .byTruncatingTail
+        let titleRow = NSStackView(views: [nameField, dot]); titleRow.orientation = .horizontal; titleRow.alignment = .centerY; titleRow.spacing = 6
+        let text = NSStackView(views: [titleRow, sub]); text.orientation = .vertical; text.alignment = .leading; text.spacing = 2
+        text.setHuggingPriority(.init(1), for: .horizontal)
+        let icon = NSImageView(image: CorralLegacyIcon.image(.monitor, size: 16) ?? NSImage()); icon.contentTintColor = CorralAestheticTokens.text
 
-        if deleting {
-            primaryButton.title = "删除中…"
-            primaryButton.isEnabled = false
-            secondaryButton.isHidden = true
-        } else if confirmingDelete {
-            primaryButton.title = "确认删除"
-            secondaryButton.title = "取消"
-        } else if editing {
-            primaryButton.title = "保存"
-            secondaryButton.title = "取消"
-        } else {
-            primaryButton.title = "重命名"
-            secondaryButton.title = "删除"
+        for button in [primaryButton, secondaryButton] {
+            button.isBordered = false; button.font = .systemFont(ofSize: 11); button.target = self
         }
+        primaryButton.action = #selector(primaryAction); secondaryButton.action = #selector(secondaryAction)
+        primaryButton.contentTintColor = confirmingDelete ? CorralAestheticTokens.danger : CorralAestheticTokens.text
+        secondaryButton.contentTintColor = CorralAestheticTokens.textSecondary
+        if deleting {
+            primaryButton.title = "删除中…"; primaryButton.isEnabled = false; secondaryButton.isHidden = true
+        } else if confirmingDelete {
+            primaryButton.title = "确认删除"; secondaryButton.title = "取消"
+        } else if editing {
+            primaryButton.title = "保存"; secondaryButton.title = "取消"
+        } else {
+            // `.dp-action-btn`: 22px icon buttons revealed on hover.
+            primaryButton.title = "重命名"; primaryButton.image = CorralLegacyIcon.image(.edit, size: 13); primaryButton.imagePosition = .imageOnly
+            secondaryButton.title = "删除"; secondaryButton.image = CorralLegacyIcon.image(.trash, size: 13); secondaryButton.imagePosition = .imageOnly
+            secondaryButton.contentTintColor = CorralAestheticTokens.textMuted
+            for button in [primaryButton, secondaryButton] { button.widthAnchor.constraint(equalToConstant: 22).isActive = true; button.heightAnchor.constraint(equalToConstant: 22).isActive = true }
+        }
+        primaryButton.setAccessibilityLabel("\(primaryButton.title) \(record.name)"); primaryButton.setAccessibilityIdentifier("corral.devices.primary")
+        secondaryButton.setAccessibilityLabel("\(secondaryButton.title) \(record.name)"); secondaryButton.setAccessibilityIdentifier("corral.devices.secondary")
+        actions.orientation = .horizontal; actions.alignment = .centerY; actions.spacing = 3
+        actions.addArrangedSubview(primaryButton); actions.addArrangedSubview(secondaryButton)
+        actions.alphaValue = persistentActions ? 1 : 0
+        let check = NSImageView(image: CorralLegacyIcon.image(.check, size: 14) ?? NSImage()); check.contentTintColor = CorralAestheticTokens.text
+        check.isHidden = !selected || persistentActions
 
-        let actions = NSStackView(views: [primaryButton, secondaryButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = 4
-        let row = NSStackView(views: [selectionButton, nameField, actions])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
+        let row = NSStackView(views: [icon, text, actions, check])
+        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10; row.distribution = .fill
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
         row.translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true; layer?.cornerRadius = 8
         addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor),
-            nameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            primaryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 54),
-            secondaryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 48),
-            heightAnchor.constraint(equalToConstant: 46)
+            row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16), nameField.widthAnchor.constraint(lessThanOrEqualToConstant: 150)
         ])
+        setAccessibilityElement(true); setAccessibilityRole(.button); setAccessibilityLabel(record.name)
+        setAccessibilityIdentifier("corral.devices.row"); setAccessibilitySelected(selected)
     }
 
     required init?(coder: NSCoder) { fatalError("DeviceManagementRowView is created programmatically") }
 
-    @objc private func toggleSelection() { onSelection?(deviceID, selectionButton.state == .on) }
+    override func accessibilityPerformPress() -> Bool { toggleSelection(); return true }
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        [primaryButton, secondaryButton].filter { !$0.isHidden && $0.isEnabled && !$0.title.isEmpty }.map { button in
+            NSAccessibilityCustomAction(name: button.title) { [weak button] in button?.performClick(nil); return true }
+        }
+    }
+    override func mouseUp(with event: NSEvent) { if !editing, bounds.contains(convert(event.locationInWindow, from: nil)) { toggleSelection() } }
+    override func mouseDown(with event: NSEvent) { if editing { super.mouseDown(with: event) } }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = CorralAestheticTokens.hoverSubtle.cgColor; actions.alphaValue = 1 }
+    override func mouseExited(with event: NSEvent) { layer?.backgroundColor = NSColor.clear.cgColor; actions.alphaValue = persistentActions ? 1 : 0 }
+
+    private func toggleSelection() { onSelection?(deviceID, !selected) }
 
     @objc private func primaryAction() {
         if confirmingDelete { onConfirmDelete?(deviceID) }
