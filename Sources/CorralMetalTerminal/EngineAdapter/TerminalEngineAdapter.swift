@@ -35,7 +35,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
             options: TerminalOptions(
                 cols: initialSize.columns,
                 rows: initialSize.rows,
-                convertEol: false,
+                convertEol: true,
                 termName: "xterm-256color",
                 cursorStyle: .steadyBlock,
                 scrollback: 500,
@@ -51,6 +51,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
             guard accept(origin.connectionEpoch, resetOnEpochChange: false) else { return [] }
             terminal.resetToInitialState()
             delegate.resetCursor()
+            terminal.feed(byteArray: [0x1B, 0x5B, 0x48])
             terminal.feed(byteArray: Array(ansi))
         case let .delta(_, ansi, origin):
             guard accept(origin.connectionEpoch, resetOnEpochChange: true) else { return [] }
