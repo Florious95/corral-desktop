@@ -108,13 +108,15 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
         }
 
         let position = terminal.getCursorLocation()
+        let wrapPending = position.x >= dimensions.cols
         return TerminalGridSnapshot(
             size: GridSize(rows: dimensions.rows, columns: dimensions.cols),
             cells: cells,
             cursor: CursorDescriptor(
-                row: position.y,
-                column: position.x,
+                row: min(max(position.y, 0), dimensions.rows - 1),
+                column: min(max(position.x, 0), dimensions.cols - 1),
                 isVisible: delegate.isCursorVisible,
+                wrapPending: wrapPending,
                 shape: delegate.cursorShape
             ),
             generation: generation

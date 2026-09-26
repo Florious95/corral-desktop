@@ -39,6 +39,45 @@ final class TerminalEngineTests: XCTestCase {
         XCTAssertTrue(snapshot.isValid)
     }
 
+    func testRightEdgeWrapPendingAndFollowingCharacterStayValid() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 7))
+        _ = try await feed("ABCDEFG", to: engine)
+
+        let edge = await engine.snapshot()
+        XCTAssertTrue(edge.isValid)
+        XCTAssertEqual(edge.cursor.column, 6)
+        XCTAssertTrue(edge.cursor.wrapPending)
+
+        _ = try await feed("H", to: engine)
+        let wrapped = await engine.snapshot()
+        XCTAssertTrue(wrapped.isValid)
+        XCTAssertEqual(wrapped.cells[7].content, .cluster("H", columns: .one))
+        XCTAssertEqual(wrapped.cursor.row, 1)
+        XCTAssertEqual(wrapped.cursor.column, 1)
+        XCTAssertFalse(wrapped.cursor.wrapPending)
+    }
+
+    func testRightEdgeDSRAndDAKeepSnapshotValid() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 7))
+        _ = try await feed("ABCDEFG", to: engine)
+        let effects = try await feed("\u{1B}[6n\u{1B}[c", to: engine)
+        XCTAssertTrue(effects.contains { if case .autoReply = $0 { true } else { false } })
+
+        let snapshot = await engine.snapshot()
+        XCTAssertTrue(snapshot.isValid)
+        XCTAssertEqual(snapshot.cursor.column, 6)
+        XCTAssertTrue(snapshot.cursor.wrapPending)
+    }
+
+    func testSnapshotsStayValidAcrossRepeatedNarrowGridWraps() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 7))
+        for character in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+            _ = try await feed(String(character), to: engine)
+            let snapshot = await engine.snapshot()
+            XCTAssertTrue(snapshot.isValid, "invalid after \(character)")
+        }
+    }
+
     func testParsesCSIAndUTF8AcrossFrameBoundaries() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 1, columns: 4))
         _ = try await engine.apply(.delta(reference: reference(), ansi: Data([0x1B, 0x5B, 0x33, 0x38, 0x3B, 0x35, 0x3B]), origin: origin(1)))
