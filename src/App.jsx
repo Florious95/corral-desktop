@@ -360,8 +360,20 @@ export default function App({ seedDevices } = {}) {
     return m;
   }, [devices]);
 
-  const checkedCount = devices.filter((d) => d.checked).length;
-  const multiDevice = checkedCount > 1;
+  const urlById = useMemo(() => {
+    const m = new Map();
+    for (const d of devices) m.set(d.id, d.url);
+    return m;
+  }, [devices]);
+
+  // 检查已连接/已配置的主机设备列表（Issue #312）：
+  // 当客户端只有 1 台活跃/配置设备时，侧边栏行内完全隐去右侧主机名称胶囊。
+  // 仅当配置设备 > 1、勾选设备 > 1，且活跃/就绪设备 > 1（或工作区包含不同设备）时，才激活 multiDevice。
+  const checkedDevices = useMemo(() => devices.filter((d) => d.checked), [devices]);
+  const activeDevices = useMemo(() => checkedDevices.filter((d) => d.state === 'ready'), [checkedDevices]);
+  const distinctWorkspaceDevices = useMemo(() => new Set(workspaces.map((w) => w.deviceId)).size, [workspaces]);
+  const isMultiDeviceEnv = devices.length > 1 && checkedDevices.length > 1;
+  const multiDevice = isMultiDeviceEnv && (activeDevices.length > 1 || distinctWorkspaceDevices > 1);
 
   const spaces = useMemo(() => workspaces.map((w) => {
     const rawSessions = w.sessions || [];
@@ -377,6 +389,7 @@ export default function App({ seedDevices } = {}) {
       key: w.spaceKey,
       deviceId: w.deviceId,
       deviceName: w.deviceName,
+      deviceUrl: w.deviceUrl || urlById.get(w.deviceId) || '',
       deviceLocal: !!localById.get(w.deviceId),
       cwd: w.cwd,
       name: w.label,
@@ -385,7 +398,7 @@ export default function App({ seedDevices } = {}) {
       state,
       sessions,
     };
-  }), [workspaces, localById, dismissedUids]);
+  }), [workspaces, localById, urlById, dismissedUids]);
 
   const newAgentTarget = useMemo(
     () => workspaces.find((w) => isSameSpaceKey(w.spaceKey, newAgentSpace)) || null,
@@ -413,6 +426,7 @@ export default function App({ seedDevices } = {}) {
           uid: s.uid,
           deviceId: w.deviceId,
           deviceName: w.deviceName,
+          deviceUrl: w.deviceUrl || urlById.get(w.deviceId) || '',
           deviceLocal: !!localById.get(w.deviceId),
           spaceKey: w.spaceKey,
           spaceName: w.label,
@@ -427,7 +441,7 @@ export default function App({ seedDevices } = {}) {
       }
     }
     return out;
-  }, [workspaces, localById, favSet, dismissedUids]);
+  }, [workspaces, localById, urlById, favSet, dismissedUids]);
 
   const agentByKey = useMemo(() => new Map(allAgents.map((a) => [a.key, a])), [allAgents]);
   const favCount = useMemo(() => allAgents.reduce((count, agent) => count + (agent.fav ? 1 : 0), 0), [allAgents]);
@@ -1168,6 +1182,20 @@ export default function App({ seedDevices } = {}) {
     setDevices(dm.devices);
   }, [dm]);
 
+  const handleRenameDevice = useCallback((id, newName) => {
+    if (typeof dm.renameDevice === 'function') {
+      dm.renameDevice(id, newName);
+    } else {
+      dm.updateDevice(id, { name: newName });
+    }
+    setDevices(dm.devices);
+  }, [dm]);
+
+  const handleRemoveDevice = useCallback((id) => {
+    dm.removeDevice(id);
+    setDevices(dm.devices);
+  }, [dm]);
+
   const handlePairMobile = useCallback(async () => {
     setDevicesOpen(false);
     if (typeof dm.fetchLocalHostIdentity === 'function') {
@@ -1491,6 +1519,8 @@ export default function App({ seedDevices } = {}) {
           devices={popoverDevices}
           onToggle={handleToggleDevice}
           onToggleAll={handleToggleAllDevices}
+          onRenameDevice={handleRenameDevice}
+          onRemoveDevice={handleRemoveDevice}
           onAddDevice={() => { setDevicesOpen(false); setAddDeviceOpen(true) }}
           onPairMobile={handlePairMobile}
           onClose={() => setDevicesOpen(false)}

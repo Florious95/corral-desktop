@@ -190,6 +190,7 @@ export default function SettingsDialog({ open, settings, onUpdateSettings, onClo
                   name="terminal.fontFamily"
                   className="chr-input chr-setting-font-family"
                   aria-label="Terminal Font Family"
+                  autoComplete="off"
                   value={fontFamily}
                   onChange={(event) => handleFontFamilyChange(event.target.value)}
                   placeholder="如 Menlo, Monaco, monospace"
@@ -221,6 +222,7 @@ export default function SettingsDialog({ open, settings, onUpdateSettings, onClo
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
+                        autoComplete="off"
                         className="chr-setting-font-size"
                         aria-label="Terminal Font Size"
                         value={fontSizeInput}

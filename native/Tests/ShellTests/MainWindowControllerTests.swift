@@ -46,6 +46,19 @@ final class MainWindowControllerTests: XCTestCase {
         assertColor(controller.webView.underPageBackgroundColor, equals: (15, 17, 21))
     }
 
+    @MainActor func testWebKitConfigurationDisablesUnusedFeatures() throws {
+        let controller = try MainWindowController(distURL: fixtureURL, websiteDataStore: .nonPersistent())
+        defer { controller.close() }
+
+        let configuration = controller.webView.configuration
+        if #available(macOS 14.0, *) {
+            XCTAssertFalse(configuration.allowsInlinePredictions)
+        }
+        XCTAssertFalse(configuration.allowsAirPlayForMediaPlayback)
+        XCTAssertEqual(configuration.mediaTypesRequiringUserActionForPlayback, .all)
+        XCTAssertFalse(configuration.preferences.isElementFullscreenEnabled)
+    }
+
     private func assertColor(_ color: NSColor?, equals expected: (Int, Int, Int), file: StaticString = #filePath, line: UInt = #line) {
         guard let color = color?.usingColorSpace(.sRGB) else {
             XCTFail("expected sRGB color", file: file, line: line)

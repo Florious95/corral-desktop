@@ -43,7 +43,7 @@ function GroupHeader({ open, onToggle, working = false, children }) {
  * @param {string} props.deviceLabel                   §7.2 规则算好的底部文案
  * @param {boolean} props.anyDeviceOnline
  * @param {() => void} props.onToggleDevices
- * @param {boolean} props.multiDevice                  勾选设备 > 1（决定是否显示徽章）
+ * @param {boolean} props.multiDevice                  多设备模式（活跃设备 > 1 时决定是否显示徽章）
  * @param {number} [props.allCount]                    All Spaces 计数，缺省由 spaces 求和
  * @param {number} [props.favCount]                    收藏计数，缺省由可见 agents 求和
  */

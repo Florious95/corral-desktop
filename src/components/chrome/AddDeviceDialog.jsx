@@ -67,6 +67,7 @@ export default function AddDeviceDialog({ open, onSubmit, onAdd, onCancel }) {
       <div className="chr-scrim" onClick={onCancel} />
       <div className="chr-dialog-pos">
         <form
+          autoComplete="off"
           className="chr-dialog"
           role="dialog"
           aria-modal="true"
@@ -84,6 +85,7 @@ export default function AddDeviceDialog({ open, onSubmit, onAdd, onCancel }) {
           <input
             id="add-name"
             className="chr-input"
+            autoComplete="off"
             value={name}
             placeholder="Mac Studio @ Home"
             onChange={(e) => setName(e.target.value)}
