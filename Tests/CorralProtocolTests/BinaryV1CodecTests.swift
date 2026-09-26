@@ -102,7 +102,16 @@ final class BinaryV1CodecTests: XCTestCase {
         let textPayload = try XCTUnwrap(textEnvelope["payload"] as? [String: Any])
         XCTAssertEqual(textPayload["text"] as? String, "héllo")
         XCTAssertNil(textPayload["bytes_b64"])
-        XCTAssertThrowsError(try codec.encodeClientCommand(.createSession(requestID: 1, deviceID: DeviceID("dev"), name: "shell", workingDirectory: nil)))
+
+        let byteRequest = try ClientInputRequest(sequence: 12, reference: reference, payload: .bytes(Data([0x00, 0xFF])))
+        let byteData = try codec.encodeClientCommand(.input(byteRequest))
+        let byteEnvelope = try XCTUnwrap(JSONSerialization.jsonObject(with: byteData) as? [String: Any])
+        let bytePayload = try XCTUnwrap(byteEnvelope["payload"] as? [String: Any])
+        XCTAssertEqual(bytePayload["bytes"] as? String, "AP8=")
+        XCTAssertNil(bytePayload["text"])
+        XCTAssertNil(bytePayload["keys"])
+        XCTAssertThrowsError(try ClientInputRequest(sequence: 13, reference: reference, payload: .bytes(Data())))
+        XCTAssertThrowsError(try ClientInputRequest(sequence: 14, reference: reference, payload: .bytes(Data(repeating: 0, count: ProtocolV1.maximumInputBytes + 1))))
     }
 
     func testReceiveEnvelopeCarriesConnectionGenerationAndLocalOrdinal() throws {
