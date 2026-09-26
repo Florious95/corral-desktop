@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 public final class CorralWindow: NSWindow {
-    public init(contentRect: NSRect = NSRect(x: 0, y: 0, width: 1180, height: 760), title: String = "Corral") {
+    public init(contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860), title: String = "Corral") {
         super.init(
             contentRect: contentRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -16,7 +16,7 @@ public final class CorralWindow: NSWindow {
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         backgroundColor = CorralAestheticTokens.surface0
-        minSize = NSSize(width: 720, height: 480)
+        minSize = NSSize(width: 1100, height: 700)
     }
 
     public required init?(coder: NSCoder) {
@@ -39,13 +39,15 @@ public final class CorralWindow: NSWindow {
 }
 
 @MainActor
-public final class CorralWindowController: NSWindowController {
+public final class CorralWindowController: NSWindowController, NSWindowDelegate {
     public private(set) var savedFrameBeforeZoom: NSRect?
+    private var savedMinimumSizeBeforeZoom: NSSize?
 
-    public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1180, height: 760)) {
+    public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860)) {
         let window = CorralWindow(contentRect: contentRect)
         super.init(window: window)
         window.contentView = workspaceView
+        window.delegate = self
         window.center()
         window.positionTrafficLights()
     }
@@ -59,16 +61,32 @@ public final class CorralWindowController: NSWindowController {
         toggleZoom(to: visibleFrame)
     }
 
-    /// Uses the target screen's visible frame and remembers the exact pre-zoom window frame.
+    /// Uses the target screen's usable frame, excluding the menu bar and Dock, and restores the exact original frame.
     public func toggleZoom(to visibleFrame: NSRect) {
-        guard let window else { return }
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
         if let originalFrame = savedFrameBeforeZoom {
+            let originalMinimumSize = savedMinimumSizeBeforeZoom ?? window.minSize
+            window.minSize = NSSize(width: min(originalMinimumSize.width, originalFrame.width), height: min(originalMinimumSize.height, originalFrame.height))
             window.setFrame(originalFrame, display: true, animate: false)
+            window.minSize = originalMinimumSize
             savedFrameBeforeZoom = nil
+            savedMinimumSizeBeforeZoom = nil
         } else {
+            let targetFrame = visibleFrame.standardized
+            guard targetFrame.width > 0, targetFrame.height > 0 else { return }
             savedFrameBeforeZoom = window.frame
-            window.setFrame(visibleFrame, display: true, animate: false)
+            savedMinimumSizeBeforeZoom = window.minSize
+            window.minSize = NSSize(width: min(window.minSize.width, targetFrame.width), height: min(window.minSize.height, targetFrame.height))
+            window.setFrame(targetFrame, display: true, animate: false)
         }
+    }
+
+    public func windowDidResize(_ notification: Notification) {
+        (window as? CorralWindow)?.positionTrafficLights()
+    }
+
+    public func windowDidChangeScreen(_ notification: Notification) {
+        (window as? CorralWindow)?.positionTrafficLights()
     }
 }
 

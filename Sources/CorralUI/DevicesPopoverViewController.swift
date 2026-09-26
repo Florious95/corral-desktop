@@ -9,15 +9,22 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public private(set) var deletionConfirmationDeviceID: DeviceID?
     public private(set) var deletionInProgressDeviceID: DeviceID?
     public private(set) var errorMessage: String?
+    public private(set) var selectedDeviceIDs = Set<DeviceID>()
+    public private(set) var readyDeviceIDs = Set<DeviceID>()
     public var onDevicesChanged: (([DeviceRecord]) -> Void)?
+    public var onAddDevice: (() -> Void)?
+    public var onPairMobile: (() -> Void)?
 
     public let tableView = NSTableView()
+    public let allDevicesButton = NSButton(checkboxWithTitle: "All Devices", target: nil, action: nil)
+    public let connectionStatus = CorralStatusIndicatorView()
+    public let selectionSummary = NSTextField(labelWithString: "未添加设备")
     private let errorLabel = NSTextField(labelWithString: "")
 
     public init(repository: any DeviceRepositoryProtocol) {
         self.repository = repository
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = NSSize(width: 520, height: 380)
+        preferredContentSize = NSSize(width: 520, height: 430)
     }
 
     public required init?(coder: NSCoder) {
@@ -39,14 +46,23 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
-        let title = NSTextField(labelWithString: "Devices")
+        let title = NSTextField(labelWithString: "设备")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
         title.textColor = CorralAestheticTokens.text
+        allDevicesButton.target = self; allDevicesButton.action = #selector(toggleAllDevices)
+        allDevicesButton.font = .systemFont(ofSize: 11); allDevicesButton.contentTintColor = CorralAestheticTokens.textSecondary
+        let toolbar = NSStackView(views: [title, NSView(), allDevicesButton]); toolbar.orientation = .horizontal; toolbar.alignment = .centerY; toolbar.spacing = 8
+        let addButton = NSButton(title: "添加设备", target: self, action: #selector(addDevice)); addButton.bezelStyle = .rounded
+        let pairButton = NSButton(title: "配对移动端", target: self, action: #selector(pairMobile)); pairButton.bezelStyle = .rounded
+        let actions = NSStackView(views: [addButton, pairButton]); actions.orientation = .horizontal; actions.alignment = .centerY; actions.spacing = 8
+        connectionStatus.status = .offline
+        selectionSummary.font = .systemFont(ofSize: 10); selectionSummary.textColor = CorralAestheticTokens.textMuted
+        let footer = NSStackView(views: [connectionStatus, selectionSummary, NSView(), actions]); footer.orientation = .horizontal; footer.alignment = .centerY; footer.spacing = 7
         errorLabel.font = .systemFont(ofSize: 11)
         errorLabel.textColor = CorralAestheticTokens.danger
         errorLabel.isHidden = true
 
-        let content = NSStackView(views: [title, scrollView, errorLabel])
+        let content = NSStackView(views: [toolbar, scrollView, footer, errorLabel])
         content.orientation = .vertical
         content.alignment = .width
         content.distribution = .fill
@@ -56,6 +72,8 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         content.layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         view = content
         scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        toolbar.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        footer.heightAnchor.constraint(equalToConstant: 32).isActive = true
         errorLabel.heightAnchor.constraint(equalToConstant: 16).isActive = true
     }
 
@@ -66,7 +84,9 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
 
     public func reloadDevices() async throws {
         devices = try await repository.listDevices()
+        if selectedDeviceIDs.isEmpty { selectedDeviceIDs = Set(devices.map(\.id)) }
         tableView.reloadData()
+        updateSelectionSummary()
         onDevicesChanged?(devices)
     }
 
@@ -85,9 +105,11 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
             record: record,
             editing: editing,
             confirmingDelete: confirmingDelete,
-            deleting: deletionInProgressDeviceID == record.id
+            deleting: deletionInProgressDeviceID == record.id,
+            selected: selectedDeviceIDs.contains(record.id)
         )
         rowView.nameField.delegate = self
+        rowView.onSelection = { [weak self] id, selected in self?.setDevice(id, selected: selected) }
         rowView.onRename = { [weak self] in self?.beginRenaming($0) }
         rowView.onSave = { [weak self] id, name in self?.scheduleRename(id, to: name) }
         rowView.onCancelRename = { [weak self] in self?.cancelRenaming($0) }
@@ -142,9 +164,11 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         do {
             try await repository.delete(id: id)
             devices.removeAll { $0.id == id }
+            selectedDeviceIDs.remove(id); readyDeviceIDs.remove(id)
             deletionConfirmationDeviceID = nil
             deletionInProgressDeviceID = nil
             tableView.reloadData()
+            updateSelectionSummary()
             onDevicesChanged?(devices)
             return true
         } catch {
@@ -228,6 +252,27 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         }
     }
 
+    public func setReadyDevices(_ ids: Set<DeviceID>) {
+        readyDeviceIDs = ids.intersection(Set(devices.map(\.id)))
+        connectionStatus.status = readyDeviceIDs.isEmpty ? .offline : .working
+    }
+
+    public func setDevice(_ id: DeviceID, selected: Bool) {
+        if selected { selectedDeviceIDs.insert(id) } else { selectedDeviceIDs.remove(id) }
+        tableView.reloadData(); updateSelectionSummary()
+    }
+
+    private func updateSelectionSummary() {
+        let names = devices.filter { selectedDeviceIDs.contains($0.id) }.map(\.name)
+        selectionSummary.stringValue = devices.isEmpty ? "未添加设备" : names.isEmpty ? "未勾选设备" : names.count == devices.count ? "全部设备" : names.joined(separator: " · ")
+        allDevicesButton.state = names.isEmpty ? .off : names.count == devices.count ? .on : .mixed
+        connectionStatus.status = readyDeviceIDs.isEmpty ? .offline : .working
+    }
+
+    @objc private func toggleAllDevices() { selectedDeviceIDs = allDevicesButton.state == .on ? Set(devices.map(\.id)) : []; tableView.reloadData(); updateSelectionSummary() }
+    @objc private func addDevice() { onAddDevice?() }
+    @objc private func pairMobile() { onPairMobile?() }
+
     private func show(_ error: Error) {
         errorMessage = String(describing: error)
         errorLabel.stringValue = errorMessage ?? ""
@@ -243,6 +288,7 @@ private final class DeviceNameTextField: NSTextField {
 @MainActor
 private final class DeviceManagementRowView: NSView {
     let nameField = DeviceNameTextField(labelWithString: "")
+    var onSelection: ((DeviceID, Bool) -> Void)?
     var onRename: ((DeviceID) -> Void)?
     var onSave: ((DeviceID, String) -> Void)?
     var onCancelRename: ((DeviceID) -> Void)?
@@ -250,16 +296,19 @@ private final class DeviceManagementRowView: NSView {
     var onConfirmDelete: ((DeviceID) -> Void)?
     var onCancelDelete: ((DeviceID) -> Void)?
 
+    private let selectionButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let primaryButton = NSButton(title: "", target: nil, action: nil)
     private let secondaryButton = NSButton(title: "", target: nil, action: nil)
     private let deviceID: DeviceID
     private let editing: Bool
     private let confirmingDelete: Bool
+    private let selected: Bool
 
-    init(record: DeviceRecord, editing: Bool, confirmingDelete: Bool, deleting: Bool) {
+    init(record: DeviceRecord, editing: Bool, confirmingDelete: Bool, deleting: Bool, selected: Bool) {
         deviceID = record.id
         self.editing = editing
         self.confirmingDelete = confirmingDelete
+        self.selected = selected
         super.init(frame: .zero)
 
         nameField.deviceID = record.id
@@ -274,6 +323,8 @@ private final class DeviceManagementRowView: NSView {
         nameField.lineBreakMode = .byTruncatingTail
         nameField.translatesAutoresizingMaskIntoConstraints = false
 
+        selectionButton.state = selected ? .on : .off
+        selectionButton.target = self; selectionButton.action = #selector(toggleSelection)
         primaryButton.isBordered = false
         primaryButton.contentTintColor = confirmingDelete ? CorralAestheticTokens.danger : CorralAestheticTokens.text
         primaryButton.target = self
@@ -284,25 +335,25 @@ private final class DeviceManagementRowView: NSView {
         secondaryButton.action = #selector(secondaryAction)
 
         if deleting {
-            primaryButton.title = "Deleting…"
+            primaryButton.title = "删除中…"
             primaryButton.isEnabled = false
             secondaryButton.isHidden = true
         } else if confirmingDelete {
-            primaryButton.title = "Confirm Delete"
-            secondaryButton.title = "Cancel"
+            primaryButton.title = "确认删除"
+            secondaryButton.title = "取消"
         } else if editing {
-            primaryButton.title = "Save"
-            secondaryButton.title = "Cancel"
+            primaryButton.title = "保存"
+            secondaryButton.title = "取消"
         } else {
-            primaryButton.title = "Rename"
-            secondaryButton.title = "Delete"
+            primaryButton.title = "重命名"
+            secondaryButton.title = "删除"
         }
 
         let actions = NSStackView(views: [primaryButton, secondaryButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 4
-        let row = NSStackView(views: [nameField, actions])
+        let row = NSStackView(views: [selectionButton, nameField, actions])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
@@ -320,6 +371,8 @@ private final class DeviceManagementRowView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("DeviceManagementRowView is created programmatically") }
+
+    @objc private func toggleSelection() { onSelection?(deviceID, selectionButton.state == .on) }
 
     @objc private func primaryAction() {
         if confirmingDelete { onConfirmDelete?(deviceID) }
