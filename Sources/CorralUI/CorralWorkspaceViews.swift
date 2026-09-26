@@ -8,12 +8,15 @@ public final class CorralTab {
     public var badge: String?
     /// The view is created once for this tab and remains attached while other tabs are selected.
     public let contentView: NSView
+    /// The latest rendered terminal grid stays associated with this tab across visibility changes.
+    public var terminalSnapshot: TerminalGridSnapshot?
 
-    public init(id: UUID = UUID(), title: String, badge: String? = nil, contentView: NSView) {
+    public init(id: UUID = UUID(), title: String, badge: String? = nil, contentView: NSView, terminalSnapshot: TerminalGridSnapshot? = nil) {
         self.id = id
         self.title = title
         self.badge = badge
         self.contentView = contentView
+        self.terminalSnapshot = terminalSnapshot
     }
 }
 
@@ -307,10 +310,18 @@ public final class CorralDeviceBadgeView: NSView {
 
     public func update(deviceNames: [String]) {
         self.deviceNames = deviceNames
-        isHidden = deviceNames.count <= 1
-        let fullText = deviceNames.joined(separator: " · ")
-        label.stringValue = fullText
-        toolTip = deviceNames.count > 1 ? deviceNames.joined(separator: ", ") : nil
+        update(text: deviceNames.joined(separator: " · "), tooltip: deviceNames.joined(separator: ", "), visible: deviceNames.count > 1)
+    }
+
+    public func update(deviceName: String, deviceCount: Int) {
+        deviceNames = [deviceName]
+        update(text: deviceName, tooltip: deviceName, visible: deviceCount > 1)
+    }
+
+    private func update(text: String, tooltip: String, visible: Bool) {
+        isHidden = !visible
+        label.stringValue = text
+        toolTip = visible ? tooltip : nil
         let naturalWidth = label.intrinsicContentSize.width + 12
         widthConstraint.constant = isHidden ? 0 : min(maximumWidth, max(24, naturalWidth))
         needsLayout = true
@@ -321,10 +332,16 @@ public final class CorralDeviceBadgeView: NSView {
 private final class CorralSidebarNode {
     let title: String
     let children: [CorralSidebarNode]
+    let sessionID: UUID?
+    let deviceBadgeName: String?
+    let deviceCount: Int
 
-    init(title: String, children: [CorralSidebarNode] = []) {
+    init(title: String, children: [CorralSidebarNode] = [], sessionID: UUID? = nil, deviceBadgeName: String? = nil, deviceCount: Int = 0) {
         self.title = title
         self.children = children
+        self.sessionID = sessionID
+        self.deviceBadgeName = deviceBadgeName
+        self.deviceCount = deviceCount
     }
 }
 
@@ -332,13 +349,18 @@ private final class CorralSidebarNode {
 public final class CorralSidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     public let outlineView = NSOutlineView()
     public let deviceBadgeView = CorralDeviceBadgeView()
+    public let settingsButton = CorralSettingsButton()
     public private(set) var devices: [CorralSidebarDevice] = []
     public var onSelectSession: ((UUID) -> Void)?
+    public var onRenameSession: ((UUID) -> Void)?
+    public var onCloseSession: ((UUID) -> Void)?
+    public var onSettings: (() -> Void)?
 
     private let scrollView = NSScrollView()
     private let headerTitle = NSTextField(labelWithString: "DEVICES")
     private var nodes: [CorralSidebarNode] = []
     private var sessionIDs: [ObjectIdentifier: UUID] = [:]
+    private var contextMenuControllers: [UUID: SessionContextMenuController] = [:]
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -369,6 +391,11 @@ public final class CorralSidebarView: NSView, NSOutlineViewDataSource, NSOutline
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
 
+        settingsButton.target = self
+        settingsButton.action = #selector(openSettings)
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(settingsButton)
+
         NSLayoutConstraint.activate([
             headerTitle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             headerTitle.centerYAnchor.constraint(equalTo: deviceBadgeView.centerYAnchor),
@@ -378,7 +405,11 @@ public final class CorralSidebarView: NSView, NSOutlineViewDataSource, NSOutline
             scrollView.topAnchor.constraint(equalTo: deviceBadgeView.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: settingsButton.topAnchor, constant: -8),
+            settingsButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            settingsButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            settingsButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            settingsButton.heightAnchor.constraint(equalToConstant: 30)
         ])
     }
 
@@ -395,10 +426,16 @@ public final class CorralSidebarView: NSView, NSOutlineViewDataSource, NSOutline
         self.devices = devices
         deviceBadgeView.update(deviceNames: devices.map(\.name))
         sessionIDs.removeAll(keepingCapacity: true)
+        contextMenuControllers.removeAll(keepingCapacity: true)
         nodes = devices.map { device in
             let sessions = device.sessions.map { session -> CorralSidebarNode in
-                let node = CorralSidebarNode(title: session.name)
+                let node = CorralSidebarNode(title: session.name, sessionID: session.id, deviceBadgeName: device.name, deviceCount: devices.count)
                 sessionIDs[ObjectIdentifier(node)] = session.id
+                contextMenuControllers[session.id] = SessionContextMenuBuilder.makeMenu(
+                    for: session.id,
+                    onRename: { [weak self] in self?.onRenameSession?($0) },
+                    onClose: { [weak self] in self?.onCloseSession?($0) }
+                )
                 return node
             }
             return CorralSidebarNode(title: device.name, children: sessions)
@@ -427,17 +464,28 @@ public final class CorralSidebarView: NSView, NSOutlineViewDataSource, NSOutline
         guard let node = item as? CorralSidebarNode else { return nil }
         let cell = NSTableCellView()
         let text = NSTextField(labelWithString: node.title)
-        text.font = .systemFont(ofSize: 12, weight: node.children.isEmpty ? .regular : .medium)
-        text.textColor = node.children.isEmpty ? CorralAestheticTokens.textSecondary : CorralAestheticTokens.text
+        text.font = .systemFont(ofSize: 12, weight: node.sessionID == nil ? .medium : .regular)
+        text.textColor = node.sessionID == nil ? CorralAestheticTokens.text : CorralAestheticTokens.textSecondary
         text.lineBreakMode = .byTruncatingTail
-        text.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(text)
+        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let badge = CorralDeviceBadgeView()
+        if let deviceName = node.deviceBadgeName {
+            badge.update(deviceName: deviceName, deviceCount: node.deviceCount)
+        }
+        let row = NSStackView(views: [text, badge])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 6
+        row.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(row)
         NSLayoutConstraint.activate([
-            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 5),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            text.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            row.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 5),
+            row.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+            row.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            badge.heightAnchor.constraint(equalToConstant: 18)
         ])
         cell.textField = text
+        if let sessionID = node.sessionID { cell.menu = contextMenuControllers[sessionID]?.menu }
         return cell
     }
 
@@ -446,6 +494,8 @@ public final class CorralSidebarView: NSView, NSOutlineViewDataSource, NSOutline
         onSelectSession?(sessionID)
         return true
     }
+
+    @objc private func openSettings() { onSettings?() }
 }
 
 @MainActor
@@ -454,7 +504,7 @@ public final class CorralTitleBarView: NSView {
 
     private let dragRegion = CorralWindowDragRegion()
     private let titleLabel = NSTextField(labelWithString: "Corral")
-    private let settingsButton = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings") ?? NSImage(), target: nil, action: nil)
+    public let settingsButton = CorralSettingsButton()
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -469,18 +519,8 @@ public final class CorralTitleBarView: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        settingsButton.isBordered = false
-        settingsButton.bezelStyle = .regularSquare
-        settingsButton.contentTintColor = CorralAestheticTokens.text
-        settingsButton.toolTip = "Settings"
-        settingsButton.setAccessibilityLabel("Settings")
         settingsButton.target = self
         settingsButton.action = #selector(openSettings)
-        settingsButton.wantsLayer = true
-        settingsButton.layer?.backgroundColor = CorralAestheticTokens.surface2.cgColor
-        settingsButton.layer?.cornerRadius = 5
-        settingsButton.layer?.borderColor = CorralAestheticTokens.border.cgColor
-        settingsButton.layer?.borderWidth = 1
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(settingsButton)
 
@@ -506,16 +546,48 @@ public final class CorralTitleBarView: NSView {
 }
 
 @MainActor
+public final class TabSwitchTelemetry {
+    public private(set) var fitCount = 0
+    public private(set) var subscribeCount = 0
+    public private(set) var unsubscribeCount = 0
+    public private(set) var resizeCount = 0
+    public private(set) var resetCount = 0
+    public private(set) var isRecordingSwitch = false
+
+    public var allCountsAreZero: Bool {
+        fitCount == 0 && subscribeCount == 0 && unsubscribeCount == 0 && resizeCount == 0 && resetCount == 0
+    }
+
+    fileprivate func beginSwitch() {
+        fitCount = 0
+        subscribeCount = 0
+        unsubscribeCount = 0
+        resizeCount = 0
+        resetCount = 0
+        isRecordingSwitch = true
+    }
+
+    fileprivate func endSwitch() { isRecordingSwitch = false }
+
+    public func recordFit() { if isRecordingSwitch { fitCount += 1 } }
+    public func recordSubscribe() { if isRecordingSwitch { subscribeCount += 1 } }
+    public func recordUnsubscribe() { if isRecordingSwitch { unsubscribeCount += 1 } }
+    public func recordResize() { if isRecordingSwitch { resizeCount += 1 } }
+    public func recordReset() { if isRecordingSwitch { resetCount += 1 } }
+}
+
+@MainActor
 public final class CorralWorkspaceView: NSView {
     public let tabBar = CorralTabBarView()
     public let sidebar: CorralSidebarView
     public let stageContainer = NSView()
+    public let tabSwitchTelemetry = TabSwitchTelemetry()
     public private(set) var tabs: [CorralTab] = []
     public private(set) var activeTabID: UUID?
     public var onCreateTab: (() -> Void)?
     public var onSettings: (() -> Void)?
 
-    private let titleBar = CorralTitleBarView()
+    public let titleBar = CorralTitleBarView()
 
     public init(tabs: [CorralTab] = [], sidebar: CorralSidebarView = CorralSidebarView()) {
         self.sidebar = sidebar
@@ -524,6 +596,7 @@ public final class CorralWorkspaceView: NSView {
         layer?.backgroundColor = CorralAestheticTokens.background.cgColor
 
         titleBar.onSettings = { [weak self] in self?.onSettings?() }
+        sidebar.onSettings = { [weak self] in self?.onSettings?() }
         tabBar.onSelectTab = { [weak self] id in self?.selectTab(id: id) }
         tabBar.onCreateTab = { [weak self] in self?.onCreateTab?() }
         tabBar.onCloseTab = { [weak self] id in self?.closeTab(id: id) }
@@ -574,9 +647,12 @@ public final class CorralWorkspaceView: NSView {
 
     public func selectTab(id: UUID) {
         guard let selected = tabs.first(where: { $0.id == id }) else { return }
+        tabSwitchTelemetry.beginSwitch()
+        defer { tabSwitchTelemetry.endSwitch() }
         activeTabID = id
         for tab in tabs {
-            tab.contentView.isHidden = tab.id != id
+            let shouldHide = tab.id != id
+            if tab.contentView.isHidden != shouldHide { tab.contentView.isHidden = shouldHide }
         }
         tabBar.setTabs(tabs, selectedTabID: id)
         if let firstResponder = firstFocusableView(in: selected.contentView) {
