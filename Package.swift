@@ -32,7 +32,11 @@ let package = Package(
         .testTarget(name: "CorralProtocolTests", dependencies: ["CorralProtocol", "CorralContracts"]),
         .testTarget(name: "CorralServicesTests", dependencies: ["CorralServices", "CorralContracts"]),
         .testTarget(name: "CorralMetalTerminalTests", dependencies: ["CorralMetalTerminal", "CorralContracts"]),
-        .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts", "CorralMetalTerminal"])
+        .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts", "CorralMetalTerminal"]),
+        .testTarget(
+            name: "CorralRegressionTests",
+            dependencies: ["CorralContracts", "CorralServices", "CorralUI", "CorralMetalTerminal"]
+        )
     ]
 )
 // M0 intentionally has no external package dependencies. Production releases use a distinct bundle identity.
