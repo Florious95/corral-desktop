@@ -45,6 +45,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, W
         let content = try LocalContent(distURL: distURL)
         let config = WKWebViewConfiguration()
         config.websiteDataStore = websiteDataStore ?? WKWebsiteDataStore.default()
+        if #available(macOS 14.0, *) {
+            config.allowsInlinePredictions = false
+        }
+        config.allowsAirPlayForMediaPlayback = false
+        config.mediaTypesRequiringUserActionForPlayback = .all
+        config.preferences.isElementFullscreenEnabled = false
         config.setURLSchemeHandler(LocalSchemeHandler(content: content), forURLScheme: "agentmirror")
         bridge = ShellBridge(services: services ?? DefaultShellServices.shared)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "native")

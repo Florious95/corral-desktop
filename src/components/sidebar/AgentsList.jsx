@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProviderIcon from './ProviderIcon.jsx';
 import { StarIcon, CheckIcon } from '../../lib/icons.jsx';
 import { AGENT_ROW_HEIGHT as ROW, sortAgents, visibleWindow } from './agentWindow.js';
+import { formatDeviceBadge, getDeviceBadgeTitle } from '../../lib/deviceBadge.js';
 
 const MIN_H = ROW * 2;
 
@@ -35,12 +36,19 @@ const sameAgentRow = (prev, next) => {
     && a.fav === b.fav
     && a.spaceName === b.spaceName
     && a.deviceName === b.deviceName
-    && a.deviceLocal === b.deviceLocal;
+    && a.deviceLocal === b.deviceLocal
+    && a.deviceUrl === b.deviceUrl;
 };
 
 const AgentRow = memo(function AgentRow({
   agent: ag, top, isOpen, isActive = false, isClosing, onOpen, onContextMenu, multiDevice, onPointerDown,
 }) {
+  const badgeLabel = multiDevice
+    ? formatDeviceBadge(ag.deviceName, { deviceLocal: ag.deviceLocal, deviceUrl: ag.deviceUrl })
+    : null;
+  const badgeTitle = multiDevice
+    ? getDeviceBadgeTitle(ag.deviceName, { deviceUrl: ag.deviceUrl })
+    : null;
   return (
     <div
       className={`agents-row agents-item${isOpen ? ' is-open' : ''}${isActive ? ' is-active' : ''}`}
@@ -73,9 +81,12 @@ const AgentRow = memo(function AgentRow({
           ) : null}
           {ag.fav ? <StarIcon size={12} fill="var(--amber)" /> : null}
         </span>
-        {multiDevice ? (
-          <span className={`agents-badge${ag.deviceLocal ? ' is-local' : ''}`}>
-            {ag.deviceName}
+        {multiDevice && badgeLabel ? (
+          <span
+            className={`agents-badge${ag.deviceLocal ? ' is-local' : ''}`}
+            title={badgeTitle || badgeLabel}
+          >
+            {badgeLabel}
           </span>
         ) : null}
       </div>

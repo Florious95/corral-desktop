@@ -233,6 +233,12 @@ export class DeviceManager {
     return true;
   }
 
+  renameDevice(id, newName) {
+    const trimmed = typeof newName === 'string' ? newName.trim() : '';
+    if (!trimmed) return false;
+    return this.updateDevice(id, { name: trimmed });
+  }
+
   removeDevice(id) {
     const i = this._devices.findIndex((x) => x.id === id);
     if (i < 0) return false;

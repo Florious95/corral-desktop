@@ -467,11 +467,90 @@
   font-size: var(--fs-13);
   font-weight: 600;
   color: var(--text);
+  min-width: 0;
 }
 .dp-name > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.dp-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+.dp-rename-input {
+  box-sizing: border-box;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-4);
+  padding: 1px 5px;
+  outline: none;
+  width: 100%;
+  max-width: 140px;
+}
+.dp-rename-input:focus {
+  border-color: var(--accent);
+}
+.dp-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--d-hover);
+}
+.dp-row:hover .dp-actions,
+.dp-row:focus-within .dp-actions {
+  opacity: 1;
+}
+.dp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-4);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--d-hover), background var(--d-hover);
+}
+.dp-action-btn:hover {
+  color: var(--text);
+  background: var(--hover-3);
+}
+.dp-action-btn.is-delete:hover {
+  color: var(--danger);
+}
+.dp-delete-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dp-confirm-btn {
+  padding: 1px 6px;
+  font-size: var(--fs-10);
+  font-weight: 600;
+  border-radius: var(--r-3);
+  cursor: pointer;
+}
+.dp-confirm-yes {
+  background: var(--danger);
+  color: #fff;
+}
+.dp-confirm-yes:hover {
+  opacity: 0.9;
+}
+.dp-confirm-no {
+  background: var(--hover-3);
+  color: var(--text-muted);
+}
+.dp-confirm-no:hover {
+  color: var(--text);
 }
 .dp-dot {
   width: 6px;

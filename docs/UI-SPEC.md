@@ -420,12 +420,14 @@ src/
  * @param {Device[]} devices
  * @param {(id:string, next:boolean) => void} onToggle       单设备勾选
  * @param {(next:boolean) => void} onToggleAll               All Devices 全选/全不选
+ * @param {(id:string, newName:string) => void} [onRenameDevice] 设备重命名（Issue #313）
+ * @param {(id:string) => void} [onRemoveDevice]             设备删除（Issue #313）
  * @param {() => void} onAddDevice                           打开 AddDeviceDialog
  * @param {() => void} onPairMobile                          打开移动端配对二维码
  * @param {() => void} onClose
  */
 ```
-内部状态：无。
+内部状态：`editing`（当前行重命名态）、`confirmDelete`（当前行删除二次确认态）。
 
 - **遮罩**：`position:fixed; inset:0; z-index:30`；`onClick` 与 `onContextMenu` 都调 `onClose`（右键也关，且 `preventDefault`）。
 - **弹层**：`position:absolute; left:10px; bottom:54px; z-index:31; width:300px; background:var(--glass-popover); backdrop-filter:var(--blur-popover)`（同时写 `-webkit-backdrop-filter`）；`border-radius:var(--r-12); box-shadow:var(--shadow-popover); padding:6px; animation:menuIn var(--d-pop) ease-out`。定位基准 = App 根元素 `position:relative`。
@@ -433,6 +435,9 @@ src/
 - **行**（All 行 + 每设备一行）：`display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:var(--r-8); cursor:pointer; transition:background-color var(--d-hover)`；hover `background-color:var(--hover-2)`。
   - 左图标 16px stroke `var(--icon-strong)` 1.8：All 行 = `<LayersIcon/>`，设备行 = `<MonitorIcon/>`。
   - 中间：`flex:1;min-width:0`。第一行 `font-size:var(--fs-13); font-weight:600; display:flex; gap:6px` = 名字 + 在线点（All 行**不显示**点）；在线点 `6px` 圆，在线 `background:var(--green)`，离线 `background:transparent;border:1.5px solid var(--dot-hollow)`。第二行 `font-size:var(--fs-11); color:var(--text-muted)` 省略号。
+  - **节点管理操作区（Issue #313 裁定）**：位于设备行右侧勾选框左侧，hover 时渐显（`.dp-actions`）：
+    - **重命名**：点击切换行内轻量输入框（`.dp-rename-input`），支持 `autoComplete="off"`，回车 / 失焦即时保存并持久化，ESC 取消；
+    - **删除节点**：点击后展示极简行内二次确认（`删除` / `取消`），确认后断开连接、清理工作区与缓存并持久化写回 `devices.json`；
   - 右勾选：选中 = `<CheckIcon size={15} stroke=var(--text) strokeWidth=2.2/>`；未选 = `<span style="width:14px;height:14px;border-radius:var(--r-4);border:1.5px solid var(--checkbox-border);box-sizing:border-box">`。
   - All 行 `sub` = `` `${devices.length} devices · ${onlineCount} connected` ``；`on = devices.every(d => d.checked)`。
 - **配对移动端行**：在 Add Device… 之前渲染，`display:flex; gap:10px; padding:8px 12px; font-size:var(--fs-13); color:var(--text-secondary); cursor:pointer; border-radius:var(--r-8)`；点击打开 PairingDialog；`<QrIcon size={14}/>`。
@@ -590,7 +595,7 @@ src/
  * @param {string} deviceLabel                    §7.2 规则算好的底部文案
  * @param {boolean} anyDeviceOnline
  * @param {() => void} onToggleDevices
- * @param {boolean} multiDevice                   勾选设备 > 1（决定是否显示徽章）
+ * @param {boolean} multiDevice                   多设备模式（当且仅当存在 >= 2 台活跃/就绪设备或工作区跨设备时为真，决定是否显示徽章；单主机场景完全隐去以释放 100% 视口，Issue #312，2026-09-25 裁定）
  */
 ```
 内部状态：无（全部提到 App）。
@@ -630,7 +635,7 @@ src/
 - 行样式：`display:flex; align-items:center; gap:10px; height:32px; flex:none; box-sizing:border-box; padding:0 10px; border-radius:var(--r-7); font-size:var(--fs-135); cursor:pointer; transition:background var(--d-hover); animation:rowIn var(--d-toggle) ease-out`；选中 `background:var(--sel-bg); font-weight:600`，未选 `background:transparent; font-weight:400`；hover `background:var(--hover-5)`。
 - 名字 span：`overflow:hidden; text-overflow:ellipsis; white-space:nowrap`。
 - 右侧（从右往左）：双列数字徽标（`.spaces-row-counts`），包含右侧总数（`count`，`font-size:var(--fs-12); color:var(--text-muted); font-weight:400; flex:none`）与左侧工作中数（`workingCount`，有会话工作时呈现为亮绿色数字 `.is-working.is-active`，无工作会话时呈现为灰色数字 `.is-idle.is-zero`）。行内原有聚合状态绿灯彻底退役（2026-09-17 裁定）。其左侧是：
-  - **设备徽章**（仅 `multiDevice` 时渲染）：pill，`font-size:var(--fs-10); font-weight:500; padding:1px 6px; border-radius:var(--r-pill); margin-right:6px; box-shadow:var(--ring-hairline)`；本机 `background:var(--badge-local-bg); color:var(--badge-local-fg)`，远端 `background:var(--badge-remote-bg); color:var(--badge-remote-fg)`。
+  - **设备徽章**（仅 `multiDevice` 时渲染，单主机场景完全隐去，Issue #312，2026-09-25 裁定）：pill，`font-size:var(--fs-10); font-weight:500; padding:1px 6px; border-radius:var(--r-pill); margin-right:6px; box-shadow:var(--ring-hairline); max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0`；优先展示极简别名（如 `Local` / `5090`，不再展示全量冗长 `[127.0.0.1:9900]`），悬浮提供 `title` 显示完整地址与设备名；本机 `background:var(--badge-local-bg); color:var(--badge-local-fg)`，远端 `background:var(--badge-remote-bg); color:var(--badge-remote-fg)`。
 - **重名消歧**：先按 `basename(cwd)` 分组；某个 basename 出现 >1 次时，这组内所有行的 `name` 改为 `` `${basename(dirname(cwd))}/${basename(cwd)}` ``；若仍冲突，再往上追加一级路径。逻辑放 `lib/aggregate.js`，SpacesList 只渲染 `space.name`。
 
 ### 5.3 `sidebar/AgentsList.jsx`
@@ -681,7 +686,7 @@ src/
     | unknown | `background:transparent; border:1.5px solid var(--ink-060)` | 状态未知 |
   - **核心 2：Provider 图标**：`<ProviderIcon provider={provider} size={18} active={state==='working'||state==='blocked'}/>`
   - **核心 3：会话名称**：`span.agents-row-title`（`flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap`）
-  - **尾部标记**：`margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；多设备徽章（`.agents-badge`，仅 `multiDevice` 时显示）。
+  - **尾部标记**：`margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex:none`：`state==='done'` → `<CheckIcon size={12}/>`；`fav` → `<StarIcon size={12} fill="var(--amber)"/>`；多设备徽章（`.agents-badge`，仅 `multiDevice` 时显示；单主机场景完全隐去释放 100% 横向宽度给会话名，多主机共存时限制 `max-width:64px; text-overflow:ellipsis; flex-shrink:0` 并优先展示极简别名 `Local`/`5090`，悬浮通过 `title` 展示完整地址，Issue #312，2026-09-25 裁定）。
   - **精简成效**：垂直单行居中排布，紧凑清晰，彻底消灭旧版第二行冗余重叠的文字，信噪比极大提升。
 - **空态**（`agents.length === 0`，渲染在轨道之后）：`padding:18px 10px; font-size:var(--fs-12); color:var(--text-faint); text-align:center`，两行：`这个空间还没有 Agent` / `{emptyHint}`（默认 `在 Space 上右键 → 新建 Agent`）。
 
