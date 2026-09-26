@@ -30,7 +30,12 @@ public enum CorralAestheticTokens {
     public static var borderSubtle: NSColor { isDark ? color(0x2A323E) : NSColor.black.withAlphaComponent(0.06) }
     public static var border: NSColor { isDark ? color(0x3A4554) : NSColor.black.withAlphaComponent(0.07) }
     public static var inputBorder: NSColor { isDark ? color(0x6D7B90) : NSColor.black.withAlphaComponent(0.12) }
-    public static var tabActiveBackground: NSColor { isDark ? color(0x0F1115).withAlphaComponent(0.96) : color(0xFBFAF8).withAlphaComponent(0.94) }
+    public static var tabActiveBackground: NSColor { isDark ? color(0x272F3A) : color(0xFBFAF8).withAlphaComponent(0.94) }
+    public static var tabActiveBorder: NSColor { isDark ? color(0x3A4554) : NSColor.black.withAlphaComponent(0.12) }
+    public static var icon: NSColor { palette(0xAAB6C5, 0x8A867E) }
+    public static var hover: NSColor { isDark ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.06) }
+    public static var hoverSubtle: NSColor { isDark ? NSColor.white.withAlphaComponent(0.04) : NSColor.black.withAlphaComponent(0.04) }
+    public static var fillSubtle: NSColor { isDark ? color(0x1E242D) : NSColor.black.withAlphaComponent(0.04) }
     public static var selectionBackground: NSColor { isDark ? color(0x28374C) : NSColor.black.withAlphaComponent(0.07) }
     public static var accent: NSColor { palette(0x8FAADC, 0x2E5898) }
     public static var success: NSColor { palette(0x72BE93, 0x34C759) }
@@ -57,7 +62,7 @@ public enum CorralAestheticTokens {
             (color(0x8FAADC), color(0x2E5898)), (color(0x72BE93), color(0x34C759)),
             (color(0xD8B57B), color(0xF0B429)), (color(0xF08A93), color(0xC42B1C)),
             (color(0x8291A5), color(0xB8B4AB)), (color(0x8291A5), color(0x201E1D)),
-            (color(0x0F1115).withAlphaComponent(0.96), color(0xFBFAF8).withAlphaComponent(0.94)),
+            (color(0x272F3A), color(0xFBFAF8).withAlphaComponent(0.94)),
             (color(0x28374C), NSColor.black.withAlphaComponent(0.07)),
             (color(0xD8B57B).withAlphaComponent(0.15), color(0xF1E8D8))
         ]
@@ -120,6 +125,8 @@ public final class CorralDeviceBadgeView: NSView {
 public final class CorralStatusIndicatorView: NSView {
     public enum Status: String, Sendable { case working, idle, blocked, done, offline, unknown }
     public var status: Status = .idle { didSet { needsDisplay = true; updatePulse() } }
+    /// Tab lamps (`.tb-tab-lamp.is-idle`) render idle as a filled dot; sidebar dots stay hollow.
+    public var fillsIdle = false { didSet { needsDisplay = true } }
     public override var intrinsicContentSize: NSSize { NSSize(width: 8, height: 8) }
     public override init(frame frameRect: NSRect) { super.init(frame: frameRect); wantsLayer = true; updatePulse() }
     public required init?(coder: NSCoder) { fatalError("CorralStatusIndicatorView is created programmatically") }
@@ -129,6 +136,8 @@ public final class CorralStatusIndicatorView: NSView {
         case .working, .blocked, .done:
             let color = switch status { case .working: CorralAestheticTokens.success; case .blocked: CorralAestheticTokens.warning; default: CorralAestheticTokens.successDeep }
             color.setFill(); circle.fill()
+        case .idle where fillsIdle:
+            CorralAestheticTokens.idleDot.setFill(); circle.fill()
         case .idle, .offline:
             CorralAestheticTokens.idleDot.setStroke(); circle.lineWidth = 1.2; circle.stroke()
         case .unknown:

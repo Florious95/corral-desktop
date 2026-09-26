@@ -132,7 +132,7 @@ open class CorralDialogViewController: NSViewController {
     public func addTextField(to root: NSView, placeholder: String, y: CGFloat, secure: Bool = false) -> NSTextField {
         let field: NSTextField = secure ? NSSecureTextField() : NSTextField()
         field.placeholderString = placeholder; field.font = .systemFont(ofSize: 12); field.textColor = CorralAestheticTokens.text; field.backgroundColor = CorralAestheticTokens.surface0; field.isBezeled = true; field.bezelStyle = .roundedBezel; field.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(field)
-        NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), field.topAnchor.constraint(equalTo: root.topAnchor, constant: y), field.heightAnchor.constraint(equalToConstant: 30)])
+        NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), field.topAnchor.constraint(equalTo: root.topAnchor, constant: y), field.heightAnchor.constraint(equalToConstant: 32)])
         return field
     }
 
@@ -146,7 +146,7 @@ open class CorralDialogViewController: NSViewController {
     }
 
     public func stylePrimary(_ button: NSButton) {
-        button.contentTintColor = CorralAestheticTokens.background; button.wantsLayer = true; button.layer?.backgroundColor = CorralAestheticTokens.accent.cgColor; button.layer?.cornerRadius = 5; button.layer?.borderWidth = 1; button.layer?.borderColor = CorralAestheticTokens.border.cgColor
+        button.contentTintColor = CorralAestheticTokens.background; button.wantsLayer = true; button.layer?.backgroundColor = CorralAestheticTokens.accent.cgColor; button.layer?.cornerRadius = 8; button.layer?.borderWidth = 0
     }
 
     public func dismiss() { closeDialog() }
@@ -188,7 +188,7 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         var y = addHeader(to: root, title: "新建 Agent", subtitle: "在「\(spaceName)」中创建")
         _ = addLabel("任务名称", to: root, y: y); y += 20
         nameField.placeholderString = "任务名称"; nameField.font = .systemFont(ofSize: 12); nameField.textColor = CorralAestheticTokens.text; nameField.backgroundColor = CorralAestheticTokens.surface0; nameField.isBezeled = true; nameField.bezelStyle = .roundedBezel; nameField.delegate = self; nameField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(nameField)
-        NSLayoutConstraint.activate([nameField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), nameField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), nameField.topAnchor.constraint(equalTo: root.topAnchor, constant: y), nameField.heightAnchor.constraint(equalToConstant: 30)])
+        NSLayoutConstraint.activate([nameField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), nameField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), nameField.topAnchor.constraint(equalTo: root.topAnchor, constant: y), nameField.heightAnchor.constraint(equalToConstant: 32)])
         y += 49
         _ = addLabel("选择 Agent", to: root, y: y); y += 21
         launcherStack.orientation = .vertical; launcherStack.alignment = .width; launcherStack.distribution = .fillEqually; launcherStack.spacing = 8; launcherStack.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(launcherStack)
@@ -401,7 +401,7 @@ public final class AddDeviceDialogViewController: CorralDialogViewController {
         if isViewLoaded { errorLabel.stringValue = validationMessage ?? "" }
     }
     private func style(_ field: NSTextField) { field.font = .systemFont(ofSize: 12); field.textColor = CorralAestheticTokens.text; field.backgroundColor = CorralAestheticTokens.surface0; field.isBezeled = true; field.bezelStyle = .roundedBezel; field.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(field) }
-    private func place(_ field: NSTextField, in root: NSView, y: CGFloat) { NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), field.topAnchor.constraint(equalTo: root.topAnchor, constant: y), field.heightAnchor.constraint(equalToConstant: 30)]) }
+    private func place(_ field: NSTextField, in root: NSView, y: CGFloat) { NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), field.topAnchor.constraint(equalTo: root.topAnchor, constant: y), field.heightAnchor.constraint(equalToConstant: 32)]) }
 }
 
 public struct CorralPairingPayload: Equatable, Sendable {
@@ -442,7 +442,7 @@ public final class PairingDialogViewController: CorralDialogViewController {
         let done = NSButton(title: "完成", target: self, action: #selector(cancel)); done.bezelStyle = .rounded; done.translatesAutoresizingMaskIntoConstraints = false; stylePrimary(done); root.addSubview(done)
         let credentialTop: NSLayoutYAxisAnchor = payload.token.isEmpty ? tokenField.bottomAnchor : root.topAnchor
         let qrTop: CGFloat = payload.token.isEmpty ? 18 : 88
-        NSLayoutConstraint.activate([tokenField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), tokenField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), tokenField.topAnchor.constraint(equalTo: root.topAnchor, constant: 78), tokenField.heightAnchor.constraint(equalToConstant: 30), hostField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), hostField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), hostField.topAnchor.constraint(equalTo: root.topAnchor, constant: payload.token.isEmpty ? 118 : 78), hostField.heightAnchor.constraint(equalToConstant: 30), imageView.centerXAnchor.constraint(equalTo: root.centerXAnchor), imageView.topAnchor.constraint(equalTo: local ? hostField.bottomAnchor : credentialTop, constant: qrTop), imageView.widthAnchor.constraint(equalToConstant: 260), imageView.heightAnchor.constraint(equalToConstant: 260), help.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), help.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), help.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 10), copyButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), copyButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22), done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), done.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor), done.widthAnchor.constraint(equalToConstant: 84)])
+        NSLayoutConstraint.activate([tokenField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), tokenField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), tokenField.topAnchor.constraint(equalTo: root.topAnchor, constant: 78), tokenField.heightAnchor.constraint(equalToConstant: 32), hostField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), hostField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), hostField.topAnchor.constraint(equalTo: root.topAnchor, constant: payload.token.isEmpty ? 118 : 78), hostField.heightAnchor.constraint(equalToConstant: 32), imageView.centerXAnchor.constraint(equalTo: root.centerXAnchor), imageView.topAnchor.constraint(equalTo: local ? hostField.bottomAnchor : credentialTop, constant: qrTop), imageView.widthAnchor.constraint(equalToConstant: 260), imageView.heightAnchor.constraint(equalToConstant: 260), help.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), help.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), help.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 10), copyButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), copyButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22), done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), done.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor), done.widthAnchor.constraint(equalToConstant: 84)])
         tokenField.target = self; tokenField.action = #selector(credentialsChanged); hostField.target = self; hostField.action = #selector(credentialsChanged)
         updateQR()
     }

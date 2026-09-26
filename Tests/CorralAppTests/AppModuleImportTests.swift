@@ -9,6 +9,18 @@ import XCTest
 
 @MainActor
 final class CorralApplicationCoordinatorTests: XCTestCase {
+    func testNewAgentMenuItemIsBoundToCommandN() throws {
+        let delegate = CorralAppDelegate()
+        let mainMenu = delegate.makeMainMenu()
+
+        let fileMenu = try XCTUnwrap(mainMenu.items.first(where: { $0.title == "File" })?.submenu)
+        let item = try XCTUnwrap(fileMenu.items.first(where: { $0.identifier?.rawValue == "corral.newagent.menu" }))
+        XCTAssertEqual(item.keyEquivalent, "n")
+        XCTAssertTrue(item.keyEquivalentModifierMask.contains(.command))
+        XCTAssertTrue(item.target === delegate)
+        XCTAssertNotNil(item.action)
+    }
+
     func testUnconfiguredCoordinatorDoesNotConnect() async throws {
         let link = RecordingSessionLink()
         let atlas = GlyphAtlasPool.shared
@@ -337,6 +349,15 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try await link.emit(.control(.authAck(ok: true, reason: nil, launchers: [launcher])))
         let launcherReceived = await waitUntil { coordinator.availableAgentLaunchers == [launcher] }
         XCTAssertTrue(launcherReceived)
+
+        coordinator.showNewAgentDialog()
+        let newAgentSheet = try XCTUnwrap(window.attachedSheet as? NSPanel)
+        XCTAssertEqual(newAgentSheet.identifier?.rawValue, "corral.newagent.window")
+        let newAgentDialog = try XCTUnwrap(newAgentSheet.contentViewController as? NewAgentDialogViewController)
+        XCTAssertEqual(newAgentDialog.view.accessibilityIdentifier(), "corral.newagent.dialog")
+        newAgentDialog.cancelButton?.performClick(nil)
+        let newAgentSheetDismissed = await waitUntil { window.attachedSheet == nil }
+        XCTAssertTrue(newAgentSheetDismissed)
 
         let listing = SessionListing(
             requestID: 1,

@@ -18,18 +18,26 @@ public final class CorralSettingsButton: NSButton {
     public func refreshTheme() { configure() }
 
     private func configure() {
-        image = CorralLegacyIcon.image(.gear, size: 16, tint: CorralAestheticTokens.text)
+        image = CorralLegacyIcon.image(.gear, size: 16, tint: CorralAestheticTokens.icon)
         imagePosition = .imageOnly
         imageScaling = .scaleProportionallyDown
         isBordered = false
         bezelStyle = .regularSquare
-        contentTintColor = CorralAestheticTokens.text
+        contentTintColor = CorralAestheticTokens.icon
         toolTip = "Settings"
         setAccessibilityLabel("Settings")
         wantsLayer = true
-        layer?.backgroundColor = CorralAestheticTokens.surface2.cgColor
-        layer?.cornerRadius = 5
-        layer?.borderColor = CorralAestheticTokens.border.cgColor
-        layer?.borderWidth = 1
+        layer?.backgroundColor = isHovered ? CorralAestheticTokens.hover.cgColor : NSColor.clear.cgColor
+        layer?.cornerRadius = 6
+        layer?.borderWidth = 0
     }
+
+    private var isHovered = false { didSet { configure() } }
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    public override func mouseEntered(with event: NSEvent) { isHovered = true }
+    public override func mouseExited(with event: NSEvent) { isHovered = false }
 }

@@ -15,10 +15,11 @@ final class NativeWorkspaceTests: XCTestCase {
 
         let workspace = CorralWorkspaceView()
         let settingsButton = workspace.sidebar.settingsButton
-        XCTAssertEqual(settingsButton.contentTintColor, CorralAestheticTokens.text)
-        XCTAssertEqual(settingsButton.layer?.borderWidth, 1)
-        XCTAssertEqual(settingsButton.layer?.borderColor, CorralAestheticTokens.border.cgColor)
-        XCTAssertEqual(settingsButton.layer?.backgroundColor, CorralAestheticTokens.surface2.cgColor)
+        // `.sidebar-settings-btn`: borderless 34px icon button, transparent until hover.
+        XCTAssertEqual(settingsButton.contentTintColor, CorralAestheticTokens.icon)
+        XCTAssertEqual(settingsButton.layer?.borderWidth, 0)
+        XCTAssertEqual(settingsButton.layer?.cornerRadius, 6)
+        XCTAssertEqual(settingsButton.layer?.backgroundColor?.alpha, 0)
         XCTAssertEqual(workspace.titleBar.layer?.backgroundColor, CorralAestheticTokens.surface0.cgColor)
         XCTAssertEqual(workspace.sidebar.layer?.backgroundColor, CorralAestheticTokens.surface0.cgColor)
 
@@ -50,7 +51,8 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(rgb(workspace.tabBar.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)) ?? .clear), 0xF5F3EF)
         XCTAssertEqual(rgb(workspace.stageContainer.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)) ?? .clear), 0xFBFAF8)
         XCTAssertEqual(rgb(workspace.sidebar.agentsTable.backgroundColor), 0xF5F3EF)
-        XCTAssertEqual(rgb(workspace.sidebar.settingsButton.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)) ?? .clear), 0xFFFFFF)
+        XCTAssertEqual(workspace.sidebar.settingsButton.layer?.backgroundColor?.alpha, 0)
+        XCTAssertEqual(rgb(workspace.sidebar.settingsButton.contentTintColor ?? .clear), 0x8A867E)
         workspace.setTheme(.dark)
         XCTAssertEqual(rgb(workspace.sidebar.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)) ?? .clear), 0x171B22)
     }
@@ -126,12 +128,93 @@ final class NativeWorkspaceTests: XCTestCase {
         workspace.setSidebarCollapsed(true)
         workspace.setSidebarCollapsed(false)
         workspace.setTheme(.light)
-        workspace.layoutSubtreeIfNeeded()
+        for index in 12..<40 {
+            workspace.addTab(CorralTab(title: "Overflow \(index)", contentView: NSView()), select: false)
+        }
+        workspace.sidebar.selectSpace(id: spaces[3].id)
+        window.layoutIfNeeded()
         workspace.tabBar.layoutSubtreeIfNeeded()
         let plusFrame = workspace.tabBar.convert(workspace.tabBar.createButton.bounds, from: workspace.tabBar.createButton)
         XCTAssertLessThanOrEqual(plusFrame.maxX, workspace.tabBar.bounds.maxX)
         XCTAssertEqual(window.frame, initialFrame)
         XCTAssertEqual(window.contentView?.bounds, initialContentBounds)
+
+        // Content must never pin the window open: the controller can still shrink it to the minimum.
+        let minimumFrame = NSRect(origin: initialFrame.origin, size: window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 1100, height: 700)).size)
+        window.setFrame(minimumFrame, display: false)
+        window.layoutIfNeeded()
+        XCTAssertEqual(window.frame, minimumFrame)
+        XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+    }
+
+    func testSidebarGeometryMatchesLegacySidebarCSS() throws {
+        let workspace = CorralWorkspaceView()
+        let controller = CorralWindowController(workspaceView: workspace)
+        let spaceID = UUID()
+        workspace.sidebar.setSpaces([CorralSidebarSpace(id: spaceID, name: "Project")])
+        workspace.sidebar.setAgents([CorralSidebarAgent(name: "Agent", spaceID: spaceID)])
+        controller.window?.layoutIfNeeded()
+        let sidebar = workspace.sidebar
+        let headers = sidebar.subviews.flatMap(\.subviews).compactMap { $0 as? CorralSidebarSectionHeader }
+        XCTAssertEqual(headers.count, 2)
+        for header in headers {
+            XCTAssertEqual(header.frame.height, 38, accuracy: 0.1)
+            // Glyphs start 2pt inside the label cell: 20px inset + 11px chevron + 4px gap = 35.
+            XCTAssertEqual(header.titleFrame.minX + 2, 35, accuracy: 0.5, "Group title is left aligned after the 20px inset and chevron")
+        }
+        // Spaces list hugs its rows (3 × 32px) so Agents follows immediately; no dead gap.
+        let spacesScroll = try XCTUnwrap(sidebar.spacesTable.enclosingScrollView)
+        XCTAssertEqual(spacesScroll.frame.height, 96, accuracy: 0.1)
+        XCTAssertEqual(spacesScroll.frame.minY, headers[1].frame.maxY, accuracy: 0.1)
+        XCTAssertEqual(sidebar.spacesTable.rect(ofRow: 0).height, 32)
+        XCTAssertEqual(sidebar.agentsTable.rect(ofRow: 0).height, 34)
+        // Footer: 44px, settings is a 34px square 8px from the trailing edge.
+        let footer = try XCTUnwrap(sidebar.settingsButton.superview)
+        XCTAssertEqual(footer.frame.height, 44, accuracy: 0.1)
+        XCTAssertEqual(footer.frame.minY, 0, accuracy: 0.1)
+        XCTAssertEqual(sidebar.settingsButton.frame.size, NSSize(width: 34, height: 34))
+        XCTAssertEqual(sidebar.settingsButton.frame.maxX, 272, accuracy: 0.1)
+        XCTAssertEqual(sidebar.devicesButton.frame.minX, 20, accuracy: 0.1)
+        // The selected Space row paints the legacy selection background.
+        let selectedRow = try XCTUnwrap(sidebar.spacesTable.rowView(atRow: 0, makeIfNecessary: true) as? CorralSidebarRowView)
+        XCTAssertTrue(selectedRow.isSelected)
+        XCTAssertEqual(selectedRow.fillColor, CorralAestheticTokens.selectionBackground)
+        XCTAssertNil((sidebar.spacesTable.rowView(atRow: 1, makeIfNecessary: true) as? CorralSidebarRowView)?.fillColor)
+    }
+
+    func testTabPillsMatchLegacyChromeCSS() throws {
+        let first = CorralTab(title: "全自动编排leader")
+        let second = CorralTab(title: "Second")
+        let workspace = CorralWorkspaceView(tabs: [first, second])
+        workspace.frame = NSRect(x: 0, y: 0, width: 1400, height: 860)
+        workspace.selectTab(id: first.id)
+        workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
+        let bar = workspace.tabBar
+        let items = descendants(of: bar).filter { String(describing: type(of: $0)) == "CorralTabItemView" }
+        XCTAssertEqual(items.count, 2)
+        for item in items {
+            let frame = bar.convert(item.bounds, from: item)
+            XCTAssertEqual(frame.height, 26, accuracy: 0.1)
+            XCTAssertEqual(frame.width, 160, accuracy: 0.1)
+            XCTAssertEqual(frame.midY, 19, accuracy: 0.1, "Pills share the 38px header centerline with the sidebar toggle")
+            XCTAssertEqual(item.layer?.cornerRadius, 6)
+        }
+        XCTAssertEqual(bar.convert(items[0].bounds, from: items[0]).minX, 9, accuracy: 0.1)
+        let capsule = try XCTUnwrap(bar.activeCapsuleFrame)
+        XCTAssertEqual(capsule.size, NSSize(width: 160, height: 26))
+        let plus = bar.convert(bar.createButton.bounds, from: bar.createButton)
+        XCTAssertEqual(plus.minX, bar.convert(items[1].bounds, from: items[1]).maxX + 9, accuracy: 0.5)
+        XCTAssertEqual(plus.size, NSSize(width: 26, height: 26))
+
+        CorralAestheticTokens.themeMode = .dark
+        XCTAssertEqual(rgb(CorralAestheticTokens.tabActiveBackground), 0x272F3A)
+        XCTAssertEqual(rgb(CorralAestheticTokens.tabActiveBorder), 0x3A4554)
+
+        for index in 0..<30 { workspace.addTab(CorralTab(title: "Overflow \(index)"), select: false) }
+        workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
+        let crowded = descendants(of: bar).filter { String(describing: type(of: $0)) == "CorralTabItemView" }
+        XCTAssertTrue(crowded.allSatisfy { $0.frame.width >= 44 - 0.1 && $0.frame.width < 160 })
+        XCTAssertLessThanOrEqual(bar.convert(bar.createButton.bounds, from: bar.createButton).maxX, bar.bounds.maxX - 10 + 0.1)
     }
 
     func testSidebarHasSpacesAndAgentsAndExactAgentContextMenu() throws {

@@ -10,10 +10,11 @@ public enum CorralAppIdentity {
 }
 
 @MainActor
-private final class AppDelegate: NSObject, NSApplicationDelegate {
+final class CorralAppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: CorralApplicationCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
         let environment = ProcessInfo.processInfo.environment
         do {
             let sessionLink = URLSessionSessionLink(codec: ProtocolV1Codec())
@@ -58,6 +59,31 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             presentStartupFailure(error)
         }
+    }
+
+    func installMainMenu() { NSApp.mainMenu = makeMainMenu() }
+
+    func makeMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "Corral Native")
+        appMenu.addItem(withTitle: "Quit Corral Native", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu(title: "File")
+        let newAgentItem = fileMenu.addItem(withTitle: "New Agent…", action: #selector(createNewAgent(_:)), keyEquivalent: "n")
+        newAgentItem.identifier = NSUserInterfaceItemIdentifier("corral.newagent.menu")
+        newAgentItem.keyEquivalentModifierMask = [.command]
+        newAgentItem.target = self
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+        return mainMenu
+    }
+
+    @objc private func createNewAgent(_ sender: Any?) {
+        coordinator?.showNewAgentDialog()
     }
 
     private func presentStartupFailure(_ error: Error) {
@@ -146,7 +172,7 @@ private enum CorralAppMain {
         let application = NSApplication.shared
         let background = ProcessInfo.processInfo.environment["CORRAL_NATIVE_BACKGROUND"] == "1"
         application.setActivationPolicy(background ? .accessory : .regular)
-        let delegate = AppDelegate()
+        let delegate = CorralAppDelegate()
         application.delegate = delegate
         application.run()
     }
