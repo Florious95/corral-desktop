@@ -241,6 +241,10 @@ export class DeviceManager {
     this._status.delete(id);
     this._level2.delete(id);
     this._launchers.delete(id);
+    const prefix = `${id}::`;
+    for (const uid of [...this._sessionDetails.keys()]) {
+      if (uid.startsWith(prefix)) this._sessionDetails.delete(uid);
+    }
     const checkedIds = this._devices.filter((x) => x.checked).map((x) => x.id);
     this._persistDevices(false);
     store.forgetDevice(id, this.storage, checkedIds);
@@ -772,15 +776,23 @@ export class DeviceManager {
   }
 
   _recordListingSessions(deviceId, payload) {
+    const liveRefs = new Set();
     for (const w of payload.workspaces || []) {
       const canonicalCwd = normalizeCwd(w.cwd);
       for (const s of w.sessions || []) {
+        liveRefs.add(s.ref);
         const uid = `${deviceId}::${s.ref}`;
         const canonicalSessionCwd = s.cwd ? normalizeCwd(s.cwd) : canonicalCwd;
         this._sessionDetails.set(uid, {
           ...s,
           cwd: canonicalSessionCwd,
         });
+      }
+    }
+    const prefix = `${deviceId}::`;
+    for (const uid of [...this._sessionDetails.keys()]) {
+      if (uid.startsWith(prefix) && !liveRefs.has(uid.slice(prefix.length))) {
+        this._sessionDetails.delete(uid);
       }
     }
   }
