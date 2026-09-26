@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+"""Fail-closed tmux shim; normalize only the nodeprobe list delimiter."""
+import os
+import subprocess
+import sys
+
+REAL_TMUX = "/opt/homebrew/bin/tmux"
+SOCKET = f"/tmp/corral-gw-test-home/tmux-{os.getuid()}/test-corral-gw-9919"
+SOCKET_NAME = "test-corral-gw-9919"
+args = sys.argv[1:]
+
+# Never let this fixture PATH fall through to the user's default tmux socket.
+scopes = [(args[i], args[i + 1]) for i in range(len(args) - 1) if args[i] in ("-S", "-L")]
+if len(scopes) != 1 or scopes[0] not in (("-S", SOCKET), ("-L", SOCKET_NAME)):
+    print("fixture tmux shim refused a non-fixture socket", file=sys.stderr)
+    raise SystemExit(64)
+
+try:
+    i = args.index("-F")
+except ValueError:
+    os.execv(REAL_TMUX, [REAL_TMUX, *args])
+
+if "list-panes" not in args or "\x1f" not in args[i + 1]:
+    os.execv(REAL_TMUX, [REAL_TMUX, *args])
+
+# tmux 3.7c replaces C0 format bytes with underscores. Use a printable field
+# separator for the real query, then restore only that separator in its bytes.
+args[i + 1] = args[i + 1].replace("\x1f", "|")
+result = subprocess.run([REAL_TMUX, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ)
+sys.stdout.buffer.write(result.stdout.replace(b"|", b"\x1f"))
+sys.stderr.buffer.write(result.stderr)
+raise SystemExit(result.returncode)

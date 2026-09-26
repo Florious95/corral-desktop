@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id_utc": "20260926T053835Z",
+  "test": {
+    "endpoint": "127.0.0.1:9919",
+    "daemon_pid": 54497,
+    "tmux_socket": "/tmp/corral-gw-test-home/tmux-501/test-corral-gw-9919",
+    "tmux_server_pid": 54237,
+    "sessions": 5,
+    "panes": 6
+  },
+  "production_9900": {
+    "expected_listener_pid": 87692,
+    "listener_pids_before": "87692",
+    "listener_pids_after": "87692",
+    "listener_identity_unchanged": true,
+    "established_connection_count_before": 4,
+    "established_connection_count_after": 4,
+    "established_connection_snapshot_sha256_before": "5ab701b4147842f4bf7bc0615e270fdc22709bf1ef1fba57d1ba9c16cd838574",
+    "established_connection_snapshot_sha256_after": "5ab701b4147842f4bf7bc0615e270fdc22709bf1ef1fba57d1ba9c16cd838574",
+    "established_connections_unchanged": true,
+    "listed_production_client_pids": {
+      "72646": {
+        "before": "absent|-|-|0",
+        "after": "absent|-|-|0",
+        "unchanged": true
+      },
+      "90213": {
+        "before": "present|五 9月/25 20:36:22 2026|8cdbc833b07ce770efc6cb789c9e349f7bb0a4ef89682af4f9dad55b70dbb185|1",
+        "after": "present|五 9月/25 20:36:22 2026|8cdbc833b07ce770efc6cb789c9e349f7bb0a4ef89682af4f9dad55b70dbb185|1",
+        "unchanged": true
+      }
+    }
+  },
+  "destructive_tooth": {
+    "attempted_endpoint": ":9900",
+    "exit_code": 64,
+    "refused_before_inspection_or_network": true
+  },
+  "result": "PASS",
+  "limitations": [
+    "lsof snapshots prove stable observed listener/socket identities across the interval; they are read-only and cannot prove an unobserved transient disconnect did not occur."
+  ]
+}
