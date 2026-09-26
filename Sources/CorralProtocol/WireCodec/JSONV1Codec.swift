@@ -9,7 +9,6 @@ public enum V1ControlCodecError: Error, Equatable, Sendable {
     case invalidPayload
     case invalidField(String)
     case payloadTooLarge
-    case unsupportedCapability(String)
 }
 
 /// Explicit v1 `{v,type,payload}` mapping. Synthesized Codable on ClientCommand is never wire output.
@@ -42,6 +41,11 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             case let .keys(keys):
                 guard !keys.isEmpty else { throw V1ControlCodecError.invalidField("keys") }
                 payload.keys = keys.map(\.rawValue)
+            case let .bytes(bytes):
+                guard !bytes.isEmpty, bytes.count <= ProtocolV1.maximumInputBytes else {
+                    throw V1ControlCodecError.invalidField("bytes")
+                }
+                payload.bytes = bytes.base64EncodedString()
             case .bareEnter:
                 break // Empty text and keys are the v1 bare-Enter representation.
             }
@@ -62,9 +66,33 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         case let .scrollWheel(reference, delta):
             guard delta != 0 else { throw V1ControlCodecError.invalidField("delta") }
             return try encodeEnvelope(type: "scroll_wheel", payload: ScrollWheelPayload(ref: reference.rawValue, delta: delta))
-        case .createSession:
-            // This command remains capability-gated; it is not part of the frozen v1 WebSocket type set.
-            throw V1ControlCodecError.unsupportedCapability("create_session")
+        case let .level2Subscribe(workspace):
+            guard !workspace.isEmpty else { throw V1ControlCodecError.invalidField("level2_subscribe.workspace") }
+            return try encodeEnvelope(type: "level2_subscribe", payload: Level2SubscribePayload(workspace: workspace))
+        case let .level2Unsubscribe(workspace):
+            return try encodeEnvelope(type: "level2_unsubscribe", payload: Level2UnsubscribePayload(workspace: workspace))
+        case let .overlaySubscribe(socket, rows, columns):
+            guard !socket.isEmpty else { throw V1ControlCodecError.invalidField("overlay_subscribe.socket") }
+            return try encodeEnvelope(type: "overlay_subscribe", payload: OverlaySubscribePayload(socket: socket, rows: rows, columns: columns))
+        case .overlayUnsubscribe:
+            return try encodeEnvelope(type: "overlay_unsubscribe", payload: EmptyPayload())
+        case let .createAgent(request):
+            guard request.requestID > 0 else { throw V1ControlCodecError.invalidField("create_agent.req_id") }
+            guard !request.workspace.isEmpty else { throw V1ControlCodecError.invalidField("create_agent.workspace") }
+            guard let anchor = request.anchorReference, !anchor.rawValue.isEmpty else {
+                throw V1ControlCodecError.invalidField("create_agent.anchor_ref")
+            }
+            guard !request.provider.isEmpty else { throw V1ControlCodecError.invalidField("create_agent.provider") }
+            let scalars = request.name.unicodeScalars
+            guard !request.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  scalars.count <= 64,
+                  !scalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw V1ControlCodecError.invalidField("create_agent.name")
+            }
+            return try encodeEnvelope(type: "create_agent", payload: CreateAgentPayload(request: request, anchor: anchor))
+        case let .closeSession(request):
+            guard request.requestID > 0 else { throw V1ControlCodecError.invalidField("close_session.req_id") }
+            return try encodeEnvelope(type: "close_session", payload: CloseSessionPayload(request: request))
         }
     }
 
@@ -84,10 +112,17 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         switch type {
         case "auth_ack":
             let value = try decodePayload(AuthAckPayload.self, from: payload)
+            let launchers = value.agentLaunchers ?? []
             guard (value.ok && (value.reason == nil || value.reason == "")) || (!value.ok && !(value.reason ?? "").isEmpty) else {
                 throw V1ControlCodecError.invalidField("auth_ack.reason")
             }
-            return .authAck(ok: value.ok, reason: value.reason)
+            var providers = Set<String>()
+            for launcher in launchers {
+                guard !launcher.provider.isEmpty, !launcher.displayName.isEmpty, providers.insert(launcher.provider).inserted else {
+                    throw V1ControlCodecError.invalidField("auth_ack.agent_launchers")
+                }
+            }
+            return .authAck(ok: value.ok, reason: value.reason, launchers: launchers)
         case "listing":
             let value = try decodePayload(ListingPayload.self, from: payload)
             let workspaces = try value.workspaces.map(decodeWorkspace)
@@ -105,6 +140,25 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             )
             guard delta.isValid else { throw V1ControlCodecError.invalidField("list_delta") }
             return .listDelta(delta)
+        case "create_agent_result":
+            let value = try decodePayload(CreateAgentResultPayload.self, from: payload)
+            guard value.requestID > 0 else { throw V1ControlCodecError.invalidField("create_agent_result.req_id") }
+            let reference = try value.reference.map(SessionReference.init)
+            if value.ok {
+                guard reference != nil, let name = value.name, !name.isEmpty, value.naming != nil, value.reason == nil else {
+                    throw V1ControlCodecError.invalidField("create_agent_result")
+                }
+            } else if reference != nil || value.name != nil || value.naming != nil || value.reason == nil {
+                throw V1ControlCodecError.invalidField("create_agent_result")
+            }
+            return .createAgentResult(CreateAgentResult(requestID: value.requestID, ok: value.ok, reference: reference, name: value.name, naming: value.naming, reason: value.reason))
+        case "close_session_result":
+            let value = try decodePayload(CloseSessionResultPayload.self, from: payload)
+            guard value.requestID > 0,
+                  (value.ok && value.reason == nil) || (!value.ok && value.reason != nil) else {
+                throw V1ControlCodecError.invalidField("close_session_result")
+            }
+            return .closeSessionResult(CloseSessionResult(requestID: value.requestID, ok: value.ok, reason: value.reason))
         case "input_ack":
             let value = try decodePayload(InputAckPayload.self, from: payload)
             guard value.requestID > 0 else { throw V1ControlCodecError.invalidField("input_ack.req_id") }
@@ -120,6 +174,29 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         case "pane_mode_changed":
             let value = try decodePayload(PaneModePayload.self, from: payload)
             return .paneModeChanged(reference: try SessionReference(value.reference), inCopyMode: value.inCopyMode)
+        case "presence_update":
+            let value = try decodePayload(PresenceUpdatePayload.self, from: payload)
+            guard value.hasMobile == (value.mobileCount > 0) else { throw V1ControlCodecError.invalidField("presence_update.has_mobile") }
+            return .presenceUpdate(
+                reference: try SessionReference(value.reference),
+                hasMobile: value.hasMobile,
+                mobileCount: value.mobileCount,
+                desktopCount: value.desktopCount
+            )
+        case "level2_frame":
+            let value = try decodePayload(Level2FramePayload.self, from: payload)
+            guard !value.workspace.isEmpty, value.sequence > 0 else { throw V1ControlCodecError.invalidField("level2_frame") }
+            return .level2Frame(workspace: value.workspace, sequence: value.sequence, sessions: try value.sessions.map(decodeSession))
+        case "level2_heartbeat":
+            let value = try decodePayload(Level2HeartbeatPayload.self, from: payload)
+            guard !value.workspace.isEmpty, value.sequence > 0 else { throw V1ControlCodecError.invalidField("level2_heartbeat") }
+            return .level2Heartbeat(workspace: value.workspace, sequence: value.sequence)
+        case "overlay_frame":
+            let value = try decodePayload(OverlayFramePayload.self, from: payload)
+            guard value.sequence > 0, !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw V1ControlCodecError.invalidField("overlay_frame")
+            }
+            return .overlayFrame(sequence: value.sequence, text: value.text, rows: value.rows ?? 0, columns: value.columns ?? 0)
         default:
             throw V1ControlCodecError.unknownType(type)
         }
@@ -141,15 +218,22 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
     }
 
     private func decodeSession(_ payload: WireSessionPayload) throws -> WireSessionRecord {
+        let state = payload.state ?? payload.activity.flatMap(WireAgentState.init(rawValue:)) ?? payload.status.flatMap(WireAgentState.init(rawValue:)) ?? .unknown
         let record = WireSessionRecord(
             reference: try SessionReference(payload.reference),
             name: payload.name,
             workingDirectory: payload.workingDirectory,
-            state: payload.state,
+            state: state,
             rows: payload.rows,
             columns: payload.columns,
             provider: payload.provider,
-            activity: payload.activity
+            activity: payload.activity,
+            windowName: payload.windowName ?? "",
+            windowIndex: payload.windowIndex ?? "",
+            title: payload.title ?? "",
+            sessionName: payload.sessionName,
+            health: payload.health ?? "",
+            status: payload.status ?? payload.activity
         )
         guard record.isValid else { throw V1ControlCodecError.invalidField("session") }
         return record
@@ -160,6 +244,7 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             workingDirectory: payload.workingDirectory,
             sessionCount: payload.sessionCount,
             aggregateState: payload.aggregateState,
+            workingCount: payload.workingCount ?? 0,
             sessions: try (payload.sessions ?? []).map(decodeSession)
         )
         guard record.isValid else { throw V1ControlCodecError.invalidField("workspace") }
@@ -264,6 +349,35 @@ private struct ListPayload: Encodable {
 }
 
 private struct ReferencePayload: Encodable { let ref: String }
+private struct CreateAgentPayload: Encodable {
+    let requestID: UInt32
+    let workspace: String
+    let anchorReference: String
+    let provider: String
+    let name: String
+    let bypass: Bool
+
+    init(request: CreateAgentRequest, anchor: SessionReference) {
+        requestID = request.requestID
+        workspace = request.workspace
+        anchorReference = anchor.rawValue
+        provider = request.provider
+        name = request.name
+        bypass = request.bypass
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case requestID = "req_id"
+        case workspace, provider, name, bypass
+        case anchorReference = "anchor_ref"
+    }
+}
+private struct CloseSessionPayload: Encodable {
+    let requestID: UInt32
+    let reference: String
+    init(request: CloseSessionRequest) { requestID = request.requestID; reference = request.reference.rawValue }
+    enum CodingKeys: String, CodingKey { case requestID = "req_id", reference = "ref" }
+}
 private struct SubscribePayload: Encodable {
     let ref: String
     let rows: UInt16
@@ -277,8 +391,9 @@ private struct InputPayload: Encodable {
     var text: String?
     var keys: [String]?
     var attachmentPath: String?
+    var bytes: String?
 
-    enum CodingKeys: String, CodingKey { case requestID = "req_id", reference = "ref", text, keys, attachmentPath = "attachment_path" }
+    enum CodingKeys: String, CodingKey { case requestID = "req_id", reference = "ref", text, keys, bytes, attachmentPath = "attachment_path" }
     init(requestID: UInt32, reference: String) { self.requestID = requestID; self.reference = reference }
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -286,6 +401,7 @@ private struct InputPayload: Encodable {
         try container.encode(reference, forKey: .reference)
         try container.encodeIfPresent(text, forKey: .text)
         try container.encodeIfPresent(keys, forKey: .keys)
+        try container.encodeIfPresent(bytes, forKey: .bytes)
         try container.encodeIfPresent(attachmentPath, forKey: .attachmentPath)
     }
 }
@@ -305,8 +421,43 @@ private struct ResizePayload: Encodable {
 }
 private struct AttachPreviewPayload: Encodable { let ref: String; let path: String }
 private struct ScrollWheelPayload: Encodable { let ref: String; let delta: Int32 }
+private struct Level2SubscribePayload: Encodable { let workspace: String }
+private struct Level2UnsubscribePayload: Encodable {
+    let workspace: String?
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: DynamicKey.self)
+        try values.encodeIfPresent(workspace, forKey: DynamicKey("workspace"))
+    }
+}
+private struct OverlaySubscribePayload: Encodable {
+    let socket: String
+    let rows: UInt16?
+    let columns: UInt16?
+    enum CodingKeys: String, CodingKey { case socket, rows, columns = "cols" }
+}
+private struct EmptyPayload: Encodable {}
 
-private struct AuthAckPayload: Decodable { let ok: Bool; let reason: String? }
+private struct AuthAckPayload: Decodable {
+    let ok: Bool
+    let reason: String?
+    let agentLaunchers: [AgentLauncher]?
+    enum CodingKeys: String, CodingKey { case ok, reason, agentLaunchers = "agent_launchers" }
+}
+private struct CreateAgentResultPayload: Decodable {
+    let requestID: UInt32
+    let ok: Bool
+    let reference: String?
+    let name: String?
+    let naming: AgentNamingMode?
+    let reason: CreateAgentFailureReason?
+    enum CodingKeys: String, CodingKey { case requestID = "req_id", ok, reference = "ref", name, naming, reason }
+}
+private struct CloseSessionResultPayload: Decodable {
+    let requestID: UInt32
+    let ok: Bool
+    let reason: CloseSessionFailureReason?
+    enum CodingKeys: String, CodingKey { case requestID = "req_id", ok, reason }
+}
 private struct InputAckPayload: Decodable {
     let requestID: UInt32
     let ok: Bool
@@ -318,6 +469,36 @@ private struct PaneModePayload: Decodable {
     let reference: String
     let inCopyMode: Bool
     enum CodingKeys: String, CodingKey { case reference = "ref", inCopyMode = "in_copy_mode" }
+}
+private struct PresenceUpdatePayload: Decodable {
+    let reference: String
+    let hasMobile: Bool
+    let mobileCount: UInt32
+    let desktopCount: UInt32
+    enum CodingKeys: String, CodingKey {
+        case reference = "ref"
+        case hasMobile = "has_mobile"
+        case mobileCount = "mobile_count"
+        case desktopCount = "desktop_count"
+    }
+}
+private struct Level2FramePayload: Decodable {
+    let workspace: String
+    let sequence: UInt64
+    let sessions: [WireSessionPayload]
+    enum CodingKeys: String, CodingKey { case workspace, sequence = "seq", sessions }
+}
+private struct Level2HeartbeatPayload: Decodable {
+    let workspace: String
+    let sequence: UInt64
+    enum CodingKeys: String, CodingKey { case workspace, sequence = "seq" }
+}
+private struct OverlayFramePayload: Decodable {
+    let sequence: UInt64
+    let text: String
+    let rows: UInt16?
+    let columns: UInt16?
+    enum CodingKeys: String, CodingKey { case sequence = "seq", text, rows, columns = "cols" }
 }
 private struct ListingPayload: Decodable {
     let requestID: UInt32
@@ -342,18 +523,36 @@ private struct ListDeltaPayload: Decodable {
 private struct WorkspacePayload: Decodable {
     let workingDirectory: String
     let sessionCount: Int
+    let workingCount: Int?
     let aggregateState: WireAgentState
     let sessions: [WireSessionPayload]?
-    enum CodingKeys: String, CodingKey { case workingDirectory = "cwd", sessionCount = "session_count", aggregateState = "aggregate_state", sessions }
+    enum CodingKeys: String, CodingKey {
+        case workingDirectory = "cwd"
+        case sessionCount = "session_count"
+        case workingCount = "working_count"
+        case aggregateState = "aggregate_state"
+        case sessions
+    }
 }
 private struct WireSessionPayload: Decodable {
     let reference: String
     let name: String
     let workingDirectory: String
-    let state: WireAgentState
+    let state: WireAgentState?
     let rows: UInt16
     let columns: UInt16
     let provider: String?
     let activity: String?
-    enum CodingKeys: String, CodingKey { case reference = "ref", name, workingDirectory = "cwd", state, rows, columns = "cols", provider, activity }
+    let windowName: String?
+    let windowIndex: String?
+    let title: String?
+    let sessionName: String?
+    let health: String?
+    let status: String?
+    enum CodingKeys: String, CodingKey {
+        case reference = "ref", name, workingDirectory = "cwd", state, rows, columns = "cols", provider, activity, title, health, status
+        case windowName = "window_name"
+        case windowIndex = "window_index"
+        case sessionName = "session_name"
+    }
 }

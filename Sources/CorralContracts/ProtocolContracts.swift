@@ -14,6 +14,7 @@ public enum ProtocolV1 {
     public static let maximumReferenceBytes = 255
     /// Client receive/send policy; measured on ANSI bytes, excluding the scrollback metadata header.
     public static let maximumANSIBytes = 1_048_576
+    public static let maximumInputBytes = 1_048_576
     public static let scrollbackMetadataByteCount = 12
 }
 
@@ -228,6 +229,7 @@ public enum WireErrorCode: String, Codable, Sendable {
     case badFrame = "bad_frame"
     case unsupportedVersion = "unsupported_version"
     case unsupportedType = "unsupported_type"
+    case invalidField = "invalid_field"
     case sessionNotFound = "session_not_found"
     case internalFailure = "internal"
 }
@@ -254,6 +256,7 @@ public enum WireInputKey: String, Codable, CaseIterable, Sendable {
 public enum ClientInputPayload: Equatable, Sendable {
     case text(String, attachmentPath: String?)
     case keys([WireInputKey])
+    case bytes(Data)
     case bareEnter
 }
 
@@ -266,6 +269,9 @@ public struct ClientInputRequest: Equatable, Sendable {
         guard sequence > 0 else { throw ProtocolContractError.invalidEnvelope }
         if case let .keys(keys) = payload, keys.isEmpty { throw ProtocolContractError.invalidEnvelope }
         if case let .text(_, path) = payload, path == "" { throw ProtocolContractError.invalidEnvelope }
+        if case let .bytes(bytes) = payload, bytes.isEmpty || bytes.count > ProtocolV1.maximumInputBytes {
+            throw ProtocolContractError.invalidEnvelope
+        }
         self.sequence = sequence
         self.reference = reference
         self.payload = payload
@@ -278,6 +284,196 @@ public struct AuthToken: Hashable, Sendable, CustomStringConvertible {
     public var description: String { "<redacted>" }
 }
 
+public enum AgentNamingMode: String, Codable, Sendable {
+    case cli
+    case tmux
+}
+
+public struct AgentLauncher: Codable, Equatable, Sendable {
+    public let provider: String
+    public let displayName: String
+    public let supportsBypass: Bool
+    public let naming: AgentNamingMode
+
+    public init(provider: String, displayName: String, supportsBypass: Bool, naming: AgentNamingMode) {
+        self.provider = provider
+        self.displayName = displayName
+        self.supportsBypass = supportsBypass
+        self.naming = naming
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, naming
+        case displayName = "display_name"
+        case supportsBypass = "supports_bypass"
+    }
+}
+
+public struct CreateAgentRequest: Equatable, Sendable {
+    public let requestID: UInt32
+    public let workspace: String
+    public let anchorReference: SessionReference?
+    public let provider: String
+    public let name: String
+    public let bypass: Bool
+
+    public init(requestID: UInt32, workspace: String, anchorReference: SessionReference?, provider: String, name: String, bypass: Bool) {
+        self.requestID = requestID
+        self.workspace = workspace
+        self.anchorReference = anchorReference
+        self.provider = provider
+        self.name = name
+        self.bypass = bypass
+    }
+}
+
+public struct CloseSessionRequest: Equatable, Sendable {
+    public let requestID: UInt32
+    public let reference: SessionReference
+
+    public init(requestID: UInt32, reference: SessionReference) {
+        self.requestID = requestID
+        self.reference = reference
+    }
+}
+
+public enum CreateAgentFailureReason: String, Codable, Sendable {
+    case invalidField = "invalid_field"
+    case targetNotFound = "target_not_found"
+    case providerUnavailable = "provider_unavailable"
+    case unsupportedBypass = "unsupported_bypass"
+    case launchFailed = "launch_failed"
+}
+
+public struct CreateAgentResult: Codable, Equatable, Sendable {
+    public let requestID: UInt32
+    public let ok: Bool
+    public let reference: SessionReference?
+    public let name: String?
+    public let naming: AgentNamingMode?
+    public let reason: CreateAgentFailureReason?
+
+    public init(requestID: UInt32, ok: Bool, reference: SessionReference? = nil, name: String? = nil, naming: AgentNamingMode? = nil, reason: CreateAgentFailureReason? = nil) {
+        self.requestID = requestID
+        self.ok = ok
+        self.reference = reference
+        self.name = name
+        self.naming = naming
+        self.reason = reason
+    }
+
+    private enum CodingKeys: String, CodingKey { case requestID = "req_id", ok, reference = "ref", name, naming, reason }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try values.decode(UInt32.self, forKey: .requestID)
+        ok = try values.decode(Bool.self, forKey: .ok)
+        reference = try values.decodeIfPresent(String.self, forKey: .reference).map(SessionReference.init)
+        name = try values.decodeIfPresent(String.self, forKey: .name)
+        naming = try values.decodeIfPresent(AgentNamingMode.self, forKey: .naming)
+        reason = try values.decodeIfPresent(CreateAgentFailureReason.self, forKey: .reason)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(requestID, forKey: .requestID)
+        try values.encode(ok, forKey: .ok)
+        try values.encodeIfPresent(reference?.rawValue, forKey: .reference)
+        try values.encodeIfPresent(name, forKey: .name)
+        try values.encodeIfPresent(naming, forKey: .naming)
+        try values.encodeIfPresent(reason, forKey: .reason)
+    }
+}
+
+public enum CloseSessionFailureReason: String, Codable, Sendable {
+    case sessionNotFound = "session_not_found"
+    case closeFailed = "close_failed"
+}
+
+public struct CloseSessionResult: Codable, Equatable, Sendable {
+    public let requestID: UInt32
+    public let ok: Bool
+    public let reason: CloseSessionFailureReason?
+
+    public init(requestID: UInt32, ok: Bool, reason: CloseSessionFailureReason? = nil) {
+        self.requestID = requestID
+        self.ok = ok
+        self.reason = reason
+    }
+
+    private enum CodingKeys: String, CodingKey { case requestID = "req_id", ok, reason }
+}
+
+public struct AgentMirrorWhoAmIResponse: Codable, Equatable, Sendable {
+    public let version: UInt16
+    public let hostID: String
+    public let name: String
+    public let port: UInt16
+    public let addresses: [String]
+
+    public init(version: UInt16 = 1, hostID: String, name: String, port: UInt16, addresses: [String]) {
+        self.version = version
+        self.hostID = hostID
+        self.name = name
+        self.port = port
+        self.addresses = addresses
+    }
+
+    enum CodingKeys: String, CodingKey { case version = "v", hostID = "host_id", name, port, addresses }
+}
+
+public struct AgentMirrorIdentifyRequest: Codable, Equatable, Sendable {
+    public let version: UInt16
+    public let hostID: String?
+    public let nonce: String
+    public let destinationIP: String
+
+    public init(version: UInt16 = 1, hostID: String? = nil, nonce: String, destinationIP: String) {
+        self.version = version
+        self.hostID = hostID
+        self.nonce = nonce
+        self.destinationIP = destinationIP
+    }
+
+    enum CodingKeys: String, CodingKey { case version = "v", hostID = "host_id", nonce, destinationIP = "dest_ip" }
+}
+
+public struct AgentMirrorIdentifyResponse: Codable, Equatable, Sendable {
+    public let version: UInt16
+    public let hostID: String
+    public let name: String
+    public let bound: String
+    public let mac: String
+
+    public init(version: UInt16 = 1, hostID: String, name: String, bound: String, mac: String) {
+        self.version = version
+        self.hostID = hostID
+        self.name = name
+        self.bound = bound
+        self.mac = mac
+    }
+
+    enum CodingKeys: String, CodingKey { case version = "v", hostID = "host_id", name, bound, mac }
+}
+
+public struct AgentMirrorHTTPError: Codable, Equatable, Sendable {
+    public let code: String
+    public let reason: String?
+    public init(code: String, reason: String? = nil) { self.code = code; self.reason = reason }
+}
+
+/// Multipart body input for POST /upload; the HTTP field name is intentionally unspecified by the server.
+public struct AgentMirrorUploadRequest: Equatable, Sendable {
+    public let fileName: String
+    public let bytes: Data
+    public init(fileName: String, bytes: Data) { self.fileName = fileName; self.bytes = bytes }
+}
+
+public struct AgentMirrorUploadResponse: Codable, Equatable, Sendable {
+    public let path: String
+    public init(path: String) { self.path = path }
+}
+
 /// Client-to-server commands only. Server responses cannot be passed to a sender.
 public enum ClientCommand: Equatable, Sendable {
     case list(requestID: UInt32)
@@ -288,15 +484,26 @@ public enum ClientCommand: Equatable, Sendable {
     case resize(reference: SessionReference, size: GridSize)
     case attachPreview(reference: SessionReference, path: String)
     case scrollWheel(reference: SessionReference, delta: Int32)
-    case createSession(requestID: UInt32, deviceID: DeviceID, name: String, workingDirectory: String?)
+    case level2Subscribe(workspace: String)
+    case level2Unsubscribe(workspace: String?)
+    case overlaySubscribe(socket: String, rows: UInt16?, columns: UInt16?)
+    case overlayUnsubscribe
+    case createAgent(CreateAgentRequest)
+    case closeSession(CloseSessionRequest)
 }
 
 /// Server-to-client control messages only; these cases are decodable, never sendable by SessionLink.
 public enum ControlMessage: Equatable, Sendable {
-    case authAck(ok: Bool, reason: String?)
+    case authAck(ok: Bool, reason: String?, launchers: [AgentLauncher] = [])
     case listing(SessionListing)
     case listDelta(SessionListDelta)
     case inputAck(seq: UInt32, ok: Bool, reason: InputFailureReason?)
+    case createAgentResult(CreateAgentResult)
+    case closeSessionResult(CloseSessionResult)
+    case presenceUpdate(reference: SessionReference, hasMobile: Bool, mobileCount: UInt32, desktopCount: UInt32)
+    case level2Frame(workspace: String, sequence: UInt64, sessions: [WireSessionRecord])
+    case level2Heartbeat(workspace: String, sequence: UInt64)
+    case overlayFrame(sequence: UInt64, text: String, rows: UInt16, columns: UInt16)
     case error(code: WireErrorCode, reason: String?)
     case paneModeChanged(reference: SessionReference, inCopyMode: Bool)
 }
