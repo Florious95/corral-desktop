@@ -374,8 +374,8 @@ export class TerminalView {
     const derivedCols = Math.max(2, Math.floor(w / cell.w));
     const derivedRows = Math.max(2, Math.floor(h / cell.h));
     return Boolean(this.lastFit
-      && this.lastFit.container_width_px === w
-      && this.lastFit.container_height_px === h
+      && Math.abs(this.lastFit.container_width_px - w) <= 1
+      && Math.abs(this.lastFit.container_height_px - h) <= 1
       && this.lastFit.derived_cols === derivedCols
       && this.lastFit.derived_rows === derivedRows);
   }
@@ -877,6 +877,39 @@ export class TerminalView {
   }
 
   /**
+   * 即时暂停 WebGL GPU 绘制提交循环（MVP Phase M2）：
+   * 挂起 xterm 的 _renderService 绘制提交循环，跳过游标 DOM 扫描，彻底消除后台 GPU 空转。
+   */
+  pauseRendering() {
+    this._renderSleeping = true;
+    const renderService = this.term?._core?._renderService;
+    if (renderService) {
+      renderService._isPaused = true;
+    }
+  }
+
+  /**
+   * 即时唤醒 WebGL GPU 绘制提交循环（MVP Phase M2）：
+   * 恢复 _renderService 绘制提交；若休眠期间积累了新输出，在常驻画布上触发一次原子增量 refresh(0, rows - 1)；
+   * 若休眠期间画面静止则零额外重绘零提交。
+   */
+  resumeRendering() {
+    if (!this._renderSleeping) return;
+    this._renderSleeping = false;
+    const renderService = this.term?._core?._renderService;
+    if (renderService) {
+      renderService._isPaused = false;
+      renderService._pausedResizeTask?.flush?.();
+      if (renderService._needsFullRefresh) {
+        renderService._needsFullRefresh = false;
+        const endRow = Math.max(0, (this.term.rows || 1) - 1);
+        this.term.refresh?.(0, endRow);
+      }
+    }
+    this._syncCursorAnchor();
+  }
+
+  /**
    * 后台窗格渲染休眠状态机（MVP Phase M2）：
    * - 休眠（sleeping=true）：WebGL Canvas 与几何位置 100% 常驻保留，数据流照常解析写入 term.buffer，
    *   仅挂起 xterm 的 _renderService GPU 绘制提交循环与游标扫描，彻底消除后台 35%~60% GPU 空转；
@@ -885,27 +918,8 @@ export class TerminalView {
    * @param {boolean} sleeping
    */
   setRenderSleep(sleeping) {
-    const next = Boolean(sleeping);
-    if (this._disposed || this._renderSleeping === next) return;
-    this._renderSleeping = next;
-
-    const renderService = this.term?._core?._renderService;
-    if (next) {
-      if (renderService) {
-        renderService._isPaused = true;
-      }
-    } else {
-      if (renderService) {
-        renderService._isPaused = false;
-        renderService._pausedResizeTask?.flush?.();
-        if (renderService._needsFullRefresh) {
-          renderService._needsFullRefresh = false;
-          const endRow = Math.max(0, (this.term.rows || 1) - 1);
-          this.term.refresh?.(0, endRow);
-        }
-      }
-      this._syncCursorAnchor();
-    }
+    if (sleeping) this.pauseRendering();
+    else this.resumeRendering();
   }
 
   dispose() {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import './terminal.css';
 import { XIcon, TerminalIcon } from '../../lib/icons.jsx';
@@ -78,6 +78,8 @@ export default function TerminalPane({
   const pendingFocusRef = useRef(false);
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
+  const lastWidthRef = useRef(0);
+  const lastHeightRef = useRef(0);
   const syncRenderSleepRef = useRef(null);
   onTextRef.current = onText;
   onKeyRef.current = onKey;
@@ -142,6 +144,8 @@ export default function TerminalPane({
     let initialCols = null;
     let initialRows = null;
     if (effectiveW > 0 && effectiveH > 0) {
+      lastWidthRef.current = effectiveW;
+      lastHeightRef.current = effectiveH;
       const grid = computeGridDimensions({
         width: effectiveW,
         height: effectiveH,
@@ -265,6 +269,8 @@ export default function TerminalPane({
     });
     view.readyWebgl?.then(() => {
       if (viewRef.current === view) {
+        if (view.container?.clientWidth) lastWidthRef.current = view.container.clientWidth;
+        if (view.container?.clientHeight) lastHeightRef.current = view.container.clientHeight;
         setRenderDiag((prev) => ({
           ...prev,
           renderer: view.rendererType,
@@ -440,10 +446,21 @@ export default function TerminalPane({
     }
 
     const ro = new ResizeObserver(() => {
-      // Hidden resident panes already have their projected geometry. Their
-      // observer may fire while a tab switches, but fitting them here only
-      // repeats the same grid and can trigger an activation reflow.
+      // 1. 若窗格处于后台隐藏态，直接忽略，避免切 Tab 时触发虚假重排
       if (host.closest('.is-hidden')) return;
+
+      // 2. 真实物理尺寸防抖守卫：只有当物理宽高发生真实改变（>= 2px）时才允许触发 fit
+      const curW = host.clientWidth;
+      const curH = host.clientHeight;
+      if (curW === 0 || curH === 0) return;
+
+      const deltaW = Math.abs(curW - lastWidthRef.current);
+      const deltaH = Math.abs(curH - lastHeightRef.current);
+      if (deltaW < 2 && deltaH < 2) return;
+
+      lastWidthRef.current = curW;
+      lastHeightRef.current = curH;
+
       if (view.isFitCurrent?.()) return;
       if (currentMode === PRESENCE_MODE.TAKEOVER) {
         view.fit();
@@ -456,7 +473,17 @@ export default function TerminalPane({
 
     const handleLayoutSettled = () => {
       if (nativeCapabilities.platform !== 'macos' || currentMode !== PRESENCE_MODE.TAKEOVER
-          || host.closest('.is-hidden') || view.isFitCurrent?.()) return;
+          || host.closest('.is-hidden')) return;
+      const curW = host.clientWidth;
+      const curH = host.clientHeight;
+      if (curW === 0 || curH === 0) return;
+      const deltaW = Math.abs(curW - lastWidthRef.current);
+      const deltaH = Math.abs(curH - lastHeightRef.current);
+      if (deltaW < 2 && deltaH < 2) return;
+
+      lastWidthRef.current = curW;
+      lastHeightRef.current = curH;
+      if (view.isFitCurrent?.()) return;
       view.fit({ immediate: true, sync: true });
     };
     const stage = host.closest('.terminal-stage');
@@ -510,7 +537,11 @@ export default function TerminalPane({
       mo = new MutationObserver(() => {
         const isHidden = Boolean(host.closest?.('.is-hidden') || paneHost.classList.contains('is-hidden') || paneHost.style.visibility === 'hidden');
         const sleeping = isHidden || (isVisibleRef.current === false);
-        syncRenderSleepRef.current?.(sleeping);
+        if (sleeping) {
+          viewRef.current?.pauseRendering();
+        } else {
+          viewRef.current?.resumeRendering();
+        }
       });
       mo.observe(paneHost, { attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] });
     }
@@ -553,21 +584,20 @@ export default function TerminalPane({
     }
   }, [fontFamily, fontSize]);
 
-  const syncRenderSleep = useCallback((sleeping) => {
+  // 动态响应窗格可见性变更：即时同步驱动后台窗格进入/退出 Render Sleep（MVP Phase M2）
+  useLayoutEffect(() => {
     const v = viewRef.current;
     if (!v) return;
-    v.setRenderSleep(sleeping);
-  }, []);
-  syncRenderSleepRef.current = syncRenderSleep;
-
-  // 动态响应窗格可见性变更：驱动后台窗格进入/退出 Render Sleep（MVP Phase M2）
-  useEffect(() => {
     const host = hostRef.current;
     const paneHost = host?.closest?.('.pane-host');
     const isHidden = Boolean(host?.closest?.('.is-hidden') || paneHost?.classList.contains('is-hidden') || paneHost?.style.visibility === 'hidden');
     const sleeping = isHidden || (isVisible === false);
-    syncRenderSleep(sleeping);
-  }, [isVisible, syncRenderSleep]);
+    if (sleeping) {
+      v.pauseRendering();
+    } else {
+      v.resumeRendering();
+    }
+  }, [isVisible]);
 
   return (
     <div

@@ -265,16 +265,39 @@ test('MVP M2: TerminalPane & TerminalView source contract verifies Render Sleep 
   assert.match(viewJs, /renderService\._needsFullRefresh/);
   assert.match(viewJs, /if\s*\(!this\.hideCursor\s*\|\|\s*this\._disposed\s*\|\|\s*this\._renderSleeping\)\s*return;/);
 
-  // TerminalPane hooks isVisible and pane-host to setRenderSleep
+  // TerminalPane hooks isVisible and pane-host to pauseRendering/resumeRendering
   assert.match(paneJsx, /renderSleep:\s*!isPaneVisible/);
-  assert.match(paneJsx, /syncRenderSleep\(sleeping\)/);
-  assert.match(paneJsx, /v\.setRenderSleep\(sleeping\)/);
+  assert.match(paneJsx, /v\.pauseRendering\(\)/);
+  assert.match(paneJsx, /v\.resumeRendering\(\)/);
+  assert.match(paneJsx, /const deltaW = Math\.abs\(curW - lastWidthRef\.current\);/);
+  assert.match(paneJsx, /const deltaH = Math\.abs\(curH - lastHeightRef\.current\);/);
+  assert.match(paneJsx, /if\s*\(deltaW < 2 && deltaH < 2\)\s*return;/);
 
   // Invariants strictly held: NO detachWebgl, NO visibility_resume, NO background unsubscribe/dropping
   assert.doesNotMatch(viewJs, /detachWebgl/);
   assert.doesNotMatch(paneJsx, /visibility_resume/);
-  assert.doesNotMatch(paneJsx, /syncRenderSleep\s*=\s*\([^)]*\)\s*=>\s*\{[^}]*unsubscribe/);
+  assert.doesNotMatch(paneJsx, /useLayoutEffect\(\(\)\s*=>\s*\{[^}]*unsubscribe/);
+  assert.doesNotMatch(paneJsx, /new MutationObserver\(\(\)\s*=>\s*\{[^}]*unsubscribe/);
   assert.doesNotMatch(paneJsx, /if\s*\(!viewRef\.current\?\.isVisible\)\s*return;/);
+});
+
+test('MVP M2: ResizeObserver physical threshold guard suppresses fit and subscribe on tab switch (fit=0, subscribe=0, reset=0)', async () => {
+  const [paneJsx, terminalViewJs] = await Promise.all([
+    readFile(new URL('../src/components/terminal/TerminalPane.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/term/TerminalView.js', import.meta.url), 'utf8'),
+  ]);
+
+  // TerminalPane records lastWidthRef and lastHeightRef
+  assert.match(paneJsx, /const lastWidthRef = useRef\(0\);/);
+  assert.match(paneJsx, /const lastHeightRef = useRef\(0\);/);
+
+  // Both ro and handleLayoutSettled bail out if deltaW < 2 && deltaH < 2
+  const matches = paneJsx.match(/if\s*\(deltaW < 2 && deltaH < 2\)\s*return;/g);
+  assert.ok(matches && matches.length >= 2, 'Both ResizeObserver and handleLayoutSettled must check deltaW < 2 && deltaH < 2');
+
+  // TerminalView.isFitCurrent tolerates 1px subpixel jitter when derived cols/rows are identical
+  assert.match(terminalViewJs, /Math\.abs\(this\.lastFit\.container_width_px - w\) <= 1/);
+  assert.match(terminalViewJs, /Math\.abs\(this\.lastFit\.container_height_px - h\) <= 1/);
 });
 
 test('MVP M2: TerminalPane props destructuring safely declares isVisible = true and avoids ReferenceError', async () => {
