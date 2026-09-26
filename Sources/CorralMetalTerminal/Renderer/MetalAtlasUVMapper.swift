@@ -7,7 +7,7 @@ public struct MetalAtlasUVRect: Equatable, Sendable {
 }
 
 public enum MetalAtlasUVMapper {
-    /// CoreText raster rows enter the atlas in bitmap order, so the glyph's local V axis is reversed.
+    /// Atlas coordinates use Metal's top-left texture origin, matching the stage's top-down screen rows.
     public static func map(coordinates: AtlasCoordinates, textureSize: MetalStagePixelSize) -> MetalAtlasUVRect? {
         let x = Int(coordinates.x)
         let y = Int(coordinates.y)
@@ -21,11 +21,11 @@ public enum MetalAtlasUVMapper {
         return MetalAtlasUVRect(
             topLeft: SIMD2(
                 Float((Double(x) + 0.5) / textureWidth),
-                Float((Double(y + height) - 0.5) / textureHeight)
+                Float((Double(y) + 0.5) / textureHeight)
             ),
             bottomRight: SIMD2(
                 Float((Double(x + width) - 0.5) / textureWidth),
-                Float((Double(y) + 0.5) / textureHeight)
+                Float((Double(y + height) - 0.5) / textureHeight)
             )
         )
     }
