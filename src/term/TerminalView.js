@@ -172,6 +172,9 @@ export class TerminalView {
     this._pasteListener = null;
     this._csiDisposables = null;
 
+    this.term._terminalView = this;
+    this.term._renderSleeping = this._renderSleeping;
+
     // 运行期硬锁守卫：彻底防御 DECSET ?12h 与 DECSCUSR 转义序列动态激活光标闪烁，杜绝 WebGL 600ms 定时器死灰复燃
     this._lockCursorBlink();
 
@@ -878,13 +881,25 @@ export class TerminalView {
 
   /**
    * 即时暂停 WebGL GPU 绘制提交循环（MVP Phase M2）：
-   * 挂起 xterm 的 _renderService 绘制提交循环，跳过游标 DOM 扫描，彻底消除后台 GPU 空转。
+   * 挂起 xterm 的 _renderService 绘制提交循环，取消排队的 rAF 回调，跳过游标 DOM 扫描，彻底消除后台 GPU 空转。
    */
   pauseRendering() {
     this._renderSleeping = true;
+    if (this.term) this.term._renderSleeping = true;
     const renderService = this.term?._core?._renderService;
     if (renderService) {
       renderService._isPaused = true;
+      const debouncer = renderService._renderDebouncer;
+      if (debouncer?._animationFrame) {
+        const win = debouncer._coreBrowserService?.window || globalThis.window || globalThis;
+        try { win.cancelAnimationFrame?.(debouncer._animationFrame); } catch {}
+        debouncer._animationFrame = undefined;
+      }
+      if (renderService._animationFrame) {
+        const win = renderService._coreBrowserService?.window || globalThis.window || globalThis;
+        try { win.cancelAnimationFrame?.(renderService._animationFrame); } catch {}
+        renderService._animationFrame = undefined;
+      }
     }
   }
 
@@ -896,6 +911,7 @@ export class TerminalView {
   resumeRendering() {
     if (!this._renderSleeping) return;
     this._renderSleeping = false;
+    if (this.term) this.term._renderSleeping = false;
     const renderService = this.term?._core?._renderService;
     if (renderService) {
       renderService._isPaused = false;

@@ -254,15 +254,33 @@ export function installAtlasMemoryHygiene(addon) {
     hookTextureAtlas(renderer._charAtlas);
   }
   if (renderer) {
+    if (typeof renderer.renderRows === 'function') {
+      const origRenderRows = renderer.renderRows;
+      renderer.renderRows = function (start, end) {
+        if (this._terminal?._renderSleeping || this._terminal?._terminalView?._renderSleeping) {
+          return;
+        }
+        return origRenderRows.call(this, start, end);
+      };
+    }
     const rendererProto = Object.getPrototypeOf(renderer);
     if (rendererProto && rendererProto !== Object.prototype && !patchedPrototypes.has(rendererProto)) {
-      if (typeof rendererProto._refreshCharAtlas === 'function') {
-        patchedPrototypes.add(rendererProto);
-        const origRefresh = rendererProto._refreshCharAtlas;
+      patchedPrototypes.add(rendererProto);
+      const origRefresh = rendererProto._refreshCharAtlas;
+      if (typeof origRefresh === 'function') {
         rendererProto._refreshCharAtlas = function (...args) {
           const res = origRefresh.apply(this, args);
           if (this._charAtlas) hookTextureAtlas(this._charAtlas);
           return res;
+        };
+      }
+      const origProtoRenderRows = rendererProto.renderRows;
+      if (typeof origProtoRenderRows === 'function') {
+        rendererProto.renderRows = function (start, end) {
+          if (this._terminal?._renderSleeping || this._terminal?._terminalView?._renderSleeping) {
+            return;
+          }
+          return origProtoRenderRows.call(this, start, end);
         };
       }
     }

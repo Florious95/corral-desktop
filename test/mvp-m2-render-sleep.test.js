@@ -2,6 +2,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { TerminalView, withHiddenCursor } from '../src/term/TerminalView.js';
+import { installAtlasMemoryHygiene } from '../src/term/webglRenderer.js';
 import { setNativeEngineForTests, resetNativeEngineForTests } from '../src/core/nativeCapabilities.js';
 
 beforeEach(() => setNativeEngineForTests({ platform: 'macos' }));
@@ -48,6 +49,7 @@ class FakeTerminalForSleep {
     this.flushedTasks = 0;
     this.renderRowsCalls = 0;
     this.disposed = false;
+    this.cancelledRafId = null;
     this._core = {
       coreService: {
         isCursorHidden: false,
@@ -57,6 +59,14 @@ class FakeTerminalForSleep {
         _needsFullRefresh: false,
         _pausedResizeTask: {
           flush: () => { this.flushedTasks++; },
+        },
+        _renderDebouncer: {
+          _animationFrame: undefined,
+          _coreBrowserService: {
+            window: {
+              cancelAnimationFrame: (id) => { this.cancelledRafId = id; },
+            },
+          },
         },
         _renderRows: (start, end) => {
           this.renderRowsCalls++;
@@ -124,9 +134,12 @@ test('MVP M2: Render Sleep state machine pauses GPU submission on sleep and cond
   assert.ok(view.term.writes.length >= 1);
 
   // 2. Put into Render Sleep (pane hidden in background)
+  rs._renderDebouncer._animationFrame = 999;
   view.setRenderSleep(true);
   assert.equal(view.isRenderSleeping, true);
   assert.equal(rs._isPaused, true, 'RenderService._isPaused must be true while in Render Sleep');
+  assert.equal(rs._renderDebouncer._animationFrame, undefined, 'renderDebouncer._animationFrame must be cancelled on sleep');
+  assert.equal(view.term.cancelledRafId, 999, 'cancelAnimationFrame must be called with queued rAF ID');
 
   const rendersBeforeSleepWrites = view.term.renderRowsCalls;
   view.term.refreshes.length = 0;
@@ -311,5 +324,38 @@ test('MVP M2: TerminalPane props destructuring safely declares isVisible = true 
 
   // App safely forwards isVisible if present or defaults to true
   assert.match(appJsx, /isVisible=\{dimensions\?\.isVisible !== undefined \? dimensions\.isVisible : true\}/);
+});
+
+test('MVP M2: WebglRenderer.renderRows suppresses GPU submission while terminal is in Render Sleep (hiddenDraws = 0)', () => {
+  let underlyingDrawCalls = 0;
+  const mockRenderer = {
+    renderRows(start, end) {
+      underlyingDrawCalls++;
+    },
+  };
+  const mockTerm = {
+    _renderSleeping: false,
+  };
+  mockRenderer._terminal = mockTerm;
+
+  const mockAddon = {
+    _renderer: mockRenderer,
+  };
+
+  installAtlasMemoryHygiene(mockAddon);
+
+  // When awake: renderRows delegates to underlying draw
+  mockRenderer.renderRows(0, 10);
+  assert.equal(underlyingDrawCalls, 1, 'Awake terminal executes renderRows');
+
+  // When in Render Sleep: renderRows immediately returns on line 1, blocking all GPU draws
+  mockTerm._renderSleeping = true;
+  mockRenderer.renderRows(0, 10);
+  assert.equal(underlyingDrawCalls, 1, 'Render Sleep must strictly block renderRows (hiddenDraws = 0)');
+
+  // When awake again:
+  mockTerm._renderSleeping = false;
+  mockRenderer.renderRows(0, 10);
+  assert.equal(underlyingDrawCalls, 2, 'Awakened terminal executes renderRows normally');
 });
 
