@@ -16,6 +16,14 @@ public struct MetalPixelViewport: Equatable, Sendable {
     public let y: Double
     public let width: Double
     public let height: Double
+
+    /// Maps top-left-origin physical stage pixels to Metal's NDC y-up coordinate system.
+    public func normalizedDevicePosition(x stageX: Double, y stageY: Double) -> SIMD2<Float> {
+        SIMD2(
+            Float((stageX - x) / width * 2 - 1),
+            Float(1 - (stageY - y) / height * 2)
+        )
+    }
 }
 
 public struct MetalPixelScissor: Equatable, Sendable {
