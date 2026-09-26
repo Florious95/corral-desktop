@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "run_id_utc": "20260926T060055Z",
+  "status": "FIRST_CHECK_PASS__RECHECK_FAIL_CLOSED_ON_SOCKET_FINGERPRINT_DRIFT",
+  "test": {
+    "endpoint": "127.0.0.1:9919",
+    "daemon_pid": 83389,
+    "post_capture_check": "running"
+  },
+  "production_9900": {
+    "first_check": {
+      "port_9900_listen_pids": "87692",
+      "port_9900_listener_identity": "present|一 9月/21 20:40:57 2026|2ab07ca87be8ce20c051e7421a88ddb95fddf469ff521aac23fcf397fd5be652|0",
+      "port_9900_established_count": "2",
+      "port_9900_established_sha256": "960eb14b0c68b6cf5b0563165beff19d02aa892d33e94957ff31020220a2efe8",
+      "client_72646_identity": "absent|-|-|0",
+      "client_90213_identity": "present|五 9月/25 20:36:22 2026|8cdbc833b07ce770efc6cb789c9e349f7bb0a4ef89682af4f9dad55b70dbb185|1"
+    },
+    "final_read_only_recheck": {
+      "port_9900_listen_pids": "87692",
+      "port_9900_listener_identity": "present|一 9月/21 20:40:57 2026|2ab07ca87be8ce20c051e7421a88ddb95fddf469ff521aac23fcf397fd5be652|0",
+      "port_9900_established_count": "2",
+      "port_9900_established_sha256": "fb6a327697e87b0ff5948eadc2754f971e213a31a56c95973c6280c57cca14bc",
+      "client_72646_identity": "absent|-|-|0",
+      "client_90213_identity": "present|五 9月/25 20:36:22 2026|8cdbc833b07ce770efc6cb789c9e349f7bb0a4ef89682af4f9dad55b70dbb185|1"
+    },
+    "listener_identity_unchanged": true,
+    "established_count_unchanged": true,
+    "established_socket_fingerprint_changed": true,
+    "client_72646_unchanged": true,
+    "client_90213_unchanged": true,
+    "baseline_to_first_check_stable": true
+  },
+  "scope": "The harness opened connections only to 127.0.0.1:9919. verify-isolation.sh uses read-only lsof/ps for 9900 and fails closed on this fingerprint drift; no endpoints or payloads are included.",
+  "interpretation": "The observed socket fingerprint changed between read-only snapshots while listener PID, established count, and listed Corral.app PID identities stayed stable. Cause is un-attributed; do not claim an unchanged 9900 connection across the full interval.",
+  "post_stop": {
+    "captured_at_utc": "2026-09-26T06:04:32Z",
+    "fixture_listener_absent": true,
+    "fixture_tmux_socket_absent": true,
+    "production_listener_identity_unchanged_from_first_pass": true,
+    "production_client_72646_identity_unchanged_from_first_pass": true,
+    "production_client_90213_identity_unchanged_from_first_pass": true,
+    "established_count": 2,
+    "established_fingerprint_unchanged_from_recheck": false,
+    "established_fingerprint_sha256": "c473e4c88133dedc7f903d7d2ba8ff98bca8e7dc053ae3c5230428c1e78c6ac8",
+    "interpretation": "Fixture teardown was verified. Any continued production socket fingerprint drift is retained as an un-attributed observation, not declared a fixture effect."
+  }
+}

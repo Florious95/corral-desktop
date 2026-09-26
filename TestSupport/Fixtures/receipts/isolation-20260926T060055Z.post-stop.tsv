@@ -1,0 +1,11 @@
+schema_version=1
+captured_at_utc=2026-09-26T06:04:32Z
+stop_result=PASS
+port_9900_listen_pids=87692
+port_9900_listener_identity=present|一 9月/21 20:40:57 2026|2ab07ca87be8ce20c051e7421a88ddb95fddf469ff521aac23fcf397fd5be652|0
+port_9900_established_count=2
+port_9900_established_sha256=c473e4c88133dedc7f903d7d2ba8ff98bca8e7dc053ae3c5230428c1e78c6ac8
+client_72646_identity=absent|-|-|0
+client_90213_identity=present|五 9月/25 20:36:22 2026|8cdbc833b07ce770efc6cb789c9e349f7bb0a4ef89682af4f9dad55b70dbb185|1
+test_9919_listener=absent
+test_tmux_socket=absent
