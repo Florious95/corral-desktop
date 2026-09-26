@@ -1,13 +1,18 @@
 import CorralContracts
-import CorralMetalTerminal
 import Metal
 import XCTest
+@testable import CorralMetalTerminal
 
 final class SharedMetalTerminalRendererTests: XCTestCase {
     @MainActor
     func testHiddenStageBatchReturnsDeferredContractReceipt() async throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal is unavailable on this machine") }
         let renderer = try SharedMetalTerminalRenderer(device: device)
+        XCTAssertTrue(renderer.glyphAtlasPool === GlyphAtlasPool.shared)
+        XCTAssertEqual(renderer.appearance, .dark)
+        renderer.setAppearance(.light)
+        XCTAssertEqual(renderer.palette.background.hexRGB, "#fbfaf8")
+        renderer.setAppearance(.dark)
         let stageID = UUID()
         let request = StageFrameRequest(
             stageID: stageID,
@@ -23,6 +28,60 @@ final class SharedMetalTerminalRendererTests: XCTestCase {
         XCTAssertEqual(receipt.stageID, stageID)
         XCTAssertEqual(receipt.layoutGeneration, LayoutGeneration(1))
         XCTAssertEqual(receipt.outcome, .deferred)
+    }
+
+    @MainActor
+    func testVisiblePaneSamplesSharedAtlasForSingleWideAndZWJGraphemes() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal is unavailable on this machine") }
+        let atlas = GlyphAtlasPool(device: device, memoryBudget: .appDefault, pageSize: 128)
+        let renderer = try SharedMetalTerminalRenderer(device: device, glyphAtlas: atlas)
+        renderer.configureStage(sizeInPoints: CGSize(width: 160, height: 32), backingScale: 1)
+
+        let foreground = TerminalColor.rgba(RGBAColor(red: 230, green: 230, blue: 230))
+        let background = TerminalColor.rgba(RGBAColor(red: 20, green: 20, blue: 20))
+        let cells = [
+            TerminalCell(content: .cluster("A", columns: .one), foreground: foreground, background: background),
+            TerminalCell(content: .cluster("界", columns: .two), foreground: foreground, background: background),
+            TerminalCell(content: .continuation, foreground: foreground, background: background),
+            TerminalCell(content: .cluster("👩‍👩‍👧‍👦", columns: .two), foreground: foreground, background: background),
+            TerminalCell(content: .continuation, foreground: foreground, background: background)
+        ]
+        let generation = DirtyGeneration(1)
+        let snapshot = TerminalGridSnapshot(
+            size: GridSize(rows: 1, columns: 5),
+            cells: cells,
+            cursor: CursorDescriptor(row: 0, column: 0),
+            generation: generation
+        )
+        let paneID = UUID()
+        let pane = PaneFrameSnapshot(
+            paneID: paneID,
+            session: SessionKey(deviceID: DeviceID("renderer-test"), reference: try SessionReference("session")),
+            viewport: StageViewportRect(x: 0, y: 0, width: 160, height: 32),
+            contentGeneration: generation,
+            snapshot: snapshot
+        )
+        let request = StageFrameRequest(
+            stageID: UUID(),
+            layoutGeneration: LayoutGeneration(1),
+            metricsGeneration: MetricsGeneration(1),
+            visibility: .visible,
+            panes: [pane]
+        )
+
+        let receipt = await renderer.render(request)
+        XCTAssertEqual(receipt.outcome, .completed)
+        XCTAssertGreaterThanOrEqual(renderer.statistics.lastFrameReferencedAtlasPages, 2)
+        XCTAssertEqual(renderer.statistics.lastFrameSampledGlyphs, 3)
+        XCTAssertGreaterThan(renderer.statistics.metalDrawCalls, 0)
+        XCTAssertEqual(renderer.statistics.fullStageBitmapUploads, 0)
+        XCTAssertEqual(renderer.statistics.atlasFrameLeasesAcquired, 1)
+        XCTAssertEqual(renderer.statistics.atlasFrameLeasesReleased, 1)
+        XCTAssertGreaterThanOrEqual(atlas.statistics.rasterizedGlyphs, 3)
+
+        let idleReceipt = await renderer.render(request)
+        XCTAssertEqual(idleReceipt.outcome, .deferred)
+        XCTAssertEqual(renderer.statistics.submittedCommandBuffers, 1)
     }
 
     func testSinglePaneMapsPointsToPhysicalViewportAndScissor() throws {
