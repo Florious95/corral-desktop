@@ -195,6 +195,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             }
             guard ok else { throw SessionLinkFailure.unauthorized }
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
+            await publish(.control(control))
 
             if restoreSubscriptions { try await restoreDesiredSubscriptions(on: candidate) }
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }

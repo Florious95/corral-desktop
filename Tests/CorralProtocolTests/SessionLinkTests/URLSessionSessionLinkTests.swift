@@ -61,6 +61,42 @@ final class URLSessionSessionLinkTests: XCTestCase {
         await link.disconnect()
     }
 
+    func testAuthenticationAckIsPublishedWithLauncherPayload() async throws {
+        let socket = MockWebSocket()
+        let link = URLSessionSessionLink(configuration: .init()) { _ in socket }
+        let events = try await link.eventStream()
+        let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9919)
+        let connect = Task {
+            try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: CredentialHandle("test"))
+        }
+        let launchers = [
+            AgentLauncher(provider: "codex", displayName: "Codex CLI", supportsBypass: true, naming: .tmux),
+            AgentLauncher(provider: "claude", displayName: "Claude Code", supportsBypass: false, naming: .cli)
+        ]
+
+        try await waitForAuthentication(on: socket)
+        await socket.enqueue(.text(#"{"v":1,"type":"auth_ack","payload":{"ok":true,"agent_launchers":[{"provider":"codex","display_name":"Codex CLI","supports_bypass":true,"naming":"tmux"},{"provider":"claude","display_name":"Claude Code","supports_bypass":false,"naming":"cli"}]}}"#))
+        _ = try await connect.value
+
+        var publishedAuthAck: ControlMessage?
+        var reachedReady = false
+        for _ in 0..<16 {
+            guard let envelope = try await events.next() else { break }
+            switch envelope.event {
+            case let .control(control):
+                if case .authAck = control { publishedAuthAck = control }
+            case let .connectionChanged(state):
+                if case .authenticatedReady = state { reachedReady = true }
+            default:
+                break
+            }
+            if publishedAuthAck != nil || reachedReady { break }
+        }
+
+        XCTAssertEqual(publishedAuthAck, .authAck(ok: true, reason: nil, launchers: launchers))
+        await link.disconnect()
+    }
+
     func testSendRequiresReadyConnectionAndEventStreamHasOneConsumer() async throws {
         let socket = MockWebSocket()
         let link = URLSessionSessionLink(configuration: .init()) { _ in socket }
