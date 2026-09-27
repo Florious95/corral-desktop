@@ -360,6 +360,9 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         if tab.isCustomTitle { addMenuItem(menu, title: "恢复自动标题", action: "resetTitle") }
         addMenuItem(menu, title: tab.isPinned ? "取消固定" : "固定到最左", action: "pin")
         menu.addItem(.separator())
+        addMenuItem(menu, title: "向右拆分", action: "splitRight")
+        addMenuItem(menu, title: "向下拆分", action: "splitDown")
+        menu.addItem(.separator())
         addMenuItem(menu, title: tab.isPreview ? "关闭预览" : "关闭工作台", action: "close")
         let unpinnedCount = owner?.tabs.filter { !$0.isPinned }.count ?? 0
         let others = addMenuItem(menu, title: "关闭其他工作台", action: "closeOthers"); others.isEnabled = unpinnedCount > 1 && !tab.isPinned
@@ -375,6 +378,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         case "reflow": .reflow
         case "resetTitle": .edit
         case "pin": .pin
+        case "splitRight", "splitDown": .split
         case "close": .close
         case "closeOthers": .closeLeft
         case "closeRight": .closeRight
@@ -732,6 +736,7 @@ public final class CorralSidebarView: NSView {
     public var onSelectSpace: ((UUID) -> Void)?
     public var onSelectAgent: ((UUID) -> Void)?
     public var onToggleFavorite: ((UUID, Bool) -> Void)?
+    public var onRenameAgent: ((UUID) -> Void)?
     public var onOpenAgent: ((UUID) -> Void)?
     public var onCloseAgent: ((UUID) -> Void)?
     public var onToggleDevices: (() -> Void)?
@@ -825,7 +830,8 @@ public final class CorralSidebarView: NSView {
         guard let agent = agents.first(where: { $0.id == id }) else { return nil }
         let controller = SessionContextMenuBuilder.makeMenu(for: agent.id, isFavorite: agent.isFavorite,
             onFavorite: { [weak self] id, value in self?.onToggleFavorite?(id, value) },
-            onClose: { [weak self] id in self?.onCloseAgent?(id) })
+            onClose: { [weak self] id in self?.onCloseAgent?(id) },
+            onRename: { [weak self] id in self?.onRenameAgent?(id) })
         contextMenuControllers[id] = controller
         return controller.menu
     }
@@ -1206,7 +1212,7 @@ public final class CorralWorkspaceView: NSView {
     fileprivate func performTabContextAction(_ id: UUID, _ action: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }), let tab = tabs.first(where: { $0.id == id }) else { return }
         switch action {
-        case "pin": onTabContextAction?(id, action)
+        case "pin", "splitRight", "splitDown": onTabContextAction?(id, action)
         case "close":
             if tab.isPreview { onClosePreview?() } else { tabBar.close(id) }
         case "closeOthers": tabs.filter { $0.id != id && !$0.isPinned }.map(\.id).forEach(closeTab(id:))
