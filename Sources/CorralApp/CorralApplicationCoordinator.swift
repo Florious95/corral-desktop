@@ -470,9 +470,11 @@ public final class CorralApplicationCoordinator {
             Task { @MainActor in await self.persistSidebarVisibility() }
         }
         workspaceView.onDevices = { [weak self] in self?.presentDevicesPopover() }
-        workspaceView.onOpenSession = { [weak self] id, _, preview in
+        workspaceView.onOpenSession = { [weak self] id, tabID, preview in
             guard let self, let key = self.uiSessionKeys[id] else { return }
-            Task { @MainActor in await self.openSession(key, gesture: preview ? .singleClick : .doubleClick) }
+            Task { @MainActor in
+                await self.openSession(key, gesture: preview ? .singleClick : .doubleClick, in: tabID)
+            }
         }
         workspaceView.onFocusSession = { [weak self] id, tabID in
             guard let self, let key = self.uiSessionKeys[id] else { return }
@@ -600,22 +602,29 @@ public final class CorralApplicationCoordinator {
 
     public func selectSidebarSession(id: UUID) {
         guard let key = uiSessionKeys[id], sessions[key] != nil else { return }
-        activeSession = key
-        stageView.activateInput(for: key, using: inputRouter)
         let sessionID = workspaceSessionID(for: key)
+        let tabID = workspaceState.tabs.first(where: { $0.sessionIDs.contains(sessionID) })?.id
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if self.workspaceState.tabs.contains(where: { $0.sessionIDs.contains(sessionID) }) {
-                await self.focusWorkspacePane(sessionID)
+            if let tabID {
+                await self.focusWorkspacePane(sessionID, in: tabID)
             } else {
                 await self.openSession(key, gesture: .singleClick)
             }
         }
     }
 
-    public func openSession(_ key: SessionKey, gesture: SessionOpenGesture = .singleClick) async {
+    public func openSession(
+        _ key: SessionKey,
+        gesture: SessionOpenGesture = .singleClick,
+        in tabID: UUID? = nil
+    ) async {
         guard let descriptor = sessions[key]?.descriptor else { return }
         do {
+            if let tabID {
+                let state = try await workspaceStore.switchTab(tabID)
+                guard state.activeTabID == tabID else { return }
+            }
             let state = try await workspaceStore.smartOpenSession(descriptor, gesture: gesture)
             await applyWorkspaceState(state)
         } catch {

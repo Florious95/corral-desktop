@@ -133,6 +133,99 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testOpenSessionHonorsTargetTabAndReplacesStageContent() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let initialFrame = window.frame
+        await coordinator.start()
+
+        let firstReference = try SessionReference("switch-leader")
+        let secondReference = try SessionReference("switch-rust-developer")
+        let deviceRawID = "corral-native-development-endpoint"
+        let firstSessionID = SessionID("\(deviceRawID.utf8.count):\(deviceRawID)\(firstReference.rawValue)")
+        let secondSessionID = SessionID("\(deviceRawID.utf8.count):\(deviceRawID)\(secondReference.rawValue)")
+        let records = [
+            WireSessionRecord(reference: firstReference, name: "leader", workingDirectory: "/fixture/leader", state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"),
+            WireSessionRecord(reference: secondReference, name: "rust-developer", workingDirectory: "/fixture/rust", state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        ]
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
+        ]))))
+        let firstOpened = await waitUntil {
+            coordinator.stageView.activeInputSession?.reference == firstReference &&
+                coordinator.subscribedSessionIDs.contains(firstReference.rawValue)
+        }
+        XCTAssertTrue(firstOpened, "the initial listing should auto-open and subscribe its first session")
+        try await link.emit(.frame(.snapshot(reference: firstReference, ansi: Data("FIRST-SESSION-CONTENT\r\n".utf8))))
+        let firstRendered = await waitUntil {
+            coordinator.stageView.presentedSubmissions.contains {
+                $0.session.reference == firstReference && self.snapshotText($0.snapshot).contains("FIRST-SESSION-CONTENT")
+            }
+        }
+        XCTAssertTrue(firstRendered)
+
+        let firstTabID = coordinator.workspaceState.activeTabID
+        await coordinator.createWorkspaceTab()
+        let targetTabID = coordinator.workspaceState.activeTabID
+        XCTAssertNotEqual(targetTabID, firstTabID)
+        await coordinator.selectWorkspaceTab(id: firstTabID)
+        let secondAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
+        coordinator.workspaceView.onOpenSession?(secondAgent.id, targetTabID, false)
+
+        let secondOpenedInTarget = await waitUntil {
+            coordinator.workspaceState.activeTabID == targetTabID &&
+                coordinator.workspaceState.tabs.first(where: { $0.id == targetTabID })?.sessionIDs == [secondSessionID] &&
+                coordinator.workspaceState.visibleSessionID == secondSessionID &&
+                coordinator.workspaceState.visibleRoot?.leafIDs == [secondSessionID] &&
+                coordinator.stageView.activeInputSession?.reference == secondReference &&
+                coordinator.subscribedSessionIDs.contains(secondReference.rawValue)
+        }
+        XCTAssertTrue(secondOpenedInTarget, "the requested blank Tab must receive and subscribe the clicked session")
+        XCTAssertEqual(coordinator.workspaceState.tabs.count, 2, "the click must not create an unintended extra Tab")
+        XCTAssertEqual(coordinator.workspaceState.tabs.first(where: { $0.id == firstTabID })?.sessionIDs, [firstSessionID])
+        XCTAssertNil(coordinator.workspaceState.previewUID)
+        try await link.emit(.frame(.snapshot(reference: secondReference, ansi: Data("SECOND-SESSION-CONTENT\r\n".utf8))))
+        let secondRendered = await waitUntil {
+            coordinator.stageView.presentedSubmissions.contains {
+                $0.session.reference == secondReference && self.snapshotText($0.snapshot).contains("SECOND-SESSION-CONTENT")
+            }
+        }
+        XCTAssertTrue(secondRendered, "the new session snapshot must replace the previous Metal stage content")
+
+        let firstAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "leader" })
+        coordinator.selectSidebarSession(id: firstAgent.id)
+        let returnedToFirst = await waitUntil {
+            coordinator.workspaceState.activeTabID == firstTabID &&
+                coordinator.workspaceState.visibleSessionID == firstSessionID &&
+                coordinator.stageView.activeInputSession?.reference == firstReference &&
+                coordinator.stageView.presentedSubmissions.contains {
+                    $0.session.reference == firstReference && self.snapshotText($0.snapshot).contains("FIRST-SESSION-CONTENT")
+                }
+        }
+        XCTAssertTrue(returnedToFirst, "selecting a session from another Tab must switch to its owning Tab and render it")
+        await coordinator.selectWorkspaceTab(id: targetTabID)
+        let returnedToSecond = await waitUntil {
+            coordinator.workspaceState.activeTabID == targetTabID &&
+                coordinator.workspaceState.visibleSessionID == secondSessionID &&
+                coordinator.stageView.activeInputSession?.reference == secondReference &&
+                coordinator.stageView.presentedSubmissions.contains {
+                    $0.session.reference == secondReference && self.snapshotText($0.snapshot).contains("SECOND-SESSION-CONTENT")
+                }
+        }
+        XCTAssertTrue(returnedToSecond, "switching Tabs must restore that Tab's session to the stage")
+        XCTAssertEqual(window.frame, initialFrame, "session and Tab switching must preserve native window geometry")
+        await coordinator.stop()
+        window.close()
+    }
+
     func testSavedSessionIdentityNameIsUsedBeforeWorkingDirectory() async throws {
         let support = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-saved-title-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: support) }
@@ -697,7 +790,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             coordinator.workspaceView.sidebar.devices.flatMap(\.sessions).first(where: { $0.name == "Fixture 2" })?.id
         )
         coordinator.selectSidebarSession(id: targetSidebarID)
-        XCTAssertEqual(coordinator.stageView.activeInputSession, paneKey)
+        let paneFocused = await waitUntil {
+            coordinator.stageView.activeInputSession == paneKey &&
+                coordinator.workspaceState.visibleSessionID == workspaceSessionIDs[1]
+        }
+        XCTAssertTrue(paneFocused, "a sidebar selection must focus its pane in the current workspace Tab")
         let commandsAfterSwitch = await link.commands()
         XCTAssertEqual(commandsAfterSwitch.filter { if case .subscribe = $0 { true } else { false } }.count, subscribedBeforeSwitch)
         XCTAssertEqual(commandsAfterSwitch.filter { if case .resize = $0 { true } else { false } }.count, resizeBeforeSwitch)
