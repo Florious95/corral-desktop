@@ -308,6 +308,15 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(tabs[1].accessibilityPerformPress())
         XCTAssertEqual(workspace.activeTabID, second.id)
         let secondTab = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == "Second" })
+        var tabContextAction: (UUID, String)?
+        workspace.onTabContextAction = { tabContextAction = ($0, $1) }
+        let splitRight = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "向右拆分" })
+        XCTAssertTrue(splitRight.handler?() ?? false)
+        XCTAssertEqual(tabContextAction?.0, second.id)
+        XCTAssertEqual(tabContextAction?.1, "splitRight")
+        let splitDown = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "向下拆分" })
+        XCTAssertTrue(splitDown.handler?() ?? false)
+        XCTAssertEqual(tabContextAction?.1, "splitDown")
         let close = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "关闭工作台" })
         XCTAssertTrue(close.handler?() ?? false)
         XCTAssertEqual(workspace.tabs.map(\.id), [first.id])
@@ -317,9 +326,10 @@ final class NativeWorkspaceTests: XCTestCase {
         let agent = CorralSidebarAgent(name: "leader", spaceID: space.id)
         let sidebar = workspace.sidebar
         sidebar.setSpaces([space]); sidebar.setAgents([agent])
-        var selectedAgent: UUID?; var favorite: (UUID, Bool)?; var closed: UUID?; var created: UUID??
+        var selectedAgent: UUID?; var favorite: (UUID, Bool)?; var renamedAgent: UUID?; var closed: UUID?; var created: UUID??
         sidebar.onSelectAgent = { selectedAgent = $0 }
         sidebar.onToggleFavorite = { favorite = ($0, $1) }
+        sidebar.onRenameAgent = { renamedAgent = $0 }
         sidebar.onCloseAgent = { closed = $0 }
         sidebar.onCreateAgent = { created = $0 }
         let agentCell = try XCTUnwrap(sidebar.agentsTable.delegate?.tableView?(sidebar.agentsTable, viewFor: nil, row: 0))
@@ -328,9 +338,11 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(agentCell.accessibilityRole(), .button)
         XCTAssertTrue(agentCell.accessibilityPerformPress())
         XCTAssertEqual(selectedAgent, agent.id)
-        XCTAssertEqual(agentCell.accessibilityCustomActions()?.map(\.name), ["收藏", "关闭"])
+        XCTAssertEqual(agentCell.accessibilityCustomActions()?.map(\.name), ["重命名", "收藏", "关闭", "复制会话 ID"])
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[0].handler?() ?? false)
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[1].handler?() ?? false)
+        XCTAssertTrue(agentCell.accessibilityCustomActions()?[2].handler?() ?? false)
+        XCTAssertEqual(renamedAgent, agent.id)
         XCTAssertEqual(favorite?.0, agent.id); XCTAssertEqual(favorite?.1, true); XCTAssertEqual(closed, agent.id)
         let spaceCell = try XCTUnwrap(sidebar.spacesTable.delegate?.tableView?(sidebar.spacesTable, viewFor: nil, row: 2))
         XCTAssertEqual(spaceCell.accessibilityIdentifier(), "corral.sidebar.space")
@@ -396,21 +408,26 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(sidebar.spaceContextMenu(for: spaceID)?.items.map(\.title), ["新建 Agent"])
 
         var favoriteChange: (UUID, Bool)?
+        var renamed: UUID?
         var closed: UUID?
         sidebar.onToggleFavorite = { favoriteChange = ($0, $1) }
+        sidebar.onRenameAgent = { renamed = $0 }
         sidebar.onCloseAgent = { closed = $0 }
         let menu = try XCTUnwrap(sidebar.agentContextMenu(for: agent.id))
-        XCTAssertEqual(menu.items.map(\.title), ["收藏", "", "关闭"])
-        XCTAssertFalse(menu.items.contains { $0.title.localizedCaseInsensitiveContains("rename") || $0.title.localizedCaseInsensitiveContains("split") })
+        XCTAssertEqual(menu.items.map(\.title), ["重命名", "收藏", "", "关闭", "复制会话 ID"])
         XCTAssertTrue(menu.items.allSatisfy { $0.isSeparatorItem || $0.target != nil })
-        let favoriteItem = try XCTUnwrap(menu.items.first)
+        let renameItem = try XCTUnwrap(menu.items.first { $0.title == "重命名" })
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(renameItem.action), to: renameItem.target, from: renameItem))
+        XCTAssertEqual(renamed, agent.id)
+        let favoriteItem = try XCTUnwrap(menu.items.first { $0.title == "收藏" })
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(favoriteItem.action), to: favoriteItem.target, from: favoriteItem))
         XCTAssertEqual(favoriteChange?.0, agent.id)
         XCTAssertEqual(favoriteChange?.1, true)
-        let closeItem = try XCTUnwrap(menu.items.last)
+        let closeItem = try XCTUnwrap(menu.items.first { $0.title == "关闭" })
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(closeItem.action), to: closeItem.target, from: closeItem))
         XCTAssertEqual(closed, agent.id)
-        XCTAssertEqual(sidebar.agentContextMenu(for: favorite.id)?.items.first?.title, "取消收藏")
+        XCTAssertTrue(menu.items.contains { $0.title == "复制会话 ID" })
+        XCTAssertEqual(sidebar.agentContextMenu(for: favorite.id)?.items[1].title, "取消收藏")
     }
 
     func testSpacesRowsFilterAgentsByFavoritesAndWorkspaceAndCanCollapse() {
