@@ -9,16 +9,102 @@ import XCTest
 
 @MainActor
 final class CorralApplicationCoordinatorTests: XCTestCase {
-    func testNewAgentMenuItemIsBoundToCommandN() throws {
-        let delegate = CorralAppDelegate()
-        let mainMenu = delegate.makeMainMenu()
+    func testMVPDefaultsToProductionLoopbackAndAcceptsAnExplicitEndpoint() throws {
+        let production = try CorralMVPConfiguration.endpoint(environment: [:])
+        XCTAssertEqual(production.url.absoluteString, "ws://127.0.0.1:9900/ws")
+        let fixture = try CorralMVPConfiguration.endpoint(environment: ["CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws"])
+        XCTAssertEqual(fixture.port, 9919)
+        XCTAssertThrowsError(try CorralMVPConfiguration.endpoint(environment: ["CORRAL_NATIVE_ENDPOINT": "ws://192.0.2.1:9900/ws"]))
+    }
 
-        let fileMenu = try XCTUnwrap(mainMenu.items.first(where: { $0.title == "File" })?.submenu)
-        let item = try XCTUnwrap(fileMenu.items.first(where: { $0.identifier?.rawValue == "corral.newagent.menu" }))
-        XCTAssertEqual(item.keyEquivalent, "n")
-        XCTAssertTrue(item.keyEquivalentModifierMask.contains(.command))
-        XCTAssertTrue(item.target === delegate)
-        XCTAssertNotNil(item.action)
+    func testSlimMVPMenusDoNotRetainLegacyWorkspaceActions() throws {
+        let mainMenu = CorralAppDelegate().makeMainMenu()
+        XCTAssertFalse(mainMenu.items.contains { $0.title == "File" })
+        XCTAssertTrue(mainMenu.items.first?.submenu?.items.contains { $0.keyEquivalent == "q" } == true)
+    }
+
+    private func waitUntilMVP(timeoutNanoseconds: UInt64 = 2_000_000_000, _ predicate: @MainActor () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+        while ContinuousClock.now < deadline {
+            if await predicate() { return true }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return await predicate()
+    }
+
+    func testWarmSessionSwitchesOnlyPresentationPointer() async throws {
+        let link = RecordingSessionLink()
+        let renderer = try SharedMetalTerminalRenderer(glyphAtlas: .shared)
+        let coordinator = CorralMVPCoordinator(
+            sessionLink: link,
+            renderer: renderer,
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-test-only"
+            ]
+        )
+        let stageID = coordinator.stageView.stageID
+        await coordinator.start()
+        XCTAssertTrue(coordinator.connected)
+
+        let firstReference = try SessionReference("mvp-session-a")
+        let secondReference = try SessionReference("mvp-session-b")
+        let records = [
+            WireSessionRecord(reference: firstReference, name: "A", workingDirectory: "/fixture/a", state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"),
+            WireSessionRecord(reference: secondReference, name: "B", workingDirectory: "/fixture/b", state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        ]
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
+        ]))))
+        let listed = await waitUntilMVP { coordinator.sessionRows.count == 2 && coordinator.stageView.stageID == stageID }
+        XCTAssertTrue(listed)
+        let firstID = try XCTUnwrap(coordinator.sessionRows.first { $0.name == "A" }?.id)
+        let secondID = try XCTUnwrap(coordinator.sessionRows.first { $0.name == "B" }?.id)
+        XCTAssertEqual(coordinator.selectedAgentID, firstID, "first listing entry is selected by default")
+
+        try await link.emit(.frame(.snapshot(reference: firstReference, ansi: Data("session A".utf8))))
+        let firstRendered = await waitUntilMVP { coordinator.stageView.submissions.first?.session.reference == firstReference }
+        XCTAssertTrue(firstRendered)
+        coordinator.switchSession(secondID)
+        let secondSelected = await waitUntilMVP {
+            coordinator.stageView.submissions.isEmpty || coordinator.stageView.submissions.first?.session.reference == secondReference
+        }
+        XCTAssertTrue(secondSelected)
+        let secondSubscribed = await waitUntilMVP {
+            let commands = await link.commands()
+            return commands.contains { if case .subscribe(reference: secondReference, _) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(secondSubscribed)
+        try await link.emit(.frame(.snapshot(reference: secondReference, ansi: Data("session B".utf8))))
+        let secondRendered = await waitUntilMVP { coordinator.stageView.submissions.first?.session.reference == secondReference }
+        XCTAssertTrue(secondRendered)
+
+        coordinator.switchSession(firstID)
+        let firstSnapshot = try XCTUnwrap(coordinator.stageView.submissions.first).snapshot
+        coordinator.switchSession(secondID)
+        let secondSnapshot = try XCTUnwrap(coordinator.stageView.submissions.first).snapshot
+        let commandsBeforeWarmSwitches = await link.commands()
+        let stageIdentity = ObjectIdentifier(coordinator.stageView)
+        let clock = ContinuousClock()
+        let switchStart = clock.now
+        for _ in 0..<10 {
+            coordinator.switchSession(firstID)
+            XCTAssertEqual(coordinator.stageView.submissions.first?.session.reference, firstReference)
+            XCTAssertEqual(coordinator.stageView.submissions.first?.snapshot, firstSnapshot)
+            coordinator.switchSession(secondID)
+            XCTAssertEqual(coordinator.stageView.submissions.first?.session.reference, secondReference)
+            XCTAssertEqual(coordinator.stageView.submissions.first?.snapshot, secondSnapshot)
+        }
+        let switchDuration = switchStart.duration(to: clock.now)
+        let commandsAfterWarmSwitches = await link.commands()
+        XCTAssertEqual(commandsAfterWarmSwitches.filter { if case .subscribe = $0 { true } else { false } }.count,
+                       commandsBeforeWarmSwitches.filter { if case .subscribe = $0 { true } else { false } }.count)
+        XCTAssertFalse(commandsAfterWarmSwitches.contains { if case .unsubscribe = $0 { true } else { false } })
+        XCTAssertEqual(ObjectIdentifier(coordinator.stageView), stageIdentity)
+        XCTAssertEqual(coordinator.stageView.stageID, stageID)
+        XCTAssertEqual(coordinator.selectedAgentID, secondID)
+        XCTAssertLessThan(switchDuration, .milliseconds(500), "warm switches must not wait for network work")
+        await coordinator.stop()
     }
 
     func testUnconfiguredCoordinatorDoesNotConnect() async throws {
