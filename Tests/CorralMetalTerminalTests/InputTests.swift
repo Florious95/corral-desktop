@@ -64,7 +64,9 @@ final class InputTests: XCTestCase {
         let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("image-paste"), inputRouting: router, pasteboard: pasteboard)
         view.keyDown(with: keyEvent(9, modifiers: .control, characters: "v"))
         let inputs = await waitForInputs(router, count: 1)
-        let path = try XCTUnwrap(inputs.first.flatMap { String(data: $0, encoding: .utf8) })
+        let pasted = try XCTUnwrap(inputs.first.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(pasted.hasPrefix("'") && pasted.hasSuffix("'"))
+        let path = String(pasted.dropFirst().dropLast())
         defer { try? FileManager.default.removeItem(atPath: path) }
 
         XCTAssertTrue(path.hasPrefix(FileManager.default.temporaryDirectory.path))
@@ -99,6 +101,21 @@ final class InputTests: XCTestCase {
         let router = RecordingInputRouter()
         let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("text-paste"), inputRouting: router, pasteboard: pasteboard)
         view.keyDown(with: keyEvent(9, modifiers: .command, characters: "v"))
+
+        let inputs = await waitForInputs(router, count: 1)
+        XCTAssertEqual(inputs.first, Data("ordinary clipboard text".utf8))
+    }
+
+    @MainActor
+    func testControlVFallsBackToPlainTextWhenClipboardHasNoImage() async {
+        let pasteboard = makeIsolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("ordinary clipboard text", forType: .string)
+
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("control-v-text"), inputRouting: router, pasteboard: pasteboard)
+        view.keyDown(with: keyEvent(9, modifiers: .control, characters: "v"))
 
         let inputs = await waitForInputs(router, count: 1)
         XCTAssertEqual(inputs.first, Data("ordinary clipboard text".utf8))
