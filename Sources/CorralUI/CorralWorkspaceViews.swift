@@ -478,7 +478,7 @@ enum CorralAccessibilityMenuActions {
 
 /// Sidebar row content: an AX button whose completed click or accessibility press opens/selects the row.
 @MainActor
-final class CorralSidebarCellView: NSTableCellView {
+class CorralSidebarCellView: NSTableCellView {
     var onPress: (() -> Void)?
     var menuProvider: (() -> NSMenu?)?
     override func accessibilityPerformPress() -> Bool { performPress() }
@@ -503,6 +503,7 @@ final class CorralSidebarRowView: NSTableRowView {
     private var isHovered = false { didSet { needsDisplay = true; revealHoverControls() } }
     override var isSelected: Bool { didSet { revealHoverControls() } }
     var backgroundRect: NSRect { isAgentRow ? bounds.insetBy(dx: 12, dy: 2) : bounds.insetBy(dx: 10, dy: 0) }
+    var backgroundRadius: CGFloat { isAgentRow ? 6 : 7 }
     var fillColor: NSColor? {
         if isSelected || isActive { return CorralAestheticTokens.selectionBackground }
         if isHovered { return isAgentRow ? (isOpen ? CorralAestheticTokens.hover : CorralAestheticTokens.hoverSubtle) : CorralAestheticTokens.hover }
@@ -511,8 +512,7 @@ final class CorralSidebarRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {
         guard let color = fillColor else { return }
         color.setFill()
-        let radius: CGFloat = isAgentRow ? 6 : 7
-        NSBezierPath(roundedRect: backgroundRect, xRadius: radius, yRadius: radius).fill()
+        NSBezierPath(roundedRect: backgroundRect, xRadius: backgroundRadius, yRadius: backgroundRadius).fill()
     }
     override func drawSelection(in dirtyRect: NSRect) {}
     override func updateTrackingAreas() {
