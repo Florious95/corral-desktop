@@ -576,6 +576,35 @@ final class CorralNativeTerminalView: TerminalView {
         handleCommandVPaste()
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu(title: "Terminal")
+        for (title, action) in [
+            ("Copy", #selector(copy(_:))),
+            ("Paste", #selector(paste(_:))),
+            ("Select All", #selector(selectAll(_:)))
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let clearItem = NSMenuItem(title: "Clear Buffer", action: #selector(clearTerminalBuffer(_:)), keyEquivalent: "")
+        clearItem.target = self
+        menu.addItem(clearItem)
+        return menu
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(clearTerminalBuffer(_:)) { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    @objc private func clearTerminalBuffer(_ sender: Any?) {
+        selection.selectNone()
+        getTerminal().buffer.clear()
+        needsDisplay = true
+    }
+
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
         guard !SwiftTermVTReplyFilter.isAutomaticResponse(data) else { return }
         terminalDelegate?.send(source: self, data: data)
