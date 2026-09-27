@@ -230,7 +230,7 @@ public actor CorralWorkspaceStore {
 
     public func snapshot() -> CorralWorkspaceState { value }
 
-    /// Single-click previews reuse one virtual slot; double-click commits to a pinned Tab.
+    /// Single-click previews reuse one virtual slot; double-click commits to a regular Tab.
     @discardableResult
     public func smartOpenSession(_ sessionID: SessionID, gesture: SessionOpenGesture = .singleClick) throws -> CorralWorkspaceState {
         guard !sessionID.rawValue.isEmpty else { throw WorkspaceStoreError.invalidSessionID }
@@ -327,7 +327,6 @@ public actor CorralWorkspaceStore {
         next.tabs[index].activeSessionID = value.tabs[index].activeSessionID.flatMap { leaves.contains($0) ? $0 : nil } ?? leaves.first
         next.previewUID = nil
         next.sessionBindings = Self.bindingsForVisibleSessions(next)
-        next = Self.pinning(next, tabID: next.tabs[index].id, pinned: true)
         try commit(next)
         return value
     }
@@ -475,8 +474,6 @@ public actor CorralWorkspaceStore {
             next.tabs[activeIndex].isImplicitBlank = false
             next.previewUID = nil
             next.sessionBindings = Self.bindingsForVisibleSessions(next)
-            next = Self.pinning(next, tabID: ownerTab.id, pinned: true)
-            next = Self.pinning(next, tabID: activeTab.id, pinned: true)
             if let identity { next = Self.upsertingBinding(sessionID: sessionID, identity: identity, in: next) }
             try commit(next)
             return value
@@ -510,7 +507,6 @@ public actor CorralWorkspaceStore {
         next.previewUID = nil
         next.sessionBindings = Self.bindingsForVisibleSessions(next)
         if let identity { next = Self.upsertingBinding(sessionID: sessionID, identity: identity, in: next) }
-        next = Self.pinning(next, tabID: activeTab.id, pinned: true)
         try commit(next)
         return value
     }
@@ -528,7 +524,6 @@ public actor CorralWorkspaceStore {
         next.tabs[index].root = updated
         next.previewUID = nil
         next.sessionBindings = Self.bindingsForVisibleSessions(next)
-        next = Self.pinning(next, tabID: targetTabID, pinned: true)
         try commit(next)
         return value
     }
@@ -594,7 +589,6 @@ public actor CorralWorkspaceStore {
             next.activeTabID = tab.id
             next.tabs[index].activeSessionID = sessionID
             next.previewUID = nil
-            if gesture == .doubleClick { next = pinning(next, tabID: tab.id, pinned: true) }
             return next
         }
         guard let index = state.tabs.firstIndex(where: { $0.id == state.activeTabID }) else { return state }
@@ -603,13 +597,13 @@ public actor CorralWorkspaceStore {
             next.tabs[index].activeSessionID = sessionID
             next.tabs[index].isImplicitBlank = false
             next.previewUID = nil
-            return pinning(next, tabID: state.tabs[index].id, pinned: true)
+            return next
         }
         if gesture == .singleClick {
             next.previewUID = sessionID
             return next
         }
-        let tab = WorkspaceTab(root: .session(sessionID), activeSessionID: sessionID, pinned: true)
+        let tab = WorkspaceTab(root: .session(sessionID), activeSessionID: sessionID)
         let insertIndex = next.tabs.prefix(while: \.pinned).count
         next.tabs.insert(tab, at: insertIndex)
         next.activeTabID = tab.id

@@ -281,6 +281,12 @@ public final class CorralApplicationCoordinator {
     public private(set) var discardedAutoReplyByteCount = 0
     private var devicesPopover: NSPopover?
 
+    private struct TabPresentation {
+        let title: String
+        let descriptor: SessionDescriptor?
+        let previewSessionID: SessionID?
+    }
+
     private struct RuntimeSession {
         var descriptor: SessionDescriptor
         let paneID: UUID
@@ -450,6 +456,10 @@ public final class CorralApplicationCoordinator {
         }
         workspaceView.onCreateTab = { [weak self] in
             Task { @MainActor in await self?.createWorkspaceTab() }
+        }
+        workspaceView.onClosePreview = { [weak self] in
+            guard let self, let previewID = self.workspaceState.previewUID else { return }
+            Task { @MainActor in await self.closeWorkspacePane(previewID) }
         }
         workspaceView.onCreateAgent = { [weak self] spaceID in
             self?.presentNewAgentDialog(for: spaceID)
@@ -745,23 +755,21 @@ public final class CorralApplicationCoordinator {
         activeWorkspaceTabID = state.activeTabID
         let oldTabs = Dictionary(uniqueKeysWithValues: workspaceView.tabs.map { ($0.id, $0) })
         let tabs = state.tabs.map { stateTab in
-            let activeDescriptor = stateTab.activeSessionID.flatMap(sessionKey(for:)).flatMap { sessions[$0]?.descriptor }
-            let title = stateTab.title.isEmpty
-                ? activeDescriptor.map { URL(fileURLWithPath: $0.workingDirectory).lastPathComponent }.flatMap { $0.isEmpty ? nil : $0 } ?? "Terminal"
-                : stateTab.title
+            let presentation = tabPresentation(for: stateTab, in: state)
+            let descriptor = presentation.descriptor
             let tab = oldTabs[stateTab.id] ?? CorralTab(
                 id: stateTab.id,
-                title: title,
+                title: presentation.title,
                 contentView: NSView(),
-                status: statusIndicator(for: activeDescriptor),
+                status: statusIndicator(for: descriptor),
                 isPinned: stateTab.pinned,
                 isCustomTitle: stateTab.isCustomTitle,
                 isBlankWorkspace: stateTab.isBlank,
-                provider: activeDescriptor?.provider
+                provider: descriptor?.provider
             )
-            tab.title = title
-            tab.status = statusIndicator(for: activeDescriptor)
-            tab.provider = activeDescriptor?.provider
+            tab.title = presentation.title
+            tab.status = statusIndicator(for: descriptor)
+            tab.provider = descriptor?.provider
             tab.isPinned = stateTab.pinned
             tab.isCustomTitle = stateTab.isCustomTitle
             tab.sessionIDs = Set(stateTab.sessionIDs.map(uiSessionID(for:)))
@@ -785,7 +793,7 @@ public final class CorralApplicationCoordinator {
         }
         updateSidebar(devices: cachedDevices)
         await updateStageSubmissions()
-        updateWorkspaceTitle(nil, count: sessionCount)
+        updateWorkspaceTitle(count: sessionCount)
         updateRendererSleepState()
     }
 
@@ -1086,7 +1094,12 @@ public final class CorralApplicationCoordinator {
         case "pin":
             let pinned = workspaceState.tabs.first(where: { $0.id == id })?.pinned == false
             await pinWorkspaceTab(id, pinned: pinned)
-        case "close": await closeWorkspaceTab(id: id)
+        case "close":
+            if workspaceState.activeTabID == id, let previewID = workspaceState.previewUID {
+                await closeWorkspacePane(previewID)
+            } else {
+                await closeWorkspaceTab(id: id)
+            }
         case "closeOthers": await closeOtherWorkspaceTabs(keeping: id)
         case "closeRight": await closeWorkspaceTabsToRight(of: id)
         case "resetTitle":
@@ -1601,7 +1614,7 @@ public final class CorralApplicationCoordinator {
         await reconcileWorkspaceListing()
         await resolveCreatedAgents(in: order)
         subscribedSessionIDs = sessionOrder.compactMap { sessions[$0]?.subscribed == true ? $0.reference.rawValue : nil }
-        updateWorkspaceTitle(listing.workspaces.first?.workingDirectory, count: sessionCount)
+        updateWorkspaceTitle(count: sessionCount)
         await subscribeVisibleSessions()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
         await updateStageSubmissions()
@@ -1629,7 +1642,7 @@ public final class CorralApplicationCoordinator {
         sessionCount = sessionOrder.count
         await reconcileWorkspaceListing()
         await resolveCreatedAgents(in: sessionOrder)
-        updateWorkspaceTitle(delta.changedWorkspaces.first?.workingDirectory, count: sessionCount)
+        updateWorkspaceTitle(count: sessionCount)
         await subscribeVisibleSessions()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
         await updateStageSubmissions()
@@ -1857,16 +1870,44 @@ public final class CorralApplicationCoordinator {
         workspaceView.sidebar.selectSpace(id: selectedSidebarSpaceID)
     }
 
-    private func updateWorkspaceTitle(_ workingDirectory: String?, count: Int) {
+    private func updateWorkspaceTitle(count: Int) {
         guard let stateTab = workspaceState.activeTab,
               let tab = workspaceView.tabs.first(where: { $0.id == stateTab.id }) else { return }
-        if !stateTab.isCustomTitle {
-            let sessionDirectory = workspaceState.visibleSessionID.flatMap(sessionKey(for:)).flatMap { sessions[$0]?.descriptor.workingDirectory }
-            let directory = sessionDirectory ?? workingDirectory
-            tab.title = directory.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0).lastPathComponent } ?? "Terminal"
-        }
+        let presentation = tabPresentation(for: stateTab, in: workspaceState)
+        tab.title = presentation.title
+        tab.status = statusIndicator(for: presentation.descriptor)
+        tab.provider = presentation.descriptor?.provider
+        tab.isPinned = stateTab.pinned
+        tab.isCustomTitle = stateTab.isCustomTitle
+        tab.isPreview = presentation.previewSessionID != nil
         tab.badge = count > 0 ? String(count) : nil
         workspaceView.tabBar.setTabs(workspaceView.tabs, selectedTabID: workspaceState.activeTabID)
+    }
+
+    private func tabPresentation(for tab: WorkspaceTab, in state: CorralWorkspaceState) -> TabPresentation {
+        let previewSessionID = tab.id == state.activeTabID ? state.previewUID : nil
+        let sessionID = previewSessionID ?? tab.activeSessionID
+        let descriptor = sessionID.flatMap(sessionKey(for:)).flatMap { sessions[$0]?.descriptor }
+        let savedIdentity = sessionID.flatMap { id in state.sessionBindings.first { $0.sessionID == id }?.identity }
+        let customTitle = tab.isCustomTitle ? nonEmpty(tab.title) : nil
+        let title = customTitle
+            ?? nonEmpty(descriptor?.name)
+            ?? nonEmpty(savedIdentity?.name)
+            ?? directoryTitle(descriptor?.workingDirectory ?? savedIdentity?.workingDirectory)
+            ?? "Terminal"
+        return TabPresentation(title: title, descriptor: descriptor, previewSessionID: previewSessionID)
+    }
+
+    private func nonEmpty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func directoryTitle(_ path: String?) -> String? {
+        guard let path = nonEmpty(path) else { return nil }
+        let component = URL(fileURLWithPath: path).lastPathComponent
+        return component == "/" ? nil : nonEmpty(component)
     }
 
     private func disconnectSessions(on deviceID: DeviceID) async throws {

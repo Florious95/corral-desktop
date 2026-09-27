@@ -40,6 +40,125 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testSidebarAgentOpenUsesRegularTabAndPreviewCloseRestoresPinnedHostTitle() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        await coordinator.start()
+        XCTAssertTrue(coordinator.connected)
+
+        let leaderReference = try SessionReference("leader-session")
+        let previewReference = try SessionReference("preview-session")
+        let records = [
+            WireSessionRecord(reference: leaderReference, name: "全自动编排leader", workingDirectory: "/Users/fixture/Aaron", state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"),
+            WireSessionRecord(reference: previewReference, name: "rust-developer", workingDirectory: "/Users/fixture/rust", state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        ]
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/Users/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
+        ]))))
+        let listed = await waitUntil { coordinator.sessionCount == 2 && coordinator.workspaceView.sidebar.agents.count == 2 }
+        XCTAssertTrue(listed)
+
+        let leader = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "全自动编排leader" })
+        let tabID = coordinator.workspaceState.activeTabID
+        coordinator.workspaceView.sidebar.onSelectAgent?(leader.id)
+        let opened = await waitUntil {
+            coordinator.workspaceState.activeTab?.activeSessionID != nil &&
+                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "全自动编排leader"
+        }
+        XCTAssertTrue(opened)
+        var tab = try XCTUnwrap(coordinator.workspaceView.tabs.first { $0.id == tabID })
+        XCTAssertFalse(coordinator.workspaceState.activeTab?.pinned ?? true)
+        XCTAssertFalse(tab.isPinned)
+        XCTAssertEqual(tab.title, "全自动编排leader", "session name must win over cwd basename Aaron")
+        XCTAssertEqual(tab.provider, "pi")
+        XCTAssertEqual(tab.status, .working)
+        let title = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "corral.tab.title"
+        })
+        XCTAssertEqual(title.stringValue, "全自动编排leader")
+
+        await coordinator.pinWorkspaceTab(tabID, pinned: true)
+        let explicitlyPinned = await waitUntil { coordinator.workspaceState.activeTab?.pinned == true }
+        XCTAssertTrue(explicitlyPinned)
+        let previewAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
+        coordinator.workspaceView.sidebar.onSelectAgent?(previewAgent.id)
+        let previewed = await waitUntil {
+            coordinator.workspaceState.previewUID != nil &&
+                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.isPreview == true &&
+                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "rust-developer"
+        }
+        XCTAssertTrue(previewed)
+        tab = try XCTUnwrap(coordinator.workspaceView.tabs.first { $0.id == tabID })
+        XCTAssertTrue(tab.isPinned, "preview must preserve an explicit pin on its host Tab")
+        XCTAssertEqual(tab.provider, "codex")
+        XCTAssertEqual(tab.status, .idle)
+        let previewClose = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "corral.tab.close"
+        })
+        XCTAssertEqual(previewClose.accessibilityLabel(), "关闭预览")
+        previewClose.performClick(previewClose)
+        let previewClosed = await waitUntil {
+            coordinator.workspaceState.previewUID == nil &&
+                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.isPreview == false &&
+                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "全自动编排leader"
+        }
+        XCTAssertTrue(previewClosed)
+        XCTAssertEqual(coordinator.workspaceState.tabs.count, 1, "closing a preview must not close its durable host")
+        XCTAssertTrue(coordinator.workspaceState.activeTab?.pinned == true)
+        XCTAssertEqual(coordinator.workspaceView.tabs.first?.provider, "pi")
+        XCTAssertEqual(coordinator.workspaceView.tabs.first?.status, .working)
+
+        coordinator.workspaceView.tabBar.onRenameTab?(tabID, "用户自定义标题")
+        let renamed = await waitUntil { coordinator.workspaceState.activeTab?.isCustomTitle == true }
+        XCTAssertTrue(renamed)
+        let changedRecords = [
+            WireSessionRecord(reference: leaderReference, name: "Updated Agent Name", workingDirectory: "/Users/fixture/NewCWD", state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"),
+            records[1]
+        ]
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 2, workspaces: [
+            WorkspaceRecord(workingDirectory: "/Users/fixture/NewCWD", sessionCount: changedRecords.count, aggregateState: .working, sessions: changedRecords)
+        ]))))
+        let customTitlePreserved = await waitUntil { coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "用户自定义标题" }
+        XCTAssertTrue(customTitlePreserved)
+        await coordinator.renameWorkspaceTab(tabID, to: "")
+        let sessionTitleRestored = await waitUntil { coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "Updated Agent Name" }
+        XCTAssertTrue(sessionTitleRestored, "session name must still win over the changed cwd basename")
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testSavedSessionIdentityNameIsUsedBeforeWorkingDirectory() async throws {
+        let support = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-saved-title-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let sessionID = SessionID("saved-session")
+        let tab = WorkspaceTab(root: .session(sessionID), activeSessionID: sessionID)
+        let state = try CorralWorkspaceState(
+            tabs: [tab],
+            activeTabID: tab.id,
+            sessionBindings: [WorkspaceSessionBinding(
+                sessionID: sessionID,
+                identity: WorkspaceSessionIdentity(deviceID: DeviceID("saved-device"), workingDirectory: "/Users/fixture/Aaron", name: "Saved session name")
+            )]
+        )
+        let stateDirectory = support.appendingPathComponent("com.corral.native.dev", isDirectory: true)
+        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(state).write(to: stateDirectory.appendingPathComponent(CorralWorkspaceStore.storageFilename))
+
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [:], supportDirectory: support)
+        await coordinator.start()
+        XCTAssertEqual(coordinator.workspaceView.tabs.first?.title, "Saved session name")
+        XCTAssertNotEqual(coordinator.workspaceView.tabs.first?.title, "Aaron")
+        await coordinator.stop()
+        coordinator.windowController.window?.close()
+    }
+
     func testWorkspaceChromeActionsPersistThroughCoordinator() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [:])
@@ -720,6 +839,10 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             glyphAtlas: atlas,
             environment: environment
         )
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 
     private func snapshotText(_ snapshot: TerminalGridSnapshot) -> String {
