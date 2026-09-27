@@ -469,11 +469,6 @@ public final class CorralApplicationCoordinator {
             let sessionID = self.workspaceSessionID(for: key)
             Task { @MainActor in await self.focusWorkspacePane(sessionID, in: tabID) }
         }
-        workspaceView.onSelectAgent = { [weak self] id in
-            guard let self, let key = self.uiSessionKeys[id] else { return }
-            self.activeSession = key
-            self.stageView.activateInput(for: key, using: self.inputRouter)
-        }
         workspaceView.sidebar.onSelectSpace = { [weak self] id in self?.selectedSidebarSpaceID = id }
         workspaceView.sidebar.onToggleFavorite = { [weak self] id, isFavorite in
             guard let self, let key = self.uiSessionKeys[id], let descriptor = self.sessions[key]?.descriptor else { return }

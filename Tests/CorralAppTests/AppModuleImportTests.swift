@@ -159,11 +159,10 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         guard let window = coordinator.windowController.window else {
             return XCTFail("coordinator must own a real window")
         }
-        window.setFrame(NSRect(x: 40, y: 40, width: 1500, height: 1000), display: false)
         window.orderBack(nil)
         window.displayIfNeeded()
         window.contentView?.layoutSubtreeIfNeeded()
-        coordinator.stageView.configureStage(sizeInPoints: NSSize(width: 1200, height: 800), backingScale: 1)
+        let initialWindowFrame = window.frame
 
         await coordinator.start()
         let connectedEndpoint = await link.connectedEndpoint()
@@ -201,6 +200,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             coordinator.subscribedSessionIDs.count == 1 && coordinator.stageView.activeInputSession != nil
         }
         XCTAssertTrue(subscribed, "opening a listed sidebar session must persist the tab and subscribe")
+        XCTAssertEqual(window.frame, initialWindowFrame, "selecting an Agent must preserve native window geometry")
         guard subscribed, let session = coordinator.stageView.activeInputSession else {
             await coordinator.stop()
             window.close()
