@@ -256,13 +256,14 @@ final class TerminalEngineTests: XCTestCase {
 
     func testTerminalQueriesReturnOnlyTypedLocalAutoReplyEffects() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 8))
-        let effects = try await feed("\u{1B}[5n\u{1B}[6n\u{1B}[c\u{1B}[?6n", to: engine)
+        let effects = try await feed("\u{1B}[5n\u{1B}[6n\u{1B}[c\u{1B}[?6n\u{1B}[?u", to: engine)
         let replies = effects.compactMap { effect -> TerminalAutoReplyBytes? in
             guard case let .autoReply(bytes) = effect else { return nil }
             return bytes
         }
         XCTAssertFalse(replies.isEmpty)
         XCTAssertEqual(replies.count, effects.count)
+        XCTAssertTrue(replies.contains { $0.data == Data("\u{1B}[?0u".utf8) })
         let snapshot = await engine.snapshot()
         XCTAssertEqual(snapshot.cells[0].content, .blank)
     }
