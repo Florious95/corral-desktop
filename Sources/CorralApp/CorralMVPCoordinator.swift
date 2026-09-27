@@ -555,8 +555,25 @@ final class CorralNativeTerminalView: TerminalView {
         installControlVPasteMonitor()
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard Self.isCommandVPaste(event), event.window === window,
+              window?.firstResponder === self else {
+            return super.performKeyEquivalent(with: event)
+        }
+        handleCommandVPaste()
+        return true
+    }
+
+    override func interpretKeyEvents(_ eventArray: [NSEvent]) {
+        guard eventArray.contains(where: Self.isCommandVPaste) else {
+            super.interpretKeyEvents(eventArray)
+            return
+        }
+        handleCommandVPaste()
+    }
+
     override func paste(_ sender: Any) {
-        if !pasteFromClipboard(trigger: .commandV) { super.paste(sender) }
+        handleCommandVPaste()
     }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
@@ -593,6 +610,16 @@ final class CorralNativeTerminalView: TerminalView {
             NSEvent.removeMonitor(controlVPasteMonitor.value)
             self.controlVPasteMonitor = nil
         }
+    }
+
+    private func handleCommandVPaste() {
+        if !pasteFromClipboard(trigger: .commandV) { super.paste(self) }
+    }
+
+    private static func isCommandVPaste(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
+        return isVKey && modifiers.contains(.command) && !modifiers.contains(.control)
     }
 
     @discardableResult
