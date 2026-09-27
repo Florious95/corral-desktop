@@ -1,5 +1,6 @@
 import AppKit
 import CorralContracts
+import CorralMetalTerminal
 import CorralProtocol
 import CorralUI
 import Foundation
@@ -489,11 +490,98 @@ public enum CorralMVPConfiguration {
     }
 }
 
+private struct LocalPasteMonitorToken: @unchecked Sendable {
+    let value: Any
+}
+
 @MainActor
 final class CorralNativeTerminalView: TerminalView {
+    private let pasteboard: NSPasteboard
+    private var controlVPasteMonitor: LocalPasteMonitorToken?
+
+    override init(frame: CGRect) {
+        pasteboard = .general
+        super.init(frame: frame)
+    }
+
+    init(frame: CGRect, pasteboard: NSPasteboard) {
+        self.pasteboard = pasteboard
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) {
+        pasteboard = .general
+        super.init(coder: coder)
+    }
+
+    deinit {
+        if let controlVPasteMonitor { NSEvent.removeMonitor(controlVPasteMonitor.value) }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if window !== newWindow { removeControlVPasteMonitor() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installControlVPasteMonitor()
+    }
+
+    override func paste(_ sender: Any) {
+        if !pasteFromClipboard(trigger: .commandV) { super.paste(sender) }
+    }
+
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
         guard !SwiftTermVTReplyFilter.isAutomaticResponse(data) else { return }
         terminalDelegate?.send(source: self, data: data)
+    }
+
+    /// Shared by the local event monitor and synthetic-event tests.
+    func handleControlVPaste(event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
+        guard isVKey, modifiers.contains(.control), !modifiers.contains(.command) else { return false }
+        _ = pasteFromClipboard(trigger: .controlV)
+        return true
+    }
+
+    private func installControlVPasteMonitor() {
+        removeControlVPasteMonitor()
+        guard window != nil else { return }
+        guard let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard let self else { return event }
+            let consumed = MainActor.assumeIsolated {
+                event.window === self.window
+                    && self.window?.firstResponder === self
+                    && self.handleControlVPaste(event: event)
+            }
+            return consumed ? nil : event
+        }) else { return }
+        controlVPasteMonitor = LocalPasteMonitorToken(value: monitor)
+    }
+
+    private func removeControlVPasteMonitor() {
+        if let controlVPasteMonitor {
+            NSEvent.removeMonitor(controlVPasteMonitor.value)
+            self.controlVPasteMonitor = nil
+        }
+    }
+
+    @discardableResult
+    private func pasteFromClipboard(trigger: TerminalClipboardPasteTrigger) -> Bool {
+        TerminalClipboardPasteHandler.handle(pasteboard: pasteboard, trigger: trigger) { [weak self] userBytes in
+            guard let self else { return }
+            var payload: [UInt8] = []
+            if getTerminal().bracketedPasteMode {
+                payload.append(contentsOf: [0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e])
+            }
+            payload.append(contentsOf: userBytes)
+            if getTerminal().bracketedPasteMode {
+                payload.append(contentsOf: [0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e])
+            }
+            send(data: payload[...])
+        }
     }
 }
 

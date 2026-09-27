@@ -1,7 +1,6 @@
 import AppKit
 import CorralContracts
 import Foundation
-import UniformTypeIdentifiers
 
 public struct TerminalCellPosition: Hashable, Sendable {
     public let row: Int
@@ -386,11 +385,11 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
         if isVKey && modifiers.contains(.command) {
-            pasteClipboard(allowFiles: true, allowImages: true)
+            pasteClipboard(trigger: .commandV)
             return
         }
         if isVKey && modifiers.contains(.control) {
-            pasteControlV()
+            pasteClipboard(trigger: .controlV)
             return
         }
         if hasMarkedComposition {
@@ -449,7 +448,7 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
     }
 
     @objc public func paste(_ sender: Any?) {
-        pasteClipboard(allowFiles: true, allowImages: true)
+        pasteClipboard(trigger: .commandV)
     }
 
     public override func accessibilityRole() -> NSAccessibility.Role { .textArea }
@@ -509,66 +508,11 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
         }
     }
 
-    private func pasteControlV() {
-        if let path = writeClipboardImage() {
-            insertText(path, replacementRange: NSRange(location: NSNotFound, length: 0))
-        } else if let text = pasteboard.string(forType: .string) {
+    private func pasteClipboard(trigger: TerminalClipboardPasteTrigger) {
+        TerminalClipboardPasteHandler.handle(pasteboard: pasteboard, trigger: trigger) { [weak self] bytes in
+            guard let self, let text = String(data: bytes, encoding: .utf8) else { return }
             insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
-    }
-
-    private func pasteClipboard(allowFiles: Bool, allowImages: Bool) {
-        if allowFiles, let paths = clipboardFilePaths(), !paths.isEmpty {
-            insertText(paths.map(Self.shellQuotedPath).joined(separator: " "), replacementRange: NSRange(location: NSNotFound, length: 0))
-        } else if allowImages, let path = writeClipboardImage() {
-            insertText(path, replacementRange: NSRange(location: NSNotFound, length: 0))
-        } else if let text = pasteboard.string(forType: .string) {
-            insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-        }
-    }
-
-    private func clipboardFilePaths() -> [String]? {
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: options) ?? []
-        let urls = objects.compactMap { $0 as? URL }.filter(\.isFileURL)
-        if !urls.isEmpty { return urls.map { $0.standardizedFileURL.path } }
-
-        let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
-        if let filenames = pasteboard.propertyList(forType: filenamesType) as? [String] {
-            return filenames.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
-        }
-        if let value = pasteboard.string(forType: .fileURL), let url = URL(string: value), url.isFileURL {
-            return [url.standardizedFileURL.path]
-        }
-        return nil
-    }
-
-    private func writeClipboardImage() -> String? {
-        guard let png = clipboardPNGData() else { return nil }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("corral-clipboard-\(UUID().uuidString).png")
-        do {
-            try png.write(to: url, options: .atomic)
-            return url.standardizedFileURL.path
-        } catch {
-            return nil
-        }
-    }
-
-    private func clipboardPNGData() -> Data? {
-        var types: [NSPasteboard.PasteboardType] = [.png, .tiff]
-        types.append(contentsOf: (pasteboard.types ?? []).filter {
-            $0 != .png && $0 != .tiff && UTType($0.rawValue)?.conforms(to: .image) == true
-        })
-        for type in types {
-            guard let data = pasteboard.data(forType: type), data.count <= 64 * 1024 * 1024 else { continue }
-            let bitmap = NSBitmapImageRep(data: data) ?? NSImage(data: data)?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
-            if let png = bitmap?.representation(using: .png, properties: [:]) { return png }
-        }
-        return nil
-    }
-
-    private static func shellQuotedPath(_ path: String) -> String {
-        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Keeps terminal keys on standard xterm byte sequences instead of layout-dependent text insertion.
