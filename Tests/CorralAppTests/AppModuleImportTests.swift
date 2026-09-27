@@ -226,6 +226,112 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testOpenSessionFallsBackInsteadOfDroppingForStaleTabID() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        await coordinator.start()
+
+        let firstReference = try SessionReference("stale-target-host")
+        let requestedReference = try SessionReference("stale-target-requested")
+        let records = [
+            WireSessionRecord(reference: firstReference, name: "host", workingDirectory: "/fixture", state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"),
+            WireSessionRecord(reference: requestedReference, name: "requested", workingDirectory: "/fixture", state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        ]
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
+        ]))))
+        let listed = await waitUntil {
+            coordinator.sessionCount == records.count && coordinator.workspaceView.sidebar.agents.count == records.count
+        }
+        XCTAssertTrue(listed)
+
+        await coordinator.createWorkspaceTab()
+        let expectedActiveTabID = coordinator.workspaceState.activeTabID
+        let requestedAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "requested" })
+        coordinator.workspaceView.onOpenSession?(requestedAgent.id, UUID(), false)
+        let opened = await waitUntil {
+            coordinator.workspaceState.activeTabID == expectedActiveTabID &&
+                coordinator.workspaceState.visibleSessionID?.rawValue.hasSuffix(requestedReference.rawValue) == true &&
+                coordinator.stageView.activeInputSession?.reference == requestedReference &&
+                coordinator.subscribedSessionIDs.contains(requestedReference.rawValue)
+        }
+        XCTAssertTrue(opened, "a stale UI Tab ID must not silently discard a valid session-open request")
+        XCTAssertTrue(coordinator.lastConnectionError?.contains("requested workspace Tab no longer exists") == true)
+
+        try await link.emit(.frame(.snapshot(reference: requestedReference, ansi: Data("STALE-TAB-FALLBACK-CONTENT\r\n".utf8))))
+        let rendered = await waitUntil {
+            coordinator.stageView.presentedSubmissions.contains {
+                $0.session.reference == requestedReference && self.snapshotText($0.snapshot).contains("STALE-TAB-FALLBACK-CONTENT")
+            }
+        }
+        XCTAssertTrue(rendered, "the fallback session snapshot must still reach the Metal stage")
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testSnapshotArrivingBeforeSubscribeReceiptIsNotDiscarded() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        await coordinator.start()
+
+        let firstReference = try SessionReference("subscribe-race-host")
+        let racedReference = try SessionReference("subscribe-race-target")
+        let records = [
+            WireSessionRecord(reference: firstReference, name: "host", workingDirectory: "/fixture", state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"),
+            WireSessionRecord(reference: racedReference, name: "race-target", workingDirectory: "/fixture", state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        ]
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
+        ]))))
+        let listed = await waitUntil {
+            coordinator.sessionCount == records.count &&
+                coordinator.subscribedSessionIDs.contains(firstReference.rawValue)
+        }
+        XCTAssertTrue(listed)
+        await coordinator.createWorkspaceTab()
+        let targetTabID = coordinator.workspaceState.activeTabID
+        let targetAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "race-target" })
+        await link.suspendNextSubscribe()
+        coordinator.workspaceView.onOpenSession?(targetAgent.id, targetTabID, false)
+
+        let sendIsPending = await waitUntil { await link.isSubscribeSuspended(for: racedReference) }
+        XCTAssertTrue(sendIsPending, "the fake link must pause after the subscribe request begins")
+        try await link.emit(.frame(.snapshot(
+            reference: racedReference,
+            ansi: Data("EARLY-SNAPSHOT-CONTENT\r\n".utf8)
+        )))
+        let renderedBeforeReceipt = await waitUntil(timeout: .seconds(8)) {
+            coordinator.stageView.presentedSubmissions.contains {
+                $0.session.reference == racedReference && self.snapshotText($0.snapshot).contains("EARLY-SNAPSHOT-CONTENT")
+            }
+        }
+        await link.releaseSuspendedSubscribe()
+        XCTAssertTrue(renderedBeforeReceipt, "the first frame must be accepted while subscribe's send receipt is pending")
+        let subscribed = await waitUntil {
+            coordinator.subscribedSessionIDs.contains(racedReference.rawValue) &&
+                coordinator.stageView.activeInputSession?.reference == racedReference
+        }
+        XCTAssertTrue(subscribed)
+        await coordinator.stop()
+        window.close()
+    }
+
     func testSavedSessionIdentityNameIsUsedBeforeWorkingDirectory() async throws {
         let support = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-saved-title-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: support) }
@@ -1081,6 +1187,9 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     private var connectCalls = 0
     private var lastCredential: CredentialHandle?
     private var ordinal: UInt64 = 0
+    private var shouldSuspendNextSubscribe = false
+    private var suspendedSubscribeReference: SessionReference?
+    private var subscribeRelease: CheckedContinuation<Void, Never>?
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         connectCalls += 1
@@ -1098,6 +1207,12 @@ private actor RecordingSessionLink: SessionLinkProtocol {
 
     func send(_ command: ClientCommand) async throws -> CommandSendReceipt {
         commandsSent.append(command)
+        if case let .subscribe(reference, _) = command, shouldSuspendNextSubscribe {
+            shouldSuspendNextSubscribe = false
+            suspendedSubscribeReference = reference
+            await withCheckedContinuation { subscribeRelease = $0 }
+            suspendedSubscribeReference = nil
+        }
         let requestID: UInt32? = switch command {
         case let .list(requestID): requestID
         case let .input(request): request.sequence
@@ -1115,6 +1230,14 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     func connectCount() -> Int { connectCalls }
     func lastConnectedCredential() -> CredentialHandle? { lastCredential }
     func commands() -> [ClientCommand] { commandsSent }
+    func suspendNextSubscribe() { shouldSuspendNextSubscribe = true }
+    func isSubscribeSuspended(for reference: SessionReference) -> Bool {
+        suspendedSubscribeReference == reference && subscribeRelease != nil
+    }
+    func releaseSuspendedSubscribe() {
+        subscribeRelease?.resume()
+        subscribeRelease = nil
+    }
 
     func emit(_ event: SessionEvent) async throws {
         guard let authenticated else { throw SessionLinkFailure.disconnected }
