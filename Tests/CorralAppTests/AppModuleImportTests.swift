@@ -32,6 +32,70 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         return await predicate()
     }
 
+    func testMVPResizesOnFirstSubscriptionAndStageGeometryChanges() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = CorralMVPCoordinator(
+            sessionLink: link,
+            renderer: try SharedMetalTerminalRenderer(glyphAtlas: .shared),
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-test-only"
+            ]
+        )
+        coordinator.window.contentView = nil
+        let firstViewport = NSSize(width: 1120, height: 860)
+        coordinator.stageView.configureStage(sizeInPoints: firstViewport, backingScale: 2)
+        let firstGrid = try XCTUnwrap(CorralMVPCoordinator.proposedGrid(for: firstViewport, cellSize: coordinator.stageView.terminalCellSize))
+        XCTAssertEqual(coordinator.desiredStageGrid, firstGrid)
+        XCTAssertGreaterThan(firstGrid.columns, 120)
+        XCTAssertGreaterThan(firstGrid.rows, 50)
+        await link.suspendNextResize()
+
+        await coordinator.start()
+        let reference = try SessionReference("mvp-resize-session")
+        let record = WireSessionRecord(
+            reference: reference, name: "resize", workingDirectory: "/fixture/resize",
+            state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"
+        )
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/resize", sessionCount: 1, aggregateState: .working, sessions: [record])
+        ]))))
+        let firstResizeSent = await waitUntilMVP {
+            await link.commands().contains { if case .resize(reference: reference, size: firstGrid) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(firstResizeSent, "the selected session must resize immediately after its initial subscribe")
+        let firstCommands = await link.commands()
+        let subscribeIndex = try XCTUnwrap(firstCommands.firstIndex { if case .subscribe(reference: reference, _) = $0 { true } else { false } })
+        let resizeIndex = try XCTUnwrap(firstCommands.firstIndex { if case .resize(reference: reference, size: firstGrid) = $0 { true } else { false } })
+        XCTAssertLessThan(subscribeIndex, resizeIndex)
+
+        let secondViewport = NSSize(width: 1000, height: 700)
+        coordinator.stageView.configureStage(sizeInPoints: secondViewport, backingScale: 2)
+        let secondGrid = try XCTUnwrap(CorralMVPCoordinator.proposedGrid(for: secondViewport, cellSize: coordinator.stageView.terminalCellSize))
+        XCTAssertNotEqual(secondGrid, firstGrid)
+        XCTAssertEqual(coordinator.desiredStageGrid, secondGrid)
+        let firstResizeSuspended = await waitUntilMVP { await link.isResizeSuspended(at: firstGrid) }
+        XCTAssertTrue(firstResizeSuspended)
+        let commandsAtSecondResize = await link.commands()
+        await link.releaseSuspendedResize()
+        let secondResizeSentAfterFirstReceipt = await waitUntilMVP {
+            await link.commands().contains { if case .resize(reference: reference, size: secondGrid) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(secondResizeSentAfterFirstReceipt, "a changed viewport must publish its updated rows and columns; commands=\(commandsAtSecondResize), error=\(String(describing: coordinator.lastConnectionError))")
+        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data("resized grid".utf8))))
+        let localEngineResized = await waitUntilMVP {
+            coordinator.stageView.submissions.first?.snapshot.size == secondGrid
+        }
+        XCTAssertTrue(localEngineResized, "SwiftTerm must use the same grid as the latest server resize")
+
+        coordinator.stageView.configureStage(sizeInPoints: secondViewport, backingScale: 2)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let finalCommands = await link.commands()
+        let resizeCount = finalCommands.filter { if case .resize(reference: reference, _) = $0 { true } else { false } }.count
+        XCTAssertEqual(resizeCount, 2, "repeated identical geometry must not send duplicate resize commands")
+        await coordinator.stop()
+    }
+
     func testWarmSessionSwitchesOnlyPresentationPointer() async throws {
         let link = RecordingSessionLink()
         let renderer = try SharedMetalTerminalRenderer(glyphAtlas: .shared)
@@ -43,6 +107,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
                 "CORRAL_NATIVE_TOKEN": "fixture-test-only"
             ]
         )
+        coordinator.window.contentView = nil
         let stageID = coordinator.stageView.stageID
         await coordinator.start()
         XCTAssertTrue(coordinator.connected)
@@ -80,8 +145,16 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(secondRendered)
 
         coordinator.switchSession(firstID)
+        let firstWarmPresented = await waitUntilMVP {
+            coordinator.stageView.submissions.first?.session.reference == firstReference
+        }
+        XCTAssertTrue(firstWarmPresented, "selecting cached A should synchronously restore its Stage submission")
         let firstSnapshot = try XCTUnwrap(coordinator.stageView.submissions.first).snapshot
         coordinator.switchSession(secondID)
+        let secondWarmPresented = await waitUntilMVP {
+            coordinator.stageView.submissions.first?.session.reference == secondReference
+        }
+        XCTAssertTrue(secondWarmPresented, "selecting cached B should synchronously restore its Stage submission")
         let secondSnapshot = try XCTUnwrap(coordinator.stageView.submissions.first).snapshot
         let commandsBeforeWarmSwitches = await link.commands()
         let stageIdentity = ObjectIdentifier(coordinator.stageView)
@@ -1276,6 +1349,9 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     private var shouldSuspendNextSubscribe = false
     private var suspendedSubscribeReference: SessionReference?
     private var subscribeRelease: CheckedContinuation<Void, Never>?
+    private var shouldSuspendNextResize = false
+    private var suspendedResizeGrid: GridSize?
+    private var resizeRelease: CheckedContinuation<Void, Never>?
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         connectCalls += 1
@@ -1298,6 +1374,12 @@ private actor RecordingSessionLink: SessionLinkProtocol {
             suspendedSubscribeReference = reference
             await withCheckedContinuation { subscribeRelease = $0 }
             suspendedSubscribeReference = nil
+        }
+        if case let .resize(_, size) = command, shouldSuspendNextResize {
+            shouldSuspendNextResize = false
+            suspendedResizeGrid = size
+            await withCheckedContinuation { resizeRelease = $0 }
+            suspendedResizeGrid = nil
         }
         let requestID: UInt32? = switch command {
         case let .list(requestID): requestID
@@ -1323,6 +1405,12 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     func releaseSuspendedSubscribe() {
         subscribeRelease?.resume()
         subscribeRelease = nil
+    }
+    func suspendNextResize() { shouldSuspendNextResize = true }
+    func isResizeSuspended(at grid: GridSize) -> Bool { suspendedResizeGrid == grid && resizeRelease != nil }
+    func releaseSuspendedResize() {
+        resizeRelease?.resume()
+        resizeRelease = nil
     }
 
     func emit(_ event: SessionEvent) async throws {

@@ -25,6 +25,14 @@ public final class CorralMVPCoordinator {
         var subscriptionPending = false
         var receivedFrame = false
         var snapshot: TerminalGridSnapshot?
+        var lastResizeGrid: GridSize?
+        var resizePendingGrid: GridSize?
+    }
+
+    private struct ResizeRequest {
+        let sessionID: UUID
+        let grid: GridSize
+        let generation: UInt64
     }
 
     private let sessionLink: any SessionLinkProtocol
@@ -41,6 +49,10 @@ public final class CorralMVPCoordinator {
     private var listingSequence: UInt64 = 0
     private var nextRequestID: UInt32 = 0
     private var listingRequestedEpoch: ConnectionEpoch?
+    private(set) var desiredStageGrid: GridSize?
+    private var resizeRequestGeneration: UInt64 = 0
+    private var pendingResize: ResizeRequest?
+    private var resizeTask: Task<Void, Never>?
     public private(set) var selectionGeneration: UInt64 = 0
 
     public init(
@@ -68,10 +80,8 @@ public final class CorralMVPCoordinator {
         self.window = window
         workspaceView.attachStageView(stageView)
         workspaceView.onSelectAgent = { [weak self] id in self?.switchSession(id) }
-        stageView.onGeometryChanged = { [weak self] _, _ in
-            guard let self, let selectedAgentID = self.selectedAgentID,
-                  let runtime = self.sessions[selectedAgentID], let snapshot = runtime.snapshot else { return }
-            self.stageView.present(self.submission(for: runtime, snapshot: snapshot))
+        stageView.onGeometryChanged = { [weak self] size, _ in
+            self?.stageGeometryChanged(size)
         }
     }
 
@@ -101,6 +111,9 @@ public final class CorralMVPCoordinator {
     public func stop() async {
         eventTask?.cancel()
         eventTask = nil
+        resizeTask?.cancel()
+        resizeTask = nil
+        pendingResize = nil
         await sessionLink.disconnect()
         connection = nil
         connected = false
@@ -109,11 +122,19 @@ public final class CorralMVPCoordinator {
     /// Changes only the permanent Stage's presentation pointer; cached sessions stay subscribed and parsed.
     public func switchSession(_ id: UUID) {
         guard let runtime = sessions[id] else { return }
+        if let previousID = selectedAgentID, previousID != id {
+            resizeRequestGeneration &+= 1
+            pendingResize = nil
+            if var previous = sessions[previousID] {
+                previous.resizePendingGrid = nil
+                sessions[previousID] = previous
+            }
+        }
         selectionGeneration &+= 1
         selectedAgentID = id
         updateSessionRows()
         stageView.activateInput(for: runtime.descriptor.key, using: inputRouter)
-        if let snapshot = runtime.snapshot {
+        if runtime.receivedFrame, let snapshot = runtime.snapshot {
             stageView.present(submission(for: runtime, snapshot: snapshot))
         } else {
             stageView.present(nil)
@@ -121,6 +142,7 @@ public final class CorralMVPCoordinator {
                 Task { @MainActor [weak self] in await self?.subscribe(id) }
             }
         }
+        scheduleResize(for: id)
     }
 
     private func consume(_ stream: any SessionEventStream) async {
@@ -190,6 +212,123 @@ public final class CorralMVPCoordinator {
             if !receipt.socketWritten { lastConnectionError = "Session listing request was not sent" }
         } catch {
             lastConnectionError = String(describing: error)
+        }
+    }
+
+    private func stageGeometryChanged(_ size: NSSize) {
+        desiredStageGrid = Self.proposedGrid(for: size, cellSize: stageView.terminalCellSize)
+        if let selectedAgentID, let runtime = sessions[selectedAgentID],
+           runtime.receivedFrame, let snapshot = runtime.snapshot {
+            stageView.present(submission(for: runtime, snapshot: snapshot))
+        }
+        if let selectedAgentID { scheduleResize(for: selectedAgentID) }
+    }
+
+    static func proposedGrid(for viewport: NSSize, cellSize: NSSize) -> GridSize? {
+        guard viewport.width.isFinite, viewport.height.isFinite,
+              cellSize.width.isFinite, cellSize.height.isFinite,
+              viewport.width > 12, viewport.height > 8,
+              cellSize.width > 0, cellSize.height > 0 else { return nil }
+        let rawColumns = Double(viewport.width - 12) / Double(cellSize.width)
+        let rawRows = Double(viewport.height - 8) / Double(cellSize.height)
+        guard rawColumns.isFinite, rawRows.isFinite else { return nil }
+        let columns = min(Int(UInt16.max), max(1, Int(min(rawColumns, Double(UInt16.max)))))
+        var rows = min(Int(UInt16.max), max(1, Int(min(rawRows, Double(UInt16.max)))))
+        while rows > 1_000_000 / columns { rows -= 1 }
+        return GridSize(rows: rows, columns: columns)
+    }
+
+    private func scheduleResize(for id: UUID) {
+        guard selectedAgentID == id, let grid = desiredStageGrid,
+              var runtime = sessions[id], runtime.subscribed else { return }
+        guard runtime.descriptor.size != grid, runtime.lastResizeGrid != grid,
+              runtime.resizePendingGrid != grid else { return }
+        resizeRequestGeneration &+= 1
+        runtime.resizePendingGrid = grid
+        sessions[id] = runtime
+        pendingResize = ResizeRequest(sessionID: id, grid: grid, generation: resizeRequestGeneration)
+        guard resizeTask == nil else { return }
+        resizeTask = Task { @MainActor [weak self] in await self?.drainPendingResizes() }
+    }
+
+    private func drainPendingResizes() async {
+        while !Task.isCancelled, let request = pendingResize {
+            pendingResize = nil
+            await applyResize(request)
+        }
+        resizeTask = nil
+    }
+
+    private func applyResize(_ request: ResizeRequest) async {
+        let id = request.sessionID
+        guard let runtime = sessions[id], runtime.subscribed else {
+            clearPendingResize(request)
+            return
+        }
+        let previousGrid = runtime.descriptor.size
+        guard isCurrentResize(request) else {
+            clearPendingResize(request)
+            return
+        }
+
+        do {
+            try await runtime.engine.resize(to: request.grid)
+            let resizedSnapshot = await runtime.engine.snapshot()
+            guard resizedSnapshot.isValid, var current = sessions[id] else { return }
+            current.snapshot = resizedSnapshot
+            sessions[id] = current
+            if current.receivedFrame, selectedAgentID == id {
+                stageView.present(submission(for: current, snapshot: resizedSnapshot))
+            }
+            guard isCurrentResize(request) else {
+                let restoreTo = selectedAgentID == id ? (desiredStageGrid ?? previousGrid) : previousGrid
+                await restoreGrid(id, restoreTo, pending: request.grid)
+                return
+            }
+
+            let receipt = try await sessionLink.send(.resize(reference: runtime.descriptor.key.reference, size: request.grid))
+            guard receipt.socketWritten else {
+                await restoreGrid(id, previousGrid, pending: request.grid)
+                lastConnectionError = "Terminal resize was not sent"
+                return
+            }
+            guard var latest = sessions[id] else { return }
+            latest.descriptor.size = request.grid
+            latest.lastResizeGrid = request.grid
+            if latest.resizePendingGrid == request.grid { latest.resizePendingGrid = nil }
+            latest.snapshot = await latest.engine.snapshot()
+            sessions[id] = latest
+            if latest.receivedFrame, selectedAgentID == id, let snapshot = latest.snapshot {
+                stageView.present(submission(for: latest, snapshot: snapshot))
+            }
+        } catch {
+            await restoreGrid(id, previousGrid, pending: request.grid)
+            lastConnectionError = String(describing: error)
+        }
+    }
+
+    private func isCurrentResize(_ request: ResizeRequest) -> Bool {
+        selectedAgentID == request.sessionID && desiredStageGrid == request.grid &&
+            resizeRequestGeneration == request.generation &&
+            sessions[request.sessionID]?.resizePendingGrid == request.grid
+    }
+
+    private func clearPendingResize(_ request: ResizeRequest) {
+        guard var runtime = sessions[request.sessionID], runtime.resizePendingGrid == request.grid else { return }
+        runtime.resizePendingGrid = nil
+        sessions[request.sessionID] = runtime
+    }
+
+    private func restoreGrid(_ id: UUID, _ grid: GridSize, pending: GridSize) async {
+        guard let runtime = sessions[id] else { return }
+        try? await runtime.engine.resize(to: grid)
+        let snapshot = await runtime.engine.snapshot()
+        guard var current = sessions[id] else { return }
+        current.snapshot = snapshot
+        if current.resizePendingGrid == pending { current.resizePendingGrid = nil }
+        sessions[id] = current
+        if current.receivedFrame, selectedAgentID == id {
+            stageView.present(submission(for: current, snapshot: snapshot))
         }
     }
 
@@ -288,7 +427,11 @@ public final class CorralMVPCoordinator {
             current.subscriptionPending = false
             current.subscribed = receipt.socketWritten
             sessions[id] = current
-            if !receipt.socketWritten { lastConnectionError = "Subscription was not sent" }
+            if receipt.socketWritten {
+                scheduleResize(for: id)
+            } else {
+                lastConnectionError = "Subscription was not sent"
+            }
         } catch {
             sessions[id]?.subscriptionPending = false
             lastConnectionError = String(describing: error)
