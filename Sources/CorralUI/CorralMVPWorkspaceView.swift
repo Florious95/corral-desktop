@@ -17,11 +17,51 @@ public struct CorralMVPSessionRow: Equatable, Identifiable {
 }
 
 @MainActor
+private final class CorralMVPSessionCellView: CorralSidebarCellView {
+    private let statusIndicator = CorralStatusIndicatorView()
+    private let providerSlot = NSView()
+    private let nameField: NSTextField
+
+    init(session: CorralMVPSessionRow) {
+        nameField = NSTextField(labelWithString: session.name)
+        super.init(frame: .zero)
+        statusIndicator.status = CorralStatusIndicatorView.Status(rawValue: session.status) ?? .unknown
+        nameField.font = .systemFont(ofSize: 13, weight: session.isSelected ? .semibold : .regular)
+        nameField.textColor = CorralAestheticTokens.text
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nameField.setContentHuggingPriority(.init(1), for: .horizontal)
+        addSubview(statusIndicator)
+        addSubview(providerSlot)
+        addSubview(nameField)
+        if let provider = session.provider, !provider.isEmpty {
+            providerSlot.addSubview(CorralProviderIconView(provider: provider, size: 18, active: session.status == "working" || session.status == "blocked"))
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        statusIndicator.frame = NSRect(x: 24, y: (bounds.height - 8) / 2, width: 8, height: 8)
+        providerSlot.frame = NSRect(x: 42, y: (bounds.height - 18) / 2, width: 18, height: 18)
+        let textHeight = ceil(nameField.fittingSize.height)
+        nameField.frame = NSRect(x: 70.5, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - 82.5), height: textHeight)
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        layout()
+    }
+}
+
+@MainActor
 public final class CorralMVPWorkspaceView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     public let stageContainer = NSView()
     public let sidebar: NSView = NSView()
     public let collapseButton = NSButton(title: "", target: nil, action: nil)
     public let devicesButton = NSButton(title: "查看所有主机", target: nil, action: nil)
+    public static let terminalViewportLeadingInset: CGFloat = 5
     public var onSelectAgent: ((UUID) -> Void)?
     public var onToggleSidebar: (() -> Void)?
     public var onShowAllHosts: (() -> Void)?
@@ -170,7 +210,7 @@ public final class CorralMVPWorkspaceView: NSView, NSTableViewDataSource, NSTabl
         view.translatesAutoresizingMaskIntoConstraints = false
         stageContainer.addSubview(view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: stageContainer.leadingAnchor),
+            view.leadingAnchor.constraint(equalTo: stageContainer.leadingAnchor, constant: Self.terminalViewportLeadingInset),
             view.trailingAnchor.constraint(equalTo: stageContainer.trailingAnchor),
             view.topAnchor.constraint(equalTo: stageContainer.topAnchor),
             view.bottomAnchor.constraint(equalTo: stageContainer.bottomAnchor)
@@ -179,44 +219,24 @@ public final class CorralMVPWorkspaceView: NSView, NSTableViewDataSource, NSTabl
 
     public func numberOfRows(in tableView: NSTableView) -> Int { sessions.count }
 
-    public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { 36 }
+    public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { 34 }
+
+    public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = CorralSidebarRowView()
+        rowView.isAgentRow = true
+        return rowView
+    }
 
     public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard sessions.indices.contains(row) else { return nil }
         let session = sessions[row]
-        let cell = CorralSidebarCellView()
+        let cell = CorralMVPSessionCellView(session: session)
         cell.identifier = NSUserInterfaceItemIdentifier("corral.mvp.session-row")
         cell.setAccessibilityElement(true)
         cell.setAccessibilityRole(.button)
         cell.setAccessibilityIdentifier("corral.mvp.session-row")
         cell.setAccessibilityLabel("\(session.name), \(session.status)")
         cell.onPress = { [weak self] in self?.onSelectAgent?(session.id) }
-
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 9
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        let status = CorralStatusIndicatorView()
-        status.status = CorralStatusIndicatorView.Status(rawValue: session.status) ?? .unknown
-        let name = NSTextField(labelWithString: session.name)
-        name.font = .systemFont(ofSize: 13, weight: session.isSelected ? .semibold : .regular)
-        name.textColor = CorralAestheticTokens.text
-        name.lineBreakMode = .byTruncatingTail
-        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        name.setContentHuggingPriority(.init(1), for: .horizontal)
-        stack.addArrangedSubview(status)
-        if let provider = session.provider, !provider.isEmpty {
-            stack.addArrangedSubview(CorralProviderIconView(provider: provider, size: 18, active: session.status == "working" || session.status == "blocked"))
-        }
-        stack.addArrangedSubview(name)
-        cell.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: cell.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
-        ])
         return cell
     }
 }
