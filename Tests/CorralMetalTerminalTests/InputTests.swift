@@ -161,6 +161,59 @@ final class InputTests: XCTestCase {
     }
 
     @MainActor
+    func testMouseButtonAndDragUseAdapterBytesInInputFIFO() async {
+        let router = RecordingInputRouter()
+        let encoder = RecordingMouseEventEncoder(returnsBytes: true)
+        let view = TerminalTextInputView(
+            frame: NSRect(x: 0, y: 0, width: 40, height: 60),
+            sessionKey: sessionKey("mouse"),
+            inputRouting: router,
+            mouseEventEncoder: encoder
+        )
+        view.configure(grid: GridSize(rows: 3, columns: 4), cellSize: NSSize(width: 10, height: 20), cursor: CursorDescriptor(row: 0, column: 0))
+        XCTAssertEqual(view.terminalCell(atViewPoint: NSPoint(x: 25, y: 25)), TerminalCellPosition(row: 1, column: 2))
+        XCTAssertNil(view.terminalCell(atViewPoint: NSPoint(x: 40, y: 25)))
+
+        view.mouseDown(with: mouseEvent(.leftMouseDown, at: NSPoint(x: 25, y: 25), in: view))
+        view.mouseDragged(with: mouseEvent(.leftMouseDragged, at: NSPoint(x: 25, y: 25), in: view))
+        view.mouseUp(with: mouseEvent(.leftMouseUp, at: NSPoint(x: 25, y: 25), in: view))
+
+        let inputs = await waitForInputs(router, count: 3)
+        XCTAssertEqual(inputs, [
+            Data("\u{1b}[<0;3;2M".utf8),
+            Data("\u{1b}[<32;3;2M".utf8),
+            Data("\u{1b}[<0;3;2m".utf8)
+        ])
+        let calls = await waitForMouseCalls(encoder, count: 3)
+        XCTAssertEqual(calls.map(\.phase), [.buttonDown, .drag, .buttonUp])
+        XCTAssertTrue(calls.allSatisfy { $0.button == 0 && $0.column == 2 && $0.row == 1 })
+    }
+
+    @MainActor
+    func testNilMouseEncodingFallsBackToTextSelection() async {
+        let router = RecordingInputRouter()
+        let encoder = RecordingMouseEventEncoder(returnsBytes: false)
+        let view = TerminalTextInputView(
+            frame: NSRect(x: 0, y: 0, width: 40, height: 60),
+            sessionKey: sessionKey("selection-fallback"),
+            inputRouting: router,
+            mouseEventEncoder: encoder
+        )
+        view.configure(grid: GridSize(rows: 2, columns: 4), cellSize: NSSize(width: 10, height: 20), cursor: CursorDescriptor(row: 0, column: 0))
+        view.updateTerminalSnapshot(makeSnapshot(rows: ["ABCD", "EFGH"]))
+
+        view.mouseDown(with: mouseEvent(.leftMouseDown, at: NSPoint(x: 5, y: 55), in: view))
+        view.mouseDragged(with: mouseEvent(.leftMouseDragged, at: NSPoint(x: 25, y: 25), in: view))
+        view.mouseUp(with: mouseEvent(.leftMouseUp, at: NSPoint(x: 25, y: 25), in: view))
+        _ = await waitForMouseCalls(encoder, count: 3)
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(view.selectedText(), "ABCD\nEFG")
+        let routedInputs = await router.inputs()
+        XCTAssertTrue(routedInputs.isEmpty)
+    }
+
+    @MainActor
     func testRectangularSelectionCopyAndHighlightGeometry() {
         let snapshot = makeSnapshot(rows: ["ABCD", "EFGH"])
         let selection = TerminalCellSelection(
@@ -246,6 +299,21 @@ final class InputTests: XCTestCase {
     }
 
     @MainActor
+    private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, in view: NSView) -> NSEvent {
+        NSEvent.mouseEvent(
+            with: type,
+            location: view.convert(point, to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: view.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+    }
+
+    @MainActor
     private func keyEvent(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], characters: String) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown,
@@ -285,6 +353,16 @@ final class InputTests: XCTestCase {
     }
 
     @MainActor
+    private func waitForMouseCalls(_ encoder: RecordingMouseEventEncoder, count: Int) async -> [MouseEncoderCall] {
+        for _ in 0..<200 {
+            let calls = await encoder.calls()
+            if calls.count >= count { return calls }
+            await Task.yield()
+        }
+        return await encoder.calls()
+    }
+
+    @MainActor
     private func waitForInputs(_ router: RecordingInputRouter, count: Int) async -> [Data] {
         for _ in 0..<200 {
             let inputs = await router.inputs()
@@ -293,6 +371,31 @@ final class InputTests: XCTestCase {
         }
         return await router.inputs()
     }
+}
+
+private struct MouseEncoderCall: Equatable, Sendable {
+    let button: Int
+    let column: Int
+    let row: Int
+    let phase: TerminalMouseEventPhase
+    let modifiers: TerminalMouseModifiers
+}
+
+private actor RecordingMouseEventEncoder: TerminalMouseEventEncoding {
+    private let returnsBytes: Bool
+    private var recorded: [MouseEncoderCall] = []
+
+    init(returnsBytes: Bool) { self.returnsBytes = returnsBytes }
+
+    func encodeMouseEvent(button: Int, column: Int, row: Int, phase: TerminalMouseEventPhase, modifiers: TerminalMouseModifiers) async -> Data? {
+        recorded.append(MouseEncoderCall(button: button, column: column, row: row, phase: phase, modifiers: modifiers))
+        guard returnsBytes else { return nil }
+        let code = phase == .drag ? button | 32 : button
+        let suffix = phase == .buttonUp ? "m" : "M"
+        return Data("\u{1b}[<\(code);\(column + 1);\(row + 1)\(suffix)".utf8)
+    }
+
+    func calls() -> [MouseEncoderCall] { recorded }
 }
 
 private actor RecordingInputRouter: TerminalInputRouting {
