@@ -410,41 +410,6 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(indicator.layer?.shadowOpacity, 0)
     }
 
-    func testNestedSplitRetainsStageViewsAndHighlightsFocus() throws {
-        let firstID = SessionID("first")
-        let secondID = SessionID("second")
-        let thirdID = SessionID("third")
-        let first = NSView()
-        let second = NSView()
-        let third = NSView()
-        let root = WorkspaceLayoutNode.split(direction: .horizontal, ratio: 0.6,
-            first: .session(firstID),
-            second: .split(direction: .vertical, ratio: 0.5, first: .session(secondID), second: .session(thirdID)))
-        let workspace = SplitWorkspaceView(root: root, stageViews: [firstID: first, secondID: second, thirdID: third])
-        XCTAssertEqual(workspace.splitterCount, 2)
-        XCTAssertEqual(workspace.stageViews.count, 3)
-        let rootSplit = try XCTUnwrap(workspace.subviews.first as? NSSplitView)
-        XCTAssertTrue(rootSplit.isVertical)
-        let nested = try XCTUnwrap(rootSplit.arrangedSubviews.compactMap { $0 as? NSSplitView }.first)
-        XCTAssertFalse(nested.isVertical)
-        XCTAssertTrue(first.superview != nil)
-        XCTAssertTrue(second.superview != nil)
-        XCTAssertTrue(third.superview != nil)
-        workspace.focus(secondID)
-        XCTAssertEqual(workspace.focusedSessionID, secondID)
-        XCTAssertEqual(second.layer?.borderWidth, 2)
-        XCTAssertEqual(first.layer?.borderWidth, 0)
-    }
-
-    func testDropZoneSelectsFiveLegacyDropRegions() {
-        let stage = CorralWorkspaceStageView()
-        XCTAssertEqual(stage.edge(at: NSPoint(x: 0.1, y: 0.5)), .left)
-        XCTAssertEqual(stage.edge(at: NSPoint(x: 0.9, y: 0.5)), .right)
-        XCTAssertEqual(stage.edge(at: NSPoint(x: 0.5, y: 0.9)), .top)
-        XCTAssertEqual(stage.edge(at: NSPoint(x: 0.5, y: 0.1)), .bottom)
-        XCTAssertEqual(stage.edge(at: NSPoint(x: 0.5, y: 0.5)), .center)
-    }
-
     func testSmartOpenSessionFocusesExistingFillsBlankOrUsesPreviewWithoutDuplicateTab() {
         let existingSession = UUID()
         let existing = CorralTab(title: "Existing", contentView: NSView(), sessionIDs: [existingSession], isBlankWorkspace: false)

@@ -339,11 +339,12 @@ public final class CorralApplicationCoordinator {
     private var cachedDevices: [DeviceRecord] = []
     private var spaceIDsByDirectory: [String: UUID] = [:]
     private var directoriesBySpaceID: [UUID: String] = [:]
-    private var splitViewsByTab: [UUID: SplitWorkspaceView] = [:]
+    /// Live divider-drag layout: moves Metal viewports without resizing any server pane until the ratio commits.
+    private var layoutPreview: WorkspaceLayoutNode?
+    private var geometryPublication = 0
     private var sessionUIIDs: [SessionID: UUID] = [:]
     private var sessionUIIDsByIdentity: [WorkspaceSessionIdentity: UUID] = [:]
     private var selectedSidebarSpaceID = CorralSidebarSpace.allSpacesID
-    private var selectedSidebarAgentID: UUID?
     private var selectedDeviceIDs = Set<DeviceID>()
     private var activeDialog: CorralDialogViewController?
     private var settingsDialog: SettingsDialogViewController?
@@ -390,7 +391,7 @@ public final class CorralApplicationCoordinator {
         initialUserPreferences: UserPreferences,
         glyphAtlas: GlyphAtlasPool = .shared,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        maximumVisiblePanes: Int = 4
+        maximumVisiblePanes: Int = .max
     ) {
         precondition(maximumVisiblePanes > 0)
         self.deviceRepository = deviceRepository
@@ -437,9 +438,9 @@ public final class CorralApplicationCoordinator {
         self.windowIsKey = windowController.window?.isKeyWindow ?? false
         installWindowStateObservers()
 
-        stageView.onGeometryChanged = { [weak self] size, scale in
+        stageView.onGeometryChanged = { [weak self] _, _ in
             guard let self else { return }
-            Task { await self.geometryChanged(size: size, backingScale: scale) }
+            Task { await self.geometryChanged() }
         }
         workspaceView.tabBar.onSelectTab = { [weak self] id in
             Task { @MainActor in await self?.selectWorkspaceTab(id: id) }
@@ -470,7 +471,6 @@ public final class CorralApplicationCoordinator {
         }
         workspaceView.onSelectAgent = { [weak self] id in
             guard let self, let key = self.uiSessionKeys[id] else { return }
-            self.selectedSidebarAgentID = id
             self.activeSession = key
             self.stageView.activateInput(for: key, using: self.inputRouter)
         }
@@ -490,12 +490,27 @@ public final class CorralApplicationCoordinator {
         workspaceView.tabBar.onContextAction = { [weak self] id, action in
             Task { @MainActor in await self?.handleTabContextAction(id, action: action) }
         }
-        workspaceView.onDropTab = { [weak self] source, target, edge in
+        let stage = workspaceView.stageContainer
+        stage.onDropSession = { [weak self] source, target, edge in
+            guard let self, let key = self.sessionKey(for: source) else { return }
+            Task { @MainActor in await self.splitWorkspacePane(key, target: target, edge: edge) }
+        }
+        stage.onDropTab = { [weak self] source, target, edge in
             Task { @MainActor in await self?.dropTab(source, onto: target, edge: edge) }
         }
-        workspaceView.onSplit = { [weak self] tabID, edge in
-            guard let self, tabID == self.workspaceState.activeTabID else { return }
-            Task { @MainActor in await self.splitSelectedAgent(edge: edge) }
+        stage.splitView.onFocusPane = { [weak self] id in
+            Task { @MainActor in await self?.focusWorkspacePane(id) }
+        }
+        stage.splitView.onClosePane = { [weak self] id in
+            Task { @MainActor in await self?.closeWorkspacePane(id) }
+        }
+        stage.splitView.onLayoutPreview = { [weak self] preview in
+            guard let self else { return }
+            self.layoutPreview = preview
+            Task { @MainActor in await self.updateStageSubmissions() }
+        }
+        stage.splitView.onRatioChange = { [weak self] path, ratio in
+            Task { @MainActor in await self?.updateWorkspaceSplitRatio(path: path, ratio: ratio) }
         }
         onAgentCreated = { [weak self] key in
             guard let self else { return }
@@ -580,7 +595,6 @@ public final class CorralApplicationCoordinator {
 
     public func selectSidebarSession(id: UUID) {
         guard let key = uiSessionKeys[id], sessions[key] != nil else { return }
-        selectedSidebarAgentID = id
         activeSession = key
         stageView.activateInput(for: key, using: inputRouter)
         let sessionID = workspaceSessionID(for: key)
@@ -678,9 +692,14 @@ public final class CorralApplicationCoordinator {
 
     public func updateWorkspaceSplitRatio(tabID: UUID? = nil, path: String, ratio: Double) async {
         do {
-            workspaceState = try await workspaceStore.updateSplitRatio(tabID: tabID, path: path, ratio: ratio)
+            let state = try await workspaceStore.updateSplitRatio(tabID: tabID, path: path, ratio: ratio)
+            layoutPreview = nil
+            await applyWorkspaceState(state)
+        } catch {
+            layoutPreview = nil
+            lastConnectionError = String(describing: error)
             await updateStageSubmissions()
-        } catch { lastConnectionError = String(describing: error) }
+        }
     }
 
     public func setWorkspaceFavorite(_ key: String, isFavorite: Bool) async {
@@ -760,7 +779,7 @@ public final class CorralApplicationCoordinator {
             selectedTabID: state.activeTabID,
             previewSessionID: state.previewUID.map(uiSessionID(for:))
         )
-        synchronizeSplitViews(state.tabs)
+        workspaceView.stageContainer.splitView.update(root: state.visibleRoot, focusedSessionID: state.visibleSessionID)
         attachStageView(to: state.activeTabID)
         activeSession = state.visibleSessionID.flatMap(sessionKey(for:))
         await subscribeVisibleSessions()
@@ -775,51 +794,12 @@ public final class CorralApplicationCoordinator {
         updateRendererSleepState()
     }
 
-    private func synchronizeSplitViews(_ stateTabs: [WorkspaceTab]) {
-        let tabIDs = Set(stateTabs.map(\.id))
-        for id in splitViewsByTab.keys.filter({ !tabIDs.contains($0) }) {
-            splitViewsByTab.removeValue(forKey: id)?.removeFromSuperview()
-        }
-        for stateTab in stateTabs {
-            guard let root = stateTab.root,
-                  let tab = workspaceView.tabs.first(where: { $0.id == stateTab.id }) else {
-                splitViewsByTab.removeValue(forKey: stateTab.id)?.removeFromSuperview()
-                continue
-            }
-            let expectedIDs = Set(stateTab.sessionIDs)
-            if let existing = splitViewsByTab[stateTab.id], existing.root == root, Set(existing.stageViews.keys) == expectedIDs {
-                if let active = stateTab.activeSessionID { existing.focus(active) }
-                continue
-            }
-            splitViewsByTab[stateTab.id]?.removeFromSuperview()
-            let stages = Dictionary(uniqueKeysWithValues: stateTab.sessionIDs.map { ($0, NSView()) })
-            let split = SplitWorkspaceView(root: root, stageViews: stages)
-            split.translatesAutoresizingMaskIntoConstraints = false
-            split.onRatioChange = { [weak self] path, ratio in
-                let encodedPath = path.isEmpty ? "root" : "root." + path.map(String.init).joined(separator: ".")
-                Task { @MainActor in await self?.updateWorkspaceSplitRatio(tabID: stateTab.id, path: encodedPath, ratio: ratio) }
-            }
-            if let active = stateTab.activeSessionID { split.focus(active) }
-            tab.contentView.addSubview(split)
-            NSLayoutConstraint.activate([
-                split.leadingAnchor.constraint(equalTo: tab.contentView.leadingAnchor),
-                split.trailingAnchor.constraint(equalTo: tab.contentView.trailingAnchor),
-                split.topAnchor.constraint(equalTo: tab.contentView.topAnchor),
-                split.bottomAnchor.constraint(equalTo: tab.contentView.bottomAnchor)
-            ])
-            splitViewsByTab[stateTab.id] = split
-        }
-    }
-
     private func attachStageView(to tabID: UUID) {
         guard let tab = workspaceView.tabs.first(where: { $0.id == tabID }) else { return }
+        guard stageView.superview !== tab.contentView else { return }
         stageView.removeFromSuperview()
         stageView.translatesAutoresizingMaskIntoConstraints = false
-        if let split = splitViewsByTab[tabID] {
-            tab.contentView.addSubview(stageView, positioned: .below, relativeTo: split)
-        } else {
-            tab.contentView.addSubview(stageView)
-        }
+        tab.contentView.addSubview(stageView)
         NSLayoutConstraint.activate([
             stageView.leadingAnchor.constraint(equalTo: tab.contentView.leadingAnchor),
             stageView.trailingAnchor.constraint(equalTo: tab.contentView.trailingAnchor),
@@ -1121,35 +1101,11 @@ public final class CorralApplicationCoordinator {
         }
     }
 
-    private func dropTab(_ sourceID: UUID, onto targetID: UUID?, edge: SplitDropZoneView.Edge) async {
-        guard let source = workspaceState.tabs.first(where: { $0.id == sourceID }),
-              let sourceSession = source.activeSessionID,
-              let key = sessionKey(for: sourceSession),
-              let descriptor = sessions[key]?.descriptor else { return }
-        let targetTabID = targetID ?? workspaceState.activeTabID
-        do {
-            _ = try await workspaceStore.switchTab(targetTabID)
-            let zone = WorkspaceDropZone(rawValue: edge.rawValue) ?? .right
-            let state = try await workspaceStore.splitSession(descriptor, target: workspaceState.activeTab?.activeSessionID, edge: zone)
-            await applyWorkspaceState(state)
-        } catch { showToast("分屏失败：\(error)", kind: .error) }
-    }
-
-    private func splitSelectedAgent(edge: SplitDropZoneView.Edge) async {
-        guard let selectedSidebarAgentID,
-              let key = uiSessionKeys[selectedSidebarAgentID],
-              let descriptor = sessions[key]?.descriptor else {
-            showToast("先从 Agents 列表选择一个 Agent，再执行分屏", kind: .info)
-            return
-        }
-        do {
-            let state = try await workspaceStore.splitSession(
-                descriptor,
-                target: workspaceState.activeTab?.activeSessionID,
-                edge: WorkspaceDropZone(rawValue: edge.rawValue) ?? .right
-            )
-            await applyWorkspaceState(state)
-        } catch { showToast("分屏失败：\(error)", kind: .error) }
+    /// A Tab dragged onto a pane moves that Tab's focused session into the visible layout.
+    private func dropTab(_ sourceID: UUID, onto target: SessionID?, edge: WorkspaceDropZone) async {
+        guard let sourceSession = workspaceState.tabs.first(where: { $0.id == sourceID })?.activeSessionID,
+              let key = sessionKey(for: sourceSession) else { return }
+        await splitWorkspacePane(key, target: target, edge: edge)
     }
 
     private func showToast(_ message: String, kind: ToastView.Kind) {
@@ -1648,7 +1604,6 @@ public final class CorralApplicationCoordinator {
         await subscribeVisibleSessions()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
         await updateStageSubmissions()
-        if let sample = stageView.currentGeometry { await geometryChanged(size: sample.0, backingScale: sample.1) }
         await writeTelemetry()
     }
 
@@ -1707,12 +1662,13 @@ public final class CorralApplicationCoordinator {
     private func subscribeVisibleSessions() async {
         guard connection != nil else { return }
         for key in visibleSessionKeys() {
-            guard var runtime = sessions[key], !runtime.subscribed else { continue }
+            guard let runtime = sessions[key], !runtime.subscribed else { continue }
             do {
+                // Subscribe at the server's own grid: a size the daemon cannot honor (panes sharing one tmux window)
+                // fails the whole subscription, while the `resize` published afterwards degrades to a no-op.
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
                 guard receipt.socketWritten else { continue }
-                runtime.subscribed = true
-                sessions[key] = runtime
+                sessions[key]?.subscribed = true
                 if activeSession == nil {
                     activeSession = key
                     stageView.activateInput(for: key, using: inputRouter)
@@ -1727,6 +1683,7 @@ public final class CorralApplicationCoordinator {
             stageView.activateInput(for: key, using: inputRouter)
         }
         subscribedSessionIDs = sessionOrder.compactMap { key in sessions[key]?.subscribed == true ? key.reference.rawValue : nil }
+        await publishPaneGeometry()
     }
 
     private func applyFrame(_ frame: BinaryFrame, origin: SessionEventOrigin) async {
@@ -1761,82 +1718,58 @@ public final class CorralApplicationCoordinator {
         }
     }
 
-    private func geometryChanged(size: NSSize, backingScale: CGFloat) async {
-        guard size.width > 0, size.height > 0, backingScale > 0 else { return }
-        let visible = paneLayouts(size: size).prefix(maximumVisiblePanes)
-        guard !visible.isEmpty else { return }
-        for (sessionID, viewport) in visible {
-            guard let key = sessionKey(for: sessionID), var runtime = sessions[key] else { continue }
-            let grid = proposedGrid(for: viewport)
-            let sample = GeometrySample(
-                viewport: viewport,
-                backingScale: Double(backingScale),
-                grid: grid,
-                metricsGeneration: MetricsGeneration(0)
-            )
-            if let previous = runtime.lastGeometry,
-               geometryPolicy.shouldDebounceViewportDelta(from: previous, to: sample) { continue }
-            runtime.lastGeometry = sample
-            let committedGrid = runtime.descriptor.size
-            guard geometryPolicy.shouldPublishResize(lastCommittedServerGrid: committedGrid, proposed: sample) else {
-                sessions[key] = runtime
-                continue
-            }
-            do {
-                let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
-                guard receipt.socketWritten else { continue }
-                try await runtime.engine.resize(to: grid)
-                runtime.descriptor.size = grid
-                runtime.snapshot = await runtime.engine.snapshot()
-                sessions[key] = runtime
-            } catch {
-                lastConnectionError = String(describing: error)
-                sessions[key] = runtime
-            }
-        }
+    private func geometryChanged() async {
+        await publishPaneGeometry()
         await updateStageSubmissions()
         await writeTelemetry()
     }
 
-    private func visibleSessionKeys() -> [SessionKey] {
-        guard let root = workspaceState.visibleRoot else { return [] }
-        return Self.sessionIDs(in: root).compactMap(sessionKey(for:)).prefix(maximumVisiblePanes).map { $0 }
-    }
-
-    private func paneLayouts(size: NSSize) -> [(SessionID, StageViewportRect)] {
-        guard let root = workspaceState.visibleRoot, size.width > 0, size.height > 0 else { return [] }
-        var result: [(SessionID, StageViewportRect)] = []
-        func visit(_ node: WorkspaceLayoutNode, _ rect: NSRect) {
-            switch node {
-            case let .session(id):
-                result.append((
-                    id,
-                    StageViewportRect(
-                        x: Double(rect.minX), y: Double(rect.minY),
-                        width: Double(rect.width), height: Double(rect.height)
-                    )
-                ))
-            case let .split(direction, ratio, first, second):
-                let share = CGFloat(ratio)
-                if direction == .horizontal {
-                    let firstWidth = rect.width * share
-                    visit(first, NSRect(x: rect.minX, y: rect.minY, width: firstWidth, height: rect.height))
-                    visit(second, NSRect(x: rect.minX + firstWidth, y: rect.minY, width: rect.width - firstWidth, height: rect.height))
-                } else {
-                    let firstHeight = rect.height * share
-                    visit(first, NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: firstHeight))
-                    visit(second, NSRect(x: rect.minX, y: rect.minY + firstHeight, width: rect.width, height: rect.height - firstHeight))
+    /// Sizes every subscribed visible pane from its own projected viewport. The stage geometry is read when this
+    /// runs, never captured from the triggering event, and each grid is committed before awaiting the socket, so a
+    /// stale layout can never land after a newer one (a newer pass also stops an older one between panes).
+    /// Viewports below the 120×60 pane floor only exist while the window collapses or changes Space and are never
+    /// published: a 1-row PTY scrolls its whole screen away.
+    private func publishPaneGeometry() async {
+        geometryPublication &+= 1
+        let publication = geometryPublication
+        guard connection != nil, let (size, backingScale) = stageView.currentGeometry else { return }
+        for (sessionID, viewport) in paneLayouts(size: size, root: workspaceState.visibleRoot).prefix(maximumVisiblePanes)
+        where viewport.width >= SplitLayout.minimumPaneWidth && viewport.height >= SplitLayout.minimumPaneHeight {
+            guard publication == geometryPublication else { return }
+            guard let key = sessionKey(for: sessionID), let runtime = sessions[key], runtime.subscribed else { continue }
+            let sample = GeometrySample(viewport: viewport, backingScale: Double(backingScale), grid: proposedGrid(for: viewport), metricsGeneration: MetricsGeneration(0))
+            if let previous = runtime.lastGeometry, geometryPolicy.shouldDebounceViewportDelta(from: previous, to: sample) { continue }
+            sessions[key]?.lastGeometry = sample
+            let committedGrid = runtime.descriptor.size
+            guard geometryPolicy.shouldPublishResize(lastCommittedServerGrid: committedGrid, proposed: sample) else { continue }
+            let grid = geometryPolicy.resolvedGridSize(proposed: sample.grid)
+            sessions[key]?.descriptor.size = grid
+            do {
+                let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
+                guard receipt.socketWritten else {
+                    if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = committedGrid }
+                    continue
                 }
+                guard sessions[key]?.descriptor.size == grid else { continue }
+                try await runtime.engine.resize(to: grid)
+                guard sessions[key]?.descriptor.size == grid else { continue }
+                sessions[key]?.snapshot = await runtime.engine.snapshot()
+            } catch {
+                if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = committedGrid }
+                lastConnectionError = String(describing: error)
             }
         }
-        visit(root, NSRect(origin: .zero, size: size))
-        return result
     }
 
-    private static func sessionIDs(in node: WorkspaceLayoutNode) -> [SessionID] {
-        switch node {
-        case let .session(id): [id]
-        case let .split(_, _, first, second): sessionIDs(in: first) + sessionIDs(in: second)
+    private func visibleSessionKeys() -> [SessionKey] {
+        guard let root = workspaceState.visibleRoot else { return [] }
+        return root.leafIDs.compactMap(sessionKey(for:)).prefix(maximumVisiblePanes).map { $0 }
+    }
+
+    /// Metal viewports are the pane frames of the same 6pt-gap projection the pane chrome draws.
+    private func paneLayouts(size: NSSize, root: WorkspaceLayoutNode?) -> [(SessionID, StageViewportRect)] {
+        SplitLayout.project(root, in: CGRect(origin: .zero, size: size)).panes.map { pane in
+            (pane.sessionID, StageViewportRect(x: pane.frame.minX, y: pane.frame.minY, width: pane.frame.width, height: pane.frame.height))
         }
     }
 
@@ -1850,7 +1783,7 @@ public final class CorralApplicationCoordinator {
 
     private func updateStageSubmissions() async {
         let size = stageView.currentGeometry?.0 ?? stageView.bounds.size
-        let layouts = paneLayouts(size: size).prefix(maximumVisiblePanes)
+        let layouts = paneLayouts(size: size, root: layoutPreview ?? workspaceState.visibleRoot).prefix(maximumVisiblePanes)
         var submissions: [PaneRenderSubmission] = []
         for (sessionID, viewport) in layouts {
             guard let key = sessionKey(for: sessionID), let runtime = sessions[key], runtime.receivedFrame,
@@ -1914,7 +1847,8 @@ public final class CorralApplicationCoordinator {
                 isFavorite: workspaceState.favorites.contains(favoriteKey(for: descriptor)),
                 isOpen: isOpen,
                 isActive: workspaceState.visibleSessionID == descriptor.id,
-                isClosing: closingSessionKeys.contains(descriptor.key)
+                isClosing: closingSessionKeys.contains(descriptor.key),
+                sessionID: descriptor.id
             )
         }
         workspaceView.sidebar.setSpaces(Array(spacesByDirectory.values).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })

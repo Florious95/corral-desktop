@@ -31,7 +31,7 @@ public struct WorkspaceTab: Codable, Equatable, Sendable, Identifiable {
     public var isImplicitBlank: Bool
 
     public var isBlank: Bool { root == nil && activeSessionID == nil }
-    public var sessionIDs: [SessionID] { root.map(Self.sessionIDs(in:)) ?? [] }
+    public var sessionIDs: [SessionID] { root?.leafIDs ?? [] }
 
     public init(
         id: UUID = UUID(),
@@ -59,13 +59,6 @@ public struct WorkspaceTab: Codable, Equatable, Sendable, Identifiable {
         case activeSessionID = "activeUid"
         case pinned
         case isImplicitBlank
-    }
-
-    private static func sessionIDs(in node: WorkspaceLayoutNode) -> [SessionID] {
-        switch node {
-        case let .session(id): [id]
-        case let .split(_, _, first, second): sessionIDs(in: first) + sessionIDs(in: second)
-        }
     }
 }
 
@@ -261,8 +254,7 @@ public actor CorralWorkspaceStore {
     public func focusPane(_ sessionID: SessionID) throws -> CorralWorkspaceState {
         guard value.previewUID != sessionID,
               let index = value.tabs.firstIndex(where: { $0.id == value.activeTabID }),
-              let root = value.tabs[index].root,
-              Self.contains(sessionID, in: root),
+              value.tabs[index].root?.contains(sessionID) == true,
               value.tabs[index].activeSessionID != sessionID else { return value }
         var next = value
         next.previewUID = nil
@@ -313,7 +305,8 @@ public actor CorralWorkspaceStore {
         return value
     }
 
-    /// Closes client-side pane topology only; it never terminates the remote session.
+    /// Closes client-side pane topology only; it never terminates the remote session. The sibling subtree is
+    /// promoted intact, pure column rows are rebalanced 1:1, and focus survives unless the focused pane closed.
     @discardableResult
     public func closePane(_ sessionID: SessionID) throws -> CorralWorkspaceState {
         if value.previewUID == sessionID {
@@ -324,12 +317,14 @@ public actor CorralWorkspaceStore {
             return value
         }
         guard let index = value.tabs.firstIndex(where: { $0.id == value.activeTabID }),
-              let root = value.tabs[index].root,
-              value.tabs[index].sessionIDs.count > 1,
-              Self.contains(sessionID, in: root) else { return value }
+              let root = value.tabs[index].root, root.contains(sessionID),
+              let remaining = root.removing(sessionID) else { return value }
         var next = value
-        next.tabs[index].root = Self.removing(sessionID, from: root)
-        next.tabs[index].activeSessionID = next.tabs[index].sessionIDs.first
+        let columns = remaining.topLevelColumns
+        next.tabs[index].root = columns.allSatisfy({ if case .session = $0 { true } else { false } })
+            ? WorkspaceLayoutNode.equalColumns(columns) : remaining
+        let leaves = remaining.leafIDs
+        next.tabs[index].activeSessionID = value.tabs[index].activeSessionID.flatMap { leaves.contains($0) ? $0 : nil } ?? leaves.first
         next.previewUID = nil
         next.sessionBindings = Self.bindingsForVisibleSessions(next)
         next = Self.pinning(next, tabID: next.tabs[index].id, pinned: true)
@@ -344,10 +339,10 @@ public actor CorralWorkspaceStore {
         var changed = next.previewUID == sessionID
         next.previewUID = next.previewUID == sessionID ? nil : next.previewUID
         for index in next.tabs.indices {
-            guard let root = next.tabs[index].root, Self.contains(sessionID, in: root) else { continue }
+            guard let root = next.tabs[index].root, root.contains(sessionID) else { continue }
             changed = true
-            let updatedRoot = Self.removing(sessionID, from: root)
-            let leaves = updatedRoot.map(Self.leafIDs(in:)) ?? []
+            let updatedRoot = root.removing(sessionID)
+            let leaves = updatedRoot?.leafIDs ?? []
             let oldActive = next.tabs[index].activeSessionID
             next.tabs[index].root = updatedRoot
             next.tabs[index].activeSessionID = oldActive.flatMap { leaves.contains($0) ? $0 : nil } ?? leaves.first
@@ -422,7 +417,8 @@ public actor CorralWorkspaceStore {
         return value
     }
 
-    /// Five-zone drop: side edges split, center replaces the target pane. A virtual preview becomes durable.
+    /// Five-zone drop (`WorkspaceLayoutNode.dropping`): edges split, center replaces the target pane. A virtual
+    /// preview becomes durable.
     @discardableResult
     public func splitSession(
         _ sessionID: SessionID,
@@ -457,20 +453,18 @@ public actor CorralWorkspaceStore {
             var next = value
             guard let ownerRoot = next.tabs[ownerIndex].root else { return value }
             let ownerActive = next.tabs[ownerIndex].activeSessionID
-            let remainingOwnerRoot = Self.removing(sessionID, from: ownerRoot)
-            let ownerLeaves = remainingOwnerRoot.map(Self.leafIDs(in:)) ?? []
+            let remainingOwnerRoot = ownerRoot.removing(sessionID)
+            let ownerLeaves = remainingOwnerRoot?.leafIDs ?? []
             next.tabs[ownerIndex].root = remainingOwnerRoot
             next.tabs[ownerIndex].activeSessionID = ownerActive.flatMap { ownerLeaves.contains($0) ? $0 : nil } ?? ownerLeaves.first
 
             let destinationRoot = activeTab.root ?? value.previewUID.map(WorkspaceLayoutNode.session)
             if let destinationRoot {
-                let leaves = Self.leafIDs(in: destinationRoot)
+                let leaves = destinationRoot.leafIDs
                 if let target = targetID.flatMap({ leaves.contains($0) ? $0 : nil })
                     ?? activeTab.activeSessionID.flatMap({ leaves.contains($0) ? $0 : nil })
                     ?? leaves.first {
-                    next.tabs[activeIndex].root = edge == .center
-                        ? Self.replacing(target, with: sessionID, in: destinationRoot)
-                        : Self.splitting(destinationRoot, target: target, adding: sessionID, edge: edge)
+                    next.tabs[activeIndex].root = destinationRoot.dropping(sessionID, onto: target, edge: edge) ?? destinationRoot
                 } else {
                     next.tabs[activeIndex].root = .session(sessionID)
                 }
@@ -488,29 +482,24 @@ public actor CorralWorkspaceStore {
             return value
         }
 
-        let hasDurableSource = activeTab.root.map { Self.contains(sessionID, in: $0) } ?? false
+        let hasDurableSource = activeTab.root?.contains(sessionID) ?? false
         var next = value
         var base = activeTab.root
         if base == nil, let preview = value.previewUID { base = .session(preview) }
 
         if hasDurableSource, let root = activeTab.root {
             guard let resolvedTarget = targetID ?? activeTab.activeSessionID ?? activeTab.sessionIDs.first,
-                  resolvedTarget != sessionID else { return value }
-            let cleaned = Self.removing(sessionID, from: root)
-            guard let cleaned, Self.contains(resolvedTarget, in: cleaned) else { return value }
-            base = edge == .center
-                ? Self.replacing(resolvedTarget, with: sessionID, in: cleaned)
-                : Self.splitting(cleaned, target: resolvedTarget, adding: sessionID, edge: edge)
+                  let dropped = root.dropping(sessionID, onto: resolvedTarget, edge: edge) else { return value }
+            base = dropped
         } else if value.previewUID == sessionID, activeTab.root == nil {
             base = .session(sessionID)
         } else if let currentRoot = base {
-            let leaves = Self.leafIDs(in: currentRoot)
+            let leaves = currentRoot.leafIDs
             guard let resolvedTarget = targetID.flatMap({ leaves.contains($0) ? $0 : nil })
                     ?? activeTab.activeSessionID.flatMap({ leaves.contains($0) ? $0 : nil })
-                    ?? leaves.first else { return value }
-            base = edge == .center
-                ? Self.replacing(resolvedTarget, with: sessionID, in: currentRoot)
-                : Self.splitting(currentRoot, target: resolvedTarget, adding: sessionID, edge: edge)
+                    ?? leaves.first,
+                  let dropped = currentRoot.dropping(sessionID, onto: resolvedTarget, edge: edge) else { return value }
+            base = dropped
         } else {
             base = .session(sessionID)
         }
@@ -532,10 +521,9 @@ public actor CorralWorkspaceStore {
         let targetTabID = tabID ?? value.activeTabID
         guard let index = value.tabs.firstIndex(where: { $0.id == targetTabID }),
               let root = value.tabs[index].root else { return value }
-        let path = path == "root" ? [] : path.hasPrefix("root.") ? Array(path.dropFirst(5).split(separator: ".").map(String.init)) : path.split(separator: ".").map(String.init)
         let roundedRatio = (ratio * 10_000).rounded() / 10_000
         guard roundedRatio > 0, roundedRatio < 1,
-              let updated = Self.updatingRatio(root, path: path, ratio: roundedRatio) else { return value }
+              let updated = root.settingRatio(roundedRatio, at: path) else { return value }
         var next = value
         next.tabs[index].root = updated
         next.previewUID = nil
@@ -641,79 +629,12 @@ public actor CorralWorkspaceStore {
     }
 
     private static func tabContaining(_ sessionID: SessionID, in state: CorralWorkspaceState) -> (Int, WorkspaceTab)? {
-        guard let index = state.tabs.firstIndex(where: { $0.root.map { contains(sessionID, in: $0) } ?? false }) else { return nil }
+        guard let index = state.tabs.firstIndex(where: { $0.root?.contains(sessionID) == true }) else { return nil }
         return (index, state.tabs[index])
     }
 
-    private static func contains(_ sessionID: SessionID, in node: WorkspaceLayoutNode) -> Bool {
-        switch node {
-        case let .session(id): id == sessionID
-        case let .split(_, _, first, second): contains(sessionID, in: first) || contains(sessionID, in: second)
-        }
-    }
-
     private static func contains(_ sessionID: SessionID, in state: CorralWorkspaceState) -> Bool {
-        sessionID == state.previewUID || state.tabs.contains { $0.root.map { contains(sessionID, in: $0) } ?? false }
-    }
-
-    private static func leafIDs(in node: WorkspaceLayoutNode) -> [SessionID] {
-        switch node {
-        case let .session(id): [id]
-        case let .split(_, _, first, second): leafIDs(in: first) + leafIDs(in: second)
-        }
-    }
-
-    private static func removing(_ sessionID: SessionID, from node: WorkspaceLayoutNode) -> WorkspaceLayoutNode? {
-        switch node {
-        case let .session(id): return id == sessionID ? nil : node
-        case let .split(direction, ratio, first, second):
-            let a = removing(sessionID, from: first)
-            let b = removing(sessionID, from: second)
-            guard let a else { return b }
-            guard let b else { return a }
-            return .split(direction: direction, ratio: ratio, first: a, second: b)
-        }
-    }
-
-    private static func replacing(_ targetID: SessionID, with sessionID: SessionID, in node: WorkspaceLayoutNode) -> WorkspaceLayoutNode {
-        switch node {
-        case let .session(id): id == targetID ? .session(sessionID) : node
-        case let .split(direction, ratio, first, second):
-            .split(direction: direction, ratio: ratio, first: replacing(targetID, with: sessionID, in: first), second: replacing(targetID, with: sessionID, in: second))
-        }
-    }
-
-    private static func splitting(_ node: WorkspaceLayoutNode, target: SessionID, adding newID: SessionID, edge: WorkspaceDropZone) -> WorkspaceLayoutNode {
-        let direction: SplitDirection = edge == .left || edge == .right ? .horizontal : .vertical
-        let insertFirst = edge == .left || edge == .top
-        switch node {
-        case let .session(id):
-            guard id == target else { return node }
-            let first = insertFirst ? WorkspaceLayoutNode.session(newID) : node
-            let second = insertFirst ? node : WorkspaceLayoutNode.session(newID)
-            return .split(direction: direction, ratio: 0.5, first: first, second: second)
-        case let .split(oldDirection, ratio, first, second):
-            if contains(target, in: first) {
-                return .split(direction: oldDirection, ratio: ratio, first: splitting(first, target: target, adding: newID, edge: edge), second: second)
-            }
-            return .split(direction: oldDirection, ratio: ratio, first: first, second: splitting(second, target: target, adding: newID, edge: edge))
-        }
-    }
-
-    private static func updatingRatio(_ node: WorkspaceLayoutNode, path: [String], ratio: Double) -> WorkspaceLayoutNode? {
-        guard case let .split(direction, oldRatio, first, second) = node else { return nil }
-        guard !path.isEmpty else {
-            return .split(direction: direction, ratio: ratio, first: first, second: second)
-        }
-        switch path[0] {
-        case "first":
-            guard let updated = updatingRatio(first, path: Array(path.dropFirst()), ratio: ratio) else { return nil }
-            return .split(direction: direction, ratio: oldRatio, first: updated, second: second)
-        case "second":
-            guard let updated = updatingRatio(second, path: Array(path.dropFirst()), ratio: ratio) else { return nil }
-            return .split(direction: direction, ratio: oldRatio, first: first, second: updated)
-        default: return nil
-        }
+        sessionID == state.previewUID || state.tabs.contains { $0.root?.contains(sessionID) == true }
     }
 
     private static func upsertingBinding(sessionID: SessionID, identity: WorkspaceSessionIdentity, in state: CorralWorkspaceState) -> CorralWorkspaceState {
@@ -728,7 +649,7 @@ public actor CorralWorkspaceStore {
         var next = state
         for index in next.tabs.indices {
             if let root = next.tabs[index].root {
-                next.tabs[index].root = replacing(oldID, with: newID, in: root)
+                next.tabs[index].root = root.replacing(oldID, with: newID)
             }
             if next.tabs[index].activeSessionID == oldID { next.tabs[index].activeSessionID = newID }
         }

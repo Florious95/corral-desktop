@@ -49,6 +49,8 @@ public enum CorralAestheticTokens {
     public static var fillSubtle: NSColor { isDark ? color(0x1E242D) : NSColor.black.withAlphaComponent(0.04) }
     public static var selectionBackground: NSColor { isDark ? color(0x28374C) : NSColor.black.withAlphaComponent(0.07) }
     public static var accent: NSColor { palette(0x8FAADC, 0x2E5898) }
+    /// `--pane-active-border`: the focused split pane outline (light falls back to `--input-focus`).
+    public static var paneActiveBorder: NSColor { palette(0x5C79A3, 0xB8A273) }
     public static var success: NSColor { palette(0x72BE93, 0x34C759) }
     public static var successDeep: NSColor { palette(0x72BE93, 0x3F7A4C) }
     public static var warning: NSColor { palette(0xD8B57B, 0xF0B429) }

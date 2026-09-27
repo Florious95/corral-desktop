@@ -268,6 +268,100 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    /// 08-split regression: a restored split whose server panes are stale (69×1) must be re-sized from each
+    /// pane's own 6pt-gap projection, and every later layout change (ratio, close) must publish new grids.
+    func testRestoredSplitPublishesEveryPaneGridAndFollowsLayoutChanges() async throws {
+        let references = [try SessionReference("split-left"), try SessionReference("split-right")]
+        let records = references.enumerated().map { index, reference in
+            WireSessionRecord(reference: reference, name: "Split \(index)", workingDirectory: "/fixture/split", state: .idle, rows: 1, columns: 69)
+        }
+        let link = RecordingSessionLink()
+        let atlas = GlyphAtlasPool.shared
+        let supportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-native-split-store-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
+        let userPreferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
+        let deviceID = DeviceID("corral-native-development-endpoint")
+        let ids = references.map { SessionID("\(deviceID.rawValue.utf8.count):\(deviceID.rawValue)\($0.rawValue)") }
+        _ = try await workspaceStore.smartOpenSession(ids[0], gesture: .doubleClick)
+        _ = try await workspaceStore.splitSession(ids[1], target: ids[0], edge: .right)
+        let coordinator = CorralApplicationCoordinator(
+            deviceRepository: EmptyDeviceRepository(),
+            credentialVault: TestDeviceCredentialVault(),
+            sessionLink: link,
+            deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
+            renderer: try SharedMetalTerminalRenderer(glyphAtlas: atlas),
+            workspaceStore: workspaceStore,
+            userPreferencesStore: userPreferencesStore,
+            initialWorkspaceState: await workspaceStore.snapshot(),
+            initialUserPreferences: await userPreferencesStore.snapshot(),
+            glyphAtlas: atlas,
+            environment: ["CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws", "CORRAL_NATIVE_TOKEN": "fixture-only-token", "CORRAL_NATIVE_BACKGROUND": "1"]
+        )
+        guard let window = coordinator.windowController.window else { return XCTFail("coordinator must own a real window") }
+        window.orderBack(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let stage = coordinator.stageView.bounds.size
+        XCTAssertEqual(stage, NSSize(width: 1400 - 280, height: 860 - 38))
+        await coordinator.start()
+        // Real order: the window settles its stage geometry long before the first listing round-trip.
+        let settled = await waitUntil { coordinator.stageView.currentGeometry?.0 == stage }
+        XCTAssertTrue(settled)
+        try await Task.sleep(for: .milliseconds(200))
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/split", sessionCount: 2, aggregateState: .idle, sessions: records)
+        ]))))
+
+        let cell = coordinator.stageView.terminalCellSize
+        func grid(width: CGFloat, height: CGFloat) -> GridSize {
+            GridSize(rows: Int(height / cell.height), columns: Int(width / cell.width))
+        }
+        func lastSentGrid(_ reference: SessionReference) async -> GridSize? {
+            await link.commands().reversed().lazy.compactMap { command -> GridSize? in
+                switch command {
+                case let .subscribe(ref, size) where ref == reference: size
+                case let .resize(ref, size) where ref == reference: size
+                default: nil
+                }
+            }.first
+        }
+        // 1120pt stage, 6pt gap: usable 1114 → 557 | 557.
+        let half = grid(width: 557, height: stage.height)
+        let restored = await waitUntil {
+            let left = await lastSentGrid(references[0]), right = await lastSentGrid(references[1])
+            return left == half && right == half
+        }
+        let restoredLeft = await lastSentGrid(references[0]), restoredRight = await lastSentGrid(references[1])
+        XCTAssertTrue(restored, "both panes must be sized from their own viewport, got \(String(describing: restoredLeft)) / \(String(describing: restoredRight)), want \(half)")
+
+        // A transient collapsed stage (window/Space churn) must never leave a pane committed at a 1-row grid.
+        coordinator.stageView.configureStage(sizeInPoints: NSSize(width: stage.width, height: 20), backingScale: 2)
+        coordinator.stageView.needsLayout = true
+        window.contentView?.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        let afterChurnLeft = await lastSentGrid(references[0]), afterChurnRight = await lastSentGrid(references[1])
+        XCTAssertEqual(afterChurnLeft, half)
+        XCTAssertEqual(afterChurnRight, half)
+
+        await coordinator.updateWorkspaceSplitRatio(path: "root", ratio: 0.3)
+        // floor(1114 × 0.3) = 334 | 780.
+        let resized = await waitUntil {
+            let left = await lastSentGrid(references[0]), right = await lastSentGrid(references[1])
+            return left == grid(width: 334, height: stage.height) && right == grid(width: 780, height: stage.height)
+        }
+        XCTAssertTrue(resized, "a ratio change must re-publish both pane grids")
+
+        await coordinator.closeWorkspacePane(ids[1])
+        let promoted = await waitUntil { await lastSentGrid(references[0]) == grid(width: stage.width, height: stage.height) }
+        XCTAssertTrue(promoted, "the surviving sibling must absorb the whole stage and be resized to it")
+        let remoteCloses = await link.commands().filter { if case .closeSession = $0 { true } else { false } }.count
+        XCTAssertEqual(remoteCloses, 0, "closing a pane never terminates its Agent")
+
+        await coordinator.stop()
+        window.close()
+    }
+
     func testGoldenFramesDriveThreeRealMetalPanesAndInputRouting() async throws {
         let fixture = try GoldenFrameFixture.load()
         let codec = ProtocolV1Codec()
@@ -383,8 +477,8 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             await link.commands().filter { if case .subscribe = $0 { true } else { false } }.count == 3
         }
         XCTAssertTrue(subscribed)
-        let selectedWorkspaceTab = try XCTUnwrap(coordinator.workspaceView.tabs.first(where: { $0.id == coordinator.workspaceState.activeTabID }))
-        XCTAssertEqual(selectedWorkspaceTab.contentView.subviews.compactMap { $0 as? SplitWorkspaceView }.first?.splitterCount, 2)
+        XCTAssertEqual(coordinator.workspaceView.stageContainer.splitView.splitterCount, 2)
+        XCTAssertEqual(coordinator.workspaceView.stageContainer.splitView.projection.panes.map(\.sessionID), [workspaceSessionIDs[0], workspaceSessionIDs[2], workspaceSessionIDs[1]])
 
         try await link.emit(.frame(goldenSnapshot))
         for reference in references.dropFirst() {

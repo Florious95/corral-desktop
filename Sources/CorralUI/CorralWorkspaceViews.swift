@@ -1,5 +1,6 @@
 import AppKit
 import CorralContracts
+import CorralServices
 
 @MainActor
 public final class CorralTab: Identifiable {
@@ -425,8 +426,10 @@ public struct CorralSidebarAgent: Identifiable, Sendable {
     public var isOpen: Bool
     public var isActive: Bool
     public var isClosing: Bool
-    public init(id: UUID = UUID(), name: String, status: CorralStatusIndicatorView.Status = .idle, provider: String? = nil, deviceName: String? = nil, spaceID: UUID? = nil, isFavorite: Bool = false, isOpen: Bool = false, isActive: Bool = false, isClosing: Bool = false) {
-        self.id = id; self.name = name; self.status = status; self.provider = provider; self.deviceName = deviceName; self.spaceID = spaceID; self.isFavorite = isFavorite; self.isOpen = isOpen; self.isActive = isActive; self.isClosing = isClosing
+    /// The real device-scoped session this row drags onto the stage.
+    public var sessionID: SessionID?
+    public init(id: UUID = UUID(), name: String, status: CorralStatusIndicatorView.Status = .idle, provider: String? = nil, deviceName: String? = nil, spaceID: UUID? = nil, isFavorite: Bool = false, isOpen: Bool = false, isActive: Bool = false, isClosing: Bool = false, sessionID: SessionID? = nil) {
+        self.id = id; self.name = name; self.status = status; self.provider = provider; self.deviceName = deviceName; self.spaceID = spaceID; self.isFavorite = isFavorite; self.isOpen = isOpen; self.isActive = isActive; self.isClosing = isClosing; self.sessionID = sessionID
     }
 }
 
@@ -648,7 +651,16 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let table = notification.object as? NSTableView else { return }
         if kind == .spaces, spaces.indices.contains(table.selectedRow) { sidebar?.selectSpace(spaces[table.selectedRow]) }
-        if kind == .agents, agents.indices.contains(table.selectedRow) { sidebar?.onSelectAgent?(agents[table.selectedRow].id) }
+    }
+    /// Agents open on a completed click, not on mouse-down selection, so dragging a row never opens a preview first.
+    @objc func agentClicked(_ table: NSTableView) {
+        if agents.indices.contains(table.clickedRow) { sidebar?.onSelectAgent?(agents[table.clickedRow].id) }
+    }
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard kind == .agents, agents.indices.contains(row), let sessionID = agents[row].sessionID else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(sessionID.rawValue, forType: CorralWorkspaceStageView.sessionPasteboardType)
+        return item
     }
     func tableView(_ tableView: NSTableView, menuFor event: NSEvent, row: Int) -> NSMenu? {
         if kind == .spaces, spaces.indices.contains(row), !spaces[row].isVirtual { return sidebar?.spaceContextMenu(for: spaces[row].id) }
@@ -865,6 +877,7 @@ public final class CorralSidebarView: NSView {
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")))
         table.headerView = nil; table.rowSizeStyle = .custom; table.intercellSpacing = .zero; table.backgroundColor = CorralAestheticTokens.surface0; table.style = .plain; table.selectionHighlightStyle = .regular
         table.dataSource = data; table.delegate = data; table.usesAutomaticRowHeights = false
+        if data.kind == .agents { table.target = data; table.action = #selector(SidebarTableData.agentClicked(_:)); table.setDraggingSourceOperationMask(.move, forLocal: true) }
     }
     private func configureScroll(_ scroll: NSScrollView, table: NSTableView) {
         table.autoresizingMask = [.width]
@@ -879,38 +892,41 @@ public final class CorralSidebarView: NSView {
     @objc private func openSettings() { onSettings?() }
 }
 
+/// Legacy `.dropzone-overlay`: the exact slot the dropped pane will occupy.
 @MainActor
 public final class SplitDropZoneView: NSView {
-    public enum Edge: String, Sendable { case left, right, top, bottom, center }
-    public var edge: Edge = .center { didSet { needsDisplay = true } }
+    public typealias Edge = WorkspaceDropZone
+    public var edge: Edge = .center
     public override func draw(_ dirtyRect: NSRect) {
-        var rect = bounds.insetBy(dx: 2, dy: 2)
-        switch edge {
-        case .left: rect.size.width *= 0.25
-        case .right: rect.origin.x += rect.width * 0.75; rect.size.width *= 0.25
-        case .bottom: rect.size.height *= 0.25
-        case .top: rect.origin.y += rect.height * 0.75; rect.size.height *= 0.25
-        case .center: break
-        }
-        CorralAestheticTokens.accent.withAlphaComponent(0.16).setFill(); NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
-        CorralAestheticTokens.accent.setStroke(); let outline = NSBezierPath(roundedRect: rect.insetBy(dx: -1, dy: -1), xRadius: 6, yRadius: 6); outline.lineWidth = 2; outline.stroke()
+        let blue = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1)
+        let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.75, dy: 0.75), xRadius: 6, yRadius: 6)
+        blue.withAlphaComponent(0.08).setFill(); outline.fill()
+        blue.withAlphaComponent(0.85).setStroke(); outline.lineWidth = 1.5; outline.stroke()
     }
 }
 
 @MainActor
 public final class CorralWorkspaceStageView: NSView {
-    public var onDropTab: ((UUID, SplitDropZoneView.Edge) -> Void)?
+    /// Sidebar Agent rows drag their real device-scoped `SessionID` under this type.
+    public static let sessionPasteboardType = NSPasteboard.PasteboardType("com.corral.native.session")
+    public var onDropSession: ((SessionID, SessionID?, SplitDropZoneView.Edge) -> Void)?
+    public var onDropTab: ((UUID, SessionID?, SplitDropZoneView.Edge) -> Void)?
     public var activeTabID: UUID?
+    public let splitView = SplitWorkspaceView()
     public let dropZone = SplitDropZoneView()
+    public private(set) var dropTarget: SplitLayout.DropTarget?
     public private(set) var emptyStateLabel: NSTextField?
     public var onCreateAgent: (() -> Void)?
     private var emptyActionButton: NSButton?
     public override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect); registerForDraggedTypes([.string]); dropZone.isHidden = true; addSubview(dropZone)
+        super.init(frame: frameRect); registerForDraggedTypes([Self.sessionPasteboardType, .string])
+        addSubview(splitView); dropZone.isHidden = true; addSubview(dropZone)
         wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.background.cgColor
     }
     public required init?(coder: NSCoder) { fatalError("CorralWorkspaceStageView is created programmatically") }
-    public override func layout() { super.layout(); dropZone.frame = bounds.insetBy(dx: 2, dy: 2) }
+    public override func layout() { super.layout(); splitView.frame = bounds }
+    /// Tab content (and the Metal stage inside it) always sits beneath the pane chrome and drop highlight.
+    public func addTabContent(_ view: NSView) { addSubview(view, positioned: .below, relativeTo: splitView) }
     public func showEmptyState(_ show: Bool, action: (() -> Void)?) {
         if let action { onCreateAgent = action }
         guard show else { emptyStateLabel?.removeFromSuperview(); emptyActionButton?.removeFromSuperview(); emptyStateLabel = nil; emptyActionButton = nil; return }
@@ -922,129 +938,44 @@ public final class CorralWorkspaceStageView: NSView {
         emptyStateLabel = label; emptyActionButton = button
     }
     @objc private func createAgent() { onCreateAgent?() }
-    public func edge(at normalizedPoint: NSPoint) -> SplitDropZoneView.Edge {
-        normalizedPoint.x < 0.25 ? .left : normalizedPoint.x > 0.75 ? .right : normalizedPoint.y < 0.25 ? .bottom : normalizedPoint.y > 0.75 ? .top : .center
-    }
-    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .move }
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
     public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let point = convert(sender.draggingLocation, from: nil)
-        let x = point.x / max(bounds.width, 1); let y = point.y / max(bounds.height, 1)
-        dropZone.edge = edge(at: NSPoint(x: x, y: y))
+        dropTarget = resolveDropTarget(sender)
+        guard let dropTarget else { dropZone.isHidden = true; return [] }
+        dropZone.edge = dropTarget.edge
+        dropZone.frame = convert(dropTarget.previewFrame, from: splitView)
+        dropZone.needsDisplay = true
         dropZone.isHidden = false
         return .move
     }
-    public override func draggingExited(_ sender: NSDraggingInfo?) { dropZone.isHidden = true }
+    public override func draggingExited(_ sender: NSDraggingInfo?) { endDropPreview() }
+    public override func draggingEnded(_ sender: NSDraggingInfo) { endDropPreview() }
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        defer { dropZone.isHidden = true }
-        guard let raw = sender.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: raw) else { return false }
-        onDropTab?(id, dropZone.edge); return true
-    }
-}
-
-@MainActor
-public final class SplitWorkspaceView: NSView, NSSplitViewDelegate {
-    public private(set) var splitterCount = 0
-    public let stageViews: [SessionID: NSView]
-    public private(set) var root: WorkspaceLayoutNode?
-    public var onRatioChange: (([Int], Double) -> Void)?
-    public private(set) var focusedSessionID: SessionID?
-    private var splitViews: [NSSplitView] = []
-    private var splitPaths: [ObjectIdentifier: [Int]] = [:]
-    private var initialRatios: [ObjectIdentifier: Double] = [:]
-    private var latestRatios: [ObjectIdentifier: Double] = [:]
-
-    public init(root: WorkspaceLayoutNode?, stageViews: [SessionID: NSView]) {
-        self.root = root; self.stageViews = stageViews
-        super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = NSColor.clear.cgColor
-        rebuild()
-    }
-    public override var isOpaque: Bool { false }
-    public override func hitTest(_ point: NSPoint) -> NSView? {
-        for split in splitViews {
-            guard let first = split.arrangedSubviews.first else { continue }
-            let local = split.convert(point, from: self)
-            let divider = split.isVertical ? first.frame.maxX : first.frame.maxY
-            let position = split.isVertical ? local.x : local.y
-            let crossAxis = split.isVertical ? local.y : local.x
-            let crossExtent = split.isVertical ? split.bounds.height : split.bounds.width
-            if crossAxis >= 0, crossAxis <= crossExtent, abs(position - divider) <= max(5, split.dividerThickness) {
-                return split
-            }
+        defer { endDropPreview() }
+        // The release coordinate is authoritative; a refused final position drops nothing.
+        guard let target = resolveDropTarget(sender) else { return false }
+        let pasteboard = sender.draggingPasteboard
+        if let raw = pasteboard.string(forType: Self.sessionPasteboardType) {
+            onDropSession?(SessionID(raw), target.target, target.edge)
+        } else if let raw = pasteboard.string(forType: .string), let id = UUID(uuidString: raw) {
+            onDropTab?(id, target.target, target.edge)
         }
-        return nil
+        return true
     }
-    public required init?(coder: NSCoder) { fatalError("SplitWorkspaceView is created programmatically") }
-    public func updateRoot(_ root: WorkspaceLayoutNode?) { self.root = root; rebuild() }
-    public func split(_ source: SessionID, beside target: SessionID, direction: SplitDirection, ratio: Double = 0.5) {
-        guard let root else { self.root = .session(source); rebuild(); return }
-        self.root = inserting(source, at: target, in: root, direction: direction, ratio: ratio); rebuild()
-    }
-    public func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        let extent = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
-        let minimum: CGFloat = splitView.isVertical ? 120 : 60
-        return min(extent - minimum, max(minimum, proposedPosition))
-    }
-    public func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard let split = notification.object as? NSSplitView, split.arrangedSubviews.count > 1 else { return }
-        let extent = split.isVertical ? split.bounds.width : split.bounds.height
-        guard extent > 0 else { return }
-        let divider = split.dividerThickness
-        let usable = max(1, extent - divider)
-        let ratio = Double((split.isVertical ? split.arrangedSubviews[0].frame.width : split.arrangedSubviews[0].frame.height) / usable)
-        latestRatios[ObjectIdentifier(split)] = min(0.95, max(0.05, ratio))
-    }
-    private func build(_ node: WorkspaceLayoutNode, path: [Int] = []) -> NSView {
-        switch node {
-        case .session(let id): return stageViews[id] ?? NSView()
-        case .split(let direction, let ratio, let first, let second):
-            let split = CorralNativeSplitView(); split.isVertical = direction == .horizontal; split.dividerStyle = .thin; split.delegate = self; splitViews.append(split)
-            let splitID = ObjectIdentifier(split)
-            splitPaths[splitID] = path
-            initialRatios[splitID] = ratio
-            split.onResizeFinished = { [weak self, weak split] in
-                guard let self, let split else { return }
-                let id = ObjectIdentifier(split)
-                guard let ratio = self.latestRatios[id], abs(ratio - (self.initialRatios[id] ?? ratio)) >= 0.0001 else { return }
-                self.onRatioChange?(self.splitPaths[id] ?? [], ratio)
-            }
-            split.addArrangedSubview(build(first, path: path + [0])); split.addArrangedSubview(build(second, path: path + [1])); splitterCount += 1
-            DispatchQueue.main.async { [weak split] in guard let split else { return }; let extent = split.isVertical ? split.bounds.width : split.bounds.height; let usable = extent - split.dividerThickness; if usable > 0 { split.setPosition(usable * CGFloat(ratio), ofDividerAt: 0) } }
-            return split
+    private func resolveDropTarget(_ sender: NSDraggingInfo) -> SplitLayout.DropTarget? {
+        let pasteboard = sender.draggingPasteboard
+        let source: SessionID
+        if let raw = pasteboard.string(forType: Self.sessionPasteboardType), !raw.isEmpty {
+            source = SessionID(raw)
+        } else if let raw = pasteboard.string(forType: .string), let id = UUID(uuidString: raw), id != activeTabID {
+            // Another Tab's session never lives in the visible layout; only the candidate geometry matters.
+            source = SessionID("tab:" + raw)
+        } else {
+            return nil
         }
+        return SplitLayout.dropTarget(at: splitView.convert(sender.draggingLocation, from: nil), source: source, root: splitView.root, in: splitView.bounds, previous: dropTarget)
     }
-    public func focus(_ sessionID: SessionID) {
-        focusedSessionID = sessionID
-        for (id, view) in stageViews {
-            view.wantsLayer = true
-            view.layer?.borderWidth = id == sessionID ? 2 : 0
-            view.layer?.borderColor = id == sessionID ? CorralAestheticTokens.accent.cgColor : NSColor.clear.cgColor
-        }
-    }
-    private func inserting(_ source: SessionID, at target: SessionID, in node: WorkspaceLayoutNode, direction: SplitDirection, ratio: Double) -> WorkspaceLayoutNode {
-        switch node {
-        case .session(let id) where id == target: return .split(direction: direction, ratio: ratio, first: .session(target), second: .session(source))
-        case .session: return node
-        case .split(let axis, let oldRatio, let first, let second): return .split(direction: axis, ratio: oldRatio, first: inserting(source, at: target, in: first, direction: direction, ratio: ratio), second: inserting(source, at: target, in: second, direction: direction, ratio: ratio))
-        }
-    }
-    private func rebuild() {
-        subviews.forEach { $0.removeFromSuperview() }; splitViews.removeAll(); splitPaths.removeAll(); initialRatios.removeAll(); latestRatios.removeAll(); splitterCount = 0
-        guard let root else { return }
-        let content = build(root); content.translatesAutoresizingMaskIntoConstraints = false; addSubview(content)
-        if let focusedSessionID { focus(focusedSessionID) }
-        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: leadingAnchor), content.trailingAnchor.constraint(equalTo: trailingAnchor), content.topAnchor.constraint(equalTo: topAnchor), content.bottomAnchor.constraint(equalTo: bottomAnchor)])
-    }
-}
-
-@MainActor
-private final class CorralNativeSplitView: NSSplitView {
-    var onResizeFinished: (() -> Void)?
-    override var dividerThickness: CGFloat { 6 }
-    override func drawDivider(in rect: NSRect) { CorralAestheticTokens.borderSubtle.setFill(); NSBezierPath(rect: rect).fill() }
-    override func mouseDown(with event: NSEvent) {
-        super.mouseDown(with: event)
-        onResizeFinished?()
-    }
+    private func endDropPreview() { dropZone.isHidden = true; dropTarget = nil }
 }
 
 @MainActor
@@ -1108,8 +1039,6 @@ public final class CorralWorkspaceView: NSView {
     public var onCreateAgent: ((UUID?) -> Void)?
     public var onToggleSidebar: (() -> Void)?
     public var onSelectAgent: ((UUID) -> Void)?
-    public var onSplit: ((UUID, SplitDropZoneView.Edge) -> Void)?
-    public var onDropTab: ((UUID, UUID?, SplitDropZoneView.Edge) -> Void)?
     public var onOpenSession: ((UUID, UUID?, Bool) -> Void)?
     public var onFocusSession: ((UUID, UUID) -> Void)?
     public var onDevices: (() -> Void)?
@@ -1149,7 +1078,6 @@ public final class CorralWorkspaceView: NSView {
         tabBar.onSelectTab = { [weak self] in self?.selectTab(id: $0) }; tabBar.onCreateTab = { [weak self] in self?.onCreateTab?() }; tabBar.onCloseTab = { [weak self] in self?.closeTab(id: $0) }
         tabBar.onRenameTab = { [weak self] id, title in self?.renameTab(id: id, title: title) }; tabBar.onReorderTabs = { [weak self] id, index in self?.reorderTab(id: id, to: index) }
         tabBar.onContextAction = { [weak self] id, action in self?.performTabContextAction(id, action) }
-        stageContainer.onDropTab = { [weak self] id, edge in self?.handleDrop(id, edge: edge) }
         stageContainer.onCreateAgent = { [weak self] in self?.onCreateAgent?(nil) }
         let orderedTabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
         for tab in orderedTabs { attach(tab) }
@@ -1255,12 +1183,8 @@ public final class CorralWorkspaceView: NSView {
         setSidebarCollapsed(sidebarIsVisible)
         onToggleSidebar?()
     }
-    private func handleDrop(_ id: UUID, edge: SplitDropZoneView.Edge) {
-        guard let activeTabID, activeTabID != id else { return }
-        if edge == .center { tabBar.onSelectTab?(id) } else { onDropTab?(id, activeTabID, edge); onSplit?(id, edge) }
-    }
     private func attach(_ tab: CorralTab) {
-        let view = tab.contentView; view.translatesAutoresizingMaskIntoConstraints = false; view.isHidden = true; stageContainer.addSubview(view)
+        let view = tab.contentView; view.translatesAutoresizingMaskIntoConstraints = false; view.isHidden = true; stageContainer.addTabContent(view)
         NSLayoutConstraint.activate([view.leadingAnchor.constraint(equalTo: stageContainer.leadingAnchor), view.trailingAnchor.constraint(equalTo: stageContainer.trailingAnchor), view.topAnchor.constraint(equalTo: stageContainer.topAnchor), view.bottomAnchor.constraint(equalTo: stageContainer.bottomAnchor)])
     }
     private func firstFocusableView(in view: NSView) -> NSView? { if view.acceptsFirstResponder { return view }; for child in view.subviews { if let result = firstFocusableView(in: child) { return result } }; return nil }
