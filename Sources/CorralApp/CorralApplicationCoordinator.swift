@@ -292,6 +292,7 @@ public final class CorralApplicationCoordinator {
         let paneID: UUID
         let engine: SwiftTermEngineAdapter
         var subscribed = false
+        var subscriptionPending = false
         var receivedFrame = false
         var snapshot: TerminalGridSnapshot?
         var lastGeometry: GeometrySample?
@@ -471,7 +472,12 @@ public final class CorralApplicationCoordinator {
         }
         workspaceView.onDevices = { [weak self] in self?.presentDevicesPopover() }
         workspaceView.onOpenSession = { [weak self] id, tabID, preview in
-            guard let self, let key = self.uiSessionKeys[id] else { return }
+            guard let self else { return }
+            guard let key = self.uiSessionKeys[id] else {
+                self.lastConnectionError = "The selected Agent no longer maps to a live session."
+                self.showToast("无法打开会话：Agent 状态已过期，请刷新列表", kind: .error)
+                return
+            }
             Task { @MainActor in
                 await self.openSession(key, gesture: preview ? .singleClick : .doubleClick, in: tabID)
             }
@@ -619,16 +625,26 @@ public final class CorralApplicationCoordinator {
         gesture: SessionOpenGesture = .singleClick,
         in tabID: UUID? = nil
     ) async {
-        guard let descriptor = sessions[key]?.descriptor else { return }
+        guard let descriptor = sessions[key]?.descriptor else {
+            lastConnectionError = "The selected session is no longer in the device listing."
+            showToast("无法打开会话：会话已从设备列表移除", kind: .warning)
+            return
+        }
         do {
+            var targetTabWasStale = false
             if let tabID {
                 let state = try await workspaceStore.switchTab(tabID)
-                guard state.activeTabID == tabID else { return }
+                targetTabWasStale = state.activeTabID != tabID
             }
             let state = try await workspaceStore.smartOpenSession(descriptor, gesture: gesture)
             await applyWorkspaceState(state)
+            if targetTabWasStale {
+                lastConnectionError = "The requested workspace Tab no longer exists; opened in the active Tab."
+                showToast("目标标签页已失效，会话已在当前标签页打开", kind: .warning)
+            }
         } catch {
             lastConnectionError = String(describing: error)
+            showToast("会话打开失败：\(error)", kind: .error)
             await writeTelemetry()
         }
     }
@@ -1685,11 +1701,14 @@ public final class CorralApplicationCoordinator {
     private func subscribeVisibleSessions() async {
         guard connection != nil else { return }
         for key in visibleSessionKeys() {
-            guard let runtime = sessions[key], !runtime.subscribed else { continue }
+            guard let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending else { continue }
             do {
+                // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
+                sessions[key]?.subscriptionPending = true
                 // Subscribe at the server's own grid: a size the daemon cannot honor (panes sharing one tmux window)
                 // fails the whole subscription, while the `resize` published afterwards degrades to a no-op.
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
+                sessions[key]?.subscriptionPending = false
                 guard receipt.socketWritten else { continue }
                 sessions[key]?.subscribed = true
                 if activeSession == nil {
@@ -1697,6 +1716,7 @@ public final class CorralApplicationCoordinator {
                     stageView.activateInput(for: key, using: inputRouter)
                 }
             } catch {
+                sessions[key]?.subscriptionPending = false
                 lastConnectionError = String(describing: error)
             }
         }
@@ -1715,7 +1735,7 @@ public final class CorralApplicationCoordinator {
         case let .snapshot(ref, _), let .delta(ref, _), let .scrollback(ref, _, _): reference = ref
         }
         let key = SessionKey(deviceID: origin.deviceID, reference: reference)
-        guard var runtime = sessions[key], runtime.subscribed else { return }
+        guard let runtime = sessions[key], runtime.subscribed || runtime.subscriptionPending else { return }
         let update: TerminalUpdate
         switch frame {
         case let .snapshot(ref, ansi): update = .snapshot(reference: ref, ansi: ansi, origin: origin)
@@ -1729,10 +1749,10 @@ public final class CorralApplicationCoordinator {
                 if case let .autoReply(reply) = effect { count += reply.data.count }
             }
             let snapshot = await runtime.engine.snapshot()
-            guard snapshot.isValid else { return }
-            runtime.snapshot = snapshot
-            runtime.receivedFrame = true
-            sessions[key] = runtime
+            guard snapshot.isValid, var currentRuntime = sessions[key] else { return }
+            currentRuntime.snapshot = snapshot
+            currentRuntime.receivedFrame = true
+            sessions[key] = currentRuntime
             await updateStageSubmissions()
             await writeTelemetry()
         } catch {
