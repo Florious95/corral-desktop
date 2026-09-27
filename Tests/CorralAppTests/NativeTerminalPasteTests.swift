@@ -58,7 +58,7 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         view.terminalDelegate = sink
         view.getTerminal().feed(text: "\u{1b}[?2004h")
         let window = makeBackgroundWindow(containing: view)
-        defer { window.close() }
+        defer { closeAndDrain(window) }
         XCTAssertTrue(window.firstResponder === view)
 
         view.keyDown(with: keyEvent(modifiers: .command, windowNumber: window.windowNumber))
@@ -78,7 +78,7 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         let view = CorralNativeTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400), pasteboard: pasteboard)
         view.terminalDelegate = sink
         let window = makeBackgroundWindow(containing: view)
-        defer { window.close() }
+        defer { closeAndDrain(window) }
         XCTAssertTrue(window.firstResponder === view)
 
         NSApp.sendEvent(keyEvent(modifiers: .control, windowNumber: window.windowNumber))
@@ -101,7 +101,7 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         view.terminalDelegate = sink
         view.getTerminal().feed(text: "\u{1b}[?2004h")
         let window = makeBackgroundWindow(containing: view)
-        defer { window.close() }
+        defer { closeAndDrain(window) }
         XCTAssertTrue(window.firstResponder === view)
 
         window.sendEvent(keyEvent(modifiers: .command, windowNumber: window.windowNumber))
@@ -118,10 +118,22 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
 
     private func makeBackgroundWindow(containing view: NSView) -> NSWindow {
         let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
+        window.isReleasedWhenClosed = false
         window.contentView = view
         window.orderBack(nil)
         _ = window.makeFirstResponder(view)
         return window
+    }
+
+    private func closeAndDrain(_ window: NSWindow) {
+        let wasVisible = window.isVisible
+        window.orderOut(nil)
+        window.contentView = nil
+        window.close()
+        if wasVisible {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
     }
 
     private func keyEvent(modifiers: NSEvent.ModifierFlags, windowNumber: Int = 0) -> NSEvent {
