@@ -93,6 +93,63 @@ final class TerminalEngineTests: XCTestCase {
         assertGoldenGlyphsAndColor(in: afterDelta)
     }
 
+    func testSnapshotOnlyNormalizesBareLFAndLiveDeltaPreservesVTColumn() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 4, columns: 12))
+        _ = try await engine.apply(.snapshot(reference: reference(), ansi: Data("A\nB\r\nC".utf8), origin: origin(1)))
+
+        let afterSnapshot = await engine.snapshot()
+        XCTAssertEqual(textRows(in: afterSnapshot)[0], "A")
+        XCTAssertEqual(textRows(in: afterSnapshot)[1], "B")
+        XCTAssertEqual(textRows(in: afterSnapshot)[2], "C")
+
+        _ = try await feed("\u{1B}[20l\u{1B}[2;6HA\nB", to: engine)
+        let afterDelta = await engine.snapshot()
+        XCTAssertEqual(afterDelta.cells[2 * 12 + 6].content, .cluster("B", columns: .one))
+        XCTAssertEqual(afterDelta.cursor.row, 2)
+        XCTAssertEqual(afterDelta.cursor.column, 7)
+    }
+
+    func testScrollbackIsReadOnlyAndNeverMutatesLiveScreen() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 12))
+        _ = try await feed("LIVE", to: engine)
+        let before = await engine.snapshot()
+        let expectedReference = try reference()
+        let metadata = try ScrollbackMetadata(requestID: 7, fromLine: -1, lineCount: 1)
+        let historyANSI = Data("OLD HISTORY\n".utf8)
+
+        let effects = try await engine.apply(.scrollback(reference: expectedReference, metadata: metadata, ansi: historyANSI, origin: origin(1)))
+
+        XCTAssertTrue(effects.isEmpty)
+        let after = await engine.snapshot()
+        XCTAssertEqual(after, before)
+        let history = await engine.historyPage()
+        XCTAssertEqual(history?.reference, expectedReference)
+        XCTAssertEqual(history?.metadata, metadata)
+        XCTAssertEqual(history?.ansi, historyANSI)
+        XCTAssertEqual(history?.origin, origin(1))
+    }
+
+    func testSnapshotReplacesPreviousScreenWithinSameEpoch() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 16))
+        _ = try await engine.apply(.snapshot(reference: reference(), ansi: Data("OLD_CONTENT".utf8), origin: origin(1)))
+        _ = try await engine.apply(.snapshot(reference: reference(), ansi: Data("NEW_CONTENT".utf8), origin: origin(1)))
+
+        let snapshot = await engine.snapshot()
+        XCTAssertEqual(textRows(in: snapshot), ["NEW_CONTENT", ""])
+    }
+
+    func testSnapshotAfterResizeAndReconnectReplacesPreviousScreen() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 16))
+        _ = try await engine.apply(.snapshot(reference: reference(), ansi: Data("OLD_CONTENT".utf8), origin: origin(1)))
+        try await engine.resize(to: GridSize(rows: 3, columns: 16))
+        _ = try await engine.apply(.snapshot(reference: reference(), ansi: Data("NEW_CONTENT".utf8), origin: origin(2)))
+
+        let snapshot = await engine.snapshot()
+        XCTAssertEqual(textRows(in: snapshot), ["NEW_CONTENT", "", ""])
+        XCTAssertEqual(snapshot.cursor.row, 0)
+        XCTAssertEqual(snapshot.cursor.column, 11)
+    }
+
     func testRightEdgeWrapPendingAndFollowingCharacterStayValid() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 7))
         _ = try await feed("ABCDEFG", to: engine)
@@ -199,13 +256,14 @@ final class TerminalEngineTests: XCTestCase {
 
     func testTerminalQueriesReturnOnlyTypedLocalAutoReplyEffects() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 8))
-        let effects = try await feed("\u{1B}[5n\u{1B}[6n\u{1B}[c\u{1B}[?6n", to: engine)
+        let effects = try await feed("\u{1B}[5n\u{1B}[6n\u{1B}[c\u{1B}[?6n\u{1B}[?u", to: engine)
         let replies = effects.compactMap { effect -> TerminalAutoReplyBytes? in
             guard case let .autoReply(bytes) = effect else { return nil }
             return bytes
         }
         XCTAssertFalse(replies.isEmpty)
         XCTAssertEqual(replies.count, effects.count)
+        XCTAssertTrue(replies.contains { $0.data == Data("\u{1B}[?0u".utf8) })
         let snapshot = await engine.snapshot()
         XCTAssertEqual(snapshot.cells[0].content, .blank)
     }
