@@ -18,6 +18,14 @@ private enum TerminalEngineError: Error {
     case generationExhausted
 }
 
+/** Immutable scrollback payload; it is never fed into the live terminal parser. */
+public struct TerminalHistoryFrame: Equatable, Sendable {
+    public let reference: SessionReference
+    public let metadata: ScrollbackMetadata
+    public let ansi: Data
+    public let origin: SessionEventOrigin
+}
+
 /// SwiftTerm owns VT parsing and screen state; its replies are returned only as local terminal effects.
 public actor SwiftTermEngineAdapter: TerminalEngineAdapter, TerminalMouseEventEncoding {
     private static let maximumCellCount = 1_000_000
@@ -29,6 +37,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter, TerminalMouseEventEn
     private var generation = DirtyGeneration.initial
     private var lastValidSnapshot: TerminalGridSnapshot?
     private var lastInvalidCellDiagnostic: String?
+    private var historyFrame: TerminalHistoryFrame?
 
     public init(size: GridSize = GridSize(rows: 24, columns: 80)) {
         let initialSize = Self.isSupported(size) ? size : GridSize(rows: 24, columns: 80)
@@ -39,7 +48,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter, TerminalMouseEventEn
             options: TerminalOptions(
                 cols: initialSize.columns,
                 rows: initialSize.rows,
-                convertEol: true,
+                convertEol: false,
                 termName: "xterm-256color",
                 cursorStyle: .steadyBlock,
                 scrollback: 500,
@@ -56,17 +65,29 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter, TerminalMouseEventEn
             terminal.resetToInitialState()
             delegate.resetCursor()
             terminal.feed(byteArray: [0x1B, 0x5B, 0x48])
-            terminal.feed(byteArray: Array(ansi))
+            terminal.feed(byteArray: Self.normalizeSnapshotLineEndings(ansi))
+            if let historyFrame, historyFrame.origin.connectionEpoch != origin.connectionEpoch {
+                self.historyFrame = nil
+            }
         case let .delta(_, ansi, origin):
             guard accept(origin.connectionEpoch, resetOnEpochChange: true) else { return [] }
             terminal.feed(byteArray: Array(ansi))
-        case let .scrollback(_, _, ansi, origin):
-            guard accept(origin.connectionEpoch, resetOnEpochChange: true) else { return [] }
-            terminal.feed(byteArray: Array(ansi))
+            if let historyFrame, historyFrame.origin.connectionEpoch != origin.connectionEpoch {
+                self.historyFrame = nil
+            }
+        case let .scrollback(reference, metadata, ansi, origin):
+            guard epoch.map({ origin.connectionEpoch == $0 }) ?? true,
+                  historyFrame.map({ origin.connectionEpoch >= $0.origin.connectionEpoch }) ?? true else { return [] }
+            historyFrame = TerminalHistoryFrame(reference: reference, metadata: metadata, ansi: ansi, origin: origin)
+            return []
         }
         guard let next = generation.next() else { throw TerminalEngineError.generationExhausted }
         generation = next
         return delegate.drainEffects()
+    }
+
+    public func historyPage() async -> TerminalHistoryFrame? {
+        historyFrame
     }
 
     public func resize(to size: GridSize) async throws {
@@ -244,6 +265,18 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter, TerminalMouseEventEn
         guard size.isValid else { return false }
         let (count, overflow) = size.rows.multipliedReportingOverflow(by: size.columns)
         return !overflow && count <= maximumCellCount
+    }
+
+    private static func normalizeSnapshotLineEndings(_ data: Data) -> [UInt8] {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(data.count)
+        var previous: UInt8?
+        for byte in data {
+            if byte == 0x0A, previous != 0x0D { bytes.append(0x0D) }
+            bytes.append(byte)
+            previous = byte
+        }
+        return bytes
     }
 
     private static func color(_ color: Attribute.Color, default defaultColor: SwiftTerm.Color, inverse inverseColor: SwiftTerm.Color) -> TerminalColor {
