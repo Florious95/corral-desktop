@@ -515,10 +515,30 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         workspaceView.appearance = appearance
         workspaceView.setTheme(CorralThemeMode(rawValue: preferences.theme.rawValue) ?? .system)
         workspaceView.setSidebarCollapsed(preferences.sidebarCollapsed)
+        applyTerminalStageAppearance()
         for (_, view) in terminalRegistry.allViews {
             view.setTerminalFont(family: preferences.fontFamily, size: preferences.fontSize)
-            view.setTerminalColors(foreground: CorralAestheticTokens.previewForeground, background: CorralAestheticTokens.previewBackground)
+            view.setTerminalColors(foreground: terminalStageForeground, background: terminalStageBackground)
         }
+    }
+
+    private var terminalStageBackground: NSColor {
+        NSColor(srgbRed: 16.0 / 255.0, green: 17.0 / 255.0, blue: 21.0 / 255.0, alpha: 1)
+    }
+
+    private var terminalStageForeground: NSColor {
+        NSColor(srgbRed: 213.0 / 255.0, green: 220.0 / 255.0, blue: 230.0 / 255.0, alpha: 1)
+    }
+
+    private func applyTerminalStageAppearance() {
+        let darkAppearance = NSAppearance(named: .darkAqua)
+        let background = terminalStageBackground.cgColor
+        workspaceView.stageContainer.appearance = darkAppearance
+        workspaceView.stageContainer.wantsLayer = true
+        workspaceView.stageContainer.layer?.backgroundColor = background
+        terminalStageView.appearance = darkAppearance
+        terminalStageView.wantsLayer = true
+        terminalStageView.layer?.backgroundColor = background
     }
 
     private func applyWorkspaceState(_ state: CorralWorkspaceState) async {
@@ -572,7 +592,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             self?.discardedAutoReplyByteCount += byteCount
         }
         view.setTerminalFont(family: userPreferences.fontFamily, size: userPreferences.fontSize)
-        view.setTerminalColors(foreground: CorralAestheticTokens.previewForeground, background: CorralAestheticTokens.previewBackground)
+        view.setTerminalColors(foreground: terminalStageForeground, background: terminalStageBackground)
         terminalRegistry.insert(view, for: key)
         return view
     }
@@ -1148,8 +1168,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard !descriptors.isEmpty else { return }
         do {
             var state = try await workspaceStore.reconcileListing(descriptors)
-            if state.tabs.count == 1,
-               state.activeTab?.isImplicitBlank == true,
+            if state.activeTab?.isBlank == true,
                state.visibleSessionID == nil,
                let firstSession = descriptors.first {
                 state = try await workspaceStore.smartOpenSession(firstSession, gesture: .singleClick)

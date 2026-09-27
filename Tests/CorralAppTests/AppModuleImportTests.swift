@@ -820,6 +820,94 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testColdStartRestoresListedSessionIntoDarkStageWhenActiveTabIsBlank() async throws {
+        let supportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-native-cold-start-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
+        let preferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
+        _ = try await preferencesStore.update(UserPreferences(theme: .light))
+
+        let reference = try SessionReference("persisted-leader")
+        let deviceID = DeviceID("corral-native-development-endpoint")
+        let sessionID = SessionID("\(deviceID.rawValue.utf8.count):\(deviceID.rawValue)\(reference.rawValue)")
+        _ = try await workspaceStore.smartOpenSession(sessionID, gesture: .doubleClick)
+        let restoredTabID = (await workspaceStore.snapshot()).activeTabID
+        _ = try await workspaceStore.createTab()
+        let initialWorkspaceState = await workspaceStore.snapshot()
+        XCTAssertNotEqual(initialWorkspaceState.activeTabID, restoredTabID)
+        XCTAssertTrue(initialWorkspaceState.activeTab?.isBlank == true)
+        XCTAssertFalse(initialWorkspaceState.activeTab?.isImplicitBlank ?? true)
+
+        let link = RecordingSessionLink()
+        let coordinator = CorralApplicationCoordinator(
+            deviceRepository: EmptyDeviceRepository(),
+            credentialVault: TestDeviceCredentialVault(),
+            sessionLink: link,
+            deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
+            workspaceStore: workspaceStore,
+            userPreferencesStore: preferencesStore,
+            initialWorkspaceState: initialWorkspaceState,
+            initialUserPreferences: await preferencesStore.snapshot(),
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+                "CORRAL_NATIVE_BACKGROUND": "1"
+            ]
+        )
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        await coordinator.start()
+        let listSent = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
+        XCTAssertTrue(listSent)
+
+        let record = WireSessionRecord(
+            reference: reference,
+            name: "leader",
+            workingDirectory: "/fixture/workspace",
+            state: .working,
+            rows: 24,
+            columns: 80,
+            provider: "pi",
+            activity: "working",
+            health: "normal"
+        )
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/workspace", sessionCount: 1, aggregateState: .working, sessions: [record])
+        ]))))
+        let opened = await waitUntil {
+            coordinator.workspaceState.activeTabID == restoredTabID &&
+                coordinator.workspaceState.visibleSessionID == sessionID &&
+                coordinator.activeTerminalSessionKey?.reference == reference &&
+                coordinator.subscribedSessionIDs.contains(reference.rawValue)
+        }
+        XCTAssertTrue(opened, "a blank active Tab must restore the first listed Agent even when another persisted Tab owns it")
+
+        let terminalView = try XCTUnwrap(coordinator.terminalView(for: SessionKey(deviceID: deviceID, reference: reference)))
+        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data("COLD-START-CONTENT\r\n".utf8))))
+        let rendered = await waitUntil { self.visibleText(in: terminalView).contains("COLD-START-CONTENT") }
+        XCTAssertTrue(rendered, "the restored session snapshot must mount and render in its SwiftTerm view")
+
+        let stageColor = try XCTUnwrap(coordinator.workspaceView.stageContainer.layer?.backgroundColor)
+        let stageNSColor = try XCTUnwrap(NSColor(cgColor: stageColor))
+        let stageRGB = try XCTUnwrap(stageNSColor.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(Int((stageRGB.redComponent * 255).rounded()), 16)
+        XCTAssertEqual(Int((stageRGB.greenComponent * 255).rounded()), 17)
+        XCTAssertEqual(Int((stageRGB.blueComponent * 255).rounded()), 21)
+        let stageHost = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first { $0 is NativeTerminalStageView })
+        let stageHostColor = try XCTUnwrap(stageHost.layer?.backgroundColor)
+        let stageHostRGB = try XCTUnwrap(NSColor(cgColor: stageHostColor)?.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(Int((stageHostRGB.redComponent * 255).rounded()), 16)
+        XCTAssertEqual(Int((stageHostRGB.greenComponent * 255).rounded()), 17)
+        XCTAssertEqual(Int((stageHostRGB.blueComponent * 255).rounded()), 21)
+        XCTAssertEqual(coordinator.workspaceView.stageContainer.appearance?.name, .darkAqua)
+
+        await coordinator.stop()
+        window.close()
+    }
+
     func testEnvironmentTokenOverridesStoredCredential() async throws {
         let handle = CredentialHandle("keychain-item:production-test")
         let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9900)
