@@ -2,9 +2,14 @@ import AppKit
 
 @MainActor
 public final class CorralWindow: NSWindow {
+    public static let minimumContentSize = NSSize(width: 1100, height: 700)
+
     public init(contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860), title: String = "Corral") {
+        var boundedContentRect = contentRect.standardized
+        boundedContentRect.size.width = max(boundedContentRect.width, Self.minimumContentSize.width)
+        boundedContentRect.size.height = max(boundedContentRect.height, Self.minimumContentSize.height)
         super.init(
-            contentRect: contentRect,
+            contentRect: boundedContentRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -16,7 +21,23 @@ public final class CorralWindow: NSWindow {
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         backgroundColor = CorralAestheticTokens.surface0
-        minSize = NSSize(width: 1100, height: 700)
+        minSize = Self.minimumContentSize
+        contentMinSize = Self.minimumContentSize
+    }
+
+    public override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        super.setFrame(Self.frameRespectingMinimumSize(frameRect), display: flag)
+    }
+
+    public override func setFrame(_ frameRect: NSRect, display flag: Bool, animate animateFlag: Bool) {
+        super.setFrame(Self.frameRespectingMinimumSize(frameRect), display: flag, animate: animateFlag)
+    }
+
+    private static func frameRespectingMinimumSize(_ frame: NSRect) -> NSRect {
+        var frame = frame.standardized
+        frame.size.width = max(frame.size.width, minimumContentSize.width)
+        frame.size.height = max(frame.size.height, minimumContentSize.height)
+        return frame
     }
 
     public required init?(coder: NSCoder) {
@@ -41,7 +62,6 @@ public final class CorralWindow: NSWindow {
 @MainActor
 public final class CorralWindowController: NSWindowController, NSWindowDelegate {
     public private(set) var savedFrameBeforeZoom: NSRect?
-    private var savedMinimumSizeBeforeZoom: NSSize?
 
     public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860)) {
         let window = CorralWindow(contentRect: contentRect)
@@ -66,20 +86,21 @@ public final class CorralWindowController: NSWindowController, NSWindowDelegate 
     public func toggleZoom(to visibleFrame: NSRect) {
         guard let window, !window.styleMask.contains(.fullScreen) else { return }
         if let originalFrame = savedFrameBeforeZoom {
-            let originalMinimumSize = savedMinimumSizeBeforeZoom ?? window.minSize
-            window.minSize = NSSize(width: min(originalMinimumSize.width, originalFrame.width), height: min(originalMinimumSize.height, originalFrame.height))
             window.setFrame(originalFrame, display: true, animate: false)
-            window.minSize = originalMinimumSize
             savedFrameBeforeZoom = nil
-            savedMinimumSizeBeforeZoom = nil
         } else {
             let targetFrame = visibleFrame.standardized
             guard targetFrame.width > 0, targetFrame.height > 0 else { return }
             savedFrameBeforeZoom = window.frame
-            savedMinimumSizeBeforeZoom = window.minSize
-            window.minSize = NSSize(width: min(window.minSize.width, targetFrame.width), height: min(window.minSize.height, targetFrame.height))
             window.setFrame(targetFrame, display: true, animate: false)
         }
+    }
+
+    public func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(
+            width: max(frameSize.width, CorralWindow.minimumContentSize.width),
+            height: max(frameSize.height, CorralWindow.minimumContentSize.height)
+        )
     }
 
     public func windowDidResize(_ notification: Notification) {

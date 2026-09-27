@@ -116,6 +116,7 @@ final class NativeWorkspaceTests: XCTestCase {
         let initialContentBounds = try XCTUnwrap(window.contentView).bounds
         XCTAssertEqual(initialContentBounds.size, NSSize(width: 1400, height: 860))
         XCTAssertEqual(window.minSize, NSSize(width: 1100, height: 700))
+        XCTAssertEqual(window.contentMinSize, NSSize(width: 1100, height: 700))
 
         let spaces = (0..<12).map { CorralSidebarSpace(id: UUID(), name: "Space \($0) · \(String(repeating: "Long", count: 8))") }
         workspace.sidebar.setSpaces(spaces)
@@ -145,6 +146,80 @@ final class NativeWorkspaceTests: XCTestCase {
         window.layoutIfNeeded()
         XCTAssertEqual(window.frame, minimumFrame)
         XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+        let undersizedController = CorralWindowController(
+            workspaceView: CorralWorkspaceView(),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 500)
+        )
+        XCTAssertEqual(undersizedController.window?.contentView?.bounds.size, NSSize(width: 1100, height: 700))
+    }
+
+    func testSelectingAgentDoesNotOpenSettingsOrChangeWindowAndStageBounds() throws {
+        let sessionID = UUID()
+        let tab = CorralTab(
+            title: "Agent workspace",
+            contentView: NSView(),
+            sessionIDs: [sessionID],
+            activeSessionID: sessionID,
+            isBlankWorkspace: false
+        )
+        let workspace = CorralWorkspaceView(tabs: [tab])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window as? CorralWindow)
+        window.setContentSize(NSSize(width: 1100, height: 700))
+        window.contentView?.layoutSubtreeIfNeeded()
+        workspace.layoutSubtreeIfNeeded()
+        workspace.sidebar.layoutSubtreeIfNeeded()
+        let agent = CorralSidebarAgent(id: sessionID, name: "Agent")
+        workspace.sidebar.setAgents([agent] + (0..<40).map { CorralSidebarAgent(name: "Agent \($0)") })
+        workspace.sidebar.layoutSubtreeIfNeeded()
+        let clipView = try XCTUnwrap(workspace.sidebar.agentsTable.enclosingScrollView?.contentView)
+        let visibleAgentRect = clipView.convert(clipView.bounds, to: workspace.sidebar)
+        let settingsRect = workspace.sidebar.settingsButton.convert(workspace.sidebar.settingsButton.bounds, to: workspace.sidebar)
+        XCTAssertFalse(visibleAgentRect.intersects(settingsRect))
+        let rowRect = workspace.sidebar.agentsTable.convert(workspace.sidebar.agentsTable.rect(ofRow: 0), to: workspace.sidebar)
+        let rowHit = workspace.sidebar.hitTest(NSPoint(x: rowRect.midX, y: rowRect.midY))
+        XCTAssertNotNil(rowHit)
+        XCTAssertTrue(rowHit === workspace.sidebar.agentsTable || rowHit?.isDescendant(of: workspace.sidebar.agentsTable) == true)
+        XCTAssertFalse(rowHit === workspace.sidebar.settingsButton)
+
+        let frame = window.frame
+        let contentBounds = try XCTUnwrap(window.contentView).bounds
+        var settingsCount = 0
+        var selectedAgent: UUID?
+        var focusedSession: (UUID, UUID)?
+        workspace.onSettings = { settingsCount += 1 }
+        workspace.onSelectAgent = { selectedAgent = $0 }
+        workspace.onFocusSession = { focusedSession = ($0, $1) }
+        workspace.sidebar.agentsTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        XCTAssertNil(selectedAgent, "selection alone is not a completed Agent click")
+        let rowCell = try XCTUnwrap(workspace.sidebar.agentsTable.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        XCTAssertTrue(rowCell.accessibilityPerformPress())
+        workspace.layoutSubtreeIfNeeded()
+        workspace.stageContainer.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(selectedAgent, sessionID)
+        XCTAssertEqual(focusedSession?.0, sessionID)
+        XCTAssertEqual(focusedSession?.1, tab.id)
+        XCTAssertEqual(settingsCount, 0)
+        XCTAssertEqual(window.frame, frame)
+        XCTAssertEqual(window.contentView?.bounds, contentBounds)
+        XCTAssertEqual(workspace.stageContainer.frame.size, NSSize(width: 820, height: 662))
+        XCTAssertEqual(tab.contentView.frame.size, workspace.stageContainer.bounds.size)
+
+        let refusedResize = controller.windowWillResize(window, to: NSSize(width: 900, height: 500))
+        XCTAssertGreaterThanOrEqual(refusedResize.width, window.minSize.width)
+        XCTAssertGreaterThanOrEqual(refusedResize.height, window.minSize.height)
+
+        workspace.sidebar.settingsButton.performClick(nil)
+        XCTAssertEqual(settingsCount, 1)
+        XCTAssertEqual(window.frame, frame)
+
+        window.setContentSize(NSSize(width: 900, height: 500))
+        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.width ?? 0, 1100)
+        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.height ?? 0, 700)
+        window.setFrame(NSRect(origin: frame.origin, size: NSSize(width: 900, height: 500)), display: false, animate: false)
+        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.width ?? 0, 1100)
+        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.height ?? 0, 700)
     }
 
     func testSidebarGeometryMatchesLegacySidebarCSS() throws {
@@ -483,13 +558,15 @@ final class NativeWorkspaceTests: XCTestCase {
     }
 
     func testWindowDoubleClickZoomStaysInVisibleFrameAndRestoresExactFrame() throws {
-        let initial = NSRect(x: 41.25, y: 72.5, width: 780.5, height: 510.25)
+        let initial = NSRect(x: 41.25, y: 72.5, width: 1180.5, height: 710.25)
         let controller = CorralWindowController(workspaceView: CorralWorkspaceView(), contentRect: initial)
         let window = try XCTUnwrap(controller.window as? CorralWindow)
         let original = window.frame
         let visibleFrame = NSRect(x: 70, y: 40, width: 1220, height: 820)
         controller.toggleZoom(to: visibleFrame)
         XCTAssertEqual(window.frame, visibleFrame)
+        XCTAssertEqual(window.minSize, CorralWindow.minimumContentSize)
+        XCTAssertEqual(window.contentMinSize, CorralWindow.minimumContentSize)
         XCTAssertGreaterThanOrEqual(window.frame.minX, visibleFrame.minX)
         XCTAssertGreaterThanOrEqual(window.frame.minY, visibleFrame.minY)
         XCTAssertLessThanOrEqual(window.frame.maxX, visibleFrame.maxX)
@@ -497,7 +574,35 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(controller.savedFrameBeforeZoom, original)
         controller.toggleZoom(to: visibleFrame)
         XCTAssertEqual(window.frame, original)
+        XCTAssertEqual(window.minSize, CorralWindow.minimumContentSize)
         XCTAssertNil(controller.savedFrameBeforeZoom)
+    }
+
+    func testSettingsOverlayDoesNotResizeWindowOrReplaceStage() throws {
+        let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "Agent", contentView: NSView())])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window as? CorralWindow)
+        window.setContentSize(NSSize(width: 1100, height: 700))
+        window.contentView?.layoutSubtreeIfNeeded()
+        workspace.layoutSubtreeIfNeeded()
+        let initialFrame = window.frame
+        let initialBounds = try XCTUnwrap(window.contentView).bounds
+        let dialog = SettingsDialogViewController()
+
+        dialog.present(over: window)
+        window.contentView?.layoutSubtreeIfNeeded()
+        workspace.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(dialog.presentedWindow === window)
+        XCTAssertEqual(window.frame, initialFrame)
+        XCTAssertEqual(window.contentView?.bounds, initialBounds)
+        XCTAssertEqual(workspace.stageContainer.frame.size, NSSize(width: 820, height: 662))
+        let activeTabContent = try XCTUnwrap(workspace.activeTabID.flatMap(workspace.view(forTab:)))
+        XCTAssertTrue(workspace.stageContainer.subviews.contains { $0 === activeTabContent })
+
+        dialog.dismiss()
+        XCTAssertEqual(window.frame, initialFrame)
+        XCTAssertEqual(window.contentView?.bounds, initialBounds)
     }
 
     func testWindowUsesTransparentFullSizeNativeTitlebar() {
