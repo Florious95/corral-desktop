@@ -48,17 +48,89 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         )
     }
 
+    func testCommandVKeyDownInvokesBracketedPasteActionWithoutHostInput() throws {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.writeObjects([NSURL(fileURLWithPath: "/tmp/Agent's folder/code file.swift")])
+
+        let sink = PasteCapture()
+        let view = CorralNativeTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400), pasteboard: pasteboard)
+        view.terminalDelegate = sink
+        view.getTerminal().feed(text: "\u{1b}[?2004h")
+        let window = makeBackgroundWindow(containing: view)
+        defer { window.close() }
+        XCTAssertTrue(window.firstResponder === view)
+
+        view.keyDown(with: keyEvent(modifiers: .command, windowNumber: window.windowNumber))
+
+        XCTAssertEqual(
+            sink.payloads,
+            [Data("\u{1b}[200~'/tmp/Agent'\\''s folder/code file.swift'\u{1b}[201~".utf8)]
+        )
+    }
+
+    func testWindowDeliveredControlVUsesTheLocalPasteMonitor() throws {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setData(samplePNG(), forType: .png)
+
+        let sink = PasteCapture()
+        let view = CorralNativeTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400), pasteboard: pasteboard)
+        view.terminalDelegate = sink
+        let window = makeBackgroundWindow(containing: view)
+        defer { window.close() }
+        XCTAssertTrue(window.firstResponder === view)
+
+        NSApp.sendEvent(keyEvent(modifiers: .control, windowNumber: window.windowNumber))
+
+        let payload = try XCTUnwrap(sink.payloads.first.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertFalse(payload.contains("\u{16}"), "the window-delivered Ctrl+V must not send the raw control byte")
+        XCTAssertTrue(payload.hasPrefix("'") && payload.hasSuffix("'"))
+        let imagePath = String(payload.dropFirst().dropLast())
+        defer { try? FileManager.default.removeItem(atPath: imagePath) }
+        XCTAssertNotNil(NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: imagePath))))
+    }
+
+    func testWindowDeliveredCommandVUsesThePasteActionAndBracketedMarkers() throws {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.writeObjects([NSURL(fileURLWithPath: "/tmp/Agent's folder/code file.swift")])
+
+        let sink = PasteCapture()
+        let view = CorralNativeTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400), pasteboard: pasteboard)
+        view.terminalDelegate = sink
+        view.getTerminal().feed(text: "\u{1b}[?2004h")
+        let window = makeBackgroundWindow(containing: view)
+        defer { window.close() }
+        XCTAssertTrue(window.firstResponder === view)
+
+        window.sendEvent(keyEvent(modifiers: .command, windowNumber: window.windowNumber))
+
+        XCTAssertEqual(
+            sink.payloads,
+            [Data("\u{1b}[200~'/tmp/Agent'\\''s folder/code file.swift'\u{1b}[201~".utf8)]
+        )
+    }
+
     private func isolatedPasteboard() -> NSPasteboard {
         NSPasteboard(name: NSPasteboard.Name("com.corral.native-paste-tests.\(UUID().uuidString)"))
     }
 
-    private func keyEvent(modifiers: NSEvent.ModifierFlags) -> NSEvent {
+    private func makeBackgroundWindow(containing view: NSView) -> NSWindow {
+        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = view
+        window.orderBack(nil)
+        _ = window.makeFirstResponder(view)
+        return window
+    }
+
+    private func keyEvent(modifiers: NSEvent.ModifierFlags, windowNumber: Int = 0) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
             modifierFlags: modifiers,
-            timestamp: 0,
-            windowNumber: 0,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: windowNumber,
             context: nil,
             characters: "v",
             charactersIgnoringModifiers: "v",
