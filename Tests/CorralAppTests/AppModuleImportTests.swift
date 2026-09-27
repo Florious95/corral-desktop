@@ -169,11 +169,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(userInputSent)
 
         let mouseBytes = Array("\u{1b}[<0;1;1M".utf8)
-        terminalView.send(source: terminalView.terminal, data: mouseBytes[...])
+        terminalView.send(data: mouseBytes[...])
         let mouseInputSent = await waitUntilMVP {
             await link.commands().filter { if case .input = $0 { true } else { false } }.count == 2
         }
-        XCTAssertTrue(mouseInputSent, "mouse reports must pass the automatic-reply filter")
+        XCTAssertTrue(mouseInputSent, "mouse reports must use the terminal user-input send path")
 
         terminalView.feed(byteArray: Array("\u{1b}[5n".utf8)[...])
         try? await Task.sleep(nanoseconds: 30_000_000)

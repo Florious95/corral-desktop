@@ -124,11 +124,8 @@ final class CorralNativeTerminalView: TerminalView {
     }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
-        if SwiftTermVTReplyFilter.isAutomaticResponse(data) {
-            onDiscardedAutomaticReply?(data.count)
-            return
-        }
-        terminalDelegate?.send(source: self, data: data)
+        // This callback is VT-parser output; user input uses TerminalView.send(data:) instead.
+        onDiscardedAutomaticReply?(data.count)
     }
 
     /// Shared by the local event monitor and synthetic-event tests.
@@ -192,20 +189,6 @@ final class CorralNativeTerminalView: TerminalView {
                 payload.append(contentsOf: [0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e])
             }
             send(data: payload[...])
-        }
-    }
-}
-
-private enum SwiftTermVTReplyFilter {
-    static func isAutomaticResponse(_ data: ArraySlice<UInt8>) -> Bool {
-        let bytes = Array(data)
-        guard bytes.count >= 2, bytes[0] == 0x1b else { return false }
-        if bytes[1] == 0x5d || bytes[1] == 0x50 { return true } // OSC and DCS replies
-        guard bytes.count >= 3, bytes[1] == 0x5b else { return false }
-        let final = bytes[bytes.count - 1]
-        guard [0x6e, 0x63, 0x79, 0x74, 0x49, 0x4f, 0x52].contains(final) else { return false }
-        return bytes[2..<(bytes.count - 1)].allSatisfy {
-            ($0 >= 0x30 && $0 <= 0x39) || [0x3b, 0x3f, 0x3e, 0x24].contains($0)
         }
     }
 }
