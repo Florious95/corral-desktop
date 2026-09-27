@@ -90,6 +90,43 @@ public struct TerminalCellSelection: Hashable, Sendable {
     }
 }
 
+public enum TerminalMouseEventPhase: Equatable, Sendable {
+    case buttonDown
+    case buttonUp
+    case drag
+}
+
+public struct TerminalMouseModifiers: OptionSet, Sendable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+
+    public static let shift = Self(rawValue: 1 << 0)
+    public static let option = Self(rawValue: 1 << 1)
+    public static let control = Self(rawValue: 1 << 2)
+}
+
+/// Implemented by the terminal adapter so its active protocol mode selects the mouse byte format.
+public protocol TerminalMouseEventEncoding: Sendable {
+    func encodeMouseEvent(
+        button: Int,
+        column: Int,
+        row: Int,
+        phase: TerminalMouseEventPhase,
+        modifiers: TerminalMouseModifiers
+    ) async -> Data?
+}
+
+private struct TerminalMouseEventRequest: Sendable {
+    let cell: TerminalCellPosition
+    let phase: TerminalMouseEventPhase
+    let modifiers: TerminalMouseModifiers
+}
+
+private enum TerminalInputFIFOEntry: Sendable {
+    case bytes(UserInputBytes)
+    case mouse(TerminalMouseEventRequest)
+}
+
 /// Native AppKit text-input client. Marked text stays local until the input method commits it.
 @MainActor
 public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
@@ -99,8 +136,12 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
     private var markedTextValue: NSAttributedString?
     private var markedSelection = NSRange(location: 0, length: 0)
     private var compositionEnterInFlight = false
-    private let routingContinuation: AsyncStream<UserInputBytes>.Continuation
+    private let routingContinuation: AsyncStream<TerminalInputFIFOEntry>.Continuation
+    private let mouseEventEncoder: (any TerminalMouseEventEncoding)?
     private var routingTask: Task<Void, Never>?
+    private var mouseSelectionAnchor: TerminalCellPosition?
+    private var forceTextSelectionForMouseGesture = false
+    private var mouseGestureReported = false
     private var gridSize = GridSize.zero
     private var cellSize = NSSize.zero
     private var terminalFont: NSFont?
@@ -110,18 +151,42 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
 
     public private(set) var selection: TerminalCellSelection?
 
-    public init(frame frameRect: NSRect, sessionKey: SessionKey, inputRouting: any TerminalInputRouting, pasteboard: NSPasteboard = .general) {
+    public init(
+        frame frameRect: NSRect,
+        sessionKey: SessionKey,
+        inputRouting: any TerminalInputRouting,
+        pasteboard: NSPasteboard = .general,
+        mouseEventEncoder: (any TerminalMouseEventEncoding)? = nil
+    ) {
         self.sessionKey = sessionKey
         self.inputRouting = inputRouting
         self.pasteboard = pasteboard
-        var continuation: AsyncStream<UserInputBytes>.Continuation!
-        let stream = AsyncStream<UserInputBytes> { continuation = $0 }
+        self.mouseEventEncoder = mouseEventEncoder
+        var continuation: AsyncStream<TerminalInputFIFOEntry>.Continuation!
+        let stream = AsyncStream<TerminalInputFIFOEntry> { continuation = $0 }
         self.routingContinuation = continuation
         super.init(frame: frameRect)
         let routing = self.inputRouting
-        self.routingTask = Task {
-            for await input in stream {
-                _ = try? await routing.route(.userBytes(input), to: sessionKey)
+        self.routingTask = Task { [weak self] in
+            for await entry in stream {
+                switch entry {
+                case let .bytes(input):
+                    _ = try? await routing.route(.userBytes(input), to: sessionKey)
+                case let .mouse(event):
+                    guard let encoder = self?.mouseEventEncoder,
+                          let data = await encoder.encodeMouseEvent(
+                            button: 0,
+                            column: event.cell.column,
+                            row: event.cell.row,
+                            phase: event.phase,
+                            modifiers: event.modifiers
+                          ), !data.isEmpty else {
+                        self?.applyTextSelection(for: event)
+                        continue
+                    }
+                    self?.finishReportedMouseEvent(event)
+                    _ = try? await routing.route(.userBytes(UserInputBytes(data)), to: sessionKey)
+                }
             }
         }
     }
@@ -154,6 +219,18 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
     public func setSelection(_ selection: TerminalCellSelection?) {
         self.selection = selection
         needsDisplay = true
+    }
+
+    /// Input points and cell metrics are both in AppKit points; the adapter receives zero-based cells.
+    public func terminalCell(atViewPoint point: NSPoint) -> TerminalCellPosition? {
+        let (_, overflow) = gridSize.rows.multipliedReportingOverflow(by: gridSize.columns)
+        guard gridSize.isValid, !overflow, cellSize.width.isFinite, cellSize.height.isFinite,
+              cellSize.width > 0, cellSize.height > 0, point.x.isFinite, point.y.isFinite else { return nil }
+        let column = (point.x - bounds.minX) / cellSize.width
+        let row = (bounds.maxY - point.y) / cellSize.height
+        guard column.isFinite, row.isFinite, column >= 0, column < CGFloat(gridSize.columns),
+              row >= 0, row < CGFloat(gridSize.rows) else { return nil }
+        return TerminalCellPosition(row: Int(floor(row)), column: Int(floor(column)))
     }
 
     public override func draw(_ dirtyRect: NSRect) {
@@ -262,6 +339,49 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
         return row * gridSize.columns + column
     }
 
+    public override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let point = convert(event.locationInWindow, from: nil)
+        guard let cell = terminalCell(atViewPoint: point) else {
+            super.mouseDown(with: event)
+            return
+        }
+        if event.modifierFlags.contains(.option) || mouseEventEncoder == nil {
+            forceTextSelectionForMouseGesture = event.modifierFlags.contains(.option)
+            applyTextSelection(for: TerminalMouseEventRequest(cell: cell, phase: .buttonDown, modifiers: []))
+        } else {
+            forceTextSelectionForMouseGesture = false
+            mouseGestureReported = true
+            enqueueMouseEvent(cell, phase: .buttonDown, modifiers: event.modifierFlags)
+        }
+    }
+
+    public override func mouseDragged(with event: NSEvent) {
+        guard let cell = terminalCell(atViewPoint: convert(event.locationInWindow, from: nil)) else { return }
+        guard mouseSelectionAnchor != nil || mouseGestureReported else { return }
+        if forceTextSelectionForMouseGesture || event.modifierFlags.contains(.option) || mouseEventEncoder == nil {
+            applyTextSelection(for: TerminalMouseEventRequest(cell: cell, phase: .drag, modifiers: []))
+        } else {
+            enqueueMouseEvent(cell, phase: .drag, modifiers: event.modifierFlags)
+        }
+    }
+
+    public override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let cell = terminalCell(atViewPoint: point) else {
+            mouseSelectionAnchor = nil
+            mouseGestureReported = false
+            forceTextSelectionForMouseGesture = false
+            return
+        }
+        if forceTextSelectionForMouseGesture || event.modifierFlags.contains(.option) || mouseEventEncoder == nil {
+            applyTextSelection(for: TerminalMouseEventRequest(cell: cell, phase: .buttonUp, modifiers: []))
+        } else if mouseSelectionAnchor != nil || mouseGestureReported {
+            enqueueMouseEvent(cell, phase: .buttonUp, modifiers: event.modifierFlags)
+        }
+        forceTextSelectionForMouseGesture = false
+    }
+
     public override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
@@ -347,6 +467,46 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
             width: cellSize.width,
             height: cellSize.height
         )
+    }
+
+    private func enqueueMouseEvent(_ cell: TerminalCellPosition, phase: TerminalMouseEventPhase, modifiers: NSEvent.ModifierFlags) {
+        var terminalModifiers: TerminalMouseModifiers = []
+        if modifiers.contains(.shift) { terminalModifiers.insert(.shift) }
+        if modifiers.contains(.option) { terminalModifiers.insert(.option) }
+        if modifiers.contains(.control) { terminalModifiers.insert(.control) }
+        routingContinuation.yield(.mouse(TerminalMouseEventRequest(cell: cell, phase: phase, modifiers: terminalModifiers)))
+    }
+
+    private func applyTextSelection(for event: TerminalMouseEventRequest) {
+        switch event.phase {
+        case .buttonDown:
+            mouseGestureReported = false
+            mouseSelectionAnchor = event.cell
+            setSelection(TerminalCellSelection(anchor: event.cell, focus: event.cell))
+        case .drag:
+            guard let anchor = mouseSelectionAnchor else { return }
+            setSelection(TerminalCellSelection(anchor: anchor, focus: event.cell))
+        case .buttonUp:
+            if let anchor = mouseSelectionAnchor {
+                setSelection(TerminalCellSelection(anchor: anchor, focus: event.cell))
+            }
+            mouseSelectionAnchor = nil
+            mouseGestureReported = false
+        }
+    }
+
+    private func finishReportedMouseEvent(_ event: TerminalMouseEventRequest) {
+        switch event.phase {
+        case .buttonDown:
+            mouseGestureReported = true
+            mouseSelectionAnchor = nil
+            setSelection(nil)
+        case .drag:
+            break
+        case .buttonUp:
+            mouseGestureReported = false
+            mouseSelectionAnchor = nil
+        }
     }
 
     private func pasteControlV() {
@@ -477,7 +637,7 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
 
     private func sendUserText(_ text: String) {
         guard !text.isEmpty, let data = text.data(using: .utf8) else { return }
-        routingContinuation.yield(UserInputBytes(data))
+        routingContinuation.yield(.bytes(UserInputBytes(data)))
     }
 
     private static func isEnter(_ event: NSEvent) -> Bool { event.keyCode == 36 || event.keyCode == 76 }
