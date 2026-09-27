@@ -27,13 +27,9 @@ final class SplitWorkspaceViewTests: XCTestCase {
 
     private func completeAgentClick(on sidebar: CorralSidebarView, row: Int) throws {
         sidebar.agentsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        let recognizer = try XCTUnwrap(sidebar.agentsTable.gestureRecognizers.compactMap { $0 as? NSClickGestureRecognizer }.first)
-        XCTAssertEqual(recognizer.numberOfClicksRequired, 1)
-        XCTAssertFalse(recognizer.delaysPrimaryMouseButtonEvents)
-        XCTAssertEqual(sidebar.agentsTable.selectedRow, row)
-        let dispatchedClick = NSClickGestureRecognizer()
-        XCTAssertNil(dispatchedClick.view, "test action dispatch does not have a WindowServer hit-tested view")
-        sidebar.handleAgentClick(dispatchedClick)
+        let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
+        XCTAssertEqual(table.selectedRow, row)
+        table.dispatchClickIfCompleted(from: row, to: row, wasDragged: false)
     }
 
     private func mouse(_ type: NSEvent.EventType, at point: CGPoint, in overlay: SplitWorkspaceView) -> NSEvent {
@@ -227,9 +223,13 @@ final class SplitWorkspaceViewTests: XCTestCase {
         sidebar.onSelectAgent = { opened.append($0) }
         sidebar.agentsTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         XCTAssertTrue(opened.isEmpty, "mouse-down selection starts drags; only a completed click opens the Agent")
+        let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
+        table.dispatchClickIfCompleted(from: 0, to: 0, wasDragged: true)
+        table.dispatchClickIfCompleted(from: 0, to: 1, wasDragged: false)
+        XCTAssertTrue(opened.isEmpty, "dragging or releasing outside the row must not open a preview")
 
-        for row in 0..<2 { try completeAgentClick(on: sidebar, row: row) }
-        XCTAssertEqual(opened, [firstID, secondID])
+        for row in [0, 1, 0] { try completeAgentClick(on: sidebar, row: row) }
+        XCTAssertEqual(opened, [firstID, secondID, firstID])
     }
 
     func testSidebarAgentClickFillsAndShowsTheNewlyCreatedTab() throws {
