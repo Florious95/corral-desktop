@@ -33,6 +33,8 @@ final class CorralNativeTerminalView: TerminalView {
         if let controlVPasteMonitor { NSEvent.removeMonitor(controlVPasteMonitor.value) }
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     func setTerminalFont(family: String, size: Int) {
         let pointSize = CGFloat(size)
         font = NSFont(name: family, size: pointSize) ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)

@@ -6,6 +6,11 @@ import XCTest
 
 @MainActor
 final class CorralNativeTerminalPasteTests: XCTestCase {
+    func testTerminalAcceptsFirstMouseForBackgroundWindowClicks() {
+        let view = CorralNativeTerminalView(frame: .zero)
+        XCTAssertTrue(view.acceptsFirstMouse(for: nil))
+    }
+
     func testControlVPastesTextOrQuotedImagePathWithoutSendingControlV() throws {
         let pasteboard = isolatedPasteboard()
         defer { pasteboard.releaseGlobally() }
