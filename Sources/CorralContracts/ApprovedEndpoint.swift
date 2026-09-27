@@ -1,13 +1,12 @@
 import Foundation
 
 public enum EndpointSafetyError: Error, Equatable, Sendable {
-    case productionEndpointForbidden
+    case nonLoopbackEndpointForbidden
     case invalidEndpoint
 }
 
-/// A validated development WebSocket URL. Only loopback port 9919 at `/ws` is admitted.
+/// A validated WebSocket URL restricted to loopback hosts and the canonical `/ws` path.
 public struct ApprovedEndpoint: Codable, Hashable, Sendable {
-    public static let productionPort = 9900
     public static let developmentPort = 9919
     public static let webSocketPath = "/ws"
     private static let allowedHosts: Set<String> = ["127.0.0.1", "::1"]
@@ -18,7 +17,12 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
     public let path: String
     private let validatedURL: URL
 
-    public init(scheme: String = "ws", host: String, port: Int, path: String = Self.webSocketPath) throws {
+    public init(
+        scheme: String = "ws",
+        host: String,
+        port: Int,
+        path: String = Self.webSocketPath
+    ) throws {
         let normalizedScheme = scheme.lowercased()
         let inputHost = host.lowercased()
         let normalizedHost: String
@@ -37,11 +41,11 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         let canonicalHost = normalizedHost == "localhost" ? "127.0.0.1" : normalizedHost
 
         guard !canonicalHost.isEmpty else { throw EndpointSafetyError.invalidEndpoint }
-        guard port != Self.productionPort, Self.allowedHosts.contains(canonicalHost) else {
-            throw EndpointSafetyError.productionEndpointForbidden
+        guard Self.allowedHosts.contains(canonicalHost) else {
+            throw EndpointSafetyError.nonLoopbackEndpointForbidden
         }
         guard normalizedScheme == "ws" || normalizedScheme == "wss",
-              (1...65_535).contains(port), port == Self.developmentPort,
+              (1...65_535).contains(port),
               path.isEmpty || path == Self.webSocketPath else {
             throw EndpointSafetyError.invalidEndpoint
         }

@@ -2,9 +2,14 @@ import AppKit
 
 @MainActor
 public final class CorralWindow: NSWindow {
-    public init(contentRect: NSRect = NSRect(x: 0, y: 0, width: 1180, height: 760), title: String = "Corral") {
+    public static let minimumContentSize = NSSize(width: 1100, height: 700)
+
+    public init(contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860), title: String = "Corral") {
+        var boundedContentRect = contentRect.standardized
+        boundedContentRect.size.width = max(boundedContentRect.width, Self.minimumContentSize.width)
+        boundedContentRect.size.height = max(boundedContentRect.height, Self.minimumContentSize.height)
         super.init(
-            contentRect: contentRect,
+            contentRect: boundedContentRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -12,10 +17,27 @@ public final class CorralWindow: NSWindow {
         self.title = title
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
+        titlebarSeparatorStyle = .none
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         backgroundColor = CorralAestheticTokens.surface0
-        minSize = NSSize(width: 720, height: 480)
+        minSize = Self.minimumContentSize
+        contentMinSize = Self.minimumContentSize
+    }
+
+    public override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        super.setFrame(Self.frameRespectingMinimumSize(frameRect), display: flag)
+    }
+
+    public override func setFrame(_ frameRect: NSRect, display flag: Bool, animate animateFlag: Bool) {
+        super.setFrame(Self.frameRespectingMinimumSize(frameRect), display: flag, animate: animateFlag)
+    }
+
+    private static func frameRespectingMinimumSize(_ frame: NSRect) -> NSRect {
+        var frame = frame.standardized
+        frame.size.width = max(frame.size.width, minimumContentSize.width)
+        frame.size.height = max(frame.size.height, minimumContentSize.height)
+        return frame
     }
 
     public required init?(coder: NSCoder) {
@@ -37,12 +59,40 @@ public final class CorralWindow: NSWindow {
     }
 }
 
+// Keep collapsible workspace constraints from becoming the window's fitting-size constraints.
 @MainActor
-public final class CorralWindowController: NSWindowController {
-    public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1180, height: 760)) {
+private final class CorralWindowContentHost: NSView {
+    private weak var workspaceView: NSView?
+
+    func host(_ view: NSView) {
+        workspaceView = view
+        view.autoresizingMask = []
+        view.frame = bounds
+        addSubview(view)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        workspaceView?.frame = bounds
+    }
+
+    override func setBoundsSize(_ newSize: NSSize) {
+        super.setBoundsSize(newSize)
+        workspaceView?.frame = bounds
+    }
+}
+
+@MainActor
+public final class CorralWindowController: NSWindowController, NSWindowDelegate {
+    public private(set) var savedFrameBeforeZoom: NSRect?
+
+    public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860)) {
         let window = CorralWindow(contentRect: contentRect)
         super.init(window: window)
-        window.contentView = workspaceView
+        let contentHost = CorralWindowContentHost(frame: window.contentView?.bounds ?? .zero)
+        contentHost.host(workspaceView)
+        window.contentView = contentHost
+        window.delegate = self
         window.center()
         window.positionTrafficLights()
     }
@@ -50,11 +100,50 @@ public final class CorralWindowController: NSWindowController {
     public required init?(coder: NSCoder) {
         fatalError("CorralWindowController is created programmatically")
     }
+
+    public func toggleZoom() {
+        guard let window, let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        toggleZoom(to: visibleFrame)
+    }
+
+    /// Uses the target screen's usable frame, excluding the menu bar and Dock, and restores the exact original frame.
+    public func toggleZoom(to visibleFrame: NSRect) {
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
+        if let originalFrame = savedFrameBeforeZoom {
+            window.setFrame(originalFrame, display: true, animate: false)
+            savedFrameBeforeZoom = nil
+        } else {
+            let targetFrame = visibleFrame.standardized
+            guard targetFrame.width > 0, targetFrame.height > 0 else { return }
+            savedFrameBeforeZoom = window.frame
+            window.setFrame(targetFrame, display: true, animate: false)
+        }
+    }
+
+    public func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(
+            width: max(frameSize.width, CorralWindow.minimumContentSize.width),
+            height: max(frameSize.height, CorralWindow.minimumContentSize.height)
+        )
+    }
+
+    public func windowDidResize(_ notification: Notification) {
+        (window as? CorralWindow)?.positionTrafficLights()
+    }
+
+    public func windowDidChangeScreen(_ notification: Notification) {
+        (window as? CorralWindow)?.positionTrafficLights()
+    }
 }
 
 @MainActor
 final class CorralWindowDragRegion: NSView {
     override func mouseDown(with event: NSEvent) {
-        window?.performDrag(with: event)
+        guard let window else { return }
+        if event.clickCount == 2, let controller = window.windowController as? CorralWindowController {
+            controller.toggleZoom()
+        } else {
+            window.performDrag(with: event)
+        }
     }
 }

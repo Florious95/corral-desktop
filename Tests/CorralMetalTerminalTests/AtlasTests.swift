@@ -128,6 +128,64 @@ final class AtlasTests: XCTestCase {
         XCTAssertEqual(pool.statistics.zeroFilledEvictions, 1)
     }
 
+    func testReserveFirstSinglePageBudgetCoversMultipleGlyphs() async throws {
+        let pageBytes = try probePageBytes(pageSize: 64)
+        let pool = try makePool(bytes: pageBytes, pages: 1, pageSize: 64)
+        let firstKey = try makeKey(for: "A", pixelSize: 18)
+        let secondKey = try makeKey(for: "B", pixelSize: 18)
+        let reservation = try await pool.reserve(gpuBytes: pageBytes, pages: 1, cpuShadowBytes: 4096)
+
+        let first = try XCTUnwrap(pool.glyph(for: firstKey))
+        let second = try XCTUnwrap(pool.glyph(for: secondKey))
+        XCTAssertEqual(first.coordinates.page, second.coordinates.page)
+        XCTAssertEqual(pool.allocatedBytes, pageBytes)
+        try await pool.publish(reservation, locations: [
+            firstKey: first.coordinates,
+            secondKey: second.coordinates
+        ])
+        let lease = try await pool.leaseGlyphs([firstKey, secondKey])
+        XCTAssertEqual(Set(lease.locations.keys), [firstKey, secondKey])
+        await pool.release(lease)
+    }
+
+    func testMaterializeFirstSinglePageBudgetIsNotChargedTwice() async throws {
+        let pageBytes = try probePageBytes(pageSize: 64)
+        let pool = try makePool(bytes: pageBytes, pages: 1, pageSize: 64)
+        let firstKey = try makeKey(for: "A", pixelSize: 18)
+        let secondKey = try makeKey(for: "B", pixelSize: 18)
+        let first = try XCTUnwrap(pool.glyph(for: firstKey))
+        let second = try XCTUnwrap(pool.glyph(for: secondKey))
+        XCTAssertEqual(first.coordinates.page, second.coordinates.page)
+        XCTAssertEqual(pool.allocatedBytes, pageBytes)
+
+        let reservation = try await pool.reserve(gpuBytes: pageBytes, pages: 1, cpuShadowBytes: 4096)
+        try await pool.publish(reservation, locations: [
+            firstKey: first.coordinates,
+            secondKey: second.coordinates
+        ])
+        let lease = try await pool.leaseGlyphs([firstKey, secondKey])
+        XCTAssertEqual(Set(lease.locations.keys), [firstKey, secondKey])
+        await pool.release(lease)
+    }
+
+    func testSameWritablePageCanBePublishedIncrementally() async throws {
+        let pageBytes = try probePageBytes(pageSize: 64)
+        let pool = try makePool(bytes: pageBytes, pages: 1, pageSize: 64)
+        let firstKey = try makeKey(for: "A", pixelSize: 18)
+        let secondKey = try makeKey(for: "B", pixelSize: 18)
+        let reservation = try await pool.reserve(gpuBytes: pageBytes, pages: 1, cpuShadowBytes: 4096)
+        let first = try XCTUnwrap(pool.glyph(for: firstKey))
+        try await pool.publish(reservation, locations: [firstKey: first.coordinates])
+
+        let second = try XCTUnwrap(pool.glyph(for: secondKey))
+        XCTAssertEqual(first.coordinates.page, second.coordinates.page)
+        try await pool.publish(reservation, locations: [secondKey: second.coordinates])
+        let lease = try await pool.leaseGlyphs([firstKey, secondKey])
+        XCTAssertEqual(lease.locations[firstKey]?.coordinates, first.coordinates)
+        XCTAssertEqual(lease.locations[secondKey]?.coordinates, second.coordinates)
+        await pool.release(lease)
+    }
+
     func testRetiredResourceWaitsForFrameLeaseThenZeroesItsPage() async throws {
         let pool = try makePool(bytes: 1024 * 1024, pages: 2, pageSize: 64)
         let key = try makeKey(for: "A", pixelSize: 16)
@@ -145,6 +203,11 @@ final class AtlasTests: XCTestCase {
 
         try await pool.retire(reservation.resource)
         XCTAssertNil(pool.coordinates(for: key))
+        let pixelsBeforeAppend = readPixels(from: texture, bytesPerPixel: 1)
+        let newKey = try makeKey(for: "g", pixelSize: 16)
+        let newGlyph = try XCTUnwrap(pool.glyph(for: newKey))
+        XCTAssertNotEqual(newGlyph.coordinates.page, pageIndex)
+        XCTAssertEqual(readPixels(from: texture, bytesPerPixel: 1), pixelsBeforeAppend)
         let whileLeased = try await pool.reclaimRetired()
         XCTAssertTrue(whileLeased.isEmpty)
         await pool.release(lease)
@@ -152,6 +215,32 @@ final class AtlasTests: XCTestCase {
         XCTAssertEqual(reclaimed, [reservation.resource])
         XCTAssertNil(pool.texture(forPage: pageIndex))
         XCTAssertTrue(readPixels(from: texture, bytesPerPixel: 1).allSatisfy { $0 == 0 })
+    }
+
+    func testFramePageLeaseSurvivesRetireUntilExplicitRelease() async throws {
+        let pool = try makePool(bytes: 1024 * 1024, pages: 2, pageSize: 64)
+        let key = try makeKey(for: "A", pixelSize: 16)
+        let entry = try XCTUnwrap(pool.glyph(for: key))
+        let reservation = try await pool.reserve(
+            gpuBytes: pool.allocatedBytes,
+            pages: 1,
+            cpuShadowBytes: 4096
+        )
+        try await pool.publish(reservation, locations: [key: entry.coordinates])
+        let lease = try await pool.acquireFrameLease(forPages: [Int(entry.coordinates.page)])
+        let entryLease = try await pool.acquireFrameLease(for: [entry])
+        XCTAssertEqual(lease.resources, [reservation.resource])
+        XCTAssertEqual(entryLease.resources, [reservation.resource])
+
+        try await pool.retire(reservation.resource)
+        let whileLeased = try await pool.reclaimRetired()
+        XCTAssertTrue(whileLeased.isEmpty)
+        await pool.releaseFrameLease(lease)
+        let stillLeased = try await pool.reclaimRetired()
+        XCTAssertTrue(stillLeased.isEmpty)
+        await pool.releaseFrameLease(entryLease)
+        let afterRelease = try await pool.reclaimRetired()
+        XCTAssertEqual(afterRelease, [reservation.resource])
     }
 
     func testHighEntropyCharactersRemainBoundedUnderPageChurn() throws {
@@ -175,6 +264,21 @@ final class AtlasTests: XCTestCase {
 
     func testSharedPoolIsOneStableApplicationInstance() {
         XCTAssertTrue(GlyphAtlasPool.shared === GlyphAtlasPool.shared)
+    }
+
+    private func probePageBytes(pageSize: Int) throws -> UInt64 {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal is unavailable on this machine")
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm,
+            width: pageSize,
+            height: pageSize,
+            mipmapped: false
+        )
+        descriptor.storageMode = .shared
+        descriptor.usage = .shaderRead
+        return UInt64(try XCTUnwrap(device.makeTexture(descriptor: descriptor)).allocatedSize)
     }
 
     private func makeKey(for text: String, pixelSize: UInt16) throws -> GlyphKey {

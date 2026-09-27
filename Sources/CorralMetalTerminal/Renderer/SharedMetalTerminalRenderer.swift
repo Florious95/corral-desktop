@@ -1,5 +1,4 @@
 import CoreGraphics
-import CoreText
 import Metal
 import QuartzCore
 import CorralContracts
@@ -12,66 +11,127 @@ public enum SharedMetalTerminalRendererError: Error {
     case samplerUnavailable
 }
 
-/// A window owns one renderer and one CAMetalLayer; a fixed-size texture ring backs the shared stage.
-/// Pane snapshots are retained as CPU data and composited into that stage only when dirty.
+public struct SharedMetalTerminalRendererStatistics: Sendable, Equatable {
+    public let lastFrameReferencedAtlasPages: Int
+    public let lastFrameSampledGlyphs: Int
+    public let submittedCommandBuffers: UInt64
+    public let metalDrawCalls: UInt64
+    public let atlasFrameLeasesAcquired: UInt64
+    public let atlasFrameLeasesReleased: UInt64
+    /// Always zero: the renderer has no stage-sized CPU bitmap or upload path.
+    public let fullStageBitmapUploads: UInt64
+
+    public static let zero = Self(
+        lastFrameReferencedAtlasPages: 0,
+        lastFrameSampledGlyphs: 0,
+        submittedCommandBuffers: 0,
+        metalDrawCalls: 0,
+        atlasFrameLeasesAcquired: 0,
+        atlasFrameLeasesReleased: 0,
+        fullStageBitmapUploads: 0
+    )
+}
+
+/// One instance owns the window's only CAMetalLayer. Terminal glyphs are sampled from the app-wide atlas.
 @MainActor
 public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
+    private enum GlyphFormat: Int, Hashable {
+        case coverageR8
+        case colorBGRA8
+    }
+
+    private struct QuadVertex {
+        var position: SIMD2<Float>
+        var textureCoordinate: SIMD2<Float>
+        var color: SIMD4<Float>
+    }
+
+    private struct GlyphBatchKey: Hashable {
+        let page: UInt16
+        let format: GlyphFormat
+    }
+
+    private struct DrawRange {
+        let start: Int
+        let count: Int
+    }
+
+    private struct GlyphDrawBatch {
+        let key: GlyphBatchKey
+        let texture: MTLTexture
+        let range: DrawRange
+    }
+
+    private struct PaneDrawPlan {
+        let mapping: MetalPaneViewport
+        let background: DrawRange
+        let blockCursor: DrawRange
+        let glyphs: [GlyphDrawBatch]
+        let overlays: DrawRange
+    }
+
     private struct PaneState {
         var snapshot: TerminalGridSnapshot
         var viewport: StageViewportRect
         var generation: DirtyGeneration
     }
 
-    private struct FontStyle: Hashable {
-        let bold: Bool
-        let italic: Bool
-        let pixelSize: Int
-    }
-
-    private struct QuadVertex {
-        var position: SIMD2<Float>
-        var textureCoordinate: SIMD2<Float>
-    }
-
-    private struct PreparedPane {
-        let mapping: MetalPaneViewport
-        let vertexStart: Int
+    private struct PreparedFrame {
+        let vertices: [QuadVertex]
+        let panes: [PaneDrawPlan]
+        let referencedPageIndices: Set<Int>
+        let sampledGlyphs: Int
     }
 
     public let stageLayer: CAMetalLayer
     public let device: MTLDevice
+    public let glyphAtlasPool: GlyphAtlasPool
+    public private(set) var appearance: TerminalThemeAppearance = .dark
+    public private(set) var palette = TerminalThemePalette.dark
+    public private(set) var statistics = SharedMetalTerminalRendererStatistics.zero
+
+    private let maximumFrameCount: UInt32 = 3
 
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLRenderPipelineState
+    private let fillPipeline: MTLRenderPipelineState
+    private let coveragePipeline: MTLRenderPipelineState
+    private let colorPipeline: MTLRenderPipelineState
     private let samplerState: MTLSamplerState
-    private let colorSpace = CGColorSpaceCreateDeviceRGB()
     private var stageSize = MetalStagePixelSize(width: 0, height: 0)
     private var stageSizeInPoints: CGSize?
-    private var currentStageID: UUID?
-    private var currentLayoutGeneration: LayoutGeneration?
-    private var currentMetricsGeneration: MetricsGeneration?
     private var backingScale = 1.0
-    private var sourceTextures: [MTLTexture] = []
-    private var inFlightSourceTextureIDs: Set<ObjectIdentifier> = []
     private var panes: [UUID: PaneState] = [:]
-    private var legacyPaneIDs: [StageViewportRect: UUID] = [:]
     private var visiblePaneIDs: Set<UUID> = []
     private var scheduler = MetalRenderFrameScheduler()
+    private var applicationSleepState: RenderSleepState = .active
+    private var latestRequest: StageFrameRequest?
+    private var stageID: UUID?
+    private var layoutGeneration: LayoutGeneration?
+    private var metricsGeneration: MetricsGeneration?
+    private var inFlightFrames: UInt32 = 0
+    private var cursorBlinkingIsEnabled = false
     private var cursorBlinkVisible = true
 
-    public init(device suppliedDevice: MTLDevice? = nil) throws {
+
+    public init(
+        device suppliedDevice: MTLDevice? = nil,
+        glyphAtlas: GlyphAtlasPool? = nil,
+        appearance: TerminalThemeAppearance = .dark
+    ) throws {
         guard let device = suppliedDevice ?? MTLCreateSystemDefaultDevice() else {
             throw SharedMetalTerminalRendererError.noMetalDevice
         }
         guard let commandQueue = device.makeCommandQueue() else {
             throw SharedMetalTerminalRendererError.commandQueueUnavailable
         }
-
         let library = try device.makeLibrary(source: Self.shaderSource, options: nil)
         guard let vertexFunction = library.makeFunction(name: "stage_vertex"),
-              let fragmentFunction = library.makeFunction(name: "stage_fragment") else {
+              let fillFragment = library.makeFunction(name: "fill_fragment"),
+              let coverageFragment = library.makeFunction(name: "coverage_fragment"),
+              let colorFragment = library.makeFunction(name: "color_fragment") else {
             throw SharedMetalTerminalRendererError.pipelineUnavailable
         }
+
         let vertexDescriptor = MTLVertexDescriptor()
         vertexDescriptor.attributes[0].format = .float2
         vertexDescriptor.attributes[0].offset = MemoryLayout<QuadVertex>.offset(of: \.position)!
@@ -79,18 +139,30 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         vertexDescriptor.attributes[1].format = .float2
         vertexDescriptor.attributes[1].offset = MemoryLayout<QuadVertex>.offset(of: \.textureCoordinate)!
         vertexDescriptor.attributes[1].bufferIndex = 0
+        vertexDescriptor.attributes[2].format = .float4
+        vertexDescriptor.attributes[2].offset = MemoryLayout<QuadVertex>.offset(of: \.color)!
+        vertexDescriptor.attributes[2].bufferIndex = 0
         vertexDescriptor.layouts[0].stride = MemoryLayout<QuadVertex>.stride
 
-        let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "Corral shared terminal stage"
-        pipelineDescriptor.vertexFunction = vertexFunction
-        pipelineDescriptor.fragmentFunction = fragmentFunction
-        pipelineDescriptor.vertexDescriptor = vertexDescriptor
-        pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        guard let pipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor) else {
-            throw SharedMetalTerminalRendererError.pipelineUnavailable
+        func makePipeline(fragment: MTLFunction, pixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = vertexFunction
+            descriptor.fragmentFunction = fragment
+            descriptor.vertexDescriptor = vertexDescriptor
+            descriptor.colorAttachments[0].pixelFormat = pixelFormat
+            descriptor.colorAttachments[0].isBlendingEnabled = true
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            return try device.makeRenderPipelineState(descriptor: descriptor)
         }
 
+        guard let fillPipeline = try? makePipeline(fragment: fillFragment, pixelFormat: .bgra8Unorm),
+              let coveragePipeline = try? makePipeline(fragment: coverageFragment, pixelFormat: .bgra8Unorm),
+              let colorPipeline = try? makePipeline(fragment: colorFragment, pixelFormat: .bgra8Unorm) else {
+            throw SharedMetalTerminalRendererError.pipelineUnavailable
+        }
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .nearest
         samplerDescriptor.magFilter = .nearest
@@ -107,174 +179,142 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         stageLayer.presentsWithTransaction = false
 
         self.device = device
+        self.glyphAtlasPool = glyphAtlas ?? .shared
+        self.appearance = appearance
+        self.palette = appearance == .dark ? .dark : .light
         self.commandQueue = commandQueue
-        self.pipelineState = pipelineState
+        self.fillPipeline = fillPipeline
+        self.coveragePipeline = coveragePipeline
+        self.colorPipeline = colorPipeline
         self.samplerState = samplerState
         self.stageLayer = stageLayer
     }
 
-    public var maximumInFlightFrames: UInt32 { get async { 3 } }
-
-    public func render(_ request: StageFrameRequest) async -> FrameReceipt {
-        guard request.isValid else { return makeReceipt(request, outcome: .failed(.invalidRequest)) }
-        guard currentStageID == nil || currentStageID == request.stageID else {
-            return makeReceipt(request, outcome: .failed(.invalidRequest))
-        }
-        currentStageID = request.stageID
-        let layoutChanged = currentLayoutGeneration != request.layoutGeneration
-        let metricsChanged = currentMetricsGeneration != request.metricsGeneration
-        currentLayoutGeneration = request.layoutGeneration
-        currentMetricsGeneration = request.metricsGeneration
-
-        var changed = false
-        for pane in request.panes {
-            changed = storePane(id: pane.paneID, snapshot: pane.snapshot, viewport: pane.viewport, generation: pane.contentGeneration) || changed
-        }
-        let visibleIDs = request.visibility.allowsPresentation ? Set(request.panes.map(\.paneID)) : []
-        let visibilityChanged = visiblePaneIDs != visibleIDs
-        visiblePaneIDs = visibleIDs
-        let sleepState: RenderSleepState
-        switch request.visibility {
-        case .visible: sleepState = .active
-        case .tabHidden: sleepState = .tabHidden
-        case .windowMinimized: sleepState = .windowMinimized
-        case .occluded: sleepState = .occluded
-        }
-        scheduler.setSleepState(sleepState)
-
-        let newestGeneration = request.panes.map(\.contentGeneration).max() ?? scheduler.latestGeneration
-        if changed || visibilityChanged || layoutChanged || metricsChanged {
-            scheduler.invalidate(generation: newestGeneration, force: true)
-        }
-        guard request.visibility.allowsPresentation else {
-            return makeReceipt(request, outcome: .deferred)
-        }
-        return await withCheckedContinuation { continuation in
-            renderIfNeeded { outcome in
-                continuation.resume(returning: self.makeReceipt(request, outcome: outcome))
-            }
-        }
+    public func setAppearance(_ appearance: TerminalThemeAppearance) {
+        guard appearance != self.appearance else { return }
+        self.appearance = appearance
+        palette = appearance == .dark ? .dark : .light
+        scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
+        scheduleCachedRender()
     }
 
-    public func setSleepState(_ state: RenderSleepState, for stageID: UUID) async {
-        guard currentStageID == nil || currentStageID == stageID else { return }
-        currentStageID = stageID
-        scheduler.setSleepState(state)
-        renderIfNeeded()
-    }
-
-    private func makeReceipt(_ request: StageFrameRequest, outcome: FrameOutcome) -> FrameReceipt {
-        FrameReceipt(
-            submissionID: UUID(), stageID: request.stageID,
-            layoutGeneration: request.layoutGeneration, metricsGeneration: request.metricsGeneration,
-            visibility: request.visibility,
-            panes: request.panes.map { PaneFrameReceipt(paneID: $0.paneID, contentGeneration: $0.contentGeneration) },
-            outcome: outcome
-        )
-    }
-
-    /// Sets window geometry only when it actually changes; tab visibility never calls this method.
     public func configureStage(sizeInPoints: CGSize, backingScale: CGFloat) {
         guard sizeInPoints.width.isFinite, sizeInPoints.height.isFinite,
+              sizeInPoints.width >= 0, sizeInPoints.height >= 0,
               backingScale.isFinite, backingScale > 0 else { return }
         let pixelWidth = sizeInPoints.width * backingScale
         let pixelHeight = sizeInPoints.height * backingScale
-        let byteCount = Double(pixelWidth) * Double(pixelHeight) * 4
-        guard pixelWidth >= 0, pixelHeight >= 0,
-              pixelWidth.isFinite, pixelHeight.isFinite,
-              pixelWidth < CGFloat(Int.max / 4), pixelHeight < CGFloat(Int.max / 4),
-              byteCount.isFinite, byteCount < Double(Int.max / 2) else { return }
+        guard pixelWidth.isFinite, pixelHeight.isFinite,
+              pixelWidth < CGFloat(Int.max / 4), pixelHeight < CGFloat(Int.max / 4) else { return }
         let nextSize = MetalStagePixelSize(
             width: Int(pixelWidth.rounded()),
             height: Int(pixelHeight.rounded())
         )
-        let nextScale = Double(backingScale)
-        guard nextSize != stageSize || nextScale != self.backingScale
-                || stageSizeInPoints != sizeInPoints || sourceTextures.isEmpty else { return }
+        guard nextSize != stageSize || Double(backingScale) != self.backingScale
+                || stageSizeInPoints != sizeInPoints else { return }
 
-        let pixelsChanged = nextSize != stageSize
         stageSize = nextSize
         stageSizeInPoints = sizeInPoints
-        self.backingScale = nextScale
+        self.backingScale = Double(backingScale)
         stageLayer.frame = CGRect(origin: .zero, size: sizeInPoints)
         stageLayer.contentsScale = backingScale
         stageLayer.drawableSize = CGSize(width: nextSize.width, height: nextSize.height)
-        if pixelsChanged || sourceTextures.isEmpty {
-            sourceTextures = (0..<3).compactMap { _ in makeStageTexture(size: nextSize) }
-        }
         scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
-        renderIfNeeded()
+        scheduleCachedRender()
     }
 
-    /// Updates retained pane data. Hidden panes do not wake the GPU; activation will compose their latest snapshot.
-    public func updatePane(
-        id: UUID,
-        snapshot: TerminalGridSnapshot,
-        in viewport: StageViewportRect,
-        dirtyGeneration: DirtyGeneration
-    ) {
-        guard viewport.isValid else { return }
-        let accepted = storePane(id: id, snapshot: snapshot, viewport: viewport, generation: dirtyGeneration)
-        guard accepted, visiblePaneIDs.contains(id) else { return }
-        scheduler.invalidate(generation: dirtyGeneration, force: true)
-        renderIfNeeded()
+    public var maximumInFlightFrames: UInt32 { get async { maximumFrameCount } }
+
+    public func render(_ request: StageFrameRequest) async -> FrameReceipt {
+        await render(request, outputTexture: nil)
     }
 
-    public func removePane(id: UUID) {
-        let wasVisible = visiblePaneIDs.remove(id) != nil
-        guard panes.removeValue(forKey: id) != nil else { return }
-        legacyPaneIDs = legacyPaneIDs.filter { $0.value != id }
-        if wasVisible {
-            scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
-            renderIfNeeded()
+    func renderOffscreenForTesting(_ request: StageFrameRequest, into texture: MTLTexture) async -> FrameReceipt {
+        guard texture.device.registryID == device.registryID,
+              texture.pixelFormat == .bgra8Unorm,
+              texture.width == stageSize.width, texture.height == stageSize.height,
+              texture.usage.contains(.renderTarget) else {
+            return Self.receipt(for: request, outcome: .failed(.invalidRequest))
         }
+        return await render(request, outputTexture: texture)
     }
 
-    /// Changes only the visible pane set. Cached snapshots, Metal pipeline and stage dimensions remain resident.
-    public func setVisiblePaneIDs(_ ids: Set<UUID>) {
-        guard ids != visiblePaneIDs else { return }
-        visiblePaneIDs = ids
-        scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
-        renderIfNeeded()
+    private func render(_ request: StageFrameRequest, outputTexture: MTLTexture?) async -> FrameReceipt {
+        guard request.isValid else { return Self.receipt(for: request, outcome: .failed(.invalidRequest)) }
+        if let stageID, stageID != request.stageID {
+            return Self.receipt(for: request, outcome: .failed(.invalidRequest))
+        }
+        stageID = request.stageID
+        let previousRequest = latestRequest
+        latestRequest = request
+
+        let layoutChanged = layoutGeneration != request.layoutGeneration
+        let metricsChanged = metricsGeneration != request.metricsGeneration
+        let visibilityChanged = previousRequest?.visibility != request.visibility
+        layoutGeneration = request.layoutGeneration
+        metricsGeneration = request.metricsGeneration
+
+        var paneChanged = false
+        for pane in request.panes {
+            paneChanged = storePane(
+                id: pane.paneID,
+                snapshot: pane.snapshot,
+                viewport: pane.viewport,
+                generation: pane.contentGeneration
+            ) || paneChanged
+        }
+        let nextVisiblePaneIDs = Set(request.panes.map(\.paneID))
+        if nextVisiblePaneIDs != visiblePaneIDs { paneChanged = true }
+        visiblePaneIDs = nextVisiblePaneIDs
+
+        let sleepState = sleepState(for: request.visibility)
+        scheduler.setSleepState(sleepState)
+        if layoutChanged || metricsChanged || visibilityChanged || paneChanged {
+            let generation = request.panes.map(\.contentGeneration).max() ?? scheduler.latestGeneration
+            scheduler.invalidate(generation: generation, force: true)
+        }
+        guard request.visibility == .visible, !scheduler.isPaused else {
+            return Self.receipt(for: request, outcome: .deferred)
+        }
+        guard scheduler.shouldSubmit else { return Self.receipt(for: request, outcome: .deferred) }
+
+        return await submit(request, outputTexture: outputTexture)
+    }
+
+    public func setSleepState(_ state: RenderSleepState, for stageID: UUID) async {
+        guard self.stageID == nil || self.stageID == stageID else { return }
+        self.stageID = stageID
+        applicationSleepState = state
+        scheduler.setSleepState(sleepState(for: latestRequest?.visibility ?? .visible))
+        if scheduler.shouldSubmit, let latestRequest {
+            _ = await render(latestRequest)
+        }
     }
 
     public func setCursorBlinking(_ enabled: Bool) {
-        guard enabled != cursorBlinkingIsEnabled else { return }
+        guard cursorBlinkingIsEnabled != enabled else { return }
         cursorBlinkingIsEnabled = enabled
         cursorBlinkVisible = true
         scheduler.setCursorBlinking(enabled)
         scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
-        renderIfNeeded()
+        scheduleCachedRender()
     }
 
     public func cursorBlinkDidTick() {
         guard cursorBlinkingIsEnabled else { return }
         cursorBlinkVisible.toggle()
         scheduler.cursorBlinkDidTick()
-        renderIfNeeded()
+        scheduleCachedRender()
     }
 
-    public func present(
-        _ snapshot: TerminalGridSnapshot,
-        in viewport: StageViewportRect,
-        dirtyGeneration: DirtyGeneration
-    ) async {
-        guard viewport.isValid else { return }
-        let id = legacyPaneIDs[viewport] ?? UUID()
-        legacyPaneIDs[viewport] = id
-        let accepted = storePane(id: id, snapshot: snapshot, viewport: viewport, generation: dirtyGeneration)
-        let becameVisible = visiblePaneIDs.insert(id).inserted
-        guard accepted || becameVisible else { return }
-        scheduler.invalidate(generation: dirtyGeneration, force: true)
-        renderIfNeeded()
+    private func sleepState(for visibility: StageVisibility) -> RenderSleepState {
+        switch visibility {
+        case .visible: applicationSleepState
+        case .tabHidden: .tabHidden
+        case .windowMinimized: .windowMinimized
+        case .occluded: .occluded
+        }
     }
-
-    public func setSleepState(_ state: RenderSleepState) async {
-        scheduler.setSleepState(state)
-        renderIfNeeded()
-    }
-
-    private var cursorBlinkingIsEnabled = false
 
     private func storePane(
         id: UUID,
@@ -287,7 +327,6 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
             panes[id] = PaneState(snapshot: snapshot, viewport: viewport, generation: generation)
             return true
         }
-
         let newSnapshot = generation > previous.generation
         let newViewport = viewport != previous.viewport
         guard newSnapshot || newViewport else { return false }
@@ -299,122 +338,417 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         return true
     }
 
-    private func makeStageTexture(size: MetalStagePixelSize) -> MTLTexture? {
-        guard size.width > 0, size.height > 0 else { return nil }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm,
-            width: size.width,
-            height: size.height,
-            mipmapped: false
-        )
-        descriptor.storageMode = .shared
-        descriptor.usage = .shaderRead
-        return device.makeTexture(descriptor: descriptor)
-    }
-
-    private func renderIfNeeded(completion: (@MainActor @Sendable (FrameOutcome) -> Void)? = nil) {
-        guard scheduler.shouldSubmit else { completion?(.deferred); return }
-        guard stageSize.width > 0, stageSize.height > 0,
-              let textureIndex = sourceTextures.indices.first(where: {
-                  !inFlightSourceTextureIDs.contains(ObjectIdentifier(sourceTextures[$0]))
-              }) else { completion?(.deferred); return }
-        let sourceTexture = sourceTextures[textureIndex]
-        let sourceTextureID = ObjectIdentifier(sourceTexture)
-
-        var prepared: [PreparedPane] = []
-        var vertices: [QuadVertex] = []
-        for id in visiblePaneIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            guard let pane = panes[id],
-                  let mapping = MetalViewportMapper.map(pane.viewport, stage: stageSize, backingScale: backingScale) else { continue }
-            let start = vertices.count
-            vertices.append(contentsOf: quadVertices(for: mapping.viewport))
-            prepared.append(PreparedPane(mapping: mapping, vertexStart: start))
+    private func submit(_ request: StageFrameRequest, outputTexture: MTLTexture?) async -> FrameReceipt {
+        guard stageSize.width > 0, stageSize.height > 0 else {
+            return Self.receipt(for: request, outcome: .failed(.noDrawable))
         }
-        let vertexBuffer = vertices.isEmpty ? nil : makeVertexBuffer(vertices)
-        guard vertices.isEmpty || vertexBuffer != nil else {
-            completion?(.failed(.commandBuffer("Unable to create pane vertex buffer")))
-            return
+        guard inFlightFrames < maximumFrameCount else {
+            return Self.receipt(for: request, outcome: .deferred)
         }
-        guard let drawable = stageLayer.nextDrawable() else {
-            completion?(.failed(.noDrawable))
-            return
+        let frameSize = stageSize
+        let frameScale = backingScale
+        let prepared = prepareDraws(for: request.panes)
+        let vertexBuffer: MTLBuffer?
+        if prepared.vertices.isEmpty {
+            vertexBuffer = nil
+        } else if let allocated = makeVertexBuffer(prepared.vertices) {
+            vertexBuffer = allocated
+        } else {
+            return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate pane vertices")))
         }
 
-        let pixels = rasterizeVisiblePanes()
-        pixels.withUnsafeBytes { bytes in
-            if let baseAddress = bytes.baseAddress {
-                sourceTexture.replace(
-                    region: MTLRegionMake2D(0, 0, stageSize.width, stageSize.height),
-                    mipmapLevel: 0,
-                    withBytes: baseAddress,
-                    bytesPerRow: stageSize.width * 4
-                )
+        let frameLease: FrameAtlasLease?
+        if prepared.referencedPageIndices.isEmpty {
+            frameLease = nil
+        } else {
+            do {
+                frameLease = try await glyphAtlasPool.acquireFrameLease(forPages: prepared.referencedPageIndices)
+                recordFrameLeaseAcquired()
+            } catch {
+                return Self.receipt(for: request, outcome: .deferred)
             }
         }
-
+        guard latestRequest == request, stageSize == frameSize, backingScale == frameScale,
+              inFlightFrames < maximumFrameCount else {
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .deferred)
+        }
+        let drawable: CAMetalDrawable?
+        let targetTexture: MTLTexture
+        if let outputTexture {
+            drawable = nil
+            targetTexture = outputTexture
+        } else if let nextDrawable = stageLayer.nextDrawable() {
+            drawable = nextDrawable
+            targetTexture = nextDrawable.texture
+        } else {
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .failed(.noDrawable))
+        }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            completion?(.failed(.commandBuffer("Unable to create command buffer")))
-            return
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to allocate command buffer")))
         }
         let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].texture = targetTexture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let clearColor = palette.background.components
+        pass.colorAttachments[0].clearColor = MTLClearColor(
+            red: Double(clearColor.x), green: Double(clearColor.y),
+            blue: Double(clearColor.z), alpha: Double(clearColor.w)
+        )
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
-            completion?(.failed(.commandBuffer("Unable to create render encoder")))
-            return
+            if let frameLease { await releaseFrameLease(frameLease) }
+            return Self.receipt(for: request, outcome: .failed(.commandBuffer("Unable to create render encoder")))
         }
 
-        encoder.setRenderPipelineState(pipelineState)
-        encoder.setFragmentTexture(sourceTexture, index: 0)
-        encoder.setFragmentSamplerState(samplerState, index: 0)
-        if !vertices.isEmpty, let vertexBuffer {
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            for pane in prepared {
-                let viewport = pane.mapping.viewport
-                encoder.setViewport(MTLViewport(
-                    originX: viewport.x,
-                    originY: viewport.y,
-                    width: viewport.width,
-                    height: viewport.height,
-                    znear: 0,
-                    zfar: 1
-                ))
-                let scissor = pane.mapping.scissor
-                encoder.setScissorRect(MTLScissorRect(
-                    x: scissor.x,
-                    y: scissor.y,
-                    width: scissor.width,
-                    height: scissor.height
-                ))
-                encoder.drawPrimitives(type: .triangle, vertexStart: pane.vertexStart, vertexCount: 6)
+        if let vertexBuffer { encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0) }
+        var drawCalls = 0
+        for pane in prepared.panes {
+            let viewport = pane.mapping.viewport
+            encoder.setViewport(MTLViewport(
+                originX: viewport.x, originY: viewport.y,
+                width: viewport.width, height: viewport.height,
+                znear: 0, zfar: 1
+            ))
+            let scissor = pane.mapping.scissor
+            encoder.setScissorRect(MTLScissorRect(
+                x: scissor.x, y: scissor.y, width: scissor.width, height: scissor.height
+            ))
+            if pane.background.count > 0 {
+                encoder.setRenderPipelineState(fillPipeline)
+                encoder.drawPrimitives(type: .triangle, vertexStart: pane.background.start, vertexCount: pane.background.count)
+                drawCalls += 1
+            }
+            if pane.blockCursor.count > 0 {
+                encoder.setRenderPipelineState(fillPipeline)
+                encoder.drawPrimitives(type: .triangle, vertexStart: pane.blockCursor.start, vertexCount: pane.blockCursor.count)
+                drawCalls += 1
+            }
+            for glyph in pane.glyphs {
+                encoder.setRenderPipelineState(glyph.key.format == .coverageR8 ? coveragePipeline : colorPipeline)
+                encoder.setFragmentTexture(glyph.texture, index: 0)
+                encoder.setFragmentSamplerState(samplerState, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: glyph.range.start, vertexCount: glyph.range.count)
+                drawCalls += 1
+            }
+            if pane.overlays.count > 0 {
+                encoder.setRenderPipelineState(fillPipeline)
+                encoder.drawPrimitives(type: .triangle, vertexStart: pane.overlays.start, vertexCount: pane.overlays.count)
+                drawCalls += 1
             }
         }
         encoder.endEncoding()
-        commandBuffer.present(drawable)
-        inFlightSourceTextureIDs.insert(sourceTextureID)
-        commandBuffer.addCompletedHandler { [weak self] completedBuffer in
-            let succeeded = completedBuffer.status == .completed
-            let outcome: FrameOutcome = succeeded
-                ? .completed
-                : .failed(.commandBuffer(completedBuffer.error.map(String.init(describing:)) ?? "Metal command buffer failed"))
-            Task { @MainActor [weak self] in
-                self?.finishFrame(usingSourceTexture: sourceTextureID, succeeded: succeeded)
-                completion?(outcome)
-            }
-        }
-        commandBuffer.commit()
+        if let drawable { commandBuffer.present(drawable) }
+
+        inFlightFrames += 1
         scheduler.markSubmitted()
+        statistics = SharedMetalTerminalRendererStatistics(
+            lastFrameReferencedAtlasPages: prepared.referencedPageIndices.count,
+            lastFrameSampledGlyphs: prepared.sampledGlyphs,
+            submittedCommandBuffers: statistics.submittedCommandBuffers &+ 1,
+            metalDrawCalls: statistics.metalDrawCalls &+ UInt64(drawCalls),
+            atlasFrameLeasesAcquired: statistics.atlasFrameLeasesAcquired,
+            atlasFrameLeasesReleased: statistics.atlasFrameLeasesReleased,
+            fullStageBitmapUploads: 0
+        )
+        return await withCheckedContinuation { continuation in
+            let glyphAtlasPool = self.glyphAtlasPool
+            commandBuffer.addCompletedHandler { [weak self, glyphAtlasPool] completedBuffer in
+                let succeeded = completedBuffer.status == .completed
+                let failureMessage = completedBuffer.error.map(String.init(describing:))
+                Task { @MainActor [weak self, glyphAtlasPool] in
+                    if let frameLease { await glyphAtlasPool.releaseFrameLease(frameLease) }
+                    guard let self else {
+                        continuation.resume(returning: Self.receipt(for: request, outcome: .failed(.commandBuffer("Renderer was released"))))
+                        return
+                    }
+                    if frameLease != nil { self.recordFrameLeaseReleased() }
+                    self.inFlightFrames -= 1
+                    let outcome: FrameOutcome
+                    if succeeded {
+                        outcome = .completed
+                        if self.scheduler.shouldSubmit { self.scheduleCachedRender() }
+                    } else {
+                        outcome = .failed(.commandBuffer(failureMessage ?? "Metal command buffer failed"))
+                        self.scheduler.invalidate(generation: self.scheduler.latestGeneration, force: true)
+                    }
+                    continuation.resume(returning: Self.receipt(for: request, outcome: outcome))
+                }
+            }
+            commandBuffer.commit()
+        }
     }
 
-    private func finishFrame(usingSourceTexture id: ObjectIdentifier, succeeded: Bool) {
-        inFlightSourceTextureIDs.remove(id)
-        if succeeded {
-            renderIfNeeded()
-        } else {
-            scheduler.invalidate(generation: scheduler.latestGeneration, force: true)
+    private func recordFrameLeaseAcquired() {
+        statistics = SharedMetalTerminalRendererStatistics(
+            lastFrameReferencedAtlasPages: statistics.lastFrameReferencedAtlasPages,
+            lastFrameSampledGlyphs: statistics.lastFrameSampledGlyphs,
+            submittedCommandBuffers: statistics.submittedCommandBuffers,
+            metalDrawCalls: statistics.metalDrawCalls,
+            atlasFrameLeasesAcquired: statistics.atlasFrameLeasesAcquired &+ 1,
+            atlasFrameLeasesReleased: statistics.atlasFrameLeasesReleased,
+            fullStageBitmapUploads: 0
+        )
+    }
+
+    private func recordFrameLeaseReleased() {
+        statistics = SharedMetalTerminalRendererStatistics(
+            lastFrameReferencedAtlasPages: statistics.lastFrameReferencedAtlasPages,
+            lastFrameSampledGlyphs: statistics.lastFrameSampledGlyphs,
+            submittedCommandBuffers: statistics.submittedCommandBuffers,
+            metalDrawCalls: statistics.metalDrawCalls,
+            atlasFrameLeasesAcquired: statistics.atlasFrameLeasesAcquired,
+            atlasFrameLeasesReleased: statistics.atlasFrameLeasesReleased &+ 1,
+            fullStageBitmapUploads: 0
+        )
+    }
+
+    private func releaseFrameLease(_ lease: FrameAtlasLease) async {
+        await glyphAtlasPool.releaseFrameLease(lease)
+        recordFrameLeaseReleased()
+    }
+
+    private func prepareDraws(for paneSnapshots: [PaneFrameSnapshot]) -> PreparedFrame {
+        var vertices: [QuadVertex] = []
+        var panePlans: [PaneDrawPlan] = []
+        var pageTextures: [UInt16: MTLTexture] = [:]
+        var referencedPages = Set<Int>()
+        var sampledGlyphs = 0
+
+        for pane in paneSnapshots {
+            guard let mapping = MetalViewportMapper.map(pane.viewport, stage: stageSize, backingScale: backingScale) else { continue }
+            let viewport = mapping.viewport
+            let snapshot = pane.snapshot
+            let cellWidth = viewport.width / Double(snapshot.size.columns)
+            let cellHeight = viewport.height / Double(snapshot.size.rows)
+            guard cellWidth > 0, cellHeight > 0 else { continue }
+
+            let backgroundStart = vertices.count
+            for row in 0..<snapshot.size.rows {
+                for column in 0..<snapshot.size.columns {
+                    let cell = snapshot.cells[row * snapshot.size.columns + column]
+                    let span: Double
+                    switch cell.content {
+                    case .continuation:
+                        continue
+                    case .blank:
+                        span = 1
+                    case .cluster(_, let columns):
+                        span = Double(columns.rawValue)
+                    }
+                    let inverse = cell.attributes.contains(.inverse)
+                    let background = terminalColor(inverse ? cell.foreground : cell.background)
+                    appendSolidQuad(
+                        into: &vertices,
+                        rect: CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth * span, height: cellHeight),
+                        viewport: viewport,
+                        color: background
+                    )
+                }
+            }
+            let backgroundRange = DrawRange(start: backgroundStart, count: vertices.count - backgroundStart)
+
+            let blockCursorStart = vertices.count
+            if cursorBlinkVisible, snapshot.cursor.isVisible, snapshot.cursor.shape == .block {
+                let column = snapshot.cursor.column
+                let row = snapshot.cursor.row
+                let cell = snapshot.cells[row * snapshot.size.columns + column]
+                let span: Double
+                if case let .cluster(_, columns) = cell.content {
+                    span = Double(columns.rawValue)
+                } else {
+                    span = 1
+                }
+                appendSolidQuad(
+                    into: &vertices,
+                    rect: CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth * span, height: cellHeight),
+                    viewport: viewport,
+                    color: palette.cursor.components
+                )
+            }
+            let blockCursorRange = DrawRange(start: blockCursorStart, count: vertices.count - blockCursorStart)
+
+            var groupedGlyphs: [GlyphBatchKey: [QuadVertex]] = [:]
+            for row in 0..<snapshot.size.rows {
+                for column in 0..<snapshot.size.columns {
+                    let cell = snapshot.cells[row * snapshot.size.columns + column]
+                    guard case let .cluster(text, columns) = cell.content else { continue }
+                    let pixelSize = UInt16(max(1, min(128, Int((cellHeight * 0.82).rounded()))))
+                    guard let entry = glyphAtlasPool.glyph(
+                        for: text,
+                        fontPostScriptName: "Menlo-Regular",
+                        pixelSize: pixelSize,
+                        isBold: cell.attributes.contains(.bold),
+                        isItalic: cell.attributes.contains(.italic)
+                    ), entry.coordinates.width > 0, entry.coordinates.height > 0 else { continue }
+                    let page = entry.coordinates.page
+                    let texture: MTLTexture
+                    if let cached = pageTextures[page] {
+                        texture = cached
+                    } else {
+                        guard let loaded = glyphAtlasPool.texture(forPage: page), loaded.device.registryID == device.registryID else { continue }
+                        texture = loaded
+                        pageTextures[page] = loaded
+                    }
+                    let span = Double(columns.rawValue)
+                    let cellRect = CGRect(
+                        x: viewport.x + Double(column) * cellWidth,
+                        y: viewport.y + Double(row) * cellHeight,
+                        width: cellWidth * span,
+                        height: cellHeight
+                    )
+                    let baselineX = cellRect.minX + max(0, (cellRect.width - entry.advanceX) / 2)
+                    let baselineY = cellRect.minY + (cellRect.height - entry.ascent - entry.descent) / 2 + entry.ascent
+                    let glyphRect = CGRect(
+                        x: baselineX + entry.imageOriginX,
+                        y: baselineY - (entry.imageOriginY + Double(entry.coordinates.height)),
+                        width: Double(entry.coordinates.width),
+                        height: Double(entry.coordinates.height)
+                    )
+                    let cursorHere = cursorBlinkVisible && snapshot.cursor.isVisible
+                        && snapshot.cursor.row == row && snapshot.cursor.column == column
+                    let inverse = cell.attributes.contains(.inverse)
+                    let textColor = cursorHere && snapshot.cursor.shape == .block
+                        ? palette.cursorAccent.components
+                        : terminalColor(inverse ? cell.background : cell.foreground)
+                    let tint = entry.format == .coverageR8 ? textColor : SIMD4<Float>(1, 1, 1, 1)
+                    guard let quad = glyphQuad(
+                        imageRect: glyphRect,
+                        clipRect: cellRect,
+                        viewport: viewport,
+                        coordinates: entry.coordinates,
+                        textureSize: CGSize(width: texture.width, height: texture.height),
+                        color: tint
+                    ) else { continue }
+                    let format: GlyphFormat = entry.format == .coverageR8 ? .coverageR8 : .colorBGRA8
+                    groupedGlyphs[GlyphBatchKey(page: page, format: format), default: []].append(contentsOf: quad)
+                    referencedPages.insert(Int(page))
+                    sampledGlyphs += 1
+                }
+            }
+
+            var glyphBatches: [GlyphDrawBatch] = []
+            for key in groupedGlyphs.keys.sorted(by: {
+                $0.page == $1.page ? $0.format.rawValue < $1.format.rawValue : $0.page < $1.page
+            }) {
+                guard let group = groupedGlyphs[key], let texture = pageTextures[key.page] else { continue }
+                let start = vertices.count
+                vertices.append(contentsOf: group)
+                glyphBatches.append(GlyphDrawBatch(
+                    key: key,
+                    texture: texture,
+                    range: DrawRange(start: start, count: group.count)
+                ))
+            }
+
+            let overlayStart = vertices.count
+            for row in 0..<snapshot.size.rows {
+                for column in 0..<snapshot.size.columns {
+                    let cell = snapshot.cells[row * snapshot.size.columns + column]
+                    let span: Double
+                    let isContinuation: Bool
+                    switch cell.content {
+                    case .continuation:
+                        span = 1
+                        isContinuation = true
+                    case .blank:
+                        span = 1
+                        isContinuation = false
+                    case .cluster(_, let columns):
+                        span = Double(columns.rawValue)
+                        isContinuation = false
+                    }
+                    let cellRect = CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth * span, height: cellHeight)
+                    let visibleForeground = terminalColor(cell.attributes.contains(.inverse) ? cell.background : cell.foreground)
+                    if !isContinuation, cell.attributes.contains(.underline) {
+                        let thickness = min(2, max(1, cellHeight * 0.06))
+                        appendSolidQuad(
+                            into: &vertices,
+                            rect: CGRect(x: cellRect.minX, y: cellRect.maxY - thickness, width: cellRect.width, height: thickness),
+                            viewport: viewport,
+                            color: visibleForeground
+                        )
+                    }
+                    guard cursorBlinkVisible, snapshot.cursor.isVisible,
+                          snapshot.cursor.row == row, snapshot.cursor.column == column else { continue }
+                    let cursorSpan: Double
+                    if case .cluster(_, columns: .two) = cell.content { cursorSpan = 2 } else { cursorSpan = 1 }
+                    let cursorRect = CGRect(x: cellRect.minX, y: cellRect.minY, width: cellWidth * cursorSpan, height: cellHeight)
+                    let cursorColor = palette.cursor.components
+                    switch snapshot.cursor.shape {
+                    case .block:
+                        break
+                    case .bar:
+                        appendSolidQuad(into: &vertices, rect: CGRect(x: cursorRect.minX, y: cursorRect.minY, width: max(1, cellWidth * 0.1), height: cursorRect.height), viewport: viewport, color: cursorColor)
+                    case .underline:
+                        let thickness = min(2, max(1, cellHeight * 0.1))
+                        appendSolidQuad(into: &vertices, rect: CGRect(x: cursorRect.minX, y: cursorRect.maxY - thickness, width: cursorRect.width, height: thickness), viewport: viewport, color: cursorColor)
+                    }
+                }
+            }
+            let overlayRange = DrawRange(start: overlayStart, count: vertices.count - overlayStart)
+            panePlans.append(PaneDrawPlan(
+                mapping: mapping,
+                background: backgroundRange,
+                blockCursor: blockCursorRange,
+                glyphs: glyphBatches,
+                overlays: overlayRange
+            ))
         }
+        return PreparedFrame(vertices: vertices, panes: panePlans, referencedPageIndices: referencedPages, sampledGlyphs: sampledGlyphs)
+    }
+
+    private func appendSolidQuad(into vertices: inout [QuadVertex], rect: CGRect, viewport: MetalPixelViewport, color: SIMD4<Float>) {
+        vertices.append(contentsOf: quadVertices(rect: rect, viewport: viewport, color: color, uvTopLeft: .zero, uvBottomRight: .zero))
+    }
+
+    private func glyphQuad(
+        imageRect: CGRect,
+        clipRect: CGRect,
+        viewport: MetalPixelViewport,
+        coordinates: AtlasCoordinates,
+        textureSize: CGSize,
+        color: SIMD4<Float>
+    ) -> [QuadVertex]? {
+        let clipped = imageRect.intersection(clipRect)
+        guard !clipped.isNull, clipped.width > 0, clipped.height > 0,
+              imageRect.width > 0, imageRect.height > 0,
+              textureSize.width > 0, textureSize.height > 0 else { return nil }
+        guard let atlasUV = MetalAtlasUVMapper.map(
+            coordinates: coordinates,
+            textureSize: MetalStagePixelSize(width: Int(textureSize.width), height: Int(textureSize.height))
+        ) else { return nil }
+        let uStart = Double(atlasUV.topLeft.x)
+        let uEnd = Double(atlasUV.bottomRight.x)
+        let vTop = Double(atlasUV.topLeft.y)
+        let vBottom = Double(atlasUV.bottomRight.y)
+        let leftRatio = (clipped.minX - imageRect.minX) / imageRect.width
+        let rightRatio = (clipped.maxX - imageRect.minX) / imageRect.width
+        let topRatio = (clipped.minY - imageRect.minY) / imageRect.height
+        let bottomRatio = (clipped.maxY - imageRect.minY) / imageRect.height
+        let uvTopLeft = SIMD2<Float>(Float(uStart + (uEnd - uStart) * leftRatio), Float(vTop + (vBottom - vTop) * topRatio))
+        let uvBottomRight = SIMD2<Float>(Float(uStart + (uEnd - uStart) * rightRatio), Float(vTop + (vBottom - vTop) * bottomRatio))
+        return quadVertices(rect: clipped, viewport: viewport, color: color, uvTopLeft: uvTopLeft, uvBottomRight: uvBottomRight)
+    }
+
+    private func quadVertices(
+        rect: CGRect,
+        viewport: MetalPixelViewport,
+        color: SIMD4<Float>,
+        uvTopLeft: SIMD2<Float>,
+        uvBottomRight: SIMD2<Float>
+    ) -> [QuadVertex] {
+        let topLeftPosition = viewport.normalizedDevicePosition(x: Double(rect.minX), y: Double(rect.minY))
+        let topRightPosition = viewport.normalizedDevicePosition(x: Double(rect.maxX), y: Double(rect.minY))
+        let bottomLeftPosition = viewport.normalizedDevicePosition(x: Double(rect.minX), y: Double(rect.maxY))
+        let bottomRightPosition = viewport.normalizedDevicePosition(x: Double(rect.maxX), y: Double(rect.maxY))
+        let topLeft = QuadVertex(position: topLeftPosition, textureCoordinate: uvTopLeft, color: color)
+        let topRight = QuadVertex(position: topRightPosition, textureCoordinate: SIMD2(uvBottomRight.x, uvTopLeft.y), color: color)
+        let bottomLeft = QuadVertex(position: bottomLeftPosition, textureCoordinate: SIMD2(uvTopLeft.x, uvBottomRight.y), color: color)
+        let bottomRight = QuadVertex(position: bottomRightPosition, textureCoordinate: uvBottomRight, color: color)
+        return [topLeft, bottomLeft, topRight, topRight, bottomLeft, bottomRight]
     }
 
     private func makeVertexBuffer(_ vertices: [QuadVertex]) -> MTLBuffer? {
@@ -428,169 +762,34 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
         }
     }
 
-    private func quadVertices(for viewport: MetalPixelViewport) -> [QuadVertex] {
-        let stageWidth = Float(stageSize.width)
-        let stageHeight = Float(stageSize.height)
-        let left = Float(viewport.x) / stageWidth
-        let top = Float(viewport.y) / stageHeight
-        let right = Float(viewport.x + viewport.width) / stageWidth
-        let bottom = Float(viewport.y + viewport.height) / stageHeight
-        let topLeft = QuadVertex(position: SIMD2(-1, 1), textureCoordinate: SIMD2(left, top))
-        let topRight = QuadVertex(position: SIMD2(1, 1), textureCoordinate: SIMD2(right, top))
-        let bottomLeft = QuadVertex(position: SIMD2(-1, -1), textureCoordinate: SIMD2(left, bottom))
-        let bottomRight = QuadVertex(position: SIMD2(1, -1), textureCoordinate: SIMD2(right, bottom))
-        return [topLeft, bottomLeft, topRight, topRight, bottomLeft, bottomRight]
-    }
-
-    private func rasterizeVisiblePanes() -> [UInt8] {
-        let width = stageSize.width
-        let height = stageSize.height
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        pixels.withUnsafeMutableBytes { bytes in
-            guard let context = CGContext(
-                data: bytes.baseAddress,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: colorSpace,
-                bitmapInfo: CGBitmapInfo.byteOrder32Little.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)).rawValue
-            ) else { return }
-            context.translateBy(x: 0, y: CGFloat(height))
-            context.scaleBy(x: 1, y: -1)
-            context.setFillColor(CGColor(gray: 0, alpha: 1))
-            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-
-            for id in visiblePaneIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-                guard let pane = panes[id], pane.snapshot.isValid,
-                      let mapping = MetalViewportMapper.map(pane.viewport, stage: stageSize, backingScale: backingScale) else { continue }
-                context.saveGState()
-                context.clip(to: CGRect(
-                    x: mapping.scissor.x,
-                    y: mapping.scissor.y,
-                    width: mapping.scissor.width,
-                    height: mapping.scissor.height
-                ))
-                draw(pane.snapshot, in: mapping.viewport, context: context)
-                context.restoreGState()
-            }
-        }
-        return pixels
-    }
-
-    private func draw(_ snapshot: TerminalGridSnapshot, in viewport: MetalPixelViewport, context: CGContext) {
-        let cellWidth = viewport.width / Double(snapshot.size.columns)
-        let cellHeight = viewport.height / Double(snapshot.size.rows)
-        guard cellWidth > 0, cellHeight > 0 else { return }
-        var fonts: [FontStyle: CTFont] = [:]
-
-        for row in 0..<snapshot.size.rows {
-            for column in 0..<snapshot.size.columns {
-                let cell = snapshot.cells[row * snapshot.size.columns + column]
-                if case .continuation = cell.content { continue }
-                let span: Double
-                if case .cluster(_, columns: .two) = cell.content { span = 2 } else { span = 1 }
-                let cursorHere = snapshot.cursor.isVisible && cursorBlinkVisible
-                    && snapshot.cursor.row == row && snapshot.cursor.column == column
-                let inverse = cell.attributes.contains(.inverse) != cursorHere
-                context.setFillColor(terminalColor(inverse ? cell.foreground : cell.background))
-                context.fill(CGRect(
-                    x: viewport.x + Double(column) * cellWidth,
-                    y: viewport.y + Double(row) * cellHeight,
-                    width: cellWidth * span,
-                    height: cellHeight
-                ))
-            }
-        }
-
-        for row in 0..<snapshot.size.rows {
-            for column in 0..<snapshot.size.columns {
-                let cell = snapshot.cells[row * snapshot.size.columns + column]
-                guard case let .cluster(cluster, columns) = cell.content else { continue }
-                let span: Double
-                switch columns {
-                case .one: span = 1
-                case .two: span = 2
-                }
-                let cursorHere = snapshot.cursor.isVisible && cursorBlinkVisible
-                    && snapshot.cursor.row == row && snapshot.cursor.column == column
-                let inverse = cell.attributes.contains(.inverse) != cursorHere
-                let foreground = terminalColor(inverse ? cell.background : cell.foreground)
-                let cellRect = CGRect(
-                    x: viewport.x + Double(column) * cellWidth,
-                    y: viewport.y + Double(row) * cellHeight,
-                    width: cellWidth * span,
-                    height: cellHeight
-                )
-
-                let fontSize = max(8, min(Int((cellHeight * 0.82).rounded()), 128))
-                let style = FontStyle(
-                    bold: cell.attributes.contains(.bold),
-                    italic: cell.attributes.contains(.italic),
-                    pixelSize: fontSize
-                )
-                let font = fonts[style] ?? makeFont(style)
-                fonts[style] = font
-                let attributes: [NSAttributedString.Key: Any] = [
-                    NSAttributedString.Key(kCTFontAttributeName as String): font,
-                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): foreground
-                ]
-                let line = CTLineCreateWithAttributedString(NSAttributedString(string: cluster, attributes: attributes))
-                let ascent = CTFontGetAscent(font)
-                let descent = CTFontGetDescent(font)
-                context.saveGState()
-                context.clip(to: cellRect)
-                context.textPosition = CGPoint(
-                    x: cellRect.minX,
-                    y: cellRect.minY + (cellRect.height - ascent - descent) / 2 + ascent
-                )
-                CTLineDraw(line, context)
-                context.restoreGState()
-            }
-        }
-    }
-
-    private func makeFont(_ style: FontStyle) -> CTFont {
-        let name: String
-        switch (style.bold, style.italic) {
-        case (true, true): name = "Menlo-BoldItalic"
-        case (true, false): name = "Menlo-Bold"
-        case (false, true): name = "Menlo-Italic"
-        case (false, false): name = "Menlo-Regular"
-        }
-        return CTFontCreateWithName(name as CFString, CGFloat(style.pixelSize), nil)
-    }
-
-    private func terminalColor(_ color: TerminalColor) -> CGColor {
-        let rgb: (UInt8, UInt8, UInt8)
+    private func terminalColor(_ color: TerminalColor) -> SIMD4<Float> {
+        let rgb: (UInt8, UInt8, UInt8, UInt8)
         switch color {
-        case .rgba(let value):
-            rgb = (value.red, value.green, value.blue)
-        case .indexed(let value):
-            rgb = indexedColor(value)
+        case .rgba(let value): rgb = (value.red, value.green, value.blue, value.alpha)
+        case .indexed(let index):
+            return palette.color(forANSIIndex: index).components
         }
-        return CGColor(
-            colorSpace: colorSpace,
-            components: [CGFloat(rgb.0) / 255, CGFloat(rgb.1) / 255, CGFloat(rgb.2) / 255, 1]
-        )!
+        return SIMD4<Float>(Float(rgb.0) / 255, Float(rgb.1) / 255, Float(rgb.2) / 255, Float(rgb.3) / 255)
     }
 
-    private func indexedColor(_ index: UInt8) -> (UInt8, UInt8, UInt8) {
-        let ansi: [(UInt8, UInt8, UInt8)] = [
-            (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
-            (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
-            (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-            (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255)
-        ]
-        let value = Int(index)
-        if value < 16 { return ansi[value] }
-        if value < 232 {
-            let levels: [UInt8] = [0, 95, 135, 175, 215, 255]
-            let cube = value - 16
-            return (levels[cube / 36], levels[(cube / 6) % 6], levels[cube % 6])
+    private static func receipt(for request: StageFrameRequest, outcome: FrameOutcome) -> FrameReceipt {
+        FrameReceipt(
+            submissionID: UUID(),
+            stageID: request.stageID,
+            layoutGeneration: request.layoutGeneration,
+            metricsGeneration: request.metricsGeneration,
+            visibility: request.visibility,
+            panes: request.panes.map { PaneFrameReceipt(paneID: $0.paneID, contentGeneration: $0.contentGeneration) },
+            outcome: outcome
+        )
+    }
+
+    private func scheduleCachedRender() {
+        guard let latestRequest else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.latestRequest == latestRequest else { return }
+            _ = await self.render(latestRequest)
         }
-        let gray = UInt8(8 + (value - 232) * 10)
-        return (gray, gray, gray)
     }
 
     private static let shaderSource = """
@@ -599,21 +798,34 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
     struct VertexIn {
         float2 position [[attribute(0)]];
         float2 textureCoordinate [[attribute(1)]];
+        float4 color [[attribute(2)]];
     };
     struct VertexOut {
         float4 position [[position]];
         float2 textureCoordinate;
+        float4 color;
     };
     vertex VertexOut stage_vertex(VertexIn in [[stage_in]]) {
         VertexOut out;
         out.position = float4(in.position, 0.0, 1.0);
         out.textureCoordinate = in.textureCoordinate;
+        out.color = in.color;
         return out;
     }
-    fragment float4 stage_fragment(VertexOut in [[stage_in]],
-                                   texture2d<float> stage [[texture(0)]],
-                                   sampler stageSampler [[sampler(0)]]) {
-        return stage.sample(stageSampler, in.textureCoordinate);
+    fragment float4 fill_fragment(VertexOut in [[stage_in]]) {
+        return float4(in.color.rgb * in.color.a, in.color.a);
+    }
+    fragment float4 coverage_fragment(VertexOut in [[stage_in]],
+                                      texture2d<float> atlas [[texture(0)]],
+                                      sampler atlasSampler [[sampler(0)]]) {
+        float coverage = atlas.sample(atlasSampler, in.textureCoordinate).r;
+        float alpha = coverage * in.color.a;
+        return float4(in.color.rgb * alpha, alpha);
+    }
+    fragment float4 color_fragment(VertexOut in [[stage_in]],
+                                   texture2d<float> atlas [[texture(0)]],
+                                   sampler atlasSampler [[sampler(0)]]) {
+        return atlas.sample(atlasSampler, in.textureCoordinate);
     }
     """
 }

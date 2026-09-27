@@ -1,0 +1,305 @@
+import AppKit
+import CorralContracts
+import CorralServices
+@testable import CorralUI
+import XCTest
+
+@MainActor
+final class SplitWorkspaceViewTests: XCTestCase {
+    private let a = SessionID("dev::A"), b = SessionID("dev::B"), c = SessionID("dev::C"), d = SessionID("dev::D"), s = SessionID("dev::S")
+    private var grid: WorkspaceLayoutNode {
+        .split(direction: .horizontal, ratio: 0.5,
+               first: .split(direction: .vertical, ratio: 0.5, first: .session(a), second: .session(c)),
+               second: .split(direction: .vertical, ratio: 0.5, first: .session(b), second: .session(d)))
+    }
+    private var pair: WorkspaceLayoutNode { .split(direction: .horizontal, ratio: 0.5, first: .session(a), second: .session(b)) }
+
+    private func hosted(_ root: WorkspaceLayoutNode?, focused: SessionID?, size: NSSize) -> (NSWindow, NSView, SplitWorkspaceView) {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: true)
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        window.contentView = container
+        let overlay = SplitWorkspaceView()
+        overlay.frame = container.bounds
+        container.addSubview(overlay)
+        overlay.update(root: root, focusedSessionID: focused)
+        return (window, container, overlay)
+    }
+
+    private func completeAgentClick(on sidebar: CorralSidebarView, row: Int) throws {
+        sidebar.agentsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
+        XCTAssertEqual(table.selectedRow, row)
+        table.dispatchClickIfCompleted(from: row, to: row, wasDragged: false)
+    }
+
+    private func mouse(_ type: NSEvent.EventType, at point: CGPoint, in overlay: SplitWorkspaceView) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: overlay.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+                           windowNumber: overlay.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+
+    func testFourPaneOverlayDrawsLegacyCardsGapsAndFocusOverATransparentStage() throws {
+        CorralAestheticTokens.themeMode = .dark
+        let (_, _, overlay) = hosted(grid, focused: a, size: NSSize(width: 1206, height: 806))
+        XCTAssertTrue(overlay.isFlipped)
+        XCTAssertEqual(overlay.splitterCount, 3)
+        XCTAssertEqual(overlay.projection.panes.map(\.frame), [
+            CGRect(x: 0, y: 0, width: 600, height: 400), CGRect(x: 0, y: 406, width: 600, height: 400),
+            CGRect(x: 606, y: 0, width: 600, height: 400), CGRect(x: 606, y: 406, width: 600, height: 400)
+        ])
+        XCTAssertEqual(Set(overlay.closeButtons.keys), [a, b, c, d])
+        let close = try XCTUnwrap(overlay.closeButtons[b])
+        XCTAssertEqual(close.frame, CGRect(x: 1178, y: 6, width: 22, height: 22), "`.pane-close-btn`: 22×22 at top 6 / right 6")
+        XCTAssertEqual(close.alphaValue, 0, "revealed only while its pane is hovered")
+        XCTAssertEqual(close.accessibilityIdentifier(), "corral.pane.close")
+        XCTAssertEqual(close.accessibilityLabel(), "关闭窗格")
+
+        let bitmap = try XCTUnwrap(overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds))
+        overlay.cacheDisplay(in: overlay.bounds, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsWide) / overlay.bounds.width
+        func pixel(_ x: CGFloat, _ y: CGFloat) -> NSColor { bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))! }
+        func assertColor(_ color: NSColor, _ hex: UInt32, _ message: String, line: UInt = #line) {
+            let expected = CorralAestheticTokens.color(hex).usingColorSpace(bitmap.colorSpace)!
+            XCTAssertEqual(color.alphaComponent, 1, accuracy: 0.01, message, line: line)
+            for (actual, wanted) in zip([color.redComponent, color.greenComponent, color.blueComponent], [expected.redComponent, expected.greenComponent, expected.blueComponent]) {
+                XCTAssertEqual(actual * 255, wanted * 255, accuracy: 2, "\(message): #\(String(hex, radix: 16))", line: line)
+            }
+        }
+        XCTAssertEqual(pixel(300, 200).alphaComponent, 0, accuracy: 0.01, "pane interiors stay transparent so the Metal stage shows through")
+        assertColor(pixel(603, 200), 0x0F1115, "the 6pt gap shows the stage background")
+        assertColor(pixel(0.5, 0.5), 0x0F1115, "8pt card corners are masked with the stage background")
+        assertColor(pixel(300, 0.5), 0x5C79A3, "the focused pane has the 1px pane-active-border outline")
+        assertColor(pixel(900, 399.5), 0x2A323E, "other panes keep the 1px border-subtle card edge")
+
+        overlay.update(root: .session(a), focusedSessionID: a)
+        XCTAssertEqual(overlay.splitterCount, 0)
+        XCTAssertTrue(overlay.closeButtons.isEmpty, "a lone pane has no card chrome and cannot be closed")
+    }
+
+    func testTerminalClicksFallThroughTheFocusedPaneWhileGapsCloseButtonsAndOtherPanesAreOwned() throws {
+        let (_, container, overlay) = hosted(grid, focused: a, size: NSSize(width: 1206, height: 806))
+        func hit(_ x: CGFloat, _ y: CGFloat) -> NSView? { overlay.hitTest(container.convert(CGPoint(x: x, y: y), from: overlay)) }
+        XCTAssertNil(hit(300, 200), "the focused pane belongs to the terminal input below")
+        XCTAssertTrue(hit(603, 200) === overlay, "the 6pt gap is the resize handle")
+        XCTAssertTrue(hit(900, 600) === overlay, "clicking another pane focuses it first")
+        XCTAssertTrue(hit(1189, 17) === overlay.closeButtons[b])
+
+        var focused: SessionID?, closed: SessionID?
+        overlay.onFocusPane = { focused = $0 }
+        overlay.onClosePane = { closed = $0 }
+        overlay.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 900, y: 600), in: overlay))
+        XCTAssertEqual(focused, d)
+        overlay.closeButtons[b]?.performClick(nil)
+        XCTAssertEqual(closed, b)
+        XCTAssertEqual(overlay.root, grid, "closing is reported, never applied locally")
+    }
+
+    func testDividerDragPreviewsLiveAndCommitsOnceFromTheFinalPointerPosition() throws {
+        let (_, _, overlay) = hosted(pair, focused: a, size: NSSize(width: 1000, height: 600))
+        var previews: [WorkspaceLayoutNode?] = [], commits: [(String, Double)] = []
+        overlay.onLayoutPreview = { previews.append($0) }
+        overlay.onRatioChange = { commits.append(($0, $1)) }
+
+        overlay.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 500, y: 300), in: overlay))
+        XCTAssertEqual(overlay.activeDividerPath, "root")
+        overlay.mouseDragged(with: mouse(.leftMouseDragged, at: CGPoint(x: 600, y: 340), in: overlay))
+        XCTAssertEqual(overlay.projection.panes.first?.frame.width, 597, "panes follow the pointer while dragging")
+        XCTAssertEqual(previews.last??.leafIDs, [a, b])
+        XCTAssertTrue(commits.isEmpty, "nothing persists mid-drag")
+        overlay.mouseUp(with: mouse(.leftMouseUp, at: CGPoint(x: 650, y: 300), in: overlay))
+        XCTAssertEqual(commits.count, 1)
+        XCTAssertEqual(commits.first?.0, "root")
+        XCTAssertEqual(commits.first?.1, 0.6514, "the release coordinate counts: round4(647.5 / 994), floor(994 × 0.6514) = 647")
+        XCTAssertEqual(overlay.projection.panes.first?.frame.width, 647)
+        XCTAssertNil(overlay.activeDividerPath)
+
+        // Returning to the start writes nothing and ends the live preview.
+        commits.removeAll(); previews.removeAll()
+        overlay.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 650, y: 300), in: overlay))
+        overlay.mouseDragged(with: mouse(.leftMouseDragged, at: CGPoint(x: 700, y: 300), in: overlay))
+        overlay.mouseUp(with: mouse(.leftMouseUp, at: CGPoint(x: 650, y: 300), in: overlay))
+        XCTAssertTrue(commits.isEmpty)
+        XCTAssertEqual(previews.count, 2)
+        XCTAssertNil(previews.last ?? nil)
+
+        // A topology change mid-drag cancels the stale gesture instead of writing into the new tree.
+        overlay.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 650, y: 300), in: overlay))
+        overlay.mouseDragged(with: mouse(.leftMouseDragged, at: CGPoint(x: 400, y: 300), in: overlay))
+        overlay.update(root: .split(direction: .vertical, ratio: 0.5, first: .session(a), second: .session(b)), focusedSessionID: a)
+        overlay.mouseUp(with: mouse(.leftMouseUp, at: CGPoint(x: 400, y: 300), in: overlay))
+        XCTAssertTrue(commits.isEmpty)
+        XCTAssertNil(previews.last ?? nil)
+    }
+
+    func testDividersAreAccessibleSplittersForHeadlessResizing() throws {
+        let (_, _, overlay) = hosted(pair, focused: a, size: NSSize(width: 1000, height: 600))
+        var commits: [(String, Double)] = []
+        overlay.onRatioChange = { commits.append(($0, $1)) }
+        let splitter = try XCTUnwrap(overlay.accessibilityChildren()?.compactMap { $0 as? NSAccessibilityElement }.first { $0.accessibilityRole() == .splitter })
+        XCTAssertEqual(splitter.accessibilityIdentifier(), "corral.split.divider")
+        XCTAssertEqual((splitter.accessibilityValue() as? NSNumber)?.doubleValue, 497)
+        splitter.setAccessibilityValue(NSNumber(value: 600))
+        XCTAssertEqual(commits.first?.0, "root")
+        XCTAssertEqual(commits.first?.1, 0.6041)
+        XCTAssertEqual(overlay.projection.panes.first?.frame.width, 600)
+    }
+
+    func testStageDropHighlightsTheCandidateSlotAndDeliversRealSessionIDs() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600), styleMask: [.borderless], backing: .buffered, defer: true)
+        let stage = CorralWorkspaceStageView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        window.contentView = stage
+        stage.layoutSubtreeIfNeeded()
+        XCTAssertEqual(stage.splitView.frame, stage.bounds)
+        XCTAssertEqual(stage.subviews.last, stage.dropZone, "the drop highlight floats above the pane chrome")
+        stage.splitView.update(root: pair, focusedSessionID: a)
+        var dropped: (SessionID, SessionID?, SplitDropZoneView.Edge)?
+        stage.onDropSession = { dropped = ($0, $1, $2) }
+
+        // Flipped overlay point (248, 10) is the top band of A.
+        let session = FakeDraggingInfo(location: stage.convert(CGPoint(x: 248, y: 590), to: nil), strings: [CorralWorkspaceStageView.sessionPasteboardType: s.rawValue])
+        defer { session.pasteboard.releaseGlobally() }
+        XCTAssertEqual(stage.draggingEntered(session), .move)
+        XCTAssertFalse(stage.dropZone.isHidden)
+        XCTAssertEqual(stage.dropZone.edge, .top)
+        XCTAssertEqual(stage.dropZone.frame, CGRect(x: 0, y: 303, width: 497, height: 297), "the highlight is the new pane's exact slot")
+        XCTAssertTrue(stage.performDragOperation(session))
+        XCTAssertEqual(dropped?.0, s)
+        XCTAssertEqual(dropped?.1, a)
+        XCTAssertEqual(dropped?.2, .top)
+        XCTAssertTrue(stage.dropZone.isHidden)
+
+        // A Tab dragged from the bar replaces the pane under the center core; the active Tab cannot drop on itself.
+        let activeTab = UUID(), otherTab = UUID()
+        stage.activeTabID = activeTab
+        var droppedTab: (UUID, SessionID?, SplitDropZoneView.Edge)?
+        stage.onDropTab = { droppedTab = ($0, $1, $2) }
+        let tab = FakeDraggingInfo(location: stage.convert(CGPoint(x: 750, y: 300), to: nil), strings: [.string: otherTab.uuidString])
+        defer { tab.pasteboard.releaseGlobally() }
+        XCTAssertEqual(stage.draggingUpdated(tab), .move)
+        XCTAssertTrue(stage.performDragOperation(tab))
+        XCTAssertEqual(droppedTab?.0, otherTab)
+        XCTAssertEqual(droppedTab?.1, b)
+        XCTAssertEqual(droppedTab?.2, .center)
+        let selfTab = FakeDraggingInfo(location: stage.convert(CGPoint(x: 750, y: 300), to: nil), strings: [.string: activeTab.uuidString])
+        defer { selfTab.pasteboard.releaseGlobally() }
+        XCTAssertEqual(stage.draggingUpdated(selfTab), [])
+
+        // An empty stage takes the dropped session as its whole layout.
+        stage.splitView.update(root: nil, focusedSessionID: nil)
+        XCTAssertEqual(stage.draggingUpdated(session), .move)
+        XCTAssertEqual(stage.dropZone.frame, stage.bounds)
+        XCTAssertTrue(stage.performDragOperation(session))
+        XCTAssertNil(dropped?.1)
+    }
+
+    func testStageRefusesDropsThatWouldSqueezeAnyPaneBelowTheMinimum() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 600), styleMask: [.borderless], backing: .buffered, defer: true)
+        let stage = CorralWorkspaceStageView(frame: NSRect(x: 0, y: 0, width: 300, height: 600))
+        window.contentView = stage
+        stage.layoutSubtreeIfNeeded()
+        stage.splitView.update(root: pair, focusedSessionID: a)
+        var dropped = false
+        stage.onDropSession = { _, _, _ in dropped = true }
+        let squeeze = FakeDraggingInfo(location: stage.convert(CGPoint(x: 5, y: 300), to: nil), strings: [CorralWorkspaceStageView.sessionPasteboardType: s.rawValue])
+        defer { squeeze.pasteboard.releaseGlobally() }
+        XCTAssertEqual(stage.draggingEntered(squeeze), [], "a third 96pt column would break the 120pt floor")
+        XCTAssertTrue(stage.dropZone.isHidden, "no highlight for a refused split")
+        XCTAssertFalse(stage.performDragOperation(squeeze))
+        XCTAssertFalse(dropped)
+    }
+
+    func testSidebarAgentClicksOpenEachRowWhileSelectionAloneNeverOpensAPreview() throws {
+        let firstID = UUID(), secondID = UUID()
+        let sidebar = CorralSidebarView()
+        sidebar.setAgents([
+            CorralSidebarAgent(id: firstID, name: "first", sessionID: s),
+            CorralSidebarAgent(id: secondID, name: "second")
+        ])
+        let writer = try XCTUnwrap(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 0) as? NSPasteboardItem)
+        XCTAssertEqual(writer.string(forType: CorralWorkspaceStageView.sessionPasteboardType), s.rawValue)
+        XCTAssertNil(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 1))
+        XCTAssertNil(sidebar.spacesTable.dataSource?.tableView?(sidebar.spacesTable, pasteboardWriterForRow: 0))
+
+        var opened: [UUID] = []
+        sidebar.onSelectAgent = { opened.append($0) }
+        sidebar.agentsTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        XCTAssertTrue(opened.isEmpty, "mouse-down selection starts drags; only a completed click opens the Agent")
+        let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
+        table.dispatchClickIfCompleted(from: 0, to: 0, wasDragged: true)
+        table.dispatchClickIfCompleted(from: 0, to: 1, wasDragged: false)
+        XCTAssertTrue(opened.isEmpty, "dragging or releasing outside the row must not open a preview")
+
+        for row in [0, 1, 0] { try completeAgentClick(on: sidebar, row: row) }
+        XCTAssertEqual(opened, [firstID, secondID, firstID])
+    }
+
+    func testSidebarAgentClickFillsAndShowsTheNewlyCreatedTab() throws {
+        let sessionID = UUID()
+        let blank = CorralTab(title: "New Tab", isBlankWorkspace: true)
+        let workspace = CorralWorkspaceView(tabs: [])
+        workspace.addTab(blank)
+        workspace.sidebar.setAgents([CorralSidebarAgent(id: sessionID, name: "next agent", sessionID: SessionID(sessionID.uuidString))])
+        var opened: (UUID, UUID?, Bool)?
+        workspace.onOpenSession = { opened = ($0, $1, $2) }
+
+        try completeAgentClick(on: workspace.sidebar, row: 0)
+        XCTAssertEqual(workspace.activeTabID, blank.id)
+        XCTAssertFalse(blank.isBlankWorkspace)
+        XCTAssertEqual(blank.activeSessionID, sessionID)
+        XCTAssertTrue(blank.sessionIDs.contains(sessionID))
+        XCTAssertFalse(blank.contentView.isHidden)
+        XCTAssertEqual(opened?.0, sessionID)
+        XCTAssertEqual(opened?.1, blank.id)
+        XCTAssertEqual(opened?.2, false)
+    }
+
+    func testFourPaneSplitNeverWidensOrPinsTheWindow() throws {
+        let tab = CorralTab(title: "Grid", contentView: NSView(), isBlankWorkspace: false)
+        let workspace = CorralWorkspaceView(tabs: [tab])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window)
+        let initialFrame = window.frame
+        workspace.stageContainer.splitView.update(root: grid, focusedSessionID: a)
+        window.layoutIfNeeded()
+        XCTAssertEqual(window.frame, initialFrame)
+        XCTAssertEqual(workspace.stageContainer.splitView.frame, workspace.stageContainer.bounds)
+        let stageSubviews = workspace.stageContainer.subviews
+        XCTAssertLessThan(try XCTUnwrap(stageSubviews.firstIndex(of: tab.contentView)), try XCTUnwrap(stageSubviews.firstIndex(of: workspace.stageContainer.splitView)),
+                          "Tab content (and its Metal stage) stays beneath the pane chrome")
+
+        let minimumFrame = NSRect(origin: initialFrame.origin, size: window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 1100, height: 700)).size)
+        window.setFrame(minimumFrame, display: false)
+        window.layoutIfNeeded()
+        XCTAssertEqual(window.frame, minimumFrame, "pane chrome has no constraints that could hold the window open")
+        XCTAssertEqual(workspace.stageContainer.splitView.projection.panes.count, 4)
+        XCTAssertTrue(workspace.stageContainer.splitView.projection.panes.allSatisfy { $0.frame.width >= 120 && $0.frame.height >= 60 })
+    }
+}
+
+/// A drag in flight without synthesizing host input: AppKit's destination methods are driven directly.
+@MainActor
+private final class FakeDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
+    let pasteboard = NSPasteboard(name: NSPasteboard.Name("corral-split-test-\(UUID().uuidString)"))
+    let draggingLocation: NSPoint
+    init(location: NSPoint, strings: [NSPasteboard.PasteboardType: String]) {
+        draggingLocation = location
+        super.init()
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        for (type, value) in strings { item.setString(value, forType: type) }
+        pasteboard.writeObjects([item])
+    }
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .move }
+    var draggedImageLocation: NSPoint { draggingLocation }
+    var draggedImage: NSImage? { nil }
+    var draggingPasteboard: NSPasteboard { pasteboard }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func resetSpringLoading() {}
+}

@@ -190,11 +190,12 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             let control: ControlMessage
             do { control = try codec.decodeControlMessage(Data(text.utf8)) }
             catch { throw SessionLinkFailure.protocolViolation("Invalid authentication acknowledgement: \(error)") }
-            guard case let .authAck(ok, _) = control else {
+            guard case let .authAck(ok, _, _) = control else {
                 throw SessionLinkFailure.protocolViolation("Expected auth_ack before other controls")
             }
             guard ok else { throw SessionLinkFailure.unauthorized }
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
+            await publish(.control(control))
 
             if restoreSubscriptions { try await restoreDesiredSubscriptions(on: candidate) }
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
@@ -285,7 +286,9 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
 
     private func requestID(for command: ClientCommand) -> UInt32? {
         switch command {
-        case let .list(requestID), let .createSession(requestID, _, _, _): requestID
+        case let .list(requestID): requestID
+        case let .createAgent(request): request.requestID
+        case let .closeSession(request): request.requestID
         case let .input(request): request.sequence
         default: nil
         }
@@ -324,7 +327,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             let control: ControlMessage
             do { control = try codec.decodeControlMessage(bytes) }
             catch { throw SessionLinkFailure.protocolViolation("Invalid control message: \(error)") }
-            if case let .authAck(ok, _) = control {
+            if case let .authAck(ok, _, _) = control {
                 if !ok { throw SessionLinkFailure.unauthorized }
                 throw SessionLinkFailure.protocolViolation("Unexpected auth_ack after authentication")
             }

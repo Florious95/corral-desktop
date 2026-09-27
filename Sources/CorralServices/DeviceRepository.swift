@@ -1,6 +1,5 @@
 import CorralContracts
 import Foundation
-import Darwin
 
 public enum DeviceRepositoryError: Error, Equatable, Sendable {
     case invalidDevice
@@ -26,7 +25,7 @@ public protocol DeviceSessionLifecycle: Sendable {
 
 /// Stores only device metadata and opaque credential handles; credential secrets belong in Keychain.
 public actor DeviceRepository: DeviceRepositoryProtocol {
-    public static let namespace = "com.corral.native.dev"
+    public static let namespace = CorralPrivateStorage.namespace
     public static let storageFilename = "devices.json"
 
     private let storageURL: URL
@@ -41,19 +40,7 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
         deletionConfirmer: (any DeviceDeletionConfirming)? = nil,
         sessionLifecycle: (any DeviceSessionLifecycle)? = nil
     ) throws {
-        let appSupport: URL
-        if let applicationSupportDirectory {
-            appSupport = applicationSupportDirectory
-        } else {
-            appSupport = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-        }
-        let directoryURL = appSupport.appendingPathComponent(Self.namespace, isDirectory: true)
-        try Self.ensurePrivateDirectory(directoryURL)
+        let directoryURL = try CorralPrivateStorage.directoryURL(applicationSupportDirectory: applicationSupportDirectory)
         let storageURL = directoryURL.appendingPathComponent(Self.storageFilename, isDirectory: false)
         self.storageURL = storageURL
         self.deletionConfirmer = deletionConfirmer
@@ -121,32 +108,8 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
         devices = updated
     }
 
-    private static func ensurePrivateDirectory(_ url: URL) throws {
-        try FileManager.default.createDirectory(
-            at: url,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: NSNumber(value: 0o700)]
-        )
-        var info = stat()
-        let statResult = url.path.withCString { lstat($0, &info) }
-        guard statResult == 0, (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else {
-            throw DeviceRepositoryError.unsafeStorage
-        }
-        let result = url.path.withCString { Darwin.chmod($0, mode_t(0o700)) }
-        guard result == 0 else { throw posixError() }
-    }
-
     private static func loadDevices(from url: URL) throws -> (devices: [DeviceRecord], requiresPruning: Bool) {
-        guard FileManager.default.fileExists(atPath: url.path) else { return ([], false) }
-        var info = stat()
-        let statResult = url.path.withCString { lstat($0, &info) }
-        guard statResult == 0, (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG) else {
-            throw DeviceRepositoryError.unsafeStorage
-        }
-        let chmodResult = url.path.withCString { Darwin.chmod($0, mode_t(0o600)) }
-        guard chmodResult == 0 else { throw posixError() }
-
-        let data = try Data(contentsOf: url)
+        guard let data = try CorralPrivateStorage.readData(from: url) else { return ([], false) }
         guard let rows = try JSONSerialization.jsonObject(with: data) as? [Any] else {
             throw DeviceRepositoryError.corruptStore
         }
@@ -161,12 +124,12 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
                 requiresPruning = true
                 continue
             }
-            if raw.endpoint.port == ApprovedEndpoint.productionPort {
-                requiresPruning = true
-                continue
-            }
             guard !raw.id.isEmpty,
-                  let endpoint = try? ApprovedEndpoint(scheme: raw.endpoint.scheme, host: raw.endpoint.host, port: raw.endpoint.port) else {
+                  let endpoint = try? ApprovedEndpoint(
+                    scheme: raw.endpoint.scheme,
+                    host: raw.endpoint.host,
+                    port: raw.endpoint.port
+                  ) else {
                 requiresPruning = true
                 continue
             }
@@ -189,55 +152,7 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(devices.map(PersistedDevice.init))
-        try atomicallyWrite(data, to: url)
-    }
-
-    private static func atomicallyWrite(_ data: Data, to url: URL) throws {
-        let temporaryURL = url.deletingLastPathComponent()
-            .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
-        let fd = temporaryURL.path.withCString {
-            Darwin.open($0, O_WRONLY | O_CREAT | O_EXCL, mode_t(0o600))
-        }
-        guard fd >= 0 else { throw posixError() }
-        var shouldRemoveTemporary = true
-        defer {
-            _ = Darwin.close(fd)
-            if shouldRemoveTemporary { _ = temporaryURL.path.withCString { unlink($0) } }
-        }
-
-        try data.withUnsafeBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else { return }
-            var offset = 0
-            while offset < bytes.count {
-                let count = Darwin.write(fd, baseAddress.advanced(by: offset), bytes.count - offset)
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    throw posixError()
-                }
-                guard count > 0 else { throw posixError() }
-                offset += count
-            }
-        }
-        guard Darwin.fsync(fd) == 0 else { throw posixError() }
-        guard temporaryURL.path.withCString({ Darwin.chmod($0, mode_t(0o600)) }) == 0 else {
-            throw posixError()
-        }
-        let renameResult = temporaryURL.path.withCString { source in
-            url.path.withCString { destination in Darwin.rename(source, destination) }
-        }
-        guard renameResult == 0 else { throw posixError() }
-        shouldRemoveTemporary = false
-        let directoryFD = url.deletingLastPathComponent().path.withCString {
-            Darwin.open($0, O_RDONLY | O_DIRECTORY)
-        }
-        if directoryFD >= 0 {
-            _ = Darwin.fsync(directoryFD)
-            _ = Darwin.close(directoryFD)
-        }
-    }
-
-    private static func posixError() -> NSError {
-        NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        try CorralPrivateStorage.atomicallyWrite(data, to: url)
     }
 }
 
