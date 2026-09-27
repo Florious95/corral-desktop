@@ -21,6 +21,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
         var terminalView: CorralNativeTerminalView? = nil
         var subscribed = false
         var subscriptionPending = false
+        var lastByteWasCarriageReturn = false
         var desiredGrid: GridSize?
         var lastResizeGrid: GridSize?
         var resizePendingGrid: GridSize?
@@ -232,13 +233,39 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
               runtime.subscribed || runtime.subscriptionPending,
               let terminalView = runtime.terminalView else { return }
         let ansi: Data
+        let isSnapshot: Bool
         switch frame {
-        case let .snapshot(_, data), let .delta(_, data): ansi = data
-        case .scrollback: return
+        case let .snapshot(_, data):
+            ansi = data
+            isSnapshot = true
+        case let .delta(_, data):
+            ansi = data
+            isSnapshot = false
+        case .scrollback:
+            return
         }
-        let bytes = Array(ansi)
-        guard !bytes.isEmpty else { return }
-        terminalView.feed(byteArray: bytes[...])
+        guard !ansi.isEmpty else { return }
+        let normalized = Self.withImplicitCarriageReturn(
+            ansi,
+            precedingCarriageReturn: isSnapshot ? false : runtime.lastByteWasCarriageReturn
+        )
+        terminalView.feed(byteArray: normalized.bytes[...])
+        if var current = sessions[id] {
+            current.lastByteWasCarriageReturn = normalized.trailingCarriageReturn
+            sessions[id] = current
+        }
+    }
+
+    private static func withImplicitCarriageReturn(_ data: Data, precedingCarriageReturn: Bool) -> (bytes: [UInt8], trailingCarriageReturn: Bool) {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(data.count)
+        var previousWasCarriageReturn = precedingCarriageReturn
+        for byte in data {
+            if byte == 0x0a, !previousWasCarriageReturn { bytes.append(0x0d) }
+            bytes.append(byte)
+            previousWasCarriageReturn = byte == 0x0d
+        }
+        return (bytes, previousWasCarriageReturn)
     }
 
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

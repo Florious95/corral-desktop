@@ -87,6 +87,46 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testBareLineFeedsReturnToColumnZeroAcrossSnapshotAndDeltaFrames() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = CorralMVPCoordinator(
+            sessionLink: link,
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-test-only"
+            ]
+        )
+        coordinator.window.contentView = nil
+        await coordinator.start()
+        let reference = try SessionReference("mvp-linefeed-session")
+        let record = WireSessionRecord(
+            reference: reference, name: "linefeeds", workingDirectory: "/fixture/linefeeds",
+            state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"
+        )
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/linefeeds", sessionCount: 1, aggregateState: .working, sessions: [record])
+        ]))))
+        let subscribed = await waitUntilMVP {
+            await link.commands().contains { if case .subscribe(reference: reference, _) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(subscribed)
+        let terminalView = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first as? TerminalView)
+
+        let snapshot = "\u{1b}[31mFIRST\n\u{1b}[32mSECOND\r\n\u{1b}[33mTHIRD\r"
+        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data(snapshot.utf8))))
+        try await link.emit(.frame(.delta(reference: reference, ansi: Data("\nFOURTH\nFIFTH".utf8))))
+        let rendered = await waitUntilMVP { visibleText(in: terminalView).contains("FIFTH") }
+        XCTAssertTrue(rendered)
+
+        let rows = (0..<5).compactMap { terminalView.terminal.getLine(row: $0)?.translateToString(trimRight: true) }
+        XCTAssertTrue(rows[0].hasPrefix("FIRST"))
+        XCTAssertTrue(rows[1].hasPrefix("SECOND"))
+        XCTAssertTrue(rows[2].hasPrefix("THIRD"))
+        XCTAssertTrue(rows[3].hasPrefix("FOURTH"))
+        XCTAssertTrue(rows[4].hasPrefix("FIFTH"))
+        await coordinator.stop()
+    }
+
     func testMVPForwardsUserBytesAndMouseButSuppressesVTReplies() async throws {
         let link = RecordingSessionLink()
         let coordinator = CorralMVPCoordinator(
