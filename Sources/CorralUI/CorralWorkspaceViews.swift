@@ -472,12 +472,17 @@ enum CorralAccessibilityMenuActions {
     }
 }
 
-/// Sidebar row content: an AX button whose press opens/selects the row and whose custom actions mirror its menu.
+/// Sidebar row content: an AX button whose completed click or accessibility press opens/selects the row.
 @MainActor
 final class CorralSidebarCellView: NSTableCellView {
     var onPress: (() -> Void)?
     var menuProvider: (() -> NSMenu?)?
-    override func accessibilityPerformPress() -> Bool { onPress?(); return onPress != nil }
+    override func accessibilityPerformPress() -> Bool { performPress() }
+    private func performPress() -> Bool {
+        guard let onPress else { return false }
+        onPress()
+        return true
+    }
     override func accessibilityPerformShowMenu() -> Bool {
         guard let menu = menuProvider?() else { return false }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self); return true
@@ -665,10 +670,8 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
         guard let table = notification.object as? NSTableView else { return }
         if kind == .spaces, spaces.indices.contains(table.selectedRow) { sidebar?.selectSpace(spaces[table.selectedRow]) }
     }
-    /// Agents open on a completed click, not on mouse-down selection, so dragging a row never opens a preview first.
-    @objc func agentClicked(_ table: NSTableView) {
-        if agents.indices.contains(table.clickedRow) { sidebar?.onSelectAgent?(agents[table.clickedRow].id) }
-    }
+    /// Resolve Agent rows from the completed click location, not `clickedRow` (which is often -1 for a drag-enabled table).
+    @objc func agentClicked(_ recognizer: NSClickGestureRecognizer) { sidebar?.handleAgentClick(recognizer) }
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
         guard kind == .agents, agents.indices.contains(row), let sessionID = agents[row].sessionID else { return nil }
         let item = NSPasteboardItem()
@@ -804,6 +807,14 @@ public final class CorralSidebarView: NSView {
         guard let raw = sender.identifier?.rawValue, let id = UUID(uuidString: String(raw.dropFirst(CorralSidebarRowView.hoverControlPrefix.count))) else { return }
         onCreateAgent?(id)
     }
+    func handleAgentClick(_ recognizer: NSClickGestureRecognizer) {
+        let table = (recognizer.view as? NSTableView) ?? agentsTable
+        handleAgentRowClick(at: table.selectedRow)
+    }
+    func handleAgentRowClick(at row: Int) {
+        guard agents.indices.contains(row) else { return }
+        onSelectAgent?(agents[row].id)
+    }
     fileprivate func selectSpace(_ space: CorralSidebarSpace) {
         selectedSpaceID = space.id
         spacesTable.reloadData(forRowIndexes: IndexSet(integersIn: 0..<spacesTable.numberOfRows), columnIndexes: IndexSet(integer: 0))
@@ -890,7 +901,13 @@ public final class CorralSidebarView: NSView {
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")))
         table.headerView = nil; table.rowSizeStyle = .custom; table.intercellSpacing = .zero; table.backgroundColor = CorralAestheticTokens.surface0; table.style = .plain; table.selectionHighlightStyle = .regular
         table.dataSource = data; table.delegate = data; table.usesAutomaticRowHeights = false
-        if data.kind == .agents { table.target = data; table.action = #selector(SidebarTableData.agentClicked(_:)); table.setDraggingSourceOperationMask(.move, forLocal: true) }
+        if data.kind == .agents {
+            table.setDraggingSourceOperationMask(.move, forLocal: true)
+            let click = NSClickGestureRecognizer(target: data, action: #selector(SidebarTableData.agentClicked(_:)))
+            click.numberOfClicksRequired = 1
+            click.delaysPrimaryMouseButtonEvents = false
+            table.addGestureRecognizer(click)
+        }
     }
     private func configureScroll(_ scroll: NSScrollView, table: NSTableView) {
         table.autoresizingMask = [.width]

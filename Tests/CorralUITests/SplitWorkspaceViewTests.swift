@@ -25,6 +25,17 @@ final class SplitWorkspaceViewTests: XCTestCase {
         return (window, container, overlay)
     }
 
+    private func completeAgentClick(on sidebar: CorralSidebarView, row: Int) throws {
+        sidebar.agentsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        let recognizer = try XCTUnwrap(sidebar.agentsTable.gestureRecognizers.compactMap { $0 as? NSClickGestureRecognizer }.first)
+        XCTAssertEqual(recognizer.numberOfClicksRequired, 1)
+        XCTAssertFalse(recognizer.delaysPrimaryMouseButtonEvents)
+        XCTAssertEqual(sidebar.agentsTable.selectedRow, row)
+        let dispatchedClick = NSClickGestureRecognizer()
+        XCTAssertNil(dispatchedClick.view, "test action dispatch does not have a WindowServer hit-tested view")
+        sidebar.handleAgentClick(dispatchedClick)
+    }
+
     private func mouse(_ type: NSEvent.EventType, at point: CGPoint, in overlay: SplitWorkspaceView) -> NSEvent {
         NSEvent.mouseEvent(with: type, location: overlay.convert(point, to: nil), modifierFlags: [], timestamp: 0,
                            windowNumber: overlay.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
@@ -200,19 +211,45 @@ final class SplitWorkspaceViewTests: XCTestCase {
         XCTAssertFalse(dropped)
     }
 
-    func testSidebarAgentRowsDragTheirRealSessionIDAndSelectionAloneNeverOpensAPreview() throws {
+    func testSidebarAgentClicksOpenEachRowWhileSelectionAloneNeverOpensAPreview() throws {
+        let firstID = UUID(), secondID = UUID()
         let sidebar = CorralSidebarView()
-        sidebar.setAgents([CorralSidebarAgent(name: "bound", sessionID: s), CorralSidebarAgent(name: "unbound")])
+        sidebar.setAgents([
+            CorralSidebarAgent(id: firstID, name: "first", sessionID: s),
+            CorralSidebarAgent(id: secondID, name: "second")
+        ])
         let writer = try XCTUnwrap(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 0) as? NSPasteboardItem)
         XCTAssertEqual(writer.string(forType: CorralWorkspaceStageView.sessionPasteboardType), s.rawValue)
         XCTAssertNil(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 1))
         XCTAssertNil(sidebar.spacesTable.dataSource?.tableView?(sidebar.spacesTable, pasteboardWriterForRow: 0))
 
-        var opened: UUID?
-        sidebar.onSelectAgent = { opened = $0 }
+        var opened: [UUID] = []
+        sidebar.onSelectAgent = { opened.append($0) }
         sidebar.agentsTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        XCTAssertNil(opened, "mouse-down selection starts drags; only a completed click opens the Agent")
-        XCTAssertNotNil(sidebar.agentsTable.action)
+        XCTAssertTrue(opened.isEmpty, "mouse-down selection starts drags; only a completed click opens the Agent")
+
+        for row in 0..<2 { try completeAgentClick(on: sidebar, row: row) }
+        XCTAssertEqual(opened, [firstID, secondID])
+    }
+
+    func testSidebarAgentClickFillsAndShowsTheNewlyCreatedTab() throws {
+        let sessionID = UUID()
+        let blank = CorralTab(title: "New Tab", isBlankWorkspace: true)
+        let workspace = CorralWorkspaceView(tabs: [])
+        workspace.addTab(blank)
+        workspace.sidebar.setAgents([CorralSidebarAgent(id: sessionID, name: "next agent", sessionID: SessionID(sessionID.uuidString))])
+        var opened: (UUID, UUID?, Bool)?
+        workspace.onOpenSession = { opened = ($0, $1, $2) }
+
+        try completeAgentClick(on: workspace.sidebar, row: 0)
+        XCTAssertEqual(workspace.activeTabID, blank.id)
+        XCTAssertFalse(blank.isBlankWorkspace)
+        XCTAssertEqual(blank.activeSessionID, sessionID)
+        XCTAssertTrue(blank.sessionIDs.contains(sessionID))
+        XCTAssertFalse(blank.contentView.isHidden)
+        XCTAssertEqual(opened?.0, sessionID)
+        XCTAssertEqual(opened?.1, blank.id)
+        XCTAssertEqual(opened?.2, false)
     }
 
     func testFourPaneSplitNeverWidensOrPinsTheWindow() throws {
