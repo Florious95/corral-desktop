@@ -14,9 +14,9 @@ final class CorralWorkspaceStoreTests: XCTestCase {
 
         let initial = try await store.smartOpenSession(first)
         let firstTabID = initial.activeTabID
-        XCTAssertTrue(initial.tabs[0].pinned)
+        XCTAssertFalse(initial.tabs[0].pinned)
         let blankTabID = try await store.createTab()
-        _ = try await store.smartOpenSession(first)
+        _ = try await store.smartOpenSession(first, gesture: .doubleClick)
         var state = await store.snapshot()
         XCTAssertEqual(state.activeTabID, firstTabID)
         XCTAssertEqual(state.tabs.count, 2)
@@ -45,8 +45,8 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         XCTAssertNil(state.previewUID)
         XCTAssertEqual(state.tabs.count, 3)
         XCTAssertEqual(state.activeTab?.root, .session(third))
-        XCTAssertTrue(state.activeTab?.pinned == true)
-        XCTAssertEqual(state.tabs.map(\.pinned), [true, true, false])
+        XCTAssertFalse(state.activeTab?.pinned == true)
+        XCTAssertEqual(state.tabs.map(\.pinned), [false, false, false])
     }
 
     func testDiscardedPreviewBindingsAreRemovedWhenSwitchingOrClosingPreview() async throws {
@@ -83,7 +83,28 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         XCTAssertFalse(state.sessionBindings.contains { $0.sessionID == preview.id })
     }
 
-    func testBlankSlotFillsAndPinsIncludingInitialImplicitBlank() async throws {
+    func testTopologyMutationsPreserveExplicitPin() async throws {
+        let support = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let store = try CorralWorkspaceStore(applicationSupportDirectory: support)
+        let first = SessionID("first")
+        let second = SessionID("second")
+        _ = try await store.smartOpenSession(first)
+        let tabID = await store.snapshot().activeTabID
+        _ = try await store.pinTab(tabID)
+
+        _ = try await store.splitSession(second, target: first, edge: .right)
+        var state = await store.snapshot()
+        XCTAssertTrue(state.activeTab?.pinned == true)
+        _ = try await store.updateSplitRatio(path: "root", ratio: 0.4)
+        state = await store.snapshot()
+        XCTAssertTrue(state.activeTab?.pinned == true)
+        _ = try await store.closePane(second)
+        state = await store.snapshot()
+        XCTAssertTrue(state.activeTab?.pinned == true)
+    }
+
+    func testBlankSlotFillStaysRegularUnlessBlankWasExplicitlyPinned() async throws {
         let support = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: support) }
         let store = try CorralWorkspaceStore(applicationSupportDirectory: support)
@@ -94,11 +115,12 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         _ = try await store.smartOpenSession(firstID)
         var state = await store.snapshot()
         XCTAssertEqual(state.activeTab?.root, .session(firstID))
-        XCTAssertTrue(state.activeTab?.pinned == true)
+        XCTAssertFalse(state.activeTab?.pinned == true)
         XCTAssertFalse(state.activeTab?.isImplicitBlank == true)
         XCTAssertNil(state.previewUID)
 
         let blankID = try await store.createTab()
+        _ = try await store.pinTab(blankID)
         let secondID = SessionID("device::second")
         _ = try await store.smartOpenSession(secondID)
         state = await store.snapshot()
@@ -107,7 +129,7 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         XCTAssertTrue(state.activeTab?.pinned == true)
     }
 
-    func testFiveZoneDropsPersistTopologyAndPinTheTab() async throws {
+    func testFiveZoneDropsPersistTopologyWithoutPinningTheTab() async throws {
         for edge in [WorkspaceDropZone.left, .right, .top, .bottom, .center] {
             let support = temporaryDirectory()
             defer { try? FileManager.default.removeItem(at: support) }
@@ -117,7 +139,7 @@ final class CorralWorkspaceStoreTests: XCTestCase {
             _ = try await store.smartOpenSession(target)
             _ = try await store.splitSession(incoming, target: target, edge: edge)
             let tab = await store.snapshot().activeTab
-            XCTAssertTrue(tab?.pinned == true, "\(edge) must commit/pin the Tab")
+            XCTAssertFalse(tab?.pinned == true, "\(edge) must preserve regular Tab state")
             switch edge {
             case .left, .right, .top, .bottom:
                 guard case let .split(direction, _, first, second) = tab?.root else {
@@ -147,7 +169,8 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         _ = try await store.splitSession(source, target: target, edge: .left)
         var state = await store.snapshot()
         XCTAssertNil(state.tabs.first(where: { $0.id == sourceTabID })?.root)
-        XCTAssertTrue(state.tabs.first(where: { $0.id == sourceTabID })?.pinned == true)
+        XCTAssertFalse(state.tabs.first(where: { $0.id == sourceTabID })?.pinned == true)
+        XCTAssertFalse(state.tabs.first(where: { $0.id == targetTabID })?.pinned == true)
         XCTAssertEqual(state.tabs.first(where: { $0.id == targetTabID })?.sessionIDs, [source, target])
         XCTAssertEqual(state.tabs.flatMap(\.sessionIDs).filter { $0 == source }.count, 1)
 
@@ -170,7 +193,7 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         _ = try await store.closePane(second)
         var state = await store.snapshot()
         XCTAssertEqual(state.activeTab?.root, .session(first))
-        XCTAssertTrue(state.activeTab?.pinned == true)
+        XCTAssertFalse(state.activeTab?.pinned == true)
 
         _ = try await store.closeTab(tabID)
         state = await store.snapshot()
@@ -188,6 +211,7 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         let firstTab = await store.snapshot().activeTabID
         let secondTab = try await store.createTab()
         _ = try await store.smartOpenSession(SessionID("agent-B"))
+        _ = try await store.pinTab(secondTab)
         let thirdTab = try await store.createTab()
         let fourthTab = try await store.createTab()
 
@@ -334,7 +358,7 @@ final class CorralWorkspaceStoreTests: XCTestCase {
         let state = await store.snapshot()
         XCTAssertEqual(state.activeTab?.sessionIDs, [new.id, companionID])
         XCTAssertEqual(state.activeTab?.activeSessionID, new.id)
-        XCTAssertTrue(state.tabs[0].pinned)
+        XCTAssertFalse(state.tabs[0].pinned)
         guard case let .split(_, ratio, _, _) = state.activeTab?.root else {
             return XCTFail("Drift must retain the pane tree")
         }

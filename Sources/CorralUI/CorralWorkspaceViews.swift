@@ -10,6 +10,7 @@ public final class CorralTab: Identifiable {
     public var provider: String?
     public var status: CorralStatusIndicatorView.Status
     public var isPinned: Bool
+    public var isPreview = false
     public var isCustomTitle: Bool
     public let defaultTitle: String
     public var sessionIDs: Set<UUID>
@@ -42,6 +43,7 @@ public final class CorralTabBarView: NSView {
     public var onSelectTab: ((UUID) -> Void)?
     public var onCreateTab: (() -> Void)?
     public var onCloseTab: ((UUID) -> Void)?
+    public var onClosePreview: (() -> Void)?
     public var onRenameTab: ((UUID, String) -> Void)?
     public var onToggleSidebar: (() -> Void)?
     public var onReorderTabs: ((UUID, Int) -> Void)?
@@ -190,6 +192,7 @@ public final class CorralTabBarView: NSView {
 
     fileprivate func select(_ id: UUID) { onSelectTab?(id) }
     fileprivate func close(_ id: UUID) { onCloseTab?(id) }
+    fileprivate func closePreview() { onClosePreview?() }
     fileprivate func commitRename(_ id: UUID, _ title: String) { onRenameTab?(id, title) }
     fileprivate func performContextAction(_ id: UUID, _ action: String) { onContextAction?(id, action) }
     @objc private func toggleSidebar() { onToggleSidebar?() }
@@ -234,65 +237,74 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         status.fillsIdle = true
         status.status = tab.status
         status.translatesAutoresizingMaskIntoConstraints = false
-        title.stringValue = tab.isPinned ? String(tab.title.prefix(1)).uppercased() : tab.title
-        title.font = .systemFont(ofSize: tab.isPinned ? 11 : 12, weight: tab.isPinned ? .semibold : .regular)
+        title.stringValue = tab.title
+        title.font = .systemFont(ofSize: 12)
         title.textColor = selected ? CorralAestheticTokens.text : CorralAestheticTokens.textSecondary
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        title.setAccessibilityIdentifier("corral.tab.title")
+        title.setAccessibilityLabel(tab.title)
         title.translatesAutoresizingMaskIntoConstraints = false
         addSubview(status)
         addSubview(title)
-        var pinnedProviderIcon: CorralProviderIconView?
-        if tab.isPinned, let provider = tab.provider {
-            let icon = CorralProviderIconView(provider: provider, size: 15, active: tab.status == .working || tab.status == .blocked)
-            pinnedProviderIcon = icon
-            addSubview(icon)
-            title.isHidden = true
+        let providerIcon: NSImageView
+        if let provider = tab.provider {
+            providerIcon = CorralProviderIconView(provider: provider, size: 15, active: tab.status == .working || tab.status == .blocked)
+        } else {
+            providerIcon = NSImageView()
+            providerIcon.translatesAutoresizingMaskIntoConstraints = false
+            providerIcon.image = CorralLegacyIcon.image(.terminal, size: 15)
+            providerIcon.contentTintColor = CorralAestheticTokens.textMuted
+            providerIcon.setAccessibilityLabel("终端")
+            NSLayoutConstraint.activate([
+                providerIcon.widthAnchor.constraint(equalToConstant: 15),
+                providerIcon.heightAnchor.constraint(equalToConstant: 15)
+            ])
         }
+        addSubview(providerIcon)
         closeButton.image = CorralLegacyIcon.image(.close, size: 10, tint: CorralAestheticTokens.textMuted)
         closeButton.imagePosition = .imageOnly
         closeButton.isBordered = false
         closeButton.contentTintColor = CorralAestheticTokens.textMuted
-        closeButton.toolTip = "关闭工作台"
-        closeButton.setAccessibilityLabel("关闭工作台"); closeButton.setAccessibilityIdentifier("corral.tab.close")
+        closeButton.toolTip = tab.isPreview ? "关闭预览" : "关闭工作台"
+        closeButton.setAccessibilityLabel(closeButton.toolTip ?? "关闭工作台"); closeButton.setAccessibilityIdentifier("corral.tab.close")
         closeButton.target = self
         closeButton.action = #selector(closeTab)
         closeButton.alphaValue = selected ? 0.7 : 0
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        if !tab.isPinned { addSubview(closeButton) }
-        let width: CGFloat = tab.isPinned ? 32 : 160
-        widthAnchor.constraint(lessThanOrEqualToConstant: width).isActive = true
+        let showsCloseButton = !tab.isPinned || tab.isPreview
+        if showsCloseButton { addSubview(closeButton) }
+        let textWidth = ceil((tab.title as NSString).size(withAttributes: [.font: title.font!]).width)
+        let fixedChromeWidth: CGFloat = 8 + 6 + 6 + 20 + (showsCloseButton ? 36 : 8)
+        let width = min(260, max(144, textWidth + fixedChromeWidth))
+        widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
+        widthAnchor.constraint(greaterThanOrEqualToConstant: 144).isActive = true
         heightAnchor.constraint(equalToConstant: 26).isActive = true
         let preferredWidth = widthAnchor.constraint(equalToConstant: width)
         preferredWidth.priority = NSLayoutConstraint.Priority(480)
         preferredWidth.isActive = true
-        status.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
-        status.widthAnchor.constraint(equalToConstant: tab.isPinned ? 6 : 6).isActive = true
-        status.heightAnchor.constraint(equalToConstant: tab.isPinned ? 6 : 6).isActive = true
-        if tab.isPinned {
-            widthAnchor.constraint(equalToConstant: 32).isActive = true
-            if let pinnedProviderIcon {
-                NSLayoutConstraint.activate([
-                    pinnedProviderIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-                    pinnedProviderIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
-                    status.leadingAnchor.constraint(equalTo: pinnedProviderIcon.trailingAnchor, constant: 1),
-                    status.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
-                ])
-            } else {
-                NSLayoutConstraint.activate([
-                    title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4), title.centerYAnchor.constraint(equalTo: centerYAnchor),
-                    status.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 1),
-                    status.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
-                ])
-            }
-        } else {
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        NSLayoutConstraint.activate([
+            status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            status.centerYAnchor.constraint(equalTo: centerYAnchor),
+            status.widthAnchor.constraint(equalToConstant: 6),
+            status.heightAnchor.constraint(equalToConstant: 6),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        NSLayoutConstraint.activate([
+            providerIcon.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 6),
+            providerIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            title.leadingAnchor.constraint(equalTo: providerIcon.trailingAnchor, constant: 5)
+        ])
+        if showsCloseButton {
             NSLayoutConstraint.activate([
-                status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-                title.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 6), title.centerYAnchor.constraint(equalTo: centerYAnchor),
                 title.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
-                closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6), closeButton.centerYAnchor.constraint(equalTo: centerYAnchor), closeButton.widthAnchor.constraint(equalToConstant: 18), closeButton.heightAnchor.constraint(equalToConstant: 18)
+                closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+                closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+                closeButton.widthAnchor.constraint(equalToConstant: 18),
+                closeButton.heightAnchor.constraint(equalToConstant: 18)
             ])
+        } else {
+            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
         }
         toolTip = tab.title
         setAccessibilityElement(true)
@@ -348,7 +360,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         if tab.isCustomTitle { addMenuItem(menu, title: "恢复自动标题", action: "resetTitle") }
         addMenuItem(menu, title: tab.isPinned ? "取消固定" : "固定到最左", action: "pin")
         menu.addItem(.separator())
-        addMenuItem(menu, title: "关闭工作台", action: "close")
+        addMenuItem(menu, title: tab.isPreview ? "关闭预览" : "关闭工作台", action: "close")
         let unpinnedCount = owner?.tabs.filter { !$0.isPinned }.count ?? 0
         let others = addMenuItem(menu, title: "关闭其他工作台", action: "closeOthers"); others.isEnabled = unpinnedCount > 1 && !tab.isPinned
         let right = addMenuItem(menu, title: "关闭右侧所有工作台", action: "closeRight"); right.isEnabled = (owner?.tabs.firstIndex(where: { $0.id == tab.id }) ?? 0) < (owner?.tabs.count ?? 1) - 1
@@ -373,11 +385,12 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     }
     @objc private func contextAction(_ item: NSMenuItem) { owner?.performContextAction(tab.id, item.representedObject as? String ?? "") }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
-    @objc private func closeTab() { owner?.close(tab.id) }
+    @objc private func closeTab() {
+        if tab.isPreview { owner?.closePreview() } else { owner?.close(tab.id) }
+    }
     @objc private func renameFromMenu() { beginRename() }
-    @objc private func togglePin() { tab.isPinned.toggle(); owner?.setTabs(owner?.tabs ?? [], selectedTabID: owner?.selectedTabID) }
+    @objc private func togglePin() { owner?.performContextAction(tab.id, "pin") }
     func beginRename() {
-        guard !tab.isPinned else { return }
         let field = CorralInlineRenameField(string: tab.title)
         field.beginEditing()
         field.isBezeled = false; field.drawsBackground = true; field.backgroundColor = CorralAestheticTokens.surface1
@@ -393,7 +406,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         field.finish(commit: true)
     }
     private func finishRename(_ value: String) { if !value.isEmpty { tab.title = value; owner?.commitRename(tab.id, value) }; removeEditor() }
-    private func removeEditor() { editField?.removeFromSuperview(); editField = nil; title.stringValue = tab.isPinned ? String(tab.title.prefix(1)) : tab.title; title.isHidden = false }
+    private func removeEditor() { editField?.removeFromSuperview(); editField = nil; title.stringValue = tab.title; title.isHidden = false }
 }
 
 public enum CorralSidebarSpaceKind: String, Sendable { case allSpaces, favorites, workspace }
@@ -1039,6 +1052,7 @@ public final class CorralWorkspaceView: NSView {
     public var onCreateAgent: ((UUID?) -> Void)?
     public var onToggleSidebar: (() -> Void)?
     public var onSelectAgent: ((UUID) -> Void)?
+    public var onClosePreview: (() -> Void)?
     public var onOpenSession: ((UUID, UUID?, Bool) -> Void)?
     public var onFocusSession: ((UUID, UUID) -> Void)?
     public var onDevices: (() -> Void)?
@@ -1076,6 +1090,7 @@ public final class CorralWorkspaceView: NSView {
         sidebar.onSettings = { [weak self] in self?.onSettings?() }; sidebar.onCreateAgent = { [weak self] in self?.onCreateAgent?($0) }; sidebar.onToggleDevices = { [weak self] in self?.onDevices?() }
         sidebar.onSelectAgent = { [weak self] id in self?.smartOpenSession(id); self?.onSelectAgent?(id) }
         tabBar.onSelectTab = { [weak self] in self?.selectTab(id: $0) }; tabBar.onCreateTab = { [weak self] in self?.onCreateTab?() }; tabBar.onCloseTab = { [weak self] in self?.closeTab(id: $0) }
+        tabBar.onClosePreview = { [weak self] in self?.onClosePreview?() }
         tabBar.onRenameTab = { [weak self] id, title in self?.renameTab(id: id, title: title) }; tabBar.onReorderTabs = { [weak self] id, index in self?.reorderTab(id: id, to: index) }
         tabBar.onContextAction = { [weak self] id, action in self?.performTabContextAction(id, action) }
         stageContainer.onCreateAgent = { [weak self] in self?.onCreateAgent?(nil) }
@@ -1094,6 +1109,7 @@ public final class CorralWorkspaceView: NSView {
         self.tabs = ordered
         activeTabID = selectedTabID
         self.previewSessionID = previewSessionID
+        for tab in ordered { tab.isPreview = tab.id == selectedTabID && previewSessionID != nil }
         stageContainer.activeTabID = selectedTabID
         for tab in ordered { tab.contentView.isHidden = tab.id != selectedTabID }
         tabBar.setTabs(ordered, selectedTabID: selectedTabID)
@@ -1111,6 +1127,7 @@ public final class CorralWorkspaceView: NSView {
         guard tabs.contains(where: { $0.id == id }) else { return }
         tabSwitchTelemetry.beginSwitch(); defer { tabSwitchTelemetry.endSwitch() }
         previewSessionID = nil
+        for tab in tabs { tab.isPreview = false }
         activeTabID = id; stageContainer.activeTabID = id
         for tab in tabs { tab.contentView.isHidden = tab.id != id }
         tabBar.setTabs(tabs, selectedTabID: id)
@@ -1135,19 +1152,19 @@ public final class CorralWorkspaceView: NSView {
             current.isBlankWorkspace = false; current.sessionIDs.insert(sessionID); current.activeSessionID = sessionID
             previewSessionID = nil; onOpenSession?(sessionID, current.id, false)
         } else {
-            previewSessionID = sessionID; onOpenSession?(sessionID, current.id, true)
+            previewSessionID = sessionID
+            current.isPreview = true
+            tabBar.setTabs(tabs, selectedTabID: activeTabID)
+            onOpenSession?(sessionID, current.id, true)
         }
     }
     public func renameTab(id: UUID, title: String) { guard !title.isEmpty, let tab = tabs.first(where: { $0.id == id }) else { return }; tab.title = title; tab.isCustomTitle = true; tabBar.setTabs(tabs, selectedTabID: activeTabID) }
     fileprivate func performTabContextAction(_ id: UUID, _ action: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }), let tab = tabs.first(where: { $0.id == id }) else { return }
         switch action {
-        case "pin":
-            tab.isPinned.toggle()
-            if tab.isPinned { reorderTab(id: id, to: tabs.filter(\.isPinned).count - 1) }
-            else { reorderTab(id: id, to: max(0, tabs.firstIndex(where: { !$0.isPinned }) ?? tabs.count - 1)) }
-            tabBar.setTabs(tabs, selectedTabID: activeTabID)
-        case "close": closeTab(id: id)
+        case "pin": onTabContextAction?(id, action)
+        case "close":
+            if tab.isPreview { onClosePreview?() } else { tabBar.close(id) }
         case "closeOthers": tabs.filter { $0.id != id && !$0.isPinned }.map(\.id).forEach(closeTab(id:))
         case "closeRight": Array(tabs.suffix(from: index + 1)).filter { !$0.isPinned }.map(\.id).forEach(closeTab(id:))
         case "resetTitle": tab.title = tab.defaultTitle; tab.isCustomTitle = false; tabBar.setTabs(tabs, selectedTabID: activeTabID); onTabContextAction?(id, action)

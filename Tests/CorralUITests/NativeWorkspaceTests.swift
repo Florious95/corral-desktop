@@ -353,13 +353,16 @@ final class NativeWorkspaceTests: XCTestCase {
         for item in items {
             let frame = bar.convert(item.bounds, from: item)
             XCTAssertEqual(frame.height, 26, accuracy: 0.1)
-            XCTAssertEqual(frame.width, 160, accuracy: 0.1)
+            XCTAssertGreaterThanOrEqual(frame.width, 144 - 0.1)
+            XCTAssertLessThanOrEqual(frame.width, 260 + 0.1)
             XCTAssertEqual(frame.midY, 19, accuracy: 0.1, "Pills share the 38px header centerline with the sidebar toggle")
             XCTAssertEqual(item.layer?.cornerRadius, 6)
         }
         XCTAssertEqual(bar.convert(items[0].bounds, from: items[0]).minX, 9, accuracy: 0.1)
         let capsule = try XCTUnwrap(bar.activeCapsuleFrame)
-        XCTAssertEqual(capsule.size, NSSize(width: 160, height: 26))
+        XCTAssertGreaterThanOrEqual(capsule.size.width, 144 - 0.1)
+        XCTAssertLessThanOrEqual(capsule.size.width, 260 + 0.1)
+        XCTAssertEqual(capsule.size.height, 26, accuracy: 0.1)
         let plus = bar.convert(bar.createButton.bounds, from: bar.createButton)
         XCTAssertEqual(plus.minX, bar.convert(items[1].bounds, from: items[1]).maxX + 9, accuracy: 0.5)
         XCTAssertEqual(plus.size, NSSize(width: 26, height: 26))
@@ -371,7 +374,7 @@ final class NativeWorkspaceTests: XCTestCase {
         for index in 0..<30 { workspace.addTab(CorralTab(title: "Overflow \(index)"), select: false) }
         workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
         let crowded = descendants(of: bar).filter { String(describing: type(of: $0)) == "CorralTabItemView" }
-        XCTAssertTrue(crowded.allSatisfy { $0.frame.width >= 44 - 0.1 && $0.frame.width < 160 })
+        XCTAssertTrue(crowded.allSatisfy { $0.frame.width >= 144 - 0.1 && $0.frame.width <= 260 + 0.1 })
         XCTAssertLessThanOrEqual(bar.convert(bar.createButton.bounds, from: bar.createButton).maxX, bar.bounds.maxX - 10 + 0.1)
     }
 
@@ -560,6 +563,56 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertGreaterThan(capsule.width, 0)
         workspace.reorderTab(id: first.id, to: 2)
         XCTAssertEqual(workspace.tabs.map(\.id), [pinned.id, second.id, first.id])
+    }
+
+    func testPinnedAndRegularTabsKeepReadableTitlesAndPreviewClosesOnlyItsPreview() throws {
+        let pinned = CorralTab(title: "全自动编排leader", status: .working, isPinned: true, provider: "pi")
+        let regular = CorralTab(title: "Workspace · Rust", provider: "codex")
+        let workspace = CorralWorkspaceView(tabs: [pinned, regular])
+        workspace.frame = NSRect(x: 0, y: 0, width: 1400, height: 860)
+        workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
+
+        func item(title: String) throws -> NSView {
+            try XCTUnwrap(descendants(of: workspace.tabBar).first {
+                $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == title
+            })
+        }
+        func titleLabel(in item: NSView) throws -> NSTextField {
+            try XCTUnwrap(descendants(of: item).compactMap { $0 as? NSTextField }.first {
+                $0.accessibilityIdentifier() == "corral.tab.title"
+            })
+        }
+
+        let pinnedItem = try item(title: pinned.title)
+        let pinnedLabel = try titleLabel(in: pinnedItem)
+        XCTAssertFalse(pinnedLabel.isHidden)
+        XCTAssertEqual(pinnedLabel.stringValue, "全自动编排leader")
+        XCTAssertGreaterThan(pinnedLabel.frame.width, 0)
+        XCTAssertEqual(pinnedLabel.cell?.lineBreakMode, .byTruncatingTail)
+        XCTAssertGreaterThanOrEqual(pinnedItem.frame.width, 144)
+        XCTAssertLessThanOrEqual(pinnedItem.frame.width, 260)
+        XCTAssertTrue(descendants(of: pinnedItem).contains { $0 is CorralProviderIconView })
+        XCTAssertFalse(descendants(of: pinnedItem).contains { $0.accessibilityIdentifier() == "corral.tab.close" })
+
+        let regularItem = try item(title: regular.title)
+        let regularLabel = try titleLabel(in: regularItem)
+        XCTAssertFalse(regularLabel.isHidden)
+        XCTAssertEqual(regularLabel.stringValue, regular.title)
+        XCTAssertTrue(descendants(of: regularItem).contains { $0.accessibilityIdentifier() == "corral.tab.close" })
+
+        var closedPreview = false
+        workspace.onClosePreview = { closedPreview = true }
+        let previewID = UUID()
+        workspace.synchronizeWorkspaceTabs([pinned, regular], selectedTabID: pinned.id, previewSessionID: previewID)
+        workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
+        let previewItem = try item(title: pinned.title)
+        let closePreview = try XCTUnwrap(descendants(of: previewItem).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "corral.tab.close"
+        })
+        XCTAssertEqual(closePreview.accessibilityLabel(), "关闭预览")
+        closePreview.performClick(closePreview)
+        XCTAssertTrue(closedPreview)
+        XCTAssertEqual(workspace.tabs.count, 2, "closing preview must not remove the durable host Tab")
     }
 
     func testTabSwitchPreserves45RowSnapshotAndRecordsNoTerminalWork() throws {
