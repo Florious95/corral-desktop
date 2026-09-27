@@ -529,11 +529,20 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
             for row in 0..<snapshot.size.rows {
                 for column in 0..<snapshot.size.columns {
                     let cell = snapshot.cells[row * snapshot.size.columns + column]
+                    let span: Double
+                    switch cell.content {
+                    case .continuation:
+                        continue
+                    case .blank:
+                        span = 1
+                    case .cluster(_, let columns):
+                        span = Double(columns.rawValue)
+                    }
                     let inverse = cell.attributes.contains(.inverse)
                     let background = terminalColor(inverse ? cell.foreground : cell.background)
                     appendSolidQuad(
                         into: &vertices,
-                        rect: CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth, height: cellHeight),
+                        rect: CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth * span, height: cellHeight),
                         viewport: viewport,
                         color: background
                     )
@@ -638,9 +647,22 @@ public final class SharedMetalTerminalRenderer: MetalTerminalRenderer {
             for row in 0..<snapshot.size.rows {
                 for column in 0..<snapshot.size.columns {
                     let cell = snapshot.cells[row * snapshot.size.columns + column]
-                    let cellRect = CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth, height: cellHeight)
+                    let span: Double
+                    let isContinuation: Bool
+                    switch cell.content {
+                    case .continuation:
+                        span = 1
+                        isContinuation = true
+                    case .blank:
+                        span = 1
+                        isContinuation = false
+                    case .cluster(_, let columns):
+                        span = Double(columns.rawValue)
+                        isContinuation = false
+                    }
+                    let cellRect = CGRect(x: viewport.x + Double(column) * cellWidth, y: viewport.y + Double(row) * cellHeight, width: cellWidth * span, height: cellHeight)
                     let visibleForeground = terminalColor(cell.attributes.contains(.inverse) ? cell.background : cell.foreground)
-                    if cell.attributes.contains(.underline) {
+                    if !isContinuation, cell.attributes.contains(.underline) {
                         let thickness = min(2, max(1, cellHeight * 0.06))
                         appendSolidQuad(
                             into: &vertices,

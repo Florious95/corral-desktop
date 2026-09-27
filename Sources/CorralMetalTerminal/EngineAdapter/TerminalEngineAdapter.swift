@@ -25,6 +25,7 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
     private let terminal: Terminal
     private var epoch: ConnectionEpoch?
     private var generation = DirtyGeneration.initial
+    private var lastValidSnapshot: TerminalGridSnapshot?
 
     public init(size: GridSize = GridSize(rows: 24, columns: 80)) {
         let initialSize = Self.isSupported(size) ? size : GridSize(rows: 24, columns: 80)
@@ -77,20 +78,42 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
         var cells: [TerminalCell] = []
         cells.reserveCapacity(dimensions.rows * dimensions.cols)
 
+        var invalidSpan: (row: Int, column: Int)?
         for row in 0..<dimensions.rows {
+            let rowStart = cells.count
+            let rawRow = (0..<dimensions.cols).map { terminal.getCharData(col: $0, row: row) }
             for column in 0..<dimensions.cols {
-                guard let data = terminal.getCharData(col: column, row: row) else {
+                guard let data = rawRow[column] else {
                     cells.append(Self.blankCell)
                     continue
                 }
+                if data.width == 0 {
+                    guard column > 0, rawRow[column - 1]?.width == 2,
+                          cells.count > rowStart,
+                          case .cluster(_, columns: .two) = cells[cells.count - 1].content else {
+                        invalidSpan = (row, column)
+                        break
+                    }
+                    let leading = cells[cells.count - 1]
+                    cells.append(TerminalCell(
+                        content: .continuation,
+                        foreground: leading.foreground,
+                        background: leading.background,
+                        attributes: leading.attributes
+                    ))
+                    continue
+                }
+                guard data.width == 1 || data.width == 2,
+                      data.width != 2 || (column + 1 < dimensions.cols && rawRow[column + 1]?.width == 0) else {
+                    invalidSpan = (row, column)
+                    break
+                }
                 let cluster = String(terminal.getCharacter(for: data))
                 let content: CellContent
-                if data.width == 0 {
-                    content = .continuation
-                } else if cluster.isEmpty || cluster == " " || cluster == "\0" {
+                if cluster.isEmpty || cluster == " " || cluster == "\0" {
                     content = .blank
                 } else {
-                    content = .cluster(cluster, columns: data.width > 1 ? .two : .one)
+                    content = .cluster(cluster, columns: data.width == 2 ? .two : .one)
                 }
                 let attribute = data.attribute
                 var attributes: TerminalAttributes = []
@@ -106,11 +129,12 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
                     attributes: attributes
                 ))
             }
+            if invalidSpan != nil { break }
         }
 
         let position = terminal.getCursorLocation()
         let wrapPending = position.x >= dimensions.cols
-        return TerminalGridSnapshot(
+        let snapshot = TerminalGridSnapshot(
             size: GridSize(rows: dimensions.rows, columns: dimensions.cols),
             cells: cells,
             cursor: CursorDescriptor(
@@ -122,6 +146,16 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
             ),
             generation: generation
         )
+        guard invalidSpan == nil, snapshot.isValid else {
+            if let invalidSpan {
+                NSLog("CorralMetalTerminal: invalid wide-cell span at row %d column %d; preserving last valid snapshot", invalidSpan.row, invalidSpan.column)
+            } else {
+                NSLog("CorralMetalTerminal: invalid terminal snapshot; preserving last valid snapshot")
+            }
+            return lastValidSnapshot ?? snapshot
+        }
+        lastValidSnapshot = snapshot
+        return snapshot
     }
 
     public func mouseReportingMode() -> TerminalMouseReportingMode {

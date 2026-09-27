@@ -109,6 +109,27 @@ final class TerminalEngineTests: XCTestCase {
         }
     }
 
+    func testWideCellContinuationInheritsLeadingVisualAttributes() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 1, columns: 4))
+        _ = try await feed("\u{1B}[1;3;4;7;38;2;1;2;3;48;2;4;5;6m界", to: engine)
+
+        let snapshot = await engine.snapshot()
+        let leading = snapshot.cells[0]
+        let continuation = snapshot.cells[1]
+        XCTAssertEqual(leading.content, .cluster("界", columns: .two))
+        XCTAssertEqual(continuation.content, .continuation)
+        XCTAssertEqual(continuation.foreground, leading.foreground)
+        XCTAssertEqual(continuation.background, leading.background)
+        XCTAssertEqual(continuation.attributes, leading.attributes)
+        XCTAssertEqual(leading.foreground, .rgba(RGBAColor(red: 1, green: 2, blue: 3)))
+        XCTAssertEqual(leading.background, .rgba(RGBAColor(red: 4, green: 5, blue: 6)))
+        XCTAssertTrue(leading.attributes.contains(.bold))
+        XCTAssertTrue(leading.attributes.contains(.italic))
+        XCTAssertTrue(leading.attributes.contains(.underline))
+        XCTAssertTrue(leading.attributes.contains(.inverse))
+        XCTAssertTrue(snapshot.isValid)
+    }
+
     func testParsesCSIAndUTF8AcrossFrameBoundaries() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 1, columns: 4))
         _ = try await engine.apply(.delta(reference: reference(), ansi: Data([0x1B, 0x5B, 0x33, 0x38, 0x3B, 0x35, 0x3B]), origin: origin(1)))

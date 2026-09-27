@@ -150,6 +150,68 @@ final class SharedMetalTerminalRendererTests: XCTestCase {
     }
 
     @MainActor
+    func testOffscreenCJKWideCellUsesOneBackgroundSpan() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal is unavailable on this machine") }
+        let renderer = try SharedMetalTerminalRenderer(
+            device: device,
+            glyphAtlas: GlyphAtlasPool(device: device, memoryBudget: .appDefault, pageSize: 128)
+        )
+        let width = 80
+        let height = 32
+        renderer.configureStage(sizeInPoints: CGSize(width: width, height: height), backingScale: 1)
+
+        let white = TerminalColor.rgba(RGBAColor(red: 255, green: 255, blue: 255))
+        let black = TerminalColor.rgba(RGBAColor(red: 0, green: 0, blue: 0))
+        let red = TerminalColor.rgba(RGBAColor(red: 255, green: 0, blue: 0))
+        let cells = [
+            TerminalCell(content: .cluster("界", columns: .two), foreground: white, background: black),
+            TerminalCell(content: .continuation, foreground: white, background: red),
+            TerminalCell(content: .blank, foreground: white, background: black),
+            TerminalCell(content: .blank, foreground: white, background: black)
+        ]
+        let generation = DirtyGeneration(1)
+        let snapshot = TerminalGridSnapshot(
+            size: GridSize(rows: 1, columns: 4),
+            cells: cells,
+            cursor: CursorDescriptor(row: 0, column: 0, isVisible: false),
+            generation: generation
+        )
+        let pane = PaneFrameSnapshot(
+            paneID: UUID(),
+            session: SessionKey(deviceID: DeviceID("cjk-span-test"), reference: try SessionReference("session")),
+            viewport: StageViewportRect(x: 0, y: 0, width: Double(width), height: Double(height)),
+            contentGeneration: generation,
+            snapshot: snapshot
+        )
+        let request = StageFrameRequest(
+            stageID: UUID(),
+            layoutGeneration: LayoutGeneration(1),
+            metricsGeneration: MetricsGeneration(1),
+            visibility: .visible,
+            panes: [pane]
+        )
+        let output = try makeOutputTexture(device: device, width: width, height: height)
+        let receipt = await renderer.renderOffscreenForTesting(request, into: output)
+        XCTAssertEqual(receipt.outcome, .completed)
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            output.getBytes(buffer.baseAddress!, bytesPerRow: width * 4,
+                            from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        let cleanSpacerPixel = (1 * width + 39) * 4
+        XCTAssertEqual(Array(pixels[cleanSpacerPixel..<(cleanSpacerPixel + 3)]), [0, 0, 0],
+                       "the wide leading cell background must cover both columns; no spacer-color step")
+        let rightHalfGlyphPixels = (0..<height).reduce(into: 0) { count, y in
+            for x in 20..<40 {
+                let offset = (y * width + x) * 4
+                if pixels[offset] > 96 && pixels[offset + 1] > 96 && pixels[offset + 2] > 96 { count += 1 }
+            }
+        }
+        XCTAssertGreaterThan(rightHalfGlyphPixels, 0, "CJK glyph ink must still reach the second cell")
+    }
+
+    @MainActor
     func testVisiblePaneSamplesSharedAtlasForSingleWideAndZWJGraphemes() async throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal is unavailable on this machine") }
         let atlas = GlyphAtlasPool(device: device, memoryBudget: .appDefault, pageSize: 128)
