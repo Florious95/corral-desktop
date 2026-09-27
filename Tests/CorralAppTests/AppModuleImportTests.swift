@@ -1216,6 +1216,60 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.discardedAutoReplyByteCount, terminalReply.count)
         let inputCountAfterTerminalReply = await link.commands().filter { if case .input = $0 { true } else { false } }.count
         XCTAssertEqual(inputCountAfterTerminalReply, userInputCount, "SwiftTerm protocol responses must not be sent back as user input")
+
+        inputView.feed(byteArray: Array("\u{1b}[?1000h\u{1b}[?1006h".utf8)[...])
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        coordinator.workspaceView.stageContainer.layoutSubtreeIfNeeded()
+        let clickLocation = inputView.convert(
+            CGPoint(x: inputView.bounds.midX, y: inputView.bounds.midY),
+            to: nil
+        )
+        let click = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: clickLocation,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ))
+        inputView.mouseDown(with: click)
+        let mouseInputSent = await waitUntil {
+            await link.commands().contains { command in
+                guard case let .input(request) = command,
+                      request.reference == paneKey.reference,
+                      case let .bytes(bytes) = request.payload else { return false }
+                return bytes.starts(with: Data("\u{1b}[<".utf8))
+            }
+        }
+        XCTAssertTrue(mouseInputSent, "SwiftTerm mouse reports must traverse the bound TerminalViewDelegate to the session link")
+
+        inputView.feed(byteArray: Array("\u{1b}[?1006l".utf8)[...])
+        let legacyClick = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: clickLocation,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 1,
+            pressure: 1
+        ))
+        inputView.mouseDown(with: legacyClick)
+        let legacyMouseInputSent = await waitUntil {
+            await link.commands().contains { command in
+                guard case let .input(request) = command,
+                      request.reference == paneKey.reference,
+                      case let .bytes(bytes) = request.payload else { return false }
+                return bytes.starts(with: Data("\u{1b}[M".utf8))
+            }
+        }
+        XCTAssertTrue(legacyMouseInputSent, "SwiftTerm legacy X10 mouse reports must also reach the session link")
+
         let stillPresented = await waitUntil {
             coordinator.telemetry.visiblePaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 3
         }
