@@ -1,6 +1,7 @@
 import AppKit
 import CorralContracts
 import Foundation
+import UniformTypeIdentifiers
 
 public struct TerminalCellPosition: Hashable, Sendable {
     public let row: Int
@@ -94,6 +95,7 @@ public struct TerminalCellSelection: Hashable, Sendable {
 public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
     private let sessionKey: SessionKey
     private let inputRouting: any TerminalInputRouting
+    private let pasteboard: NSPasteboard
     private var markedTextValue: NSAttributedString?
     private var markedSelection = NSRange(location: 0, length: 0)
     private var compositionEnterInFlight = false
@@ -108,9 +110,10 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
 
     public private(set) var selection: TerminalCellSelection?
 
-    public init(frame frameRect: NSRect, sessionKey: SessionKey, inputRouting: any TerminalInputRouting) {
+    public init(frame frameRect: NSRect, sessionKey: SessionKey, inputRouting: any TerminalInputRouting, pasteboard: NSPasteboard = .general) {
         self.sessionKey = sessionKey
         self.inputRouting = inputRouting
+        self.pasteboard = pasteboard
         var continuation: AsyncStream<UserInputBytes>.Continuation!
         let stream = AsyncStream<UserInputBytes> { continuation = $0 }
         self.routingContinuation = continuation
@@ -260,14 +263,32 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
     }
 
     public override func keyDown(with event: NSEvent) {
-        if Self.isEnter(event) {
-            guard hasMarkedComposition else {
-                sendUserText("\r")
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
+        if isVKey && modifiers.contains(.command) {
+            pasteClipboard(allowFiles: true, allowImages: true)
+            return
+        }
+        if isVKey && modifiers.contains(.control) {
+            pasteControlV()
+            return
+        }
+        if hasMarkedComposition {
+            if Self.isEnter(event) {
+                compositionEnterInFlight = true
+                defer { compositionEnterInFlight = false }
+                interpretKeyEvents([event])
                 return
             }
-            compositionEnterInFlight = true
-            defer { compositionEnterInFlight = false }
             interpretKeyEvents([event])
+            return
+        }
+        if let text = Self.directInput(for: event, modifiers: modifiers) {
+            sendUserText(text)
+            return
+        }
+        if Self.isEnter(event) {
+            sendUserText("\r")
             return
         }
         interpretKeyEvents([event])
@@ -279,8 +300,14 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
         case "insertNewline:":
             guard !hasMarkedComposition, !compositionEnterInFlight else { return }
             sendUserText("\r")
+        case "insertTab:":
+            sendUserText("\t")
+        case "cancelOperation:":
+            sendUserText("\u{1b}")
         case "deleteBackward:":
             sendUserText("\u{7f}")
+        case "deleteForward:":
+            sendUserText("\u{1b}[3~")
         case "moveUp:":
             sendUserText("\u{1b}[A")
         case "moveDown:":
@@ -297,13 +324,12 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
     @objc public func copy(_ sender: Any?) {
         let text = selectedText()
         guard !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     @objc public func paste(_ sender: Any?) {
-        guard let text = NSPasteboard.general.string(forType: .string) else { return }
-        insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        pasteClipboard(allowFiles: true, allowImages: true)
     }
 
     public override func accessibilityRole() -> NSAccessibility.Role { .textArea }
@@ -321,6 +347,119 @@ public class TerminalTextInputView: NSView, @preconcurrency NSTextInputClient {
             width: cellSize.width,
             height: cellSize.height
         )
+    }
+
+    private func pasteControlV() {
+        if let path = writeClipboardImage() {
+            insertText(path, replacementRange: NSRange(location: NSNotFound, length: 0))
+        } else if let text = pasteboard.string(forType: .string) {
+            insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+    }
+
+    private func pasteClipboard(allowFiles: Bool, allowImages: Bool) {
+        if allowFiles, let paths = clipboardFilePaths(), !paths.isEmpty {
+            insertText(paths.map(Self.shellQuotedPath).joined(separator: " "), replacementRange: NSRange(location: NSNotFound, length: 0))
+        } else if allowImages, let path = writeClipboardImage() {
+            insertText(path, replacementRange: NSRange(location: NSNotFound, length: 0))
+        } else if let text = pasteboard.string(forType: .string) {
+            insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+    }
+
+    private func clipboardFilePaths() -> [String]? {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: options) ?? []
+        let urls = objects.compactMap { $0 as? URL }.filter(\.isFileURL)
+        if !urls.isEmpty { return urls.map { $0.standardizedFileURL.path } }
+
+        let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        if let filenames = pasteboard.propertyList(forType: filenamesType) as? [String] {
+            return filenames.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        }
+        if let value = pasteboard.string(forType: .fileURL), let url = URL(string: value), url.isFileURL {
+            return [url.standardizedFileURL.path]
+        }
+        return nil
+    }
+
+    private func writeClipboardImage() -> String? {
+        guard let png = clipboardPNGData() else { return nil }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("corral-clipboard-\(UUID().uuidString).png")
+        do {
+            try png.write(to: url, options: .atomic)
+            return url.standardizedFileURL.path
+        } catch {
+            return nil
+        }
+    }
+
+    private func clipboardPNGData() -> Data? {
+        var types: [NSPasteboard.PasteboardType] = [.png, .tiff]
+        types.append(contentsOf: (pasteboard.types ?? []).filter {
+            $0 != .png && $0 != .tiff && UTType($0.rawValue)?.conforms(to: .image) == true
+        })
+        for type in types {
+            guard let data = pasteboard.data(forType: type), data.count <= 64 * 1024 * 1024 else { continue }
+            let bitmap = NSBitmapImageRep(data: data) ?? NSImage(data: data)?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
+            if let png = bitmap?.representation(using: .png, properties: [:]) { return png }
+        }
+        return nil
+    }
+
+    private static func shellQuotedPath(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Keeps terminal keys on standard xterm byte sequences instead of layout-dependent text insertion.
+    private static func directInput(for event: NSEvent, modifiers: NSEvent.ModifierFlags) -> String? {
+        if modifiers.contains(.control), let value = event.charactersIgnoringModifiers?.unicodeScalars.first?.value {
+            let controlValue: UInt32
+            switch value {
+            case 0x40...0x5f: controlValue = value & 0x1f
+            case 0x61...0x7a: controlValue = value - 0x60
+            case 0x3f: controlValue = 0x7f
+            default: controlValue = 0
+            }
+            if controlValue != 0, let scalar = UnicodeScalar(controlValue) { return String(scalar) }
+            if value == 0x20 || value == 0x40 { return "\0" }
+        }
+        if modifiers.contains(.control) {
+            switch event.keyCode {
+            case 8: return "\u{03}"
+            case 2: return "\u{04}"
+            case 6: return "\u{1a}"
+            default: break
+            }
+        }
+        switch event.keyCode {
+        case 48: return "\t"
+        case 51: return "\u{7f}"
+        case 53: return "\u{1b}"
+        case 114: return "\u{1b}[2~"
+        case 115: return "\u{1b}[H"
+        case 116: return "\u{1b}[5~"
+        case 117: return "\u{1b}[3~"
+        case 119: return "\u{1b}[F"
+        case 121: return "\u{1b}[6~"
+        case 122: return "\u{1b}OP"
+        case 120: return "\u{1b}OQ"
+        case 99: return "\u{1b}OR"
+        case 118: return "\u{1b}OS"
+        case 96: return "\u{1b}[15~"
+        case 97: return "\u{1b}[17~"
+        case 98: return "\u{1b}[18~"
+        case 100: return "\u{1b}[19~"
+        case 101: return "\u{1b}[20~"
+        case 109: return "\u{1b}[21~"
+        case 103: return "\u{1b}[23~"
+        case 111: return "\u{1b}[24~"
+        case 123: return "\u{1b}[D"
+        case 124: return "\u{1b}[C"
+        case 125: return "\u{1b}[B"
+        case 126: return "\u{1b}[A"
+        default: return nil
+        }
     }
 
     private func attributedText(from value: Any) -> NSAttributedString? {

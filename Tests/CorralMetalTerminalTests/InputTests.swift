@@ -54,6 +54,91 @@ final class InputTests: XCTestCase {
     }
 
     @MainActor
+    func testControlVPastesClipboardImageAsTemporaryPNGPath() async throws {
+        let pasteboard = makeIsolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setData(samplePNG(), forType: .png)
+
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("image-paste"), inputRouting: router, pasteboard: pasteboard)
+        view.keyDown(with: keyEvent(9, modifiers: .control, characters: "v"))
+        let inputs = await waitForInputs(router, count: 1)
+        let path = try XCTUnwrap(inputs.first.flatMap { String(data: $0, encoding: .utf8) })
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        XCTAssertTrue(path.hasPrefix(FileManager.default.temporaryDirectory.path))
+        XCTAssertTrue(URL(fileURLWithPath: path).lastPathComponent.hasPrefix("corral-clipboard-"))
+        XCTAssertNotNil(NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: path))))
+    }
+
+    @MainActor
+    func testCommandVPastesQuotedFileURLPath() async throws {
+        let pasteboard = makeIsolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        let path = "/tmp/Agent's folder/code file.swift"
+        let secondPath = "/tmp/second input.txt"
+        pasteboard.writeObjects([NSURL(fileURLWithPath: path), NSURL(fileURLWithPath: secondPath)])
+
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("file-paste"), inputRouting: router, pasteboard: pasteboard)
+        view.keyDown(with: keyEvent(9, modifiers: .command, characters: "v"))
+        let inputs = await waitForInputs(router, count: 1)
+
+        XCTAssertEqual(inputs.first.flatMap { String(data: $0, encoding: .utf8) }, "'/tmp/Agent'\\''s folder/code file.swift' '/tmp/second input.txt'")
+    }
+
+    @MainActor
+    func testCommandVFallsBackToPlainText() async {
+        let pasteboard = makeIsolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("ordinary clipboard text", forType: .string)
+
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("text-paste"), inputRouting: router, pasteboard: pasteboard)
+        view.keyDown(with: keyEvent(9, modifiers: .command, characters: "v"))
+
+        let inputs = await waitForInputs(router, count: 1)
+        XCTAssertEqual(inputs.first, Data("ordinary clipboard text".utf8))
+    }
+
+    @MainActor
+    func testControlAndNavigationKeysProduceTerminalBytes() async {
+        let router = RecordingInputRouter()
+        let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("keys"), inputRouting: router)
+        let character: (UInt32) -> String = { String(UnicodeScalar($0)!) }
+        let keys: [(UInt16, NSEvent.ModifierFlags, String, [UInt8])] = [
+            (8, .control, "c", [0x03]),
+            (2, .control, "d", [0x04]),
+            (6, .control, "z", [0x1a]),
+            (48, [], character(9), [0x09]),
+            (53, [], character(0x1b), [0x1b]),
+            (126, [], character(0xf700), [0x1b, 0x5b, 0x41]),
+            (125, [], character(0xf701), [0x1b, 0x5b, 0x42]),
+            (124, [], character(0xf703), [0x1b, 0x5b, 0x43]),
+            (123, [], character(0xf702), [0x1b, 0x5b, 0x44]),
+            (115, [], character(0xf729), [0x1b, 0x5b, 0x48]),
+            (119, [], character(0xf72b), [0x1b, 0x5b, 0x46]),
+            (116, [], character(0xf72c), [0x1b, 0x5b, 0x35, 0x7e]),
+            (121, [], character(0xf72d), [0x1b, 0x5b, 0x36, 0x7e]),
+            (114, [], character(0xf727), [0x1b, 0x5b, 0x32, 0x7e]),
+            (117, [], character(0xf728), [0x1b, 0x5b, 0x33, 0x7e]),
+            (122, [], character(0xf704), [0x1b, 0x4f, 0x50]),
+            (111, [], character(0xf70f), [0x1b, 0x5b, 0x32, 0x34, 0x7e]),
+            (51, [], character(0x7f), [0x7f]),
+            (36, [], character(0x0d), [0x0d])
+        ]
+        for (keyCode, modifiers, characters, _) in keys {
+            view.keyDown(with: keyEvent(keyCode, modifiers: modifiers, characters: characters))
+        }
+        let inputs = await waitForInputs(router, count: keys.count)
+
+        XCTAssertEqual(inputs, keys.map { Data($0.3) })
+    }
+
+    @MainActor
     func testUserTextRoutesInSubmissionOrder() async {
         let router = RecordingInputRouter()
         let view = TerminalTextInputView(frame: .zero, sessionKey: sessionKey("ordering"), inputRouting: router)
@@ -135,6 +220,45 @@ final class InputTests: XCTestCase {
 
         view.updateTerminalSnapshot(makeSnapshot(rows: [String(repeating: "A", count: 5000)]), accessibilityCharacterLimit: 5000)
         XCTAssertEqual((view.accessibilityValue() as? String)?.unicodeScalars.count, 4096)
+    }
+
+    @MainActor
+    private func makeIsolatedPasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("com.corral.native-input-tests.\(UUID().uuidString)"))
+    }
+
+    @MainActor
+    private func samplePNG() -> Data {
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 2,
+            pixelsHigh: 2,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )!
+        bitmap.setColor(NSColor(calibratedRed: 1, green: 0, blue: 0, alpha: 1), atX: 0, y: 0)
+        return bitmap.representation(using: .png, properties: [:])!
+    }
+
+    @MainActor
+    private func keyEvent(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], characters: String) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: keyCode
+        )!
     }
 
     private func sessionKey(_ reference: String) -> SessionKey {
