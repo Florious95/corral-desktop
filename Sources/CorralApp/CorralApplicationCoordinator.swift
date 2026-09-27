@@ -1521,7 +1521,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
         sessions[key] = runtime
         switch frame {
-        case let .snapshot(_, bytes), let .delta(_, bytes): view.feed(byteArray: Array(bytes)[...])
+        case let .snapshot(_, bytes): view.replaceSnapshot(bytes)
+        case let .delta(_, bytes): view.feed(byteArray: Array(bytes)[...])
         case .scrollback: return
         }
         await writeTelemetry()

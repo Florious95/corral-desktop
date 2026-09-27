@@ -57,6 +57,7 @@ final class NativeTerminalStageView: NSView {
             self.views[id]?.setInputEnabled(false)
             self.views[id]?.removeFromSuperview()
             self.views[id] = view
+            view.setInputEnabled(id == focusedSessionID)
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }

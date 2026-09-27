@@ -557,6 +557,105 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testFullCoordinatorReplacesSnapshotsAndKeepsRemoteHistoryOutOfLiveBuffer() async throws {
+        let reference = try SessionReference("snapshot-boundary")
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        await coordinator.start()
+        let record = WireSessionRecord(
+            reference: reference, name: "snapshot-boundary", workingDirectory: "/fixture/snapshot",
+            state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"
+        )
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/snapshot", sessionCount: 1, aggregateState: .working, sessions: [record])
+        ]))))
+        let subscribed = await waitUntil {
+            coordinator.activeTerminalSessionKey?.reference == reference &&
+                coordinator.subscribedSessionIDs.contains(reference.rawValue)
+        }
+        XCTAssertTrue(subscribed)
+        guard subscribed, let view = coordinator.terminalView(for: reference) else {
+            await coordinator.stop()
+            return
+        }
+
+        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data("STALE-SNAPSHOT\r\n".utf8))))
+        let staleSnapshotApplied = await waitUntil { self.terminalText(coordinator, reference: reference).contains("STALE-SNAPSHOT") }
+        XCTAssertTrue(staleSnapshotApplied)
+        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data("FIRST-ROW\nSECOND-ROW".utf8))))
+        let replacementApplied = await waitUntil {
+            let text = self.terminalText(coordinator, reference: reference)
+            return text.contains("FIRST-ROW") && text.contains("SECOND-ROW") && !text.contains("STALE-SNAPSHOT")
+        }
+        XCTAssertTrue(replacementApplied, "a fresh complete snapshot replaces, rather than appends to, the prior screen")
+        XCTAssertTrue(view.getTerminal().getLine(row: 0)?.translateToString(trimRight: true).hasPrefix("FIRST-ROW") == true)
+        XCTAssertTrue(view.getTerminal().getLine(row: 1)?.translateToString(trimRight: true).hasPrefix("SECOND-ROW") == true)
+
+        let metadata = try ScrollbackMetadata(requestID: 1, fromLine: 0, lineCount: 1)
+        try await link.emit(.frame(.scrollback(reference: reference, metadata: metadata, ansi: Data("REMOTE-HISTORY-MUST-STAY-ISOLATED".utf8))))
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(self.terminalText(coordinator, reference: reference).contains("REMOTE-HISTORY-MUST-STAY-ISOLATED"))
+        await coordinator.stop()
+    }
+
+    func testTabContextMenuSplitActionsMoveSessionIntoActiveTab() async throws {
+        let cases: [(String, SplitDirection)] = [("splitRight", .horizontal), ("splitDown", .vertical)]
+        for (action, expectedDirection) in cases {
+            let firstReference = try SessionReference("context-split-first")
+            let secondReference = try SessionReference("context-split-second")
+            let deviceID = DeviceID("corral-native-development-endpoint")
+            let firstSessionID = SessionID("\(deviceID.rawValue.utf8.count):\(deviceID.rawValue)\(firstReference.rawValue)")
+            let secondSessionID = SessionID("\(deviceID.rawValue.utf8.count):\(deviceID.rawValue)\(secondReference.rawValue)")
+            let link = RecordingSessionLink()
+            let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+                "CORRAL_NATIVE_BACKGROUND": "1"
+            ])
+            await coordinator.start()
+            let records = [
+                WireSessionRecord(reference: firstReference, name: "First", workingDirectory: "/fixture/split", state: .working, rows: 24, columns: 80),
+                WireSessionRecord(reference: secondReference, name: "Second", workingDirectory: "/fixture/split", state: .idle, rows: 24, columns: 80)
+            ]
+            try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+                WorkspaceRecord(workingDirectory: "/fixture/split", sessionCount: 2, aggregateState: .working, sessions: records)
+            ]))))
+            let firstReady = await waitUntil {
+                coordinator.activeTerminalSessionKey?.reference == firstReference &&
+                    coordinator.subscribedSessionIDs.contains(firstReference.rawValue)
+            }
+            XCTAssertTrue(firstReady)
+            let firstTabID = coordinator.workspaceState.activeTabID
+            await coordinator.createWorkspaceTab()
+            let secondTabID = coordinator.workspaceState.activeTabID
+            let secondKey = SessionKey(deviceID: DeviceID("corral-native-development-endpoint"), reference: secondReference)
+            await coordinator.openSession(secondKey, gesture: .doubleClick, in: secondTabID)
+            let secondReady = await waitUntil {
+                coordinator.workspaceState.activeTabID == secondTabID &&
+                    coordinator.activeTerminalSessionKey == secondKey &&
+                    coordinator.subscribedSessionIDs.contains(secondReference.rawValue)
+            }
+            XCTAssertTrue(secondReady)
+
+            coordinator.workspaceView.tabBar.onContextAction?(firstTabID, action)
+            let splitApplied = await waitUntil {
+                coordinator.workspaceState.activeTabID == secondTabID &&
+                    Set(coordinator.workspaceState.visibleRoot?.leafIDs ?? []) == Set([firstSessionID, secondSessionID])
+            }
+            XCTAssertTrue(splitApplied, "\(action) must move the source Tab's session into the active Tab split")
+            if case let .split(direction, _, _, _)? = coordinator.workspaceState.visibleRoot {
+                XCTAssertEqual(direction, expectedDirection)
+            } else {
+                XCTFail("\(action) should produce a split layout")
+            }
+            await coordinator.stop()
+        }
+    }
+
     func testSavedSessionIdentityNameIsUsedBeforeWorkingDirectory() async throws {
         let support = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-saved-title-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: support) }

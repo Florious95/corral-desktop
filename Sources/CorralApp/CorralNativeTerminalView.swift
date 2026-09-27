@@ -11,7 +11,7 @@ private struct LocalPasteMonitorToken: @unchecked Sendable {
 final class CorralNativeTerminalView: TerminalView {
     private let pasteboard: NSPasteboard
     private var controlVPasteMonitor: LocalPasteMonitorToken?
-    private var inputEnabled = false
+    private var inputEnabled = true
     var onDiscardedAutomaticReply: ((Int) -> Void)?
 
     override init(frame: CGRect) {
@@ -42,6 +42,23 @@ final class CorralNativeTerminalView: TerminalView {
         if let color = Self.swiftTermColor(foreground) { getTerminal().foregroundColor = color }
         if let color = Self.swiftTermColor(background) { getTerminal().backgroundColor = color }
         needsDisplay = true
+    }
+
+    func replaceSnapshot(_ bytes: Data) {
+        getTerminal().resetToInitialState()
+        feed(byteArray: Self.normalizeSnapshotLineEndings(bytes)[...])
+    }
+
+    private static func normalizeSnapshotLineEndings(_ data: Data) -> [UInt8] {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(data.count)
+        var previous: UInt8?
+        for byte in data {
+            if byte == 0x0A, previous != 0x0D { bytes.append(0x0D) }
+            bytes.append(byte)
+            previous = byte
+        }
+        return bytes
     }
 
     private static func swiftTermColor(_ source: NSColor) -> Color? {
