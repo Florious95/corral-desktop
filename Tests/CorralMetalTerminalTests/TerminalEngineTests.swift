@@ -153,6 +153,23 @@ final class TerminalEngineTests: XCTestCase {
         XCTAssertTrue(snapshot.isValid)
     }
 
+    func testMouseEncodingIsModeGatedAndUsesSwiftTermProtocol() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 3, columns: 8))
+        let modifiers: TerminalMouseModifiers = [.shift, .option, .control]
+
+        let ordinaryShell = await engine.encodeMouseEvent(button: 0, column: 2, row: 1, phase: .buttonDown, modifiers: modifiers)
+        XCTAssertNil(ordinaryShell)
+
+        _ = try await feed("\u{1B}[?1002h\u{1B}[?1006h", to: engine)
+        let press = await engine.encodeMouseEvent(button: 0, column: 2, row: 1, phase: .buttonDown, modifiers: modifiers)
+        let drag = await engine.encodeMouseEvent(button: 0, column: 2, row: 1, phase: .drag, modifiers: modifiers)
+        let release = await engine.encodeMouseEvent(button: 0, column: 2, row: 1, phase: .buttonUp, modifiers: modifiers)
+
+        XCTAssertEqual(press, Data("\u{1B}[<28;3;2M".utf8))
+        XCTAssertEqual(drag, Data("\u{1B}[<60;3;2M".utf8))
+        XCTAssertEqual(release, Data("\u{1B}[<28;3;2m".utf8))
+    }
+
     func testParsesCSIAndUTF8AcrossFrameBoundaries() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 1, columns: 4))
         _ = try await engine.apply(.delta(reference: reference(), ansi: Data([0x1B, 0x5B, 0x33, 0x38, 0x3B, 0x35, 0x3B]), origin: origin(1)))

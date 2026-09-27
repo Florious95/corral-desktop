@@ -19,7 +19,7 @@ private enum TerminalEngineError: Error {
 }
 
 /// SwiftTerm owns VT parsing and screen state; its replies are returned only as local terminal effects.
-public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
+public actor SwiftTermEngineAdapter: TerminalEngineAdapter, TerminalMouseEventEncoding {
     private static let maximumCellCount = 1_000_000
     private static let logger = Logger(subsystem: "com.corral.native.dev", category: "terminal-adapter")
 
@@ -173,6 +173,59 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
         case .buttonEventTracking: return .buttonEventTracking
         case .anyEvent: return .anyEvent
         }
+    }
+
+    public func encodeMouseEvent(
+        button: Int,
+        column: Int,
+        row: Int,
+        phase: TerminalMouseEventPhase,
+        modifiers: TerminalMouseModifiers
+    ) async -> Data? {
+        guard button >= 0, button <= 2,
+              (0..<terminal.cols).contains(column),
+              (0..<terminal.rows).contains(row) else { return nil }
+
+        let isRelease: Bool
+        let isMotion: Bool
+        switch phase {
+        case .buttonDown:
+            isRelease = false
+            isMotion = false
+        case .buttonUp:
+            isRelease = true
+            isMotion = false
+        case .drag:
+            isRelease = false
+            isMotion = true
+        }
+        switch terminal.mouseMode {
+        case .off:
+            return nil
+        case .x10 where isRelease || isMotion:
+            return nil
+        case .vt200 where isMotion:
+            return nil
+        default:
+            break
+        }
+
+        let buttonFlags = terminal.encodeButton(
+            button: button,
+            release: isRelease,
+            shift: modifiers.contains(.shift),
+            meta: modifiers.contains(.option),
+            control: modifiers.contains(.control)
+        )
+        delegate.beginUpdate()
+        if isMotion {
+            terminal.sendMotion(buttonFlags: buttonFlags, x: column, y: row, pixelX: column, pixelY: row)
+        } else {
+            terminal.sendEvent(buttonFlags: buttonFlags, x: column, y: row)
+        }
+        let effects = delegate.drainEffects()
+        guard effects.count == 1, case let .autoReply(reply) = effects[0] else { return nil }
+        return reply.data
     }
 
     private func accept(_ incoming: ConnectionEpoch, resetOnEpochChange: Bool) -> Bool {
