@@ -887,9 +887,16 @@ final class NativeWorkspaceTests: XCTestCase {
     }
 
     func testDevicePopoverMatchesLegacyLayoutAndIsAXDrivable() async throws {
+        let previousThemeMode = CorralAestheticTokens.themeMode
+        CorralAestheticTokens.themeMode = .dark
+        defer { CorralAestheticTokens.themeMode = previousThemeMode }
+        let darkAppearance = NSAppearance(named: .darkAqua)
+        let hostWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 255), styleMask: [.borderless], backing: .buffered, defer: false)
+        hostWindow.appearance = darkAppearance
         let local = try makeDeviceRecord(id: "local", name: "Local")
         let remote = try makeDeviceRecord(id: "remote", name: "Remote")
         let controller = DevicesPopoverViewController(repository: TestDeviceRepository(records: [local, remote]))
+        hostWindow.contentViewController = controller
         var added = 0, paired = 0
         var selection: Set<DeviceID> = []
         controller.onAddDevice = { added += 1 }; controller.onPairMobile = { paired += 1 }
