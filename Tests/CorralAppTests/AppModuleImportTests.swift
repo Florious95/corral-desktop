@@ -101,6 +101,81 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testInitialListingAutomaticallyOpensAndRendersFirstSession() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        guard let window = coordinator.windowController.window else {
+            return XCTFail("coordinator must own a real window")
+        }
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let initialWindowFrame = window.frame
+
+        await coordinator.start()
+        let listSent = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
+        XCTAssertTrue(listSent)
+        let firstReference = try SessionReference("auto-open-0")
+        let records = try (0..<62).map { index in
+            WireSessionRecord(
+                reference: try SessionReference("auto-open-\(index)"),
+                name: "agent-\(index)",
+                workingDirectory: "/fixture/workspace",
+                state: .working,
+                rows: 24,
+                columns: 80,
+                provider: "pi",
+                activity: "working",
+                health: "normal"
+            )
+        }
+        let listing = SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(
+                workingDirectory: "/fixture/workspace",
+                sessionCount: records.count,
+                aggregateState: .working,
+                sessions: records
+            )
+        ])
+        try await link.emit(.control(.listing(listing)))
+
+        let opened = await waitUntil(timeout: .seconds(8)) {
+            coordinator.sessionCount == records.count
+                && coordinator.stageView.activeInputSession?.reference == firstReference
+                && coordinator.subscribedSessionIDs.contains(firstReference.rawValue)
+        }
+        let commands = await link.commands()
+        XCTAssertTrue(opened, "the first listed session should be selected and subscribed automatically")
+        XCTAssertTrue(commands.contains {
+            if case let .subscribe(reference, _) = $0 { return reference == firstReference }
+            return false
+        }, "opening the default session must issue a subscribe command")
+        guard opened else {
+            await coordinator.stop()
+            window.close()
+            return
+        }
+
+        try await link.emit(.frame(.snapshot(
+            reference: firstReference,
+            ansi: Data("AUTO-OPEN-TERMINAL-CONTENT\r\n".utf8)
+        )))
+        let rendered = await waitUntil(timeout: .seconds(8)) {
+            coordinator.stageView.presentedSubmissions.contains {
+                $0.session == coordinator.stageView.activeInputSession
+                    && self.snapshotText($0.snapshot).contains("AUTO-OPEN-TERMINAL-CONTENT")
+            }
+        }
+        XCTAssertTrue(rendered, "the default session snapshot should render in the terminal stage")
+        XCTAssertEqual(window.frame, initialWindowFrame, "automatic session opening must preserve window geometry")
+        await coordinator.stop()
+        window.close()
+    }
+
     func testEnvironmentTokenOverridesStoredCredential() async throws {
         let handle = CredentialHandle("keychain-item:production-test")
         let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9900)

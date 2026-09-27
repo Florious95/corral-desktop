@@ -1330,7 +1330,13 @@ public final class CorralApplicationCoordinator {
         let descriptors = sessionOrder.compactMap { sessions[$0]?.descriptor }
         guard !descriptors.isEmpty else { return }
         do {
-            let state = try await workspaceStore.reconcileListing(descriptors)
+            var state = try await workspaceStore.reconcileListing(descriptors)
+            if state.tabs.count == 1,
+               state.activeTab?.isImplicitBlank == true,
+               state.visibleSessionID == nil,
+               let firstSession = descriptors.first {
+                state = try await workspaceStore.smartOpenSession(firstSession, gesture: .singleClick)
+            }
             await applyWorkspaceState(state)
         } catch {
             lastConnectionError = String(describing: error)
