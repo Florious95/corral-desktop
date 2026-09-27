@@ -31,7 +31,8 @@ let package = Package(
                 "CorralProtocol",
                 "CorralServices",
                 "CorralMetalTerminal",
-                "CorralUI"
+                "CorralUI",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
             ]
         ),
         .testTarget(name: "CorralContractsTests", dependencies: ["CorralContracts"]),

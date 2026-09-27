@@ -1,5 +1,4 @@
 import AppKit
-import CorralMetalTerminal
 import CorralProtocol
 
 public enum CorralAppIdentity {
@@ -16,26 +15,19 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(background ? .accessory : .regular)
         NSApp.mainMenu = makeMainMenu()
 
-        do {
-            let sessionLink = URLSessionSessionLink(codec: ProtocolV1Codec())
-            let atlas = GlyphAtlasPool.shared
-            let renderer = try SharedMetalTerminalRenderer(glyphAtlas: atlas)
-            let coordinator = CorralMVPCoordinator(
-                sessionLink: sessionLink,
-                renderer: renderer,
-                environment: environment
-            )
-            self.coordinator = coordinator
-            if background {
-                coordinator.window.orderBack(nil)
-            } else {
-                coordinator.window.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            Task { @MainActor in await coordinator.start() }
-        } catch {
-            presentStartupFailure(error)
+        let sessionLink = URLSessionSessionLink(codec: ProtocolV1Codec())
+        let coordinator = CorralMVPCoordinator(
+            sessionLink: sessionLink,
+            environment: environment
+        )
+        self.coordinator = coordinator
+        if background {
+            coordinator.window.orderBack(nil)
+        } else {
+            coordinator.window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
+        Task { @MainActor in await coordinator.start() }
     }
 
     func makeMainMenu() -> NSMenu {
@@ -46,15 +38,6 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
         appItem.submenu = appMenu
         menu.addItem(appItem)
         return menu
-    }
-
-    private func presentStartupFailure(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Corral Native could not start"
-        alert.informativeText = String(describing: error)
-        alert.alertStyle = .critical
-        alert.runModal()
-        NSApp.terminate(nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

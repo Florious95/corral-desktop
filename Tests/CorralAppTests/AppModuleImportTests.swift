@@ -4,6 +4,7 @@ import CorralMetalTerminal
 import CorralProtocol
 import CorralServices
 import CorralUI
+import SwiftTerm
 import XCTest
 @testable import CorralApp
 
@@ -32,25 +33,21 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         return await predicate()
     }
 
-    func testMVPResizesOnFirstSubscriptionAndStageGeometryChanges() async throws {
+    private func visibleText(in terminalView: TerminalView) -> String {
+        (0..<terminalView.terminal.rows).compactMap { terminalView.terminal.getLine(row: $0)?.translateToString(trimRight: true) }
+            .joined(separator: "\n")
+    }
+
+    func testMVPUsesSwiftTermGridAndKeepsScrollbackOutOfLiveTerminal() async throws {
         let link = RecordingSessionLink()
         let coordinator = CorralMVPCoordinator(
             sessionLink: link,
-            renderer: try SharedMetalTerminalRenderer(glyphAtlas: .shared),
             environment: [
                 "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
                 "CORRAL_NATIVE_TOKEN": "fixture-test-only"
             ]
         )
         coordinator.window.contentView = nil
-        let firstViewport = NSSize(width: 1120, height: 860)
-        coordinator.stageView.configureStage(sizeInPoints: firstViewport, backingScale: 2)
-        let firstGrid = try XCTUnwrap(CorralMVPCoordinator.proposedGrid(for: firstViewport, cellSize: coordinator.stageView.terminalCellSize))
-        XCTAssertEqual(coordinator.desiredStageGrid, firstGrid)
-        XCTAssertGreaterThan(firstGrid.columns, 120)
-        XCTAssertGreaterThan(firstGrid.rows, 50)
-        await link.suspendNextResize()
-
         await coordinator.start()
         let reference = try SessionReference("mvp-resize-session")
         let record = WireSessionRecord(
@@ -60,55 +57,99 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
             WorkspaceRecord(workingDirectory: "/fixture/resize", sessionCount: 1, aggregateState: .working, sessions: [record])
         ]))))
-        let firstResizeSent = await waitUntilMVP {
-            await link.commands().contains { if case .resize(reference: reference, size: firstGrid) = $0 { true } else { false } }
+        let subscribed = await waitUntilMVP {
+            await link.commands().contains { if case .subscribe(reference: reference, _) = $0 { true } else { false } }
         }
-        XCTAssertTrue(firstResizeSent, "the selected session must resize immediately after its initial subscribe")
-        let firstCommands = await link.commands()
-        let subscribeIndex = try XCTUnwrap(firstCommands.firstIndex { if case .subscribe(reference: reference, _) = $0 { true } else { false } })
-        let resizeIndex = try XCTUnwrap(firstCommands.firstIndex { if case .resize(reference: reference, size: firstGrid) = $0 { true } else { false } })
+        XCTAssertTrue(subscribed)
+        let terminalView = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first as? TerminalView)
+        XCTAssertFalse(terminalView.isUsingMetalRenderer, "SwiftTerm must use its stable CoreGraphics renderer")
+
+        let grid = GridSize(rows: 48, columns: 132)
+        coordinator.sizeChanged(source: terminalView, newCols: grid.columns, newRows: grid.rows)
+        let resized = await waitUntilMVP {
+            await link.commands().contains { if case .resize(reference: reference, size: grid) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(resized, "SwiftTerm's measured grid must be sent to the server")
+        let commands = await link.commands()
+        let subscribeIndex = try XCTUnwrap(commands.firstIndex { if case .subscribe(reference: reference, _) = $0 { true } else { false } })
+        let resizeIndex = try XCTUnwrap(commands.firstIndex { if case .resize(reference: reference, size: grid) = $0 { true } else { false } })
         XCTAssertLessThan(subscribeIndex, resizeIndex)
 
-        let secondViewport = NSSize(width: 1000, height: 700)
-        coordinator.stageView.configureStage(sizeInPoints: secondViewport, backingScale: 2)
-        let secondGrid = try XCTUnwrap(CorralMVPCoordinator.proposedGrid(for: secondViewport, cellSize: coordinator.stageView.terminalCellSize))
-        XCTAssertNotEqual(secondGrid, firstGrid)
-        XCTAssertEqual(coordinator.desiredStageGrid, secondGrid)
-        let firstResizeSuspended = await waitUntilMVP { await link.isResizeSuspended(at: firstGrid) }
-        XCTAssertTrue(firstResizeSuspended)
-        let commandsAtSecondResize = await link.commands()
-        await link.releaseSuspendedResize()
-        let secondResizeSentAfterFirstReceipt = await waitUntilMVP {
-            await link.commands().contains { if case .resize(reference: reference, size: secondGrid) = $0 { true } else { false } }
-        }
-        XCTAssertTrue(secondResizeSentAfterFirstReceipt, "a changed viewport must publish its updated rows and columns; commands=\(commandsAtSecondResize), error=\(String(describing: coordinator.lastConnectionError))")
-        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data("resized grid".utf8))))
-        let localEngineResized = await waitUntilMVP {
-            coordinator.stageView.submissions.first?.snapshot.size == secondGrid
-        }
-        XCTAssertTrue(localEngineResized, "SwiftTerm must use the same grid as the latest server resize")
-
-        coordinator.stageView.configureStage(sizeInPoints: secondViewport, backingScale: 2)
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        let finalCommands = await link.commands()
-        let resizeCount = finalCommands.filter { if case .resize(reference: reference, _) = $0 { true } else { false } }.count
-        XCTAssertEqual(resizeCount, 2, "repeated identical geometry must not send duplicate resize commands")
+        try await link.emit(.frame(.snapshot(reference: reference, ansi: Data("LIVE".utf8))))
+        let liveRendered = await waitUntilMVP { visibleText(in: terminalView).contains("LIVE") }
+        XCTAssertTrue(liveRendered)
+        let metadata = try ScrollbackMetadata(requestID: 1, fromLine: 0, lineCount: 1)
+        try await link.emit(.frame(.scrollback(reference: reference, metadata: metadata, ansi: Data("HISTORY_SHOULD_NOT_APPEAR".utf8))))
+        try await link.emit(.frame(.delta(reference: reference, ansi: Data("\r\nTAIL".utf8))))
+        let deltaRendered = await waitUntilMVP { visibleText(in: terminalView).contains("TAIL") }
+        XCTAssertTrue(deltaRendered)
+        XCTAssertFalse(visibleText(in: terminalView).contains("HISTORY_SHOULD_NOT_APPEAR"))
         await coordinator.stop()
     }
 
-    func testWarmSessionSwitchesOnlyPresentationPointer() async throws {
+    func testMVPForwardsUserBytesAndMouseButSuppressesVTReplies() async throws {
         let link = RecordingSessionLink()
-        let renderer = try SharedMetalTerminalRenderer(glyphAtlas: .shared)
         let coordinator = CorralMVPCoordinator(
             sessionLink: link,
-            renderer: renderer,
             environment: [
                 "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
                 "CORRAL_NATIVE_TOKEN": "fixture-test-only"
             ]
         )
         coordinator.window.contentView = nil
-        let stageID = coordinator.stageView.stageID
+        await coordinator.start()
+        let reference = try SessionReference("mvp-input-session")
+        let record = WireSessionRecord(
+            reference: reference, name: "input", workingDirectory: "/fixture/input",
+            state: .working, rows: 24, columns: 80, provider: "pi", activity: "working", health: "normal"
+        )
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/input", sessionCount: 1, aggregateState: .working, sessions: [record])
+        ]))))
+        let subscribed = await waitUntilMVP {
+            await link.commands().contains { if case .subscribe(reference: reference, _) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(subscribed)
+        let terminalView = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first as? TerminalView)
+
+        let userBytes = Array("hello".utf8)
+        terminalView.send(data: userBytes[...])
+        let userInputSent = await waitUntilMVP {
+            await link.commands().contains { if case .input = $0 { true } else { false } }
+        }
+        XCTAssertTrue(userInputSent)
+
+        let mouseBytes = Array("\u{1b}[<0;1;1M".utf8)
+        terminalView.send(source: terminalView.terminal, data: mouseBytes[...])
+        let mouseInputSent = await waitUntilMVP {
+            await link.commands().filter { if case .input = $0 { true } else { false } }.count == 2
+        }
+        XCTAssertTrue(mouseInputSent, "mouse reports must pass the automatic-reply filter")
+
+        terminalView.feed(byteArray: Array("\u{1b}[5n".utf8)[...])
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        let inputCommands = await link.commands()
+        let inputRequests = inputCommands.compactMap { command -> ClientInputRequest? in
+            guard case let .input(request) = command else { return nil }
+            return request
+        }
+        XCTAssertEqual(inputRequests.count, 2, "SwiftTerm VT query replies must not be echoed as user input")
+        XCTAssertEqual(inputRequests.map(\.sequence), [1, 2])
+        XCTAssertEqual(inputRequests[0].payload, .bytes(Data(userBytes)))
+        XCTAssertEqual(inputRequests[1].payload, .bytes(Data(mouseBytes)))
+        await coordinator.stop()
+    }
+
+    func testWarmSessionSwitchesPersistentTerminalViewsWithoutResubscribe() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = CorralMVPCoordinator(
+            sessionLink: link,
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-test-only"
+            ]
+        )
+        coordinator.window.contentView = nil
         await coordinator.start()
         XCTAssertTrue(coordinator.connected)
 
@@ -121,62 +162,45 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
             WorkspaceRecord(workingDirectory: "/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
         ]))))
-        let listed = await waitUntilMVP { coordinator.sessionRows.count == 2 && coordinator.stageView.stageID == stageID }
+        let listed = await waitUntilMVP { coordinator.sessionRows.count == 2 && coordinator.workspaceView.stageContainer.subviews.first is TerminalView }
         XCTAssertTrue(listed)
         let firstID = try XCTUnwrap(coordinator.sessionRows.first { $0.name == "A" }?.id)
         let secondID = try XCTUnwrap(coordinator.sessionRows.first { $0.name == "B" }?.id)
         XCTAssertEqual(coordinator.selectedAgentID, firstID, "first listing entry is selected by default")
 
         try await link.emit(.frame(.snapshot(reference: firstReference, ansi: Data("session A".utf8))))
-        let firstRendered = await waitUntilMVP { coordinator.stageView.submissions.first?.session.reference == firstReference }
+        let firstView = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first as? TerminalView)
+        let firstRendered = await waitUntilMVP { visibleText(in: firstView).contains("session A") }
         XCTAssertTrue(firstRendered)
+        let stageIdentity = ObjectIdentifier(coordinator.workspaceView.stageContainer)
+
         coordinator.switchSession(secondID)
-        let secondSelected = await waitUntilMVP {
-            coordinator.stageView.submissions.isEmpty || coordinator.stageView.submissions.first?.session.reference == secondReference
-        }
-        XCTAssertTrue(secondSelected)
         let secondSubscribed = await waitUntilMVP {
+            guard coordinator.workspaceView.stageContainer.subviews.first !== firstView else { return false }
             let commands = await link.commands()
             return commands.contains { if case .subscribe(reference: secondReference, _) = $0 { true } else { false } }
         }
         XCTAssertTrue(secondSubscribed)
+        let secondView = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first as? TerminalView)
         try await link.emit(.frame(.snapshot(reference: secondReference, ansi: Data("session B".utf8))))
-        let secondRendered = await waitUntilMVP { coordinator.stageView.submissions.first?.session.reference == secondReference }
+        let secondRendered = await waitUntilMVP { visibleText(in: secondView).contains("session B") }
         XCTAssertTrue(secondRendered)
 
-        coordinator.switchSession(firstID)
-        let firstWarmPresented = await waitUntilMVP {
-            coordinator.stageView.submissions.first?.session.reference == firstReference
-        }
-        XCTAssertTrue(firstWarmPresented, "selecting cached A should synchronously restore its Stage submission")
-        let firstSnapshot = try XCTUnwrap(coordinator.stageView.submissions.first).snapshot
-        coordinator.switchSession(secondID)
-        let secondWarmPresented = await waitUntilMVP {
-            coordinator.stageView.submissions.first?.session.reference == secondReference
-        }
-        XCTAssertTrue(secondWarmPresented, "selecting cached B should synchronously restore its Stage submission")
-        let secondSnapshot = try XCTUnwrap(coordinator.stageView.submissions.first).snapshot
         let commandsBeforeWarmSwitches = await link.commands()
-        let stageIdentity = ObjectIdentifier(coordinator.stageView)
-        let clock = ContinuousClock()
-        let switchStart = clock.now
         for _ in 0..<10 {
             coordinator.switchSession(firstID)
-            XCTAssertEqual(coordinator.stageView.submissions.first?.session.reference, firstReference)
-            XCTAssertEqual(coordinator.stageView.submissions.first?.snapshot, firstSnapshot)
+            XCTAssertTrue(coordinator.workspaceView.stageContainer.subviews.first === firstView)
+            XCTAssertTrue(visibleText(in: firstView).contains("session A"))
             coordinator.switchSession(secondID)
-            XCTAssertEqual(coordinator.stageView.submissions.first?.session.reference, secondReference)
-            XCTAssertEqual(coordinator.stageView.submissions.first?.snapshot, secondSnapshot)
+            XCTAssertTrue(coordinator.workspaceView.stageContainer.subviews.first === secondView)
+            XCTAssertTrue(visibleText(in: secondView).contains("session B"))
         }
-        let switchDuration = switchStart.duration(to: clock.now)
         let commandsAfterWarmSwitches = await link.commands()
         XCTAssertEqual(commandsAfterWarmSwitches.filter { if case .subscribe = $0 { true } else { false } }.count,
                        commandsBeforeWarmSwitches.filter { if case .subscribe = $0 { true } else { false } }.count)
         XCTAssertFalse(commandsAfterWarmSwitches.contains { if case .unsubscribe = $0 { true } else { false } })
-        XCTAssertEqual(ObjectIdentifier(coordinator.stageView), stageIdentity)
-        XCTAssertEqual(coordinator.stageView.stageID, stageID)
+        XCTAssertEqual(ObjectIdentifier(coordinator.workspaceView.stageContainer), stageIdentity)
         XCTAssertEqual(coordinator.selectedAgentID, secondID)
-        XCTAssertLessThan(switchDuration, .milliseconds(500), "warm switches must not wait for network work")
         await coordinator.stop()
     }
 

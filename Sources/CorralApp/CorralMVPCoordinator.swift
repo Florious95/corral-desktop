@@ -1,30 +1,27 @@
 import AppKit
 import CorralContracts
-import CorralMetalTerminal
 import CorralProtocol
 import CorralUI
 import Foundation
+@preconcurrency import SwiftTerm
 
 @MainActor
-public final class CorralMVPCoordinator {
+public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
     public let window: NSWindow
     public let workspaceView: CorralMVPWorkspaceView
-    let stageView: MetalStageView
 
     public private(set) var selectedAgentID: UUID?
     public private(set) var connected = false
     public private(set) var lastConnectionError: String?
     public private(set) var sessionRows: [CorralMVPSessionRow] = []
+    private(set) var desiredStageGrid: GridSize?
 
     private struct RuntimeSession {
         var descriptor: SessionDescriptor
-        let id: UUID
-        let paneID: UUID
-        let engine: SwiftTermEngineAdapter
+        var terminalView: CorralNativeTerminalView? = nil
         var subscribed = false
         var subscriptionPending = false
-        var receivedFrame = false
-        var snapshot: TerminalGridSnapshot?
+        var desiredGrid: GridSize?
         var lastResizeGrid: GridSize?
         var resizePendingGrid: GridSize?
     }
@@ -35,37 +32,38 @@ public final class CorralMVPCoordinator {
         let generation: UInt64
     }
 
+    private struct PendingInput {
+        let reference: SessionReference
+        let bytes: Data
+    }
+
     private let sessionLink: any SessionLinkProtocol
     private let endpoint: ApprovedEndpoint?
     private let credential: CredentialHandle?
     private let deviceID = DeviceID("corral-native-mvp")
-    private let inputRouter: SessionLinkInputRouter
-    private let effectSink = LocalTerminalEffectPolicySink()
     private var connection: AuthenticatedConnection?
     private var eventTask: Task<Void, Never>?
     private var sessions: [UUID: RuntimeSession] = [:]
     private var idByReference: [SessionReference: UUID] = [:]
+    private var idByTerminalView: [ObjectIdentifier: UUID] = [:]
     private var sessionOrder: [UUID] = []
     private var listingSequence: UInt64 = 0
     private var nextRequestID: UInt32 = 0
+    private var nextInputSequence: UInt32 = 0
     private var listingRequestedEpoch: ConnectionEpoch?
-    private(set) var desiredStageGrid: GridSize?
     private var resizeRequestGeneration: UInt64 = 0
     private var pendingResize: ResizeRequest?
     private var resizeTask: Task<Void, Never>?
-    public private(set) var selectionGeneration: UInt64 = 0
+    private var pendingInputs: [PendingInput] = []
+    private var inputTask: Task<Void, Never>?
 
     public init(
         sessionLink: any SessionLinkProtocol,
-        renderer: SharedMetalTerminalRenderer,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         workspaceView: CorralMVPWorkspaceView = CorralMVPWorkspaceView(frame: .zero)
     ) {
         self.sessionLink = sessionLink
         self.workspaceView = workspaceView
-        self.stageView = MetalStageView(renderer: renderer, stageID: UUID())
-        self.inputRouter = SessionLinkInputRouter(sessionLink: sessionLink)
-
         self.endpoint = try? CorralMVPConfiguration.endpoint(environment: environment)
         self.credential = environment["CORRAL_NATIVE_TOKEN"].flatMap { $0.isEmpty ? nil : CredentialHandle($0) }
 
@@ -78,11 +76,7 @@ public final class CorralMVPCoordinator {
         window.title = "Corral Native"
         window.contentView = workspaceView
         self.window = window
-        workspaceView.attachStageView(stageView)
         workspaceView.onSelectAgent = { [weak self] id in self?.switchSession(id) }
-        stageView.onGeometryChanged = { [weak self] size, _ in
-            self?.stageGeometryChanged(size)
-        }
     }
 
     public func start() async {
@@ -113,7 +107,11 @@ public final class CorralMVPCoordinator {
         eventTask = nil
         resizeTask?.cancel()
         resizeTask = nil
+        inputTask?.cancel()
+        inputTask = nil
         pendingResize = nil
+        pendingInputs.removeAll(keepingCapacity: false)
+        for runtime in sessions.values { runtime.terminalView?.terminalDelegate = nil }
         await sessionLink.disconnect()
         connection = nil
         connected = false
@@ -121,7 +119,7 @@ public final class CorralMVPCoordinator {
 
     /// Changes only the permanent Stage's presentation pointer; cached sessions stay subscribed and parsed.
     public func switchSession(_ id: UUID) {
-        guard let runtime = sessions[id] else { return }
+        guard sessions[id] != nil, let terminalView = makeTerminalView(for: id) else { return }
         if let previousID = selectedAgentID, previousID != id {
             resizeRequestGeneration &+= 1
             pendingResize = nil
@@ -130,19 +128,29 @@ public final class CorralMVPCoordinator {
                 sessions[previousID] = previous
             }
         }
-        selectionGeneration &+= 1
         selectedAgentID = id
+        workspaceView.stageContainer.subviews.filter { $0 !== terminalView }.forEach { $0.removeFromSuperview() }
+        workspaceView.attachStageView(terminalView)
+        _ = window.makeFirstResponder(terminalView)
         updateSessionRows()
-        stageView.activateInput(for: runtime.descriptor.key, using: inputRouter)
-        if runtime.receivedFrame, let snapshot = runtime.snapshot {
-            stageView.present(submission(for: runtime, snapshot: snapshot))
-        } else {
-            stageView.present(nil)
-            if !runtime.subscribed && !runtime.subscriptionPending {
-                Task { @MainActor [weak self] in await self?.subscribe(id) }
-            }
+        guard let runtime = sessions[id] else { return }
+        if !runtime.subscribed && !runtime.subscriptionPending {
+            Task { @MainActor [weak self] in await self?.subscribe(id) }
+        } else if let grid = runtime.desiredGrid {
+            scheduleResize(for: id, grid: grid)
         }
-        scheduleResize(for: id)
+    }
+
+    private func makeTerminalView(for id: UUID) -> CorralNativeTerminalView? {
+        guard var runtime = sessions[id] else { return nil }
+        if let terminalView = runtime.terminalView { return terminalView }
+        let terminalView = CorralNativeTerminalView(frame: .zero)
+        terminalView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        terminalView.terminalDelegate = self
+        runtime.terminalView = terminalView
+        sessions[id] = runtime
+        idByTerminalView[ObjectIdentifier(terminalView)] = id
+        return terminalView
     }
 
     private func consume(_ stream: any SessionEventStream) async {
@@ -173,6 +181,7 @@ public final class CorralMVPCoordinator {
                 connected = true
                 if changed {
                     listingSequence = 0
+                    nextInputSequence = 0
                     await requestListing()
                 }
             case .disconnected, .failed:
@@ -193,7 +202,7 @@ public final class CorralMVPCoordinator {
             case let .error(_, reason): lastConnectionError = reason
             default: break
             }
-        case let .frame(frame): await applyFrame(frame, origin: envelope.origin)
+        case let .frame(frame): applyFrame(frame)
         case let .failed(error):
             connected = false
             lastConnectionError = String(describing: error)
@@ -215,33 +224,40 @@ public final class CorralMVPCoordinator {
         }
     }
 
-    private func stageGeometryChanged(_ size: NSSize) {
-        desiredStageGrid = Self.proposedGrid(for: size, cellSize: stageView.terminalCellSize)
-        if let selectedAgentID, let runtime = sessions[selectedAgentID],
-           runtime.receivedFrame, let snapshot = runtime.snapshot {
-            stageView.present(submission(for: runtime, snapshot: snapshot))
+    /// SwiftTerm's live parser receives only ordered snapshot/delta frames. Historical scrollback frames
+    /// remain isolated from the live terminal state.
+    private func applyFrame(_ frame: BinaryFrame) {
+        let reference = frame.reference
+        guard let id = idByReference[reference], let runtime = sessions[id],
+              runtime.subscribed || runtime.subscriptionPending,
+              let terminalView = runtime.terminalView else { return }
+        let ansi: Data
+        switch frame {
+        case let .snapshot(_, data), let .delta(_, data): ansi = data
+        case .scrollback: return
         }
-        if let selectedAgentID { scheduleResize(for: selectedAgentID) }
+        let bytes = Array(ansi)
+        guard !bytes.isEmpty else { return }
+        terminalView.feed(byteArray: bytes[...])
     }
 
-    static func proposedGrid(for viewport: NSSize, cellSize: NSSize) -> GridSize? {
-        guard viewport.width.isFinite, viewport.height.isFinite,
-              cellSize.width.isFinite, cellSize.height.isFinite,
-              viewport.width > 12, viewport.height > 8,
-              cellSize.width > 0, cellSize.height > 0 else { return nil }
-        let rawColumns = Double(viewport.width - 12) / Double(cellSize.width)
-        let rawRows = Double(viewport.height - 8) / Double(cellSize.height)
-        guard rawColumns.isFinite, rawRows.isFinite else { return nil }
-        let columns = min(Int(UInt16.max), max(1, Int(min(rawColumns, Double(UInt16.max)))))
-        var rows = min(Int(UInt16.max), max(1, Int(min(rawRows, Double(UInt16.max)))))
-        while rows > 1_000_000 / columns { rows -= 1 }
-        return GridSize(rows: rows, columns: columns)
+    public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        guard newCols > 0, newRows > 0,
+              newCols <= Int(UInt16.max), newRows <= Int(UInt16.max),
+              newRows <= 1_000_000 / newCols,
+              let id = idByTerminalView[ObjectIdentifier(source)], var runtime = sessions[id] else { return }
+        let grid = GridSize(rows: newRows, columns: newCols)
+        runtime.desiredGrid = grid
+        sessions[id] = runtime
+        if selectedAgentID == id {
+            desiredStageGrid = grid
+            scheduleResize(for: id, grid: grid)
+        }
     }
 
-    private func scheduleResize(for id: UUID) {
-        guard selectedAgentID == id, let grid = desiredStageGrid,
-              var runtime = sessions[id], runtime.subscribed else { return }
-        guard runtime.descriptor.size != grid, runtime.lastResizeGrid != grid,
+    private func scheduleResize(for id: UUID, grid: GridSize) {
+        guard selectedAgentID == id, var runtime = sessions[id], runtime.subscribed,
+              runtime.descriptor.size != grid, runtime.lastResizeGrid != grid,
               runtime.resizePendingGrid != grid else { return }
         resizeRequestGeneration &+= 1
         runtime.resizePendingGrid = grid
@@ -260,49 +276,25 @@ public final class CorralMVPCoordinator {
     }
 
     private func applyResize(_ request: ResizeRequest) async {
-        let id = request.sessionID
-        guard let runtime = sessions[id], runtime.subscribed else {
+        guard isCurrentResize(request), let runtime = sessions[request.sessionID] else {
             clearPendingResize(request)
             return
         }
-        let previousGrid = runtime.descriptor.size
-        guard isCurrentResize(request) else {
-            clearPendingResize(request)
-            return
-        }
-
         do {
-            try await runtime.engine.resize(to: request.grid)
-            let resizedSnapshot = await runtime.engine.snapshot()
-            guard resizedSnapshot.isValid, var current = sessions[id] else { return }
-            current.snapshot = resizedSnapshot
-            sessions[id] = current
-            if current.receivedFrame, selectedAgentID == id {
-                stageView.present(submission(for: current, snapshot: resizedSnapshot))
-            }
-            guard isCurrentResize(request) else {
-                let restoreTo = selectedAgentID == id ? (desiredStageGrid ?? previousGrid) : previousGrid
-                await restoreGrid(id, restoreTo, pending: request.grid)
-                return
-            }
-
             let receipt = try await sessionLink.send(.resize(reference: runtime.descriptor.key.reference, size: request.grid))
+            guard var latest = sessions[request.sessionID] else { return }
             guard receipt.socketWritten else {
-                await restoreGrid(id, previousGrid, pending: request.grid)
+                if latest.resizePendingGrid == request.grid { latest.resizePendingGrid = nil }
+                sessions[request.sessionID] = latest
                 lastConnectionError = "Terminal resize was not sent"
                 return
             }
-            guard var latest = sessions[id] else { return }
             latest.descriptor.size = request.grid
             latest.lastResizeGrid = request.grid
             if latest.resizePendingGrid == request.grid { latest.resizePendingGrid = nil }
-            latest.snapshot = await latest.engine.snapshot()
-            sessions[id] = latest
-            if latest.receivedFrame, selectedAgentID == id, let snapshot = latest.snapshot {
-                stageView.present(submission(for: latest, snapshot: snapshot))
-            }
+            sessions[request.sessionID] = latest
         } catch {
-            await restoreGrid(id, previousGrid, pending: request.grid)
+            clearPendingResize(request)
             lastConnectionError = String(describing: error)
         }
     }
@@ -319,16 +311,24 @@ public final class CorralMVPCoordinator {
         sessions[request.sessionID] = runtime
     }
 
-    private func restoreGrid(_ id: UUID, _ grid: GridSize, pending: GridSize) async {
-        guard let runtime = sessions[id] else { return }
-        try? await runtime.engine.resize(to: grid)
-        let snapshot = await runtime.engine.snapshot()
-        guard var current = sessions[id] else { return }
-        current.snapshot = snapshot
-        if current.resizePendingGrid == pending { current.resizePendingGrid = nil }
-        sessions[id] = current
-        if current.receivedFrame, selectedAgentID == id {
-            stageView.present(submission(for: current, snapshot: snapshot))
+    private func subscribe(_ id: UUID) async {
+        guard var runtime = sessions[id], !runtime.subscribed, !runtime.subscriptionPending else { return }
+        runtime.subscriptionPending = true
+        sessions[id] = runtime
+        do {
+            let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: runtime.descriptor.size))
+            guard var current = sessions[id] else { return }
+            current.subscriptionPending = false
+            current.subscribed = receipt.socketWritten
+            sessions[id] = current
+            if receipt.socketWritten, let grid = current.desiredGrid {
+                scheduleResize(for: id, grid: grid)
+            } else if !receipt.socketWritten {
+                lastConnectionError = "Subscription was not sent"
+            }
+        } catch {
+            sessions[id]?.subscriptionPending = false
+            lastConnectionError = String(describing: error)
         }
     }
 
@@ -342,8 +342,12 @@ public final class CorralMVPCoordinator {
         }
         let removed = Set(sessionOrder).subtracting(ordered)
         for id in removed {
-            if let reference = sessions.removeValue(forKey: id)?.descriptor.key.reference {
-                idByReference.removeValue(forKey: reference)
+            if let runtime = sessions.removeValue(forKey: id) {
+                idByReference.removeValue(forKey: runtime.descriptor.key.reference)
+                if let view = runtime.terminalView {
+                    idByTerminalView.removeValue(forKey: ObjectIdentifier(view))
+                    view.terminalDelegate = nil
+                }
             }
         }
         sessionOrder = ordered
@@ -354,8 +358,9 @@ public final class CorralMVPCoordinator {
             switchSession(first)
         } else {
             selectedAgentID = nil
-            stageView.activateInput(for: nil, using: inputRouter)
-            stageView.present(nil)
+            desiredStageGrid = nil
+            workspaceView.stageContainer.subviews.forEach { $0.removeFromSuperview() }
+            updateSessionRows()
         }
     }
 
@@ -364,7 +369,10 @@ public final class CorralMVPCoordinator {
         listingSequence = delta.sequence
         for reference in delta.removedReferences {
             guard let id = idByReference.removeValue(forKey: reference) else { continue }
-            sessions.removeValue(forKey: id)
+            if let runtime = sessions.removeValue(forKey: id), let view = runtime.terminalView {
+                idByTerminalView.removeValue(forKey: ObjectIdentifier(view))
+                view.terminalDelegate = nil
+            }
             sessionOrder.removeAll { $0 == id }
         }
         for record in delta.addedSessions + delta.changedSessions {
@@ -379,15 +387,14 @@ public final class CorralMVPCoordinator {
         }
         updateSessionRows()
         if let selectedAgentID, sessions[selectedAgentID] != nil {
-            if let runtime = sessions[selectedAgentID], let snapshot = runtime.snapshot {
-                stageView.present(submission(for: runtime, snapshot: snapshot))
-            }
+            switchSession(selectedAgentID)
         } else if let first = sessionOrder.first {
             switchSession(first)
         } else {
             selectedAgentID = nil
-            stageView.activateInput(for: nil, using: inputRouter)
-            stageView.present(nil)
+            desiredStageGrid = nil
+            workspaceView.stageContainer.subviews.forEach { $0.removeFromSuperview() }
+            updateSessionRows()
         }
     }
 
@@ -410,67 +417,35 @@ public final class CorralMVPCoordinator {
             current.descriptor = descriptor
             sessions[id] = current
         } else {
-            sessions[id] = RuntimeSession(
-                descriptor: descriptor, id: id, paneID: UUID(), engine: SwiftTermEngineAdapter(size: size)
-            )
+            sessions[id] = RuntimeSession(descriptor: descriptor)
         }
         return id
     }
 
-    private func subscribe(_ id: UUID) async {
-        guard var runtime = sessions[id], !runtime.subscribed, !runtime.subscriptionPending else { return }
-        runtime.subscriptionPending = true
-        sessions[id] = runtime
-        do {
-            let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: runtime.descriptor.size))
-            guard var current = sessions[id] else { return }
-            current.subscriptionPending = false
-            current.subscribed = receipt.socketWritten
-            sessions[id] = current
-            if receipt.socketWritten {
-                scheduleResize(for: id)
-            } else {
-                lastConnectionError = "Subscription was not sent"
-            }
-        } catch {
-            sessions[id]?.subscriptionPending = false
-            lastConnectionError = String(describing: error)
-        }
+    private func enqueueInput(reference: SessionReference, bytes: Data) {
+        guard !bytes.isEmpty, bytes.count <= ProtocolV1.maximumInputBytes else { return }
+        pendingInputs.append(PendingInput(reference: reference, bytes: bytes))
+        guard inputTask == nil else { return }
+        inputTask = Task { @MainActor [weak self] in await self?.drainPendingInputs() }
     }
 
-    private func applyFrame(_ frame: BinaryFrame, origin: SessionEventOrigin) async {
-        let selectionAtStart = selectionGeneration
-        let reference = frame.reference
-        guard let id = idByReference[reference], let runtime = sessions[id],
-              runtime.subscribed || runtime.subscriptionPending else { return }
-        let update: TerminalUpdate
-        switch frame {
-        case let .snapshot(reference, ansi): update = .snapshot(reference: reference, ansi: ansi, origin: origin)
-        case let .delta(reference, ansi): update = .delta(reference: reference, ansi: ansi, origin: origin)
-        case let .scrollback(reference, metadata, ansi): update = .scrollback(reference: reference, metadata: metadata, ansi: ansi, origin: origin)
-        }
-        do {
-            let effects = try await runtime.engine.apply(update)
-            await effectSink.consume(effects, for: runtime.descriptor.key)
-            let snapshot = await runtime.engine.snapshot()
-            guard snapshot.isValid, var current = sessions[id] else { return }
-            current.receivedFrame = true
-            current.snapshot = snapshot
-            sessions[id] = current
-            if let selectedAgentID, let selected = sessions[selectedAgentID],
-               (selectedAgentID == id || selectionGeneration != selectionAtStart),
-               let selectedSnapshot = selected.snapshot {
-                stageView.present(submission(for: selected, snapshot: selectedSnapshot))
+    private func drainPendingInputs() async {
+        while !Task.isCancelled, !pendingInputs.isEmpty {
+            let input = pendingInputs.removeFirst()
+            guard nextInputSequence < UInt32.max else {
+                lastConnectionError = "Terminal input sequence exhausted"
+                continue
             }
-        } catch {
-            lastConnectionError = String(describing: error)
+            nextInputSequence += 1
+            do {
+                let request = try ClientInputRequest(sequence: nextInputSequence, reference: input.reference, payload: .bytes(input.bytes))
+                let receipt = try await sessionLink.send(.input(request))
+                if !receipt.socketWritten { lastConnectionError = "Terminal input was not sent" }
+            } catch {
+                lastConnectionError = String(describing: error)
+            }
         }
-    }
-
-    private func submission(for runtime: RuntimeSession, snapshot: TerminalGridSnapshot) -> PaneRenderSubmission {
-        let size = stageView.currentGeometry?.0 ?? stageView.bounds.size
-        let viewport = StageViewportRect(x: 0, y: 0, width: Double(max(1, size.width)), height: Double(max(1, size.height)))
-        return PaneRenderSubmission(paneID: runtime.paneID, session: runtime.descriptor.key, viewport: viewport, snapshot: snapshot)
+        inputTask = nil
     }
 
     private func updateSessionRows() {
@@ -486,6 +461,22 @@ public final class CorralMVPCoordinator {
         }
         workspaceView.setSessions(sessionRows)
     }
+
+    public func setTerminalTitle(source: TerminalView, title: String) {}
+    public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    public func scrolled(source: TerminalView, position: Double) {}
+    public func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    public func bell(source: TerminalView) {}
+    public func clipboardCopy(source: TerminalView, content: Data) {}
+    public func clipboardRead(source: TerminalView) -> Data? { nil }
+    public func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    public func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+
+    public func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        guard let id = idByTerminalView[ObjectIdentifier(source)],
+              let runtime = sessions[id], runtime.subscribed else { return }
+        enqueueInput(reference: runtime.descriptor.key.reference, bytes: Data(data))
+    }
 }
 
 public enum CorralMVPConfiguration {
@@ -495,5 +486,27 @@ public enum CorralMVPConfiguration {
         let value = environment["CORRAL_NATIVE_ENDPOINT"] ?? defaultEndpoint
         guard let url = URL(string: value) else { throw EndpointSafetyError.invalidEndpoint }
         return try ApprovedEndpoint(url: url)
+    }
+}
+
+@MainActor
+final class CorralNativeTerminalView: TerminalView {
+    override func send(source: Terminal, data: ArraySlice<UInt8>) {
+        guard !SwiftTermVTReplyFilter.isAutomaticResponse(data) else { return }
+        terminalDelegate?.send(source: self, data: data)
+    }
+}
+
+private enum SwiftTermVTReplyFilter {
+    static func isAutomaticResponse(_ data: ArraySlice<UInt8>) -> Bool {
+        let bytes = Array(data)
+        guard bytes.count >= 2, bytes[0] == 0x1b else { return false }
+        if bytes[1] == 0x5d || bytes[1] == 0x50 { return true } // OSC and DCS replies
+        guard bytes.count >= 3, bytes[1] == 0x5b else { return false }
+        let final = bytes[bytes.count - 1]
+        guard [0x6e, 0x63, 0x79, 0x74, 0x49, 0x4f, 0x52].contains(final) else { return false }
+        return bytes[2..<(bytes.count - 1)].allSatisfy {
+            ($0 >= 0x30 && $0 <= 0x39) || [0x3b, 0x3f, 0x3e, 0x24].contains($0)
+        }
     }
 }
