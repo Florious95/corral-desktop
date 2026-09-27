@@ -576,6 +576,40 @@ final class CorralSidebarSectionHeader: NSView {
 }
 
 @MainActor
+final class CorralAgentTableView: NSTableView {
+    var onAgentClick: ((Int) -> Void)?
+    private var pressedRow: Int?
+    private var didDrag = false
+
+    override func mouseDown(with event: NSEvent) {
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        pressedRow = row >= 0 ? row : nil
+        didDrag = false
+        super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        didDrag = true
+        super.mouseDragged(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let releasedRow = row(at: convert(event.locationInWindow, from: nil))
+        let downRow = pressedRow
+        let wasDragged = didDrag
+        super.mouseUp(with: event)
+        pressedRow = nil
+        didDrag = false
+        dispatchClickIfCompleted(from: downRow, to: releasedRow, wasDragged: wasDragged)
+    }
+
+    func dispatchClickIfCompleted(from pressedRow: Int?, to releasedRow: Int, wasDragged: Bool) {
+        guard !wasDragged, let pressedRow, pressedRow >= 0, pressedRow == releasedRow else { return }
+        onAgentClick?(pressedRow)
+    }
+}
+
+@MainActor
 private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     enum Kind { case spaces, agents }
     let kind: Kind
@@ -669,9 +703,9 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let table = notification.object as? NSTableView else { return }
         if kind == .spaces, spaces.indices.contains(table.selectedRow) { sidebar?.selectSpace(spaces[table.selectedRow]) }
+        // Agent selection occurs on mouse-down; CorralAgentTableView dispatches only after mouse-up and drag checks.
     }
-    /// Resolve Agent rows from the completed click location, not `clickedRow` (which is often -1 for a drag-enabled table).
-    @objc func agentClicked(_ recognizer: NSClickGestureRecognizer) { sidebar?.handleAgentClick(recognizer) }
+    func agentClicked(row: Int) { sidebar?.handleAgentRowClick(at: row) }
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
         guard kind == .agents, agents.indices.contains(row), let sessionID = agents[row].sessionID else { return nil }
         let item = NSPasteboardItem()
@@ -688,7 +722,7 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
 @MainActor
 public final class CorralSidebarView: NSView {
     public let spacesTable = NSTableView()
-    public let agentsTable = NSTableView()
+    public let agentsTable: NSTableView = CorralAgentTableView()
     public let deviceBadgeView = CorralDeviceBadgeView()
     public let devicesButton = NSButton(title: "设备", target: nil, action: nil)
     public let settingsButton = CorralSettingsButton()
@@ -807,10 +841,6 @@ public final class CorralSidebarView: NSView {
         guard let raw = sender.identifier?.rawValue, let id = UUID(uuidString: String(raw.dropFirst(CorralSidebarRowView.hoverControlPrefix.count))) else { return }
         onCreateAgent?(id)
     }
-    func handleAgentClick(_ recognizer: NSClickGestureRecognizer) {
-        let table = (recognizer.view as? NSTableView) ?? agentsTable
-        handleAgentRowClick(at: table.selectedRow)
-    }
     func handleAgentRowClick(at row: Int) {
         guard agents.indices.contains(row) else { return }
         onSelectAgent?(agents[row].id)
@@ -901,12 +931,9 @@ public final class CorralSidebarView: NSView {
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")))
         table.headerView = nil; table.rowSizeStyle = .custom; table.intercellSpacing = .zero; table.backgroundColor = CorralAestheticTokens.surface0; table.style = .plain; table.selectionHighlightStyle = .regular
         table.dataSource = data; table.delegate = data; table.usesAutomaticRowHeights = false
-        if data.kind == .agents {
+        if data.kind == .agents, let agentTable = table as? CorralAgentTableView {
             table.setDraggingSourceOperationMask(.move, forLocal: true)
-            let click = NSClickGestureRecognizer(target: data, action: #selector(SidebarTableData.agentClicked(_:)))
-            click.numberOfClicksRequired = 1
-            click.delaysPrimaryMouseButtonEvents = false
-            table.addGestureRecognizer(click)
+            agentTable.onAgentClick = { [weak data] row in data?.agentClicked(row: row) }
         }
     }
     private func configureScroll(_ scroll: NSScrollView, table: NSTableView) {
