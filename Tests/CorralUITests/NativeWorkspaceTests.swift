@@ -433,6 +433,31 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(sidebar.agentsExpanded)
     }
 
+    func testSidebarSectionCollapseKeepsWindowChromePinnedToTop() throws {
+        let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "Agent", contentView: NSView())])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window)
+        let initialFrame = window.frame
+        workspace.sidebar.setSpaces((0..<3).map { CorralSidebarSpace(name: "Project \($0)") })
+        workspace.sidebar.setAgents((0..<62).map { CorralSidebarAgent(name: "Agent \($0)") })
+
+        for (spacesExpanded, agentsExpanded) in [(true, true), (true, false), (false, false), (false, true), (true, true)] {
+            workspace.sidebar.setSpacesExpanded(spacesExpanded)
+            workspace.sidebar.setAgentsExpanded(agentsExpanded)
+            window.layoutIfNeeded()
+            workspace.layoutSubtreeIfNeeded()
+            workspace.sidebar.layoutSubtreeIfNeeded()
+            XCTAssertEqual(window.frame, initialFrame)
+            XCTAssertEqual(workspace.frame, window.contentView?.bounds)
+            XCTAssertEqual(workspace.titleBar.frame.maxY, workspace.bounds.maxY, accuracy: 0.1)
+            XCTAssertEqual(workspace.tabBar.frame.maxY, workspace.bounds.maxY, accuracy: 0.1)
+            XCTAssertEqual(workspace.sidebar.frame.minY, 0, accuracy: 0.1)
+            XCTAssertEqual(workspace.sidebar.frame.maxY, workspace.bounds.maxY - CorralWorkspaceView.headerHeight, accuracy: 0.1)
+            XCTAssertEqual(workspace.stageContainer.frame.minY, 0, accuracy: 0.1)
+            XCTAssertEqual(workspace.stageContainer.frame.maxY, workspace.bounds.maxY - CorralWorkspaceView.headerHeight, accuracy: 0.1)
+        }
+    }
+
     func testOnlyRealSpaceRowsOfferInlineAgentCreation() throws {
         let sidebar = CorralSidebarView()
         let workspaceID = UUID()

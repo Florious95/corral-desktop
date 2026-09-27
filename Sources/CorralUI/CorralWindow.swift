@@ -59,6 +59,29 @@ public final class CorralWindow: NSWindow {
     }
 }
 
+// Keep collapsible workspace constraints from becoming the window's fitting-size constraints.
+@MainActor
+private final class CorralWindowContentHost: NSView {
+    private weak var workspaceView: NSView?
+
+    func host(_ view: NSView) {
+        workspaceView = view
+        view.autoresizingMask = []
+        view.frame = bounds
+        addSubview(view)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        workspaceView?.frame = bounds
+    }
+
+    override func setBoundsSize(_ newSize: NSSize) {
+        super.setBoundsSize(newSize)
+        workspaceView?.frame = bounds
+    }
+}
+
 @MainActor
 public final class CorralWindowController: NSWindowController, NSWindowDelegate {
     public private(set) var savedFrameBeforeZoom: NSRect?
@@ -66,8 +89,9 @@ public final class CorralWindowController: NSWindowController, NSWindowDelegate 
     public init(workspaceView: CorralWorkspaceView, contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860)) {
         let window = CorralWindow(contentRect: contentRect)
         super.init(window: window)
-        window.contentView = workspaceView
-        workspaceView.autoresizingMask = [.width, .height]
+        let contentHost = CorralWindowContentHost(frame: window.contentView?.bounds ?? .zero)
+        contentHost.host(workspaceView)
+        window.contentView = contentHost
         window.delegate = self
         window.center()
         window.positionTrafficLights()
