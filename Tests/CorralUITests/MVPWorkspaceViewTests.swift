@@ -4,6 +4,31 @@ import XCTest
 
 @MainActor
 final class MVPWorkspaceViewTests: XCTestCase {
+    func testMVPChromeMatchesMeasuredSidebarControlsAndDispatchesActions() throws {
+        let workspace = CorralMVPWorkspaceView(frame: NSRect(x: 0, y: 0, width: 1400, height: 980))
+        workspace.layoutSubtreeIfNeeded()
+        var collapseCount = 0
+        var hostsCount = 0
+        workspace.onToggleSidebar = { collapseCount += 1 }
+        workspace.onShowAllHosts = { hostsCount += 1 }
+
+        let titleBar = try XCTUnwrap(workspace.collapseButton.superview)
+        XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+        XCTAssertEqual(workspace.collapseButton.frame.minX, 243, accuracy: 0.1)
+        XCTAssertEqual(workspace.collapseButton.frame.size, NSSize(width: 28, height: 27))
+        XCTAssertEqual(titleBar.bounds.maxY - workspace.collapseButton.frame.maxY, 5, accuracy: 0.1)
+        workspace.collapseButton.performClick(nil)
+        XCTAssertEqual(collapseCount, 1)
+
+        let footer = try XCTUnwrap(workspace.devicesButton.superview)
+        XCTAssertEqual(footer.frame.height, 44, accuracy: 0.1)
+        XCTAssertEqual(workspace.devicesButton.title, "查看所有主机")
+        XCTAssertEqual(workspace.devicesButton.frame.minX, 12, accuracy: 0.1)
+        XCTAssertEqual(workspace.devicesButton.frame.size, NSSize(width: 222, height: 35))
+        workspace.devicesButton.performClick(nil)
+        XCTAssertEqual(hostsCount, 1)
+    }
+
     func testSessionRowsRouteEachCompletedClickDirectlyAndKeepOneStageAttached() throws {
         let firstID = UUID(), secondID = UUID()
         let workspace = CorralMVPWorkspaceView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))

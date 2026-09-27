@@ -754,8 +754,6 @@ public final class CorralSidebarView: NSView {
     private let agentsScroll = NSScrollView()
     private var contextMenuControllers: [UUID: SessionContextMenuController] = [:]
     private var allAgents: [CorralSidebarAgent] = []
-    private let footerStatus = NSTextField(labelWithString: "未连接设备")
-    private let footerStatusDot = NSView()
     private let footerBorder = NSView()
     private var spacesHeight: NSLayoutConstraint!
     public static let spaceRowHeight: CGFloat = 32
@@ -771,22 +769,18 @@ public final class CorralSidebarView: NSView {
         configureScroll(spacesScroll, table: spacesTable); configureScroll(agentsScroll, table: agentsTable)
         spacesHeader.onToggle = { [weak self] in self?.setSpacesExpanded(!(self?.spacesExpanded ?? true)) }
         agentsHeader.onToggle = { [weak self] in self?.setAgentsExpanded(!(self?.agentsExpanded ?? true)) }
-        // `.sidebar-footer`: 44px, 1px top border, padding 4px 8px 4px 12px; 34px devices hit area + 34px settings.
+        // The host picker is 222×35pt at x=12; settings remains 34pt, 8pt from the edge.
         let footer = NSView()
         footerBorder.wantsLayer = true; footerBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor; footerBorder.translatesAutoresizingMaskIntoConstraints = false
+        devicesButton.title = "查看所有主机"
         devicesButton.target = self; devicesButton.action = #selector(toggleDevices); devicesButton.image = CorralLegacyIcon.image(.layers, size: 15, tint: CorralAestheticTokens.text); devicesButton.imagePosition = .imageLeading; devicesButton.imageHugsTitle = true
-        devicesButton.font = .systemFont(ofSize: 13, weight: .semibold); devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("设备管理"); devicesButton.setAccessibilityIdentifier("corral.sidebar.devices"); devicesButton.translatesAutoresizingMaskIntoConstraints = false
-        footerStatus.font = .systemFont(ofSize: 11); footerStatus.textColor = CorralAestheticTokens.textMuted; footerStatus.translatesAutoresizingMaskIntoConstraints = false
-        footerStatusDot.wantsLayer = true; footerStatusDot.layer?.cornerRadius = 3.5; footerStatusDot.translatesAutoresizingMaskIntoConstraints = false
+        devicesButton.font = .systemFont(ofSize: 13, weight: .semibold); devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("查看所有主机"); devicesButton.setAccessibilityIdentifier("corral.sidebar.devices"); devicesButton.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.setAccessibilityIdentifier("corral.sidebar.settings")
         settingsButton.target = self; settingsButton.action = #selector(openSettings); settingsButton.translatesAutoresizingMaskIntoConstraints = false
-        for view in [footerBorder, devicesButton, footerStatus, footerStatusDot, settingsButton] { footer.addSubview(view) }
+        for view in [footerBorder, devicesButton, settingsButton] { footer.addSubview(view) }
         NSLayoutConstraint.activate([
             footerBorder.leadingAnchor.constraint(equalTo: footer.leadingAnchor), footerBorder.trailingAnchor.constraint(equalTo: footer.trailingAnchor), footerBorder.topAnchor.constraint(equalTo: footer.topAnchor), footerBorder.heightAnchor.constraint(equalToConstant: 1),
-            devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 20), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), devicesButton.heightAnchor.constraint(equalToConstant: 34),
-            footerStatus.leadingAnchor.constraint(equalTo: devicesButton.trailingAnchor, constant: 8), footerStatus.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-            footerStatusDot.leadingAnchor.constraint(equalTo: footerStatus.trailingAnchor, constant: 8), footerStatusDot.centerYAnchor.constraint(equalTo: footer.centerYAnchor), footerStatusDot.widthAnchor.constraint(equalToConstant: 7), footerStatusDot.heightAnchor.constraint(equalToConstant: 7),
-            footerStatusDot.trailingAnchor.constraint(lessThanOrEqualTo: settingsButton.leadingAnchor, constant: -8),
+            devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), devicesButton.widthAnchor.constraint(equalToConstant: 222), devicesButton.heightAnchor.constraint(equalToConstant: 35),
             settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -8), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 34), settingsButton.heightAnchor.constraint(equalToConstant: 34)
         ])
         let stack = NSStackView(views: [spacesHeader, spacesScroll, agentsHeader, agentsScroll, footer])
@@ -871,7 +865,6 @@ public final class CorralSidebarView: NSView {
         layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         spacesTable.backgroundColor = CorralAestheticTokens.surface0
         agentsTable.backgroundColor = CorralAestheticTokens.surface0
-        footerStatus.textColor = CorralAestheticTokens.textMuted
         footerBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor
         devicesButton.image = CorralLegacyIcon.image(.layers, size: 15, tint: CorralAestheticTokens.text)
         spacesHeader.refreshTheme(); agentsHeader.refreshTheme()
@@ -881,12 +874,6 @@ public final class CorralSidebarView: NSView {
     }
     public func setDevices(_ devices: [CorralSidebarDevice]) {
         self.devices = devices
-        footerStatus.stringValue = devices.isEmpty ? "未连接设备" : "\(devices.count) 台设备"
-        let online = devices.contains(where: \.isOnline)
-        footerStatusDot.layer?.backgroundColor = online ? CorralAestheticTokens.success.cgColor : NSColor.clear.cgColor
-        footerStatusDot.layer?.borderColor = online ? NSColor.clear.cgColor : CorralAestheticTokens.idleDot.cgColor
-        footerStatusDot.layer?.borderWidth = online ? 0 : 1
-        footerStatusDot.toolTip = online ? "至少一台设备在线" : "设备离线"
         let sessions = devices.flatMap { device in device.sessions.map { CorralSidebarAgent(id: $0.id, name: $0.name, status: .idle, deviceName: device.name) } }
         setAgents(sessions)
         deviceBadgeView.configure(deviceName: devices.first?.name ?? "", deviceCount: devices.count)
@@ -1058,8 +1045,8 @@ public final class CorralSidebarTitleBarView: NSView {
         collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏"); collapseButton.setAccessibilityIdentifier("corral.sidebar.toggle")
         NSLayoutConstraint.activate([
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
-            collapseButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), collapseButton.centerYAnchor.constraint(equalTo: centerYAnchor), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 26),
-            dragRegion.leadingAnchor.constraint(equalTo: collapseButton.trailingAnchor, constant: 8), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
+            collapseButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 243), collapseButton.topAnchor.constraint(equalTo: topAnchor, constant: 5), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 27),
+            dragRegion.leadingAnchor.constraint(equalTo: trafficLightsSpacer.trailingAnchor), dragRegion.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor), bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor), bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor), bottomBorder.heightAnchor.constraint(equalToConstant: 1)
         ])
     }

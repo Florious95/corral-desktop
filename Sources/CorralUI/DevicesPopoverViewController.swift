@@ -26,8 +26,11 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public let selectionSummary = NSTextField(labelWithString: "0 devices · 0 connected")
     private let errorLabel = NSTextField(labelWithString: "")
     private var tableHeight: NSLayoutConstraint!
-    /// `.dp`: 300px wide, 6px padding, 12px radius.
+    /// Native hosts card: 300pt wide, 155pt fixed chrome, 50pt per visible device row.
     public static let width: CGFloat = 300
+    public static let contentInset: CGFloat = 6
+    public static let cornerRadius: CGFloat = 12
+    public static let fixedChromeHeight: CGFloat = 155
     public static let rowHeight: CGFloat = 50
 
     public init(repository: any DeviceRepositoryProtocol) {
@@ -90,9 +93,13 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         content.alignment = .width
         content.distribution = .fill
         content.spacing = 0
-        content.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        content.edgeInsets = NSEdgeInsets(top: Self.contentInset, left: Self.contentInset, bottom: Self.contentInset, right: Self.contentInset)
         content.setCustomSpacing(4, after: pairRow); content.setCustomSpacing(4, after: separator)
         content.setAccessibilityIdentifier("corral.devices.popover")
+        content.wantsLayer = true
+        content.layer?.backgroundColor = CorralAestheticTokens.surface2.cgColor
+        content.layer?.cornerRadius = Self.cornerRadius
+        content.layer?.masksToBounds = true
         view = content
         tableHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([content.widthAnchor.constraint(equalToConstant: Self.width), tableHeight])
@@ -115,9 +122,10 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     /// Lists up to five devices before scrolling; the popover resizes to its content.
     private func updateContentSize() {
         guard isViewLoaded else { return }
-        tableHeight.constant = CGFloat(min(devices.count, 5)) * Self.rowHeight
+        let visibleRows = min(devices.count, 5)
+        tableHeight.constant = CGFloat(visibleRows) * Self.rowHeight
         view.layoutSubtreeIfNeeded()
-        preferredContentSize = NSSize(width: Self.width, height: ceil(view.fittingSize.height))
+        preferredContentSize = NSSize(width: Self.width, height: Self.fixedChromeHeight + CGFloat(visibleRows) * Self.rowHeight)
     }
 
     public static func shouldCommitReturn(hasMarkedText: Bool) -> Bool {
