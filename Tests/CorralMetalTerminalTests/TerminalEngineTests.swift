@@ -41,6 +41,29 @@ final class TerminalEngineTests: XCTestCase {
         XCTAssertTrue(snapshot.isValid)
     }
 
+    func testWideContinuationsInheritLeadingVisualAttributes() async throws {
+        let engine = SwiftTermEngineAdapter(size: GridSize(rows: 1, columns: 8))
+        _ = try await feed("\u{1B}[1;3;4;7;38;2;12;34;56;48;2;78;90;123m招聘🚀", to: engine)
+
+        let snapshot = await engine.snapshot()
+        XCTAssertTrue(snapshot.isValid)
+        for (column, cluster) in [(0, "招"), (2, "聘"), (4, "🚀")] {
+            let leading = snapshot.cells[column]
+            let continuation = snapshot.cells[column + 1]
+            XCTAssertEqual(leading.content, .cluster(cluster, columns: .two))
+            XCTAssertEqual(continuation.content, .continuation)
+            XCTAssertEqual(leading.foreground, .rgba(RGBAColor(red: 12, green: 34, blue: 56)))
+            XCTAssertEqual(leading.background, .rgba(RGBAColor(red: 78, green: 90, blue: 123)))
+            XCTAssertEqual(continuation.foreground, leading.foreground)
+            XCTAssertEqual(continuation.background, leading.background)
+            XCTAssertEqual(continuation.attributes, leading.attributes)
+            XCTAssertTrue(leading.attributes.contains(.bold))
+            XCTAssertTrue(leading.attributes.contains(.italic))
+            XCTAssertTrue(leading.attributes.contains(.underline))
+            XCTAssertTrue(leading.attributes.contains(.inverse))
+        }
+    }
+
     func testCapturedGoldenSnapshotAndDeltaFollowVTScrolling() async throws {
         let codec = BinaryV1Codec()
         let snapshotFrame = try capturedFrame("snapshot", codec: codec)

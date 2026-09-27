@@ -1,5 +1,6 @@
 import CorralContracts
 import Foundation
+import OSLog
 import SwiftTerm
 
 public protocol TerminalEngineAdapter: TerminalEngineSubmitting, TerminalSnapshotProviding {}
@@ -20,11 +21,14 @@ private enum TerminalEngineError: Error {
 /// SwiftTerm owns VT parsing and screen state; its replies are returned only as local terminal effects.
 public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
     private static let maximumCellCount = 1_000_000
+    private static let logger = Logger(subsystem: "com.corral.native.dev", category: "terminal-adapter")
 
     private let delegate: EngineDelegate
     private let terminal: Terminal
     private var epoch: ConnectionEpoch?
     private var generation = DirtyGeneration.initial
+    private var lastValidSnapshot: TerminalGridSnapshot?
+    private var lastInvalidCellDiagnostic: String?
 
     public init(size: GridSize = GridSize(rows: 24, columns: 80)) {
         let initialSize = Self.isSupported(size) ? size : GridSize(rows: 24, columns: 80)
@@ -74,31 +78,63 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
 
     public func snapshot() async -> TerminalGridSnapshot {
         let dimensions = terminal.getDims()
+        let size = GridSize(rows: dimensions.rows, columns: dimensions.cols)
+        let position = terminal.getCursorLocation()
+        let cursor = CursorDescriptor(
+            row: min(max(position.y, 0), dimensions.rows - 1),
+            column: min(max(position.x, 0), dimensions.cols - 1),
+            isVisible: delegate.isCursorVisible,
+            wrapPending: position.x >= dimensions.cols,
+            shape: delegate.cursorShape
+        )
         var cells: [TerminalCell] = []
         cells.reserveCapacity(dimensions.rows * dimensions.cols)
 
         for row in 0..<dimensions.rows {
+            let rawRow = (0..<dimensions.cols).map { terminal.getCharData(col: $0, row: row) }
             for column in 0..<dimensions.cols {
-                guard let data = terminal.getCharData(col: column, row: row) else {
-                    cells.append(Self.blankCell)
+                guard let raw = rawRow[column] else {
+                    return invalidSnapshot(size: size, cursor: cursor, row: row, column: column, reason: "missing raw cell")
+                }
+
+                if raw.width == 0 {
+                    guard column > 0,
+                          let rawLeading = rawRow[column - 1], rawLeading.width == 2,
+                          let leading = cells.last,
+                          case .cluster(_, columns: .two) = leading.content else {
+                        return invalidSnapshot(size: size, cursor: cursor, row: row, column: column, reason: "continuation without same-row leading wide cell")
+                    }
+                    cells.append(TerminalCell(
+                        content: .continuation,
+                        foreground: leading.foreground,
+                        background: leading.background,
+                        attributes: leading.attributes
+                    ))
                     continue
                 }
-                let cluster = String(terminal.getCharacter(for: data))
-                let content: CellContent
-                if data.width == 0 {
-                    content = .continuation
-                } else if cluster.isEmpty || cluster == " " || cluster == "\0" {
-                    content = .blank
-                } else {
-                    content = .cluster(cluster, columns: data.width > 1 ? .two : .one)
+
+                guard raw.width == 1 || raw.width == 2 else {
+                    return invalidSnapshot(size: size, cursor: cursor, row: row, column: column, reason: "unsupported raw cell width \(raw.width)")
                 }
-                let attribute = data.attribute
+                let cluster = String(terminal.getCharacter(for: raw))
+                let isBlank = cluster.isEmpty || cluster == " " || cluster == "\0"
+                let content: CellContent = isBlank
+                    ? .blank
+                    : .cluster(cluster, columns: raw.width == 2 ? .two : .one)
+                if raw.width == 2 {
+                    guard !isBlank,
+                          column + 1 < dimensions.cols,
+                          rawRow[column + 1]?.width == 0 else {
+                        return invalidSnapshot(size: size, cursor: cursor, row: row, column: column, reason: "wide leading cell has no same-row continuation")
+                    }
+                }
+
+                let attribute = raw.attribute
                 var attributes: TerminalAttributes = []
                 if attribute.style.contains(.bold) { attributes.insert(.bold) }
                 if attribute.style.contains(.italic) { attributes.insert(.italic) }
                 if attribute.style.contains(.underline) { attributes.insert(.underline) }
                 if attribute.style.contains(.inverse) { attributes.insert(.inverse) }
-
                 cells.append(TerminalCell(
                     content: content,
                     foreground: Self.color(attribute.fg, default: terminal.foregroundColor, inverse: terminal.backgroundColor),
@@ -108,20 +144,25 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
             }
         }
 
-        let position = terminal.getCursorLocation()
-        let wrapPending = position.x >= dimensions.cols
-        return TerminalGridSnapshot(
-            size: GridSize(rows: dimensions.rows, columns: dimensions.cols),
-            cells: cells,
-            cursor: CursorDescriptor(
-                row: min(max(position.y, 0), dimensions.rows - 1),
-                column: min(max(position.x, 0), dimensions.cols - 1),
-                isVisible: delegate.isCursorVisible,
-                wrapPending: wrapPending,
-                shape: delegate.cursorShape
-            ),
-            generation: generation
-        )
+        let snapshot = TerminalGridSnapshot(size: size, cells: cells, cursor: cursor, generation: generation)
+        lastValidSnapshot = snapshot
+        lastInvalidCellDiagnostic = nil
+        return snapshot
+    }
+
+    private func invalidSnapshot(
+        size: GridSize,
+        cursor: CursorDescriptor,
+        row: Int,
+        column: Int,
+        reason: String
+    ) -> TerminalGridSnapshot {
+        let diagnostic = "Invalid VT cell span at row \(row), column \(column): \(reason)"
+        if lastInvalidCellDiagnostic != diagnostic {
+            Self.logger.error("\(diagnostic, privacy: .public)")
+            lastInvalidCellDiagnostic = diagnostic
+        }
+        return lastValidSnapshot ?? TerminalGridSnapshot(size: size, cells: [], cursor: cursor, generation: generation)
     }
 
     public func mouseReportingMode() -> TerminalMouseReportingMode {
@@ -151,12 +192,6 @@ public actor SwiftTermEngineAdapter: TerminalEngineAdapter {
         let (count, overflow) = size.rows.multipliedReportingOverflow(by: size.columns)
         return !overflow && count <= maximumCellCount
     }
-
-    private static let blankCell = TerminalCell(
-        content: .blank,
-        foreground: .rgba(RGBAColor(red: 138, green: 138, blue: 138)),
-        background: .rgba(RGBAColor(red: 0, green: 0, blue: 0))
-    )
 
     private static func color(_ color: Attribute.Color, default defaultColor: SwiftTerm.Color, inverse inverseColor: SwiftTerm.Color) -> TerminalColor {
         switch color {
