@@ -1,10 +1,10 @@
 import AppKit
 import CorralContracts
-import CorralMetalTerminal
 import CorralProtocol
 import CorralServices
 import CorralUI
 import Foundation
+@preconcurrency import SwiftTerm
 
 public protocol DeviceCredentialVault: Sendable {
     func store(_ secret: String, for handle: CredentialHandle) async throws
@@ -12,34 +12,15 @@ public protocol DeviceCredentialVault: Sendable {
     func delete(_ handle: CredentialHandle) async throws
 }
 
-public struct PaneRenderSubmission: Equatable, Sendable {
-    public let paneID: UUID
-    public let session: SessionKey
-    public let viewport: StageViewportRect
-    public let snapshot: TerminalGridSnapshot
-
-    public init(paneID: UUID, session: SessionKey, viewport: StageViewportRect, snapshot: TerminalGridSnapshot) {
-        self.paneID = paneID
-        self.session = session
-        self.viewport = viewport
-        self.snapshot = snapshot
-    }
-
-    var frameSnapshot: PaneFrameSnapshot {
-        PaneFrameSnapshot(paneID: paneID, session: session, viewport: viewport, contentGeneration: snapshot.generation, snapshot: snapshot)
-    }
-}
-
 public struct CorralApplicationTelemetry: Codable, Equatable, Sendable {
     public let pid: Int32
     public let connected: Bool
     public let sessionCount: Int
     public let subscribedSessionIDs: [String]
-    public let renderedPaneCount: Int
+    public let terminalViewCount: Int
+    public let visiblePaneCount: Int
     public let nonEmptyLineCount: Int
-    public let metalSubmissionCount: UInt64
-    public let atlasPageCount: UInt32
-    public let atlasAllocatedBytes: UInt64
+    public let discardedAutoReplyByteCount: Int
 }
 
 @MainActor
@@ -53,11 +34,12 @@ private final class NewAgentSheetDelegate: NSObject, NSWindowDelegate {
 }
 
 @MainActor
-public final class CorralApplicationCoordinator {
+public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDelegate {
     public let windowController: CorralWindowController
     public let workspaceView: CorralWorkspaceView
     public let backgroundMode: Bool
-    let stageView: MetalStageView
+    private let terminalStageView: NativeTerminalStageView
+    private let terminalRegistry = TerminalSessionRegistry()
     public let workspaceStore: CorralWorkspaceStore
     public let userPreferencesStore: UserPreferencesStore
 
@@ -68,7 +50,7 @@ public final class CorralApplicationCoordinator {
     public private(set) var subscribedSessionIDs: [String] = []
     public private(set) var lastConnectionError: String?
     public private(set) var discardedAutoReplyByteCount = 0
-    private var devicesPopover: NSPopover?
+    private(set) var devicesCardPanel: CorralAnchoredCardPanel?
 
     private struct TabPresentation {
         let title: String
@@ -78,13 +60,10 @@ public final class CorralApplicationCoordinator {
 
     private struct RuntimeSession {
         var descriptor: SessionDescriptor
-        let paneID: UUID
-        let engine: SwiftTermEngineAdapter
         var subscribed = false
         var subscriptionPending = false
-        var receivedFrame = false
-        var snapshot: TerminalGridSnapshot?
-        var lastGeometry: GeometrySample?
+        var lastAppliedReceiveOrdinal = ReceiveOrdinal(0)
+        var desiredGrid: GridSize?
         var hasMobile = false
         var mobileCount: UInt32 = 0
         var desktopCount: UInt32 = 0
@@ -113,20 +92,13 @@ public final class CorralApplicationCoordinator {
     private let credentialVault: any DeviceCredentialVault
     private let sessionLink: any SessionLinkProtocol
     private let deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle
-    private let renderer: SharedMetalTerminalRenderer
-    private let glyphAtlas: GlyphAtlasPool
     private let inputRouter: SessionLinkInputRouter
-    private let terminalEffectSink = LocalTerminalEffectPolicySink()
-    private let geometryPolicy: any GeometryPolicy = DefaultGeometryPolicy()
     private let environment: [String: String]
     private let telemetryURL: URL?
     private let telemetryWriter = AtomicTelemetryWriter()
     private let maximumVisiblePanes: Int
     private var sidebarDeviceIDs: [DeviceID: UUID] = [:]
     private var activeWorkspaceTabID: UUID
-    private var windowObserverTokens: [NSObjectProtocol] = []
-    private var applicationIsActive = false
-    private var windowIsKey = false
     private var connection: AuthenticatedConnection?
     private var activeConnectionConfiguration: ConnectionConfiguration?
     private var eventStreamTask: Task<Void, Never>?
@@ -137,7 +109,6 @@ public final class CorralApplicationCoordinator {
     private var directoriesBySpaceID: [UUID: String] = [:]
     /// Live divider-drag layout: moves Metal viewports without resizing any server pane until the ratio commits.
     private var layoutPreview: WorkspaceLayoutNode?
-    private var geometryPublication = 0
     private var sessionUIIDs: [SessionID: UUID] = [:]
     private var sessionUIIDsByIdentity: [WorkspaceSessionIdentity: UUID] = [:]
     private var selectedSidebarSpaceID = CorralSidebarSpace.allSpacesID
@@ -180,12 +151,10 @@ public final class CorralApplicationCoordinator {
         credentialVault: any DeviceCredentialVault,
         sessionLink: any SessionLinkProtocol,
         deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle,
-        renderer: SharedMetalTerminalRenderer,
         workspaceStore: CorralWorkspaceStore,
         userPreferencesStore: UserPreferencesStore,
         initialWorkspaceState: CorralWorkspaceState,
         initialUserPreferences: UserPreferences,
-        glyphAtlas: GlyphAtlasPool = .shared,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         maximumVisiblePanes: Int = .max
     ) {
@@ -194,14 +163,12 @@ public final class CorralApplicationCoordinator {
         self.credentialVault = credentialVault
         self.sessionLink = sessionLink
         self.deviceSessionLifecycle = deviceSessionLifecycle
-        self.renderer = renderer
+        self.inputRouter = SessionLinkInputRouter(sessionLink: sessionLink)
         self.workspaceStore = workspaceStore
         self.userPreferencesStore = userPreferencesStore
         self.workspaceState = initialWorkspaceState
         self.userPreferences = initialUserPreferences
         self.activeWorkspaceTabID = initialWorkspaceState.activeTabID
-        self.glyphAtlas = glyphAtlas
-        self.inputRouter = SessionLinkInputRouter(sessionLink: sessionLink)
         self.environment = environment
         self.maximumVisiblePanes = maximumVisiblePanes
         self.backgroundMode = environment["CORRAL_NATIVE_BACKGROUND"] == "1"
@@ -211,8 +178,6 @@ public final class CorralApplicationCoordinator {
             telemetryURL = nil
         }
 
-        let stageID = UUID()
-        let stageView = MetalStageView(renderer: renderer, stageID: stageID)
         let tabs = initialWorkspaceState.tabs.map { state in
             CorralTab(
                 id: state.id,
@@ -224,20 +189,21 @@ public final class CorralApplicationCoordinator {
             )
         }
         let workspaceView = CorralWorkspaceView(tabs: tabs)
-        self.stageView = stageView
+        let terminalStageView = NativeTerminalStageView(frame: .zero)
+        terminalStageView.maximumVisiblePanes = maximumVisiblePanes
+        terminalStageView.translatesAutoresizingMaskIntoConstraints = false
+        workspaceView.stageContainer.addTabContent(terminalStageView)
+        NSLayoutConstraint.activate([
+            terminalStageView.leadingAnchor.constraint(equalTo: workspaceView.stageContainer.leadingAnchor),
+            terminalStageView.trailingAnchor.constraint(equalTo: workspaceView.stageContainer.trailingAnchor),
+            terminalStageView.topAnchor.constraint(equalTo: workspaceView.stageContainer.topAnchor),
+            terminalStageView.bottomAnchor.constraint(equalTo: workspaceView.stageContainer.bottomAnchor)
+        ])
+        self.terminalStageView = terminalStageView
         self.workspaceView = workspaceView
         self.windowController = CorralWindowController(workspaceView: workspaceView)
         workspaceView.selectTab(id: initialWorkspaceState.activeTabID)
-        attachStageView(to: initialWorkspaceState.activeTabID)
         applyPreferences(initialUserPreferences)
-        self.applicationIsActive = NSApplication.shared.isActive
-        self.windowIsKey = windowController.window?.isKeyWindow ?? false
-        installWindowStateObservers()
-
-        stageView.onGeometryChanged = { [weak self] _, _ in
-            guard let self else { return }
-            Task { await self.geometryChanged() }
-        }
         workspaceView.tabBar.onSelectTab = { [weak self] id in
             Task { @MainActor in await self?.selectWorkspaceTab(id: id) }
         }
@@ -282,6 +248,7 @@ public final class CorralApplicationCoordinator {
             Task { @MainActor in await self.setWorkspaceFavorite(self.favoriteKey(for: descriptor), isFavorite: isFavorite) }
         }
         workspaceView.sidebar.onCloseAgent = { [weak self] id in self?.confirmCloseAgent(id: id) }
+        workspaceView.sidebar.onRenameAgent = { [weak self] id in self?.presentRenameAgent(id: id) }
         workspaceView.tabBar.onRenameTab = { [weak self] id, title in
             Task { @MainActor in await self?.renameWorkspaceTab(id, to: title) }
         }
@@ -309,7 +276,7 @@ public final class CorralApplicationCoordinator {
         stage.splitView.onLayoutPreview = { [weak self] preview in
             guard let self else { return }
             self.layoutPreview = preview
-            Task { @MainActor in await self.updateStageSubmissions() }
+            self.updateTerminalStage()
         }
         stage.splitView.onRatioChange = { [weak self] path, ratio in
             Task { @MainActor in await self?.updateWorkspaceSplitRatio(path: path, ratio: ratio) }
@@ -375,8 +342,9 @@ public final class CorralApplicationCoordinator {
     public func stop() async {
         telemetryTask?.cancel()
         telemetryTask = nil
-        windowObserverTokens.forEach(NotificationCenter.default.removeObserver)
-        windowObserverTokens.removeAll()
+        devicesCardPanel?.orderOut(nil)
+        devicesCardPanel = nil
+        terminalRegistry.removeAll()
         actionTimeoutTasks.values.forEach { $0.cancel() }
         actionTimeoutTasks.removeAll()
         pendingCreateAgentRequests.removeAll()
@@ -388,11 +356,6 @@ public final class CorralApplicationCoordinator {
         connected = false
         await deviceSessionLifecycle.markDisconnected()
         await writeTelemetry()
-    }
-
-    public func setApplicationActive(_ active: Bool) {
-        applicationIsActive = active
-        updateRendererSleepState()
     }
 
     public func selectSidebarSession(id: UUID) {
@@ -517,7 +480,7 @@ public final class CorralApplicationCoordinator {
         } catch {
             layoutPreview = nil
             lastConnectionError = String(describing: error)
-            await updateStageSubmissions()
+            updateTerminalStage()
         }
     }
 
@@ -542,14 +505,6 @@ public final class CorralApplicationCoordinator {
 
     private func applyPreferences(_ preferences: UserPreferences) {
         userPreferences = preferences
-        let isDark: Bool
-        switch preferences.theme {
-        case .dark: isDark = true
-        case .light: isDark = false
-        case .system:
-            isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        }
-        renderer.setAppearance(isDark ? .dark : .light)
         let appearance: NSAppearance?
         switch preferences.theme {
         case .dark: appearance = NSAppearance(named: .darkAqua)
@@ -560,7 +515,10 @@ public final class CorralApplicationCoordinator {
         workspaceView.appearance = appearance
         workspaceView.setTheme(CorralThemeMode(rawValue: preferences.theme.rawValue) ?? .system)
         workspaceView.setSidebarCollapsed(preferences.sidebarCollapsed)
-        stageView.setTerminalFont(family: preferences.fontFamily, size: preferences.fontSize)
+        for (_, view) in terminalRegistry.allViews {
+            view.setTerminalFont(family: preferences.fontFamily, size: preferences.fontSize)
+            view.setTerminalColors(foreground: CorralAestheticTokens.previewForeground, background: CorralAestheticTokens.previewBackground)
+        }
     }
 
     private func applyWorkspaceState(_ state: CorralWorkspaceState) async {
@@ -597,32 +555,45 @@ public final class CorralApplicationCoordinator {
             previewSessionID: state.previewUID.map(uiSessionID(for:))
         )
         workspaceView.stageContainer.splitView.update(root: state.visibleRoot, focusedSessionID: state.visibleSessionID)
-        attachStageView(to: state.activeTabID)
         activeSession = state.visibleSessionID.flatMap(sessionKey(for:))
+        updateTerminalStage()
         await subscribeVisibleSessions()
-        if let activeSession, sessions[activeSession]?.subscribed == true {
-            stageView.activateInput(for: activeSession, using: inputRouter)
-        } else {
-            stageView.activateInput(for: nil, using: inputRouter)
-        }
         updateSidebar(devices: cachedDevices)
-        await updateStageSubmissions()
         updateWorkspaceTitle(count: sessionCount)
-        updateRendererSleepState()
+        focusVisibleTerminal()
     }
 
-    private func attachStageView(to tabID: UUID) {
-        guard let tab = workspaceView.tabs.first(where: { $0.id == tabID }) else { return }
-        guard stageView.superview !== tab.contentView else { return }
-        stageView.removeFromSuperview()
-        stageView.translatesAutoresizingMaskIntoConstraints = false
-        tab.contentView.addSubview(stageView)
-        NSLayoutConstraint.activate([
-            stageView.leadingAnchor.constraint(equalTo: tab.contentView.leadingAnchor),
-            stageView.trailingAnchor.constraint(equalTo: tab.contentView.trailingAnchor),
-            stageView.topAnchor.constraint(equalTo: tab.contentView.topAnchor),
-            stageView.bottomAnchor.constraint(equalTo: tab.contentView.bottomAnchor)
-        ])
+    private func ensureTerminalView(for key: SessionKey) -> CorralNativeTerminalView? {
+        guard sessions[key] != nil else { return nil }
+        if let view = terminalRegistry.view(for: key) { return view }
+        let view = CorralNativeTerminalView(frame: .zero)
+        view.terminalDelegate = self
+        view.onDiscardedAutomaticReply = { [weak self] byteCount in
+            self?.discardedAutoReplyByteCount += byteCount
+        }
+        view.setTerminalFont(family: userPreferences.fontFamily, size: userPreferences.fontSize)
+        view.setTerminalColors(foreground: CorralAestheticTokens.previewForeground, background: CorralAestheticTokens.previewBackground)
+        terminalRegistry.insert(view, for: key)
+        return view
+    }
+
+    private func updateTerminalStage() {
+        var views: [SessionID: CorralNativeTerminalView] = [:]
+        for (key, view) in terminalRegistry.allViews {
+            if let runtime = sessions[key] { views[runtime.descriptor.id] = view }
+        }
+        terminalStageView.update(
+            root: layoutPreview ?? workspaceState.visibleRoot,
+            focusedSessionID: workspaceState.visibleSessionID,
+            views: views
+        )
+    }
+
+    private func focusVisibleTerminal() {
+        guard let sessionID = workspaceState.visibleSessionID,
+              let key = sessionKey(for: sessionID),
+              let view = terminalRegistry.view(for: key), !view.isHidden else { return }
+        windowController.window?.makeFirstResponder(view)
     }
 
     private func sessionKey(for sessionID: SessionID) -> SessionKey? {
@@ -721,18 +692,26 @@ public final class CorralApplicationCoordinator {
 
     public func flushTelemetry() async { await writeTelemetry() }
 
+    var activeTerminalSessionKey: SessionKey? { activeSession }
+
+    func terminalView(for key: SessionKey) -> CorralNativeTerminalView? { terminalRegistry.view(for: key) }
+
+    func terminalView(for reference: SessionReference) -> CorralNativeTerminalView? {
+        guard let key = sessionOrder.first(where: { $0.reference == reference }) else { return nil }
+        return terminalRegistry.view(for: key)
+    }
+
     public var telemetry: CorralApplicationTelemetry {
-        let stats = glyphAtlas.statistics
+        let visibleViews = visibleSessionKeys().compactMap { terminalRegistry.view(for: $0) }
         return CorralApplicationTelemetry(
             pid: ProcessInfo.processInfo.processIdentifier,
             connected: connected,
             sessionCount: sessionCount,
             subscribedSessionIDs: subscribedSessionIDs,
-            renderedPaneCount: stageView.presentedSubmissions.count,
-            nonEmptyLineCount: Self.nonEmptyLineCount(in: stageView.presentedSubmissions),
-            metalSubmissionCount: renderer.statistics.submittedCommandBuffers,
-            atlasPageCount: stats.pageCount,
-            atlasAllocatedBytes: stats.allocatedBytes
+            terminalViewCount: terminalRegistry.count,
+            visiblePaneCount: terminalStageView.visibleSessionIDs.count,
+            nonEmptyLineCount: Self.nonEmptyLineCount(in: visibleViews),
+            discardedAutoReplyByteCount: discardedAutoReplyByteCount
         )
     }
 
@@ -919,8 +898,60 @@ public final class CorralApplicationCoordinator {
         case "resetTitle":
             do { await applyWorkspaceState(try await workspaceStore.resetTabTitle(id)) }
             catch { showToast("标签标题重置失败：\(error)", kind: .error) }
+            updateSidebar(devices: cachedDevices)
+        case "splitRight": await splitWorkspaceTab(id, edge: .right)
+        case "splitDown": await splitWorkspaceTab(id, edge: .bottom)
         default: break
         }
+    }
+
+    private func splitWorkspaceTab(_ tabID: UUID, edge: WorkspaceDropZone) async {
+        guard let sourceTab = workspaceState.tabs.first(where: { $0.id == tabID }),
+              let sourceID = sourceTab.activeSessionID ?? sourceTab.sessionIDs.first,
+              let targetTab = workspaceState.activeTab else {
+            showToast("请先打开另一个会话以创建分屏", kind: .warning)
+            return
+        }
+        let targetID = sourceTab.id == workspaceState.activeTabID
+            ? sourceTab.sessionIDs.first(where: { $0 != sourceID })
+            : targetTab.activeSessionID ?? targetTab.sessionIDs.first
+        guard let targetID, targetID != sourceID, let key = sessionKey(for: sourceID) else {
+            showToast("分屏需要两个不同的已打开会话", kind: .warning)
+            return
+        }
+        await splitWorkspacePane(key, target: targetID, edge: edge)
+    }
+
+    private func presentRenameAgent(id: UUID) {
+        guard let key = uiSessionKeys[id], let runtime = sessions[key] else { return }
+        let field = NSTextField(string: runtime.descriptor.name)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        field.setAccessibilityIdentifier("corral.renameAgent.name")
+        let alert = NSAlert()
+        alert.messageText = "Rename Agent"
+        alert.informativeText = "This name is saved in the current workspace."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename").setAccessibilityIdentifier("corral.renameAgent.submit")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task { @MainActor in await renameAgent(key, to: field.stringValue) }
+    }
+
+    func renameAgent(_ key: SessionKey, to proposedTitle: String) async {
+        let title = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, let runtime = sessions[key] else { return }
+        let sessionID = runtime.descriptor.id
+        if !workspaceState.tabs.contains(where: { $0.sessionIDs.contains(sessionID) }) {
+            await openSession(key, gesture: .doubleClick)
+        }
+        guard let tab = workspaceState.tabs.first(where: { $0.sessionIDs.contains(sessionID) }) else {
+            showToast("无法在工作区中重命名此 Agent", kind: .error)
+            return
+        }
+        await focusWorkspacePane(sessionID, in: tab.id)
+        await renameWorkspaceTab(tab.id, to: title)
+        updateSidebar(devices: cachedDevices)
     }
 
     /// A Tab dragged onto a pane moves that Tab's focused session into the visible layout.
@@ -997,7 +1028,11 @@ public final class CorralApplicationCoordinator {
     }
 
     private func presentDevicesPopover() {
-        if devicesPopover?.isShown == true { devicesPopover?.close(); return }
+        if devicesCardPanel?.isVisible == true {
+            devicesCardPanel?.orderOut(nil)
+            devicesCardPanel = nil
+            return
+        }
         let controller = DevicesPopoverViewController(repository: deviceRepository)
         controller.onDevicesChanged = { [weak self] devices in
             Task { @MainActor in await self?.devicesChanged(devices) }
@@ -1009,74 +1044,29 @@ public final class CorralApplicationCoordinator {
             Task { @MainActor in await self.selectDevice(id) }
         }
         controller.onAddDevice = { [weak self] in
-            self?.devicesPopover?.close()
-            self?.devicesPopover = nil
+            self?.devicesCardPanel?.orderOut(nil)
+            self?.devicesCardPanel = nil
             self?.presentAddDeviceDialog()
         }
         controller.onPairMobile = { [weak self] in
-            self?.devicesPopover?.close()
-            self?.devicesPopover = nil
+            self?.devicesCardPanel?.orderOut(nil)
+            self?.devicesCardPanel = nil
             self?.presentPairingDialog()
         }
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = controller
-        popover.show(relativeTo: workspaceView.tabBar.devicesButton.bounds, of: workspaceView.tabBar.devicesButton, preferredEdge: .maxY)
-        devicesPopover = popover
+        let panel = CorralAnchoredCardPanel(contentViewController: controller, anchoredTo: workspaceView.tabBar.devicesButton)
+        devicesCardPanel = panel
+        panel.makeKeyAndOrderFront(nil)
         Task { @MainActor in
             do {
                 try await controller.reloadDevices()
                 controller.setReadyDevices(connected ? Set([configuredDeviceID].compactMap { $0 }) : [])
                 if let configuredDeviceID { controller.setDevice(configuredDeviceID, selected: true) }
                 self.selectedDeviceIDs = controller.selectedDeviceIDs
+                panel.updateContentSizeAndPosition(anchoredTo: self.workspaceView.tabBar.devicesButton)
             } catch {
                 self.showToast("设备列表读取失败：\(error)", kind: .error)
             }
         }
-    }
-
-    private func installWindowStateObservers() {
-        guard let window = windowController.window else { return }
-        let notifications: [Notification.Name] = [
-            NSWindow.didBecomeKeyNotification,
-            NSWindow.didResignKeyNotification,
-            NSWindow.didMiniaturizeNotification,
-            NSWindow.didDeminiaturizeNotification,
-            NSWindow.didChangeOcclusionStateNotification
-        ]
-        for name in notifications {
-            let token = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] note in
-                let notificationName = note.name
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    switch notificationName {
-                    case NSWindow.didBecomeKeyNotification: self.windowIsKey = true
-                    case NSWindow.didResignKeyNotification, NSWindow.didMiniaturizeNotification: self.windowIsKey = false
-                    case NSWindow.didDeminiaturizeNotification: self.windowIsKey = self.windowController.window?.isKeyWindow ?? false
-                    default: break
-                    }
-                    self.updateRendererSleepState()
-                }
-            }
-            windowObserverTokens.append(token)
-        }
-    }
-
-    private func updateRendererSleepState() {
-        let window = windowController.window
-        let state: RenderSleepState
-        if window?.isMiniaturized == true {
-            state = .windowMinimized
-        } else if backgroundMode && window?.isVisible == true {
-            state = .active
-        } else if let window, !window.occlusionState.contains(.visible) {
-            state = .occluded
-        } else if !applicationIsActive || !windowIsKey {
-            state = .applicationInactive
-        } else {
-            state = .active
-        }
-        stageView.setRenderSleepState(state)
     }
 
     private func scheduleActionTimeout(_ requestID: UInt32) {
@@ -1399,14 +1389,13 @@ public final class CorralApplicationCoordinator {
                 }
             }
             sessions.removeValue(forKey: key)
+            _ = terminalRegistry.remove(key)
             let removedUIID = sessionUIIDs.removeValue(forKey: workspaceSessionID(for: key))
             if let removedUIID { uiSessionKeys.removeValue(forKey: removedUIID) }
             uiSessionKeys = uiSessionKeys.filter { $0.value != key }
-            if activeSession == key {
-                activeSession = nil
-                stageView.activateInput(for: nil, using: inputRouter)
-            }
+            if activeSession == key { activeSession = nil }
         }
+        updateTerminalStage()
     }
 
     private func applyListing(_ listing: SessionListing, origin: SessionEventOrigin) async {
@@ -1431,7 +1420,7 @@ public final class CorralApplicationCoordinator {
         updateWorkspaceTitle(count: sessionCount)
         await subscribeVisibleSessions()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
-        await updateStageSubmissions()
+        updateTerminalStage()
         await writeTelemetry()
     }
 
@@ -1459,7 +1448,7 @@ public final class CorralApplicationCoordinator {
         updateWorkspaceTitle(count: sessionCount)
         await subscribeVisibleSessions()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
-        await updateStageSubmissions()
+        updateTerminalStage()
         await writeTelemetry()
     }
 
@@ -1478,10 +1467,16 @@ public final class CorralApplicationCoordinator {
             freshness: SessionFreshness(connectionEpoch: origin.connectionEpoch, receiveOrdinal: origin.receiveOrdinal)
         )
         if var runtime = sessions[key] {
+            if runtime.descriptor.freshness?.connectionEpoch != origin.connectionEpoch {
+                runtime.subscribed = false
+                runtime.subscriptionPending = false
+                runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
+            }
             runtime.descriptor = descriptor
+            runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             sessions[key] = runtime
         } else {
-            sessions[key] = RuntimeSession(descriptor: descriptor, paneID: UUID(), engine: SwiftTermEngineAdapter(size: size))
+            sessions[key] = RuntimeSession(descriptor: descriptor, lastAppliedReceiveOrdinal: origin.receiveOrdinal)
         }
         _ = uiSessionID(for: descriptor.id)
         return key
@@ -1489,33 +1484,28 @@ public final class CorralApplicationCoordinator {
 
     private func subscribeVisibleSessions() async {
         guard connection != nil else { return }
+        for key in visibleSessionKeys() { _ = ensureTerminalView(for: key) }
+        updateTerminalStage()
         for key in visibleSessionKeys() {
             guard let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending else { continue }
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
-                // Subscribe at the server's own grid: a size the daemon cannot honor (panes sharing one tmux window)
-                // fails the whole subscription, while the `resize` published afterwards degrades to a no-op.
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
                 sessions[key]?.subscriptionPending = false
                 guard receipt.socketWritten else { continue }
                 sessions[key]?.subscribed = true
-                if activeSession == nil {
-                    activeSession = key
-                    stageView.activateInput(for: key, using: inputRouter)
-                }
+                if let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
             } catch {
                 sessions[key]?.subscriptionPending = false
                 lastConnectionError = String(describing: error)
             }
         }
-        if activeSession == nil,
-           let key = visibleSessionKeys().first(where: { sessions[$0]?.subscribed == true }) {
-            activeSession = key
-            stageView.activateInput(for: key, using: inputRouter)
+        if activeSession == nil {
+            activeSession = visibleSessionKeys().first(where: { sessions[$0]?.subscribed == true })
         }
         subscribedSessionIDs = sessionOrder.compactMap { key in sessions[key]?.subscribed == true ? key.reference.rawValue : nil }
-        await publishPaneGeometry()
+        updateTerminalStage()
     }
 
     private func applyFrame(_ frame: BinaryFrame, origin: SessionEventOrigin) async {
@@ -1524,73 +1514,17 @@ public final class CorralApplicationCoordinator {
         case let .snapshot(ref, _), let .delta(ref, _), let .scrollback(ref, _, _): reference = ref
         }
         let key = SessionKey(deviceID: origin.deviceID, reference: reference)
-        guard let runtime = sessions[key], runtime.subscribed || runtime.subscriptionPending else { return }
-        let update: TerminalUpdate
+        guard var runtime = sessions[key], runtime.subscribed || runtime.subscriptionPending,
+              runtime.descriptor.freshness?.connectionEpoch == origin.connectionEpoch,
+              runtime.lastAppliedReceiveOrdinal < origin.receiveOrdinal,
+              let view = terminalRegistry.view(for: key) else { return }
+        runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
+        sessions[key] = runtime
         switch frame {
-        case let .snapshot(ref, ansi): update = .snapshot(reference: ref, ansi: ansi, origin: origin)
-        case let .delta(ref, ansi): update = .delta(reference: ref, ansi: ansi, origin: origin)
-        case let .scrollback(ref, metadata, ansi): update = .scrollback(reference: ref, metadata: metadata, ansi: ansi, origin: origin)
+        case let .snapshot(_, bytes), let .delta(_, bytes): view.feed(byteArray: Array(bytes)[...])
+        case .scrollback: return
         }
-        do {
-            let effects = try await runtime.engine.apply(update)
-            await terminalEffectSink.consume(effects, for: key)
-            discardedAutoReplyByteCount += effects.reduce(into: 0) { count, effect in
-                if case let .autoReply(reply) = effect { count += reply.data.count }
-            }
-            let snapshot = await runtime.engine.snapshot()
-            guard snapshot.isValid, var currentRuntime = sessions[key] else { return }
-            currentRuntime.snapshot = snapshot
-            currentRuntime.receivedFrame = true
-            sessions[key] = currentRuntime
-            await updateStageSubmissions()
-            await writeTelemetry()
-        } catch {
-            lastConnectionError = String(describing: error)
-            await writeTelemetry()
-        }
-    }
-
-    private func geometryChanged() async {
-        await publishPaneGeometry()
-        await updateStageSubmissions()
         await writeTelemetry()
-    }
-
-    /// Sizes every subscribed visible pane from its own projected viewport. The stage geometry is read when this
-    /// runs, never captured from the triggering event, and each grid is committed before awaiting the socket, so a
-    /// stale layout can never land after a newer one (a newer pass also stops an older one between panes).
-    /// Viewports below the 120×60 pane floor only exist while the window collapses or changes Space and are never
-    /// published: a 1-row PTY scrolls its whole screen away.
-    private func publishPaneGeometry() async {
-        geometryPublication &+= 1
-        let publication = geometryPublication
-        guard connection != nil, let (size, backingScale) = stageView.currentGeometry else { return }
-        for (sessionID, viewport) in paneLayouts(size: size, root: workspaceState.visibleRoot).prefix(maximumVisiblePanes)
-        where viewport.width >= SplitLayout.minimumPaneWidth && viewport.height >= SplitLayout.minimumPaneHeight {
-            guard publication == geometryPublication else { return }
-            guard let key = sessionKey(for: sessionID), let runtime = sessions[key], runtime.subscribed else { continue }
-            let sample = GeometrySample(viewport: viewport, backingScale: Double(backingScale), grid: proposedGrid(for: viewport), metricsGeneration: MetricsGeneration(0))
-            if let previous = runtime.lastGeometry, geometryPolicy.shouldDebounceViewportDelta(from: previous, to: sample) { continue }
-            sessions[key]?.lastGeometry = sample
-            let committedGrid = runtime.descriptor.size
-            guard geometryPolicy.shouldPublishResize(lastCommittedServerGrid: committedGrid, proposed: sample) else { continue }
-            let grid = geometryPolicy.resolvedGridSize(proposed: sample.grid)
-            sessions[key]?.descriptor.size = grid
-            do {
-                let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
-                guard receipt.socketWritten else {
-                    if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = committedGrid }
-                    continue
-                }
-                guard sessions[key]?.descriptor.size == grid else { continue }
-                try await runtime.engine.resize(to: grid)
-                guard sessions[key]?.descriptor.size == grid else { continue }
-                sessions[key]?.snapshot = await runtime.engine.snapshot()
-            } catch {
-                if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = committedGrid }
-                lastConnectionError = String(describing: error)
-            }
-        }
     }
 
     private func visibleSessionKeys() -> [SessionKey] {
@@ -1598,35 +1532,63 @@ public final class CorralApplicationCoordinator {
         return root.leafIDs.compactMap(sessionKey(for:)).prefix(maximumVisiblePanes).map { $0 }
     }
 
-    /// Metal viewports are the pane frames of the same 6pt-gap projection the pane chrome draws.
-    private func paneLayouts(size: NSSize, root: WorkspaceLayoutNode?) -> [(SessionID, StageViewportRect)] {
-        SplitLayout.project(root, in: CGRect(origin: .zero, size: size)).panes.map { pane in
-            (pane.sessionID, StageViewportRect(x: pane.frame.minX, y: pane.frame.minY, width: pane.frame.width, height: pane.frame.height))
+    private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize) async {
+        guard connection != nil, var runtime = sessions[key], runtime.subscribed,
+              runtime.descriptor.size != grid,
+              terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
+        let previous = runtime.descriptor.size
+        runtime.descriptor.size = grid
+        runtime.desiredGrid = grid
+        sessions[key] = runtime
+        do {
+            let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
+            guard receipt.socketWritten else {
+                if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = previous }
+                return
+            }
+        } catch {
+            if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = previous }
+            lastConnectionError = String(describing: error)
         }
     }
 
-    private func proposedGrid(for viewport: StageViewportRect) -> GridSize {
-        let cell = stageView.terminalCellSize
-        let columns = min(max(1, Int(viewport.width / Double(cell.width))), Int(UInt16.max))
-        var rows = min(max(1, Int(viewport.height / Double(cell.height))), Int(UInt16.max))
-        while rows > 1_000_000 / columns { rows -= 1 }
-        return GridSize(rows: rows, columns: columns)
+    public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        guard newCols > 0, newRows > 0,
+              newCols <= Int(UInt16.max), newRows <= Int(UInt16.max),
+              newRows <= 1_000_000 / newCols,
+              let key = terminalRegistry.key(for: source), var runtime = sessions[key] else { return }
+        let grid = GridSize(rows: newRows, columns: newCols)
+        runtime.desiredGrid = grid
+        sessions[key] = runtime
+        guard runtime.subscribed else { return }
+        Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid) }
     }
 
-    private func updateStageSubmissions() async {
-        let size = stageView.currentGeometry?.0 ?? stageView.bounds.size
-        let layouts = paneLayouts(size: size, root: layoutPreview ?? workspaceState.visibleRoot).prefix(maximumVisiblePanes)
-        var submissions: [PaneRenderSubmission] = []
-        for (sessionID, viewport) in layouts {
-            guard let key = sessionKey(for: sessionID), let runtime = sessions[key], runtime.receivedFrame,
-                  let snapshot = runtime.snapshot else { continue }
-            submissions.append(PaneRenderSubmission(paneID: runtime.paneID, session: key, viewport: viewport, snapshot: snapshot))
-        }
-        await stageView.submit(submissions)
-        if let activeSession, sessions[activeSession]?.subscribed == true {
-            stageView.activateInput(for: activeSession, using: inputRouter)
+    public func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        guard let key = terminalRegistry.key(for: source), sessions[key]?.subscribed == true else { return }
+        let bytes = Data(data)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do { _ = try await inputRouter.routeBytes(bytes, to: key) }
+            catch { lastConnectionError = String(describing: error) }
         }
     }
+
+    public func setTerminalTitle(source: TerminalView, title: String) {}
+    public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        guard userPreferences.followDirectory, let key = terminalRegistry.key(for: source),
+              let directory, !directory.isEmpty else { return }
+        sessions[key]?.descriptor.workingDirectory = directory
+        updateSidebar(devices: cachedDevices)
+        updateWorkspaceTitle(count: sessionCount)
+    }
+    public func scrolled(source: TerminalView, position: Double) {}
+    public func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    public func bell(source: TerminalView) {}
+    public func clipboardCopy(source: TerminalView, content: Data) {}
+    public func clipboardRead(source: TerminalView) -> Data? { nil }
+    public func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    public func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 
     private func updateSidebar(devices: [DeviceRecord]) {
         cachedDevices = devices
@@ -1740,17 +1702,18 @@ public final class CorralApplicationCoordinator {
 
     private func removeSessions(on deviceID: DeviceID) async throws {
         let removed = sessions.keys.filter { $0.deviceID == deviceID }
-        for key in removed { sessions.removeValue(forKey: key) }
+        for key in removed {
+            sessions.removeValue(forKey: key)
+            _ = terminalRegistry.remove(key)
+        }
         sessionOrder.removeAll { $0.deviceID == deviceID }
         uiSessionKeys = uiSessionKeys.filter { $0.value.deviceID != deviceID }
-        if activeSession?.deviceID == deviceID {
-            activeSession = nil
-            stageView.activateInput(for: nil, using: inputRouter)
-        }
+        if activeSession?.deviceID == deviceID { activeSession = nil }
+        updateTerminalStage()
         sessionCount = sessionOrder.count
         subscribedSessionIDs = sessionOrder.compactMap { sessions[$0]?.subscribed == true ? $0.reference.rawValue : nil }
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
-        await updateStageSubmissions()
+        updateTerminalStage()
         await writeTelemetry()
     }
 
@@ -1770,74 +1733,31 @@ public final class CorralApplicationCoordinator {
         await telemetryWriter.write(telemetry, to: telemetryURL)
     }
 
-    private static func nonEmptyLineCount(in submissions: [PaneRenderSubmission]) -> Int {
-        submissions.reduce(0) { total, submission in
-            total + (0..<submission.snapshot.size.rows).filter { row in
-                let start = row * submission.snapshot.size.columns
-                let end = start + submission.snapshot.size.columns
-                return submission.snapshot.cells[start..<end].contains { cell in
-                    guard case let .cluster(text, _) = cell.content else { return false }
-                    return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                }
+    private static func nonEmptyLineCount(in views: [CorralNativeTerminalView]) -> Int {
+        views.reduce(0) { count, view in
+            count + (0..<view.getTerminal().rows).filter { row in
+                guard let line = view.getTerminal().getLine(row: row) else { return false }
+                return !line.translateToString(trimRight: true).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }.count
         }
     }
 }
 
-actor LocalTerminalEffectPolicySink: TerminalEffectPolicySink {
-    func consume(_ effects: [TerminalEffect], for session: SessionKey) async {
-        // VT-generated replies and effects are intentionally local; none are fed to SessionLink.
-    }
-}
-
-actor SessionLinkInputRouter: TerminalInputRouting {
+actor SessionLinkInputRouter {
     private let sessionLink: any SessionLinkProtocol
     private var sequence: UInt32 = 0
 
     init(sessionLink: any SessionLinkProtocol) { self.sessionLink = sessionLink }
 
-    func route(_ input: TerminalInput, to session: SessionKey) async throws -> UInt32 {
+    func routeBytes(_ bytes: Data, to session: SessionKey) async throws -> UInt32 {
         guard sequence < UInt32.max else { throw SessionLinkFailure.protocolViolation("Input sequence exhausted") }
-        let text: String
-        switch input {
-        case let .userText(value), let .pasteIntent(value): text = value
-        case let .userBytes(bytes):
-            guard let value = String(data: bytes.data, encoding: .utf8) else {
-                throw SessionLinkFailure.protocolViolation("Terminal input is not valid UTF-8")
-            }
-            text = value
-        case let .namedKey(key): text = Self.sequence(for: key)
-        }
         sequence += 1
-        let payload: ClientInputPayload = text == "\r" || text == "\n" ? .bareEnter : .text(text, attachmentPath: nil)
-        let request = try ClientInputRequest(sequence: sequence, reference: session.reference, payload: payload)
+        let request = try ClientInputRequest(sequence: sequence, reference: session.reference, payload: .bytes(bytes))
         let receipt = try await sessionLink.send(.input(request))
         guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
         return sequence
     }
 
-    private static func sequence(for key: TerminalKey) -> String {
-        switch key {
-        case .up: "\u{1b}[A"
-        case .down: "\u{1b}[B"
-        case .right: "\u{1b}[C"
-        case .left: "\u{1b}[D"
-        case .backspace, .delete: "\u{7f}"
-        case .enter: "\r"
-        case .escape: "\u{1b}"
-        case .tab: "\t"
-        case .home: "\u{1b}[H"
-        case .end: "\u{1b}[F"
-        case .pageUp: "\u{1b}[5~"
-        case .pageDown: "\u{1b}[6~"
-        case .insert: "\u{1b}[2~"
-        case .function1: "\u{1b}OP"
-        case .function2: "\u{1b}OQ"
-        case .function3: "\u{1b}OR"
-        case .function4: "\u{1b}OS"
-        default: ""
-        }
-    }
 }
 
 public actor CoordinatorDeviceSessionLifecycle: DeviceSessionLifecycle {

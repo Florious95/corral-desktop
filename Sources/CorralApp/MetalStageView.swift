@@ -2,6 +2,24 @@ import AppKit
 import CorralContracts
 import CorralMetalTerminal
 
+public struct PaneRenderSubmission: Equatable, Sendable {
+    public let paneID: UUID
+    public let session: SessionKey
+    public let viewport: StageViewportRect
+    public let snapshot: TerminalGridSnapshot
+
+    public init(paneID: UUID, session: SessionKey, viewport: StageViewportRect, snapshot: TerminalGridSnapshot) {
+        self.paneID = paneID
+        self.session = session
+        self.viewport = viewport
+        self.snapshot = snapshot
+    }
+
+    var frameSnapshot: PaneFrameSnapshot {
+        PaneFrameSnapshot(paneID: paneID, session: session, viewport: viewport, contentGeneration: snapshot.generation, snapshot: snapshot)
+    }
+}
+
 @MainActor
 final class MetalStageView: NSView {
     let renderer: SharedMetalTerminalRenderer

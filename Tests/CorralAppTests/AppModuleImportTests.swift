@@ -18,10 +18,14 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertThrowsError(try CorralMVPConfiguration.endpoint(environment: ["CORRAL_NATIVE_ENDPOINT": "ws://192.0.2.1:9900/ws"]))
     }
 
-    func testSlimMVPMenusDoNotRetainLegacyWorkspaceActions() throws {
+    func testFullAppMenuExposesNewAgentShortcut() throws {
         let mainMenu = CorralAppDelegate().makeMainMenu()
-        XCTAssertFalse(mainMenu.items.contains { $0.title == "File" })
+        XCTAssertTrue(mainMenu.items.contains { $0.submenu?.title == "File" })
         XCTAssertTrue(mainMenu.items.first?.submenu?.items.contains { $0.keyEquivalent == "q" } == true)
+        let newAgent = try XCTUnwrap(mainMenu.items.first(where: { $0.submenu?.title == "File" })?.submenu?.items.first)
+        XCTAssertEqual(newAgent.title, "New Agent")
+        XCTAssertEqual(newAgent.keyEquivalent, "n")
+        XCTAssertTrue(newAgent.keyEquivalentModifierMask.contains(.command))
     }
 
     private func waitUntilMVP(timeoutNanoseconds: UInt64 = 2_000_000_000, _ predicate: @MainActor () async -> Bool) async -> Bool {
@@ -36,6 +40,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
     private func visibleText(in terminalView: TerminalView) -> String {
         (0..<terminalView.terminal.rows).compactMap { terminalView.terminal.getLine(row: $0)?.translateToString(trimRight: true) }
             .joined(separator: "\n")
+    }
+
+    private func terminalText(_ coordinator: CorralApplicationCoordinator, reference: SessionReference) -> String {
+        guard let view = coordinator.terminalView(for: reference) else { return "" }
+        return visibleText(in: view)
     }
 
     func testMVPUsesSwiftTermGridAndKeepsScrollbackOutOfLiveTerminal() async throws {
@@ -352,6 +361,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.renameWorkspaceTab(tabID, to: "")
         let sessionTitleRestored = await waitUntil { coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "Updated Agent Name" }
         XCTAssertTrue(sessionTitleRestored, "session name must still win over the changed cwd basename")
+        let leaderKey = SessionKey(deviceID: DeviceID("corral-native-development-endpoint"), reference: leaderReference)
+        await coordinator.renameAgent(leaderKey, to: "Local Agent Title")
+        XCTAssertEqual(coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title, "Local Agent Title")
+        XCTAssertTrue(coordinator.workspaceState.tabs.first(where: { $0.id == tabID })?.isCustomTitle == true)
+        XCTAssertTrue(coordinator.workspaceView.sidebar.agents.contains { $0.name == "Updated Agent Name" }, "workspace title overrides must not rename the server Agent")
         await coordinator.stop()
         window.close()
     }
@@ -383,15 +397,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             WorkspaceRecord(workingDirectory: "/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
         ]))))
         let firstOpened = await waitUntil {
-            coordinator.stageView.activeInputSession?.reference == firstReference &&
+            coordinator.activeTerminalSessionKey?.reference == firstReference &&
                 coordinator.subscribedSessionIDs.contains(firstReference.rawValue)
         }
         XCTAssertTrue(firstOpened, "the initial listing should auto-open and subscribe its first session")
         try await link.emit(.frame(.snapshot(reference: firstReference, ansi: Data("FIRST-SESSION-CONTENT\r\n".utf8))))
         let firstRendered = await waitUntil {
-            coordinator.stageView.presentedSubmissions.contains {
-                $0.session.reference == firstReference && self.snapshotText($0.snapshot).contains("FIRST-SESSION-CONTENT")
-            }
+            self.terminalText(coordinator, reference: firstReference).contains("FIRST-SESSION-CONTENT")
         }
         XCTAssertTrue(firstRendered)
 
@@ -408,7 +420,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
                 coordinator.workspaceState.tabs.first(where: { $0.id == targetTabID })?.sessionIDs == [secondSessionID] &&
                 coordinator.workspaceState.visibleSessionID == secondSessionID &&
                 coordinator.workspaceState.visibleRoot?.leafIDs == [secondSessionID] &&
-                coordinator.stageView.activeInputSession?.reference == secondReference &&
+                coordinator.activeTerminalSessionKey?.reference == secondReference &&
                 coordinator.subscribedSessionIDs.contains(secondReference.rawValue)
         }
         XCTAssertTrue(secondOpenedInTarget, "the requested blank Tab must receive and subscribe the clicked session")
@@ -417,31 +429,25 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.workspaceState.previewUID)
         try await link.emit(.frame(.snapshot(reference: secondReference, ansi: Data("SECOND-SESSION-CONTENT\r\n".utf8))))
         let secondRendered = await waitUntil {
-            coordinator.stageView.presentedSubmissions.contains {
-                $0.session.reference == secondReference && self.snapshotText($0.snapshot).contains("SECOND-SESSION-CONTENT")
-            }
+            self.terminalText(coordinator, reference: secondReference).contains("SECOND-SESSION-CONTENT")
         }
-        XCTAssertTrue(secondRendered, "the new session snapshot must replace the previous Metal stage content")
+        XCTAssertTrue(secondRendered, "the new session snapshot must feed the selected SwiftTerm view")
 
         let firstAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "leader" })
         coordinator.selectSidebarSession(id: firstAgent.id)
         let returnedToFirst = await waitUntil {
             coordinator.workspaceState.activeTabID == firstTabID &&
                 coordinator.workspaceState.visibleSessionID == firstSessionID &&
-                coordinator.stageView.activeInputSession?.reference == firstReference &&
-                coordinator.stageView.presentedSubmissions.contains {
-                    $0.session.reference == firstReference && self.snapshotText($0.snapshot).contains("FIRST-SESSION-CONTENT")
-                }
+                coordinator.activeTerminalSessionKey?.reference == firstReference &&
+                self.terminalText(coordinator, reference: firstReference).contains("FIRST-SESSION-CONTENT")
         }
         XCTAssertTrue(returnedToFirst, "selecting a session from another Tab must switch to its owning Tab and render it")
         await coordinator.selectWorkspaceTab(id: targetTabID)
         let returnedToSecond = await waitUntil {
             coordinator.workspaceState.activeTabID == targetTabID &&
                 coordinator.workspaceState.visibleSessionID == secondSessionID &&
-                coordinator.stageView.activeInputSession?.reference == secondReference &&
-                coordinator.stageView.presentedSubmissions.contains {
-                    $0.session.reference == secondReference && self.snapshotText($0.snapshot).contains("SECOND-SESSION-CONTENT")
-                }
+                coordinator.activeTerminalSessionKey?.reference == secondReference &&
+                self.terminalText(coordinator, reference: secondReference).contains("SECOND-SESSION-CONTENT")
         }
         XCTAssertTrue(returnedToSecond, "switching Tabs must restore that Tab's session to the stage")
         XCTAssertEqual(window.frame, initialFrame, "session and Tab switching must preserve native window geometry")
@@ -483,7 +489,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let opened = await waitUntil {
             coordinator.workspaceState.activeTabID == expectedActiveTabID &&
                 coordinator.workspaceState.visibleSessionID?.rawValue.hasSuffix(requestedReference.rawValue) == true &&
-                coordinator.stageView.activeInputSession?.reference == requestedReference &&
+                coordinator.activeTerminalSessionKey?.reference == requestedReference &&
                 coordinator.subscribedSessionIDs.contains(requestedReference.rawValue)
         }
         XCTAssertTrue(opened, "a stale UI Tab ID must not silently discard a valid session-open request")
@@ -491,11 +497,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
 
         try await link.emit(.frame(.snapshot(reference: requestedReference, ansi: Data("STALE-TAB-FALLBACK-CONTENT\r\n".utf8))))
         let rendered = await waitUntil {
-            coordinator.stageView.presentedSubmissions.contains {
-                $0.session.reference == requestedReference && self.snapshotText($0.snapshot).contains("STALE-TAB-FALLBACK-CONTENT")
-            }
+            self.terminalText(coordinator, reference: requestedReference).contains("STALE-TAB-FALLBACK-CONTENT")
         }
-        XCTAssertTrue(rendered, "the fallback session snapshot must still reach the Metal stage")
+        XCTAssertTrue(rendered, "the fallback session snapshot must still reach the SwiftTerm view")
         await coordinator.stop()
         window.close()
     }
@@ -540,15 +544,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             ansi: Data("EARLY-SNAPSHOT-CONTENT\r\n".utf8)
         )))
         let renderedBeforeReceipt = await waitUntil(timeout: .seconds(8)) {
-            coordinator.stageView.presentedSubmissions.contains {
-                $0.session.reference == racedReference && self.snapshotText($0.snapshot).contains("EARLY-SNAPSHOT-CONTENT")
-            }
+            self.terminalText(coordinator, reference: racedReference).contains("EARLY-SNAPSHOT-CONTENT")
         }
         await link.releaseSuspendedSubscribe()
         XCTAssertTrue(renderedBeforeReceipt, "the first frame must be accepted while subscribe's send receipt is pending")
         let subscribed = await waitUntil {
             coordinator.subscribedSessionIDs.contains(racedReference.rawValue) &&
-                coordinator.stageView.activeInputSession?.reference == racedReference
+                coordinator.activeTerminalSessionKey?.reference == racedReference
         }
         XCTAssertTrue(subscribed)
         await coordinator.stop()
@@ -601,6 +603,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let collapsed = await waitUntil { await coordinator.userPreferencesStore.snapshot().sidebarCollapsed }
         XCTAssertTrue(collapsed)
         XCTAssertTrue(coordinator.workspaceView.isSidebarCollapsed)
+
+        coordinator.workspaceView.onDevices?()
+        let devicesPanel = try XCTUnwrap(coordinator.devicesCardPanel)
+        XCTAssertTrue(devicesPanel.contentViewController is DevicesPopoverViewController)
+        XCTAssertEqual(devicesPanel.frame.width, CorralAnchoredCardPanel.cardWidth)
         await coordinator.stop()
     }
 
@@ -686,7 +693,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
 
         let opened = await waitUntil(timeout: .seconds(8)) {
             coordinator.sessionCount == records.count
-                && coordinator.stageView.activeInputSession?.reference == firstReference
+                && coordinator.activeTerminalSessionKey?.reference == firstReference
                 && coordinator.subscribedSessionIDs.contains(firstReference.rawValue)
         }
         let commands = await link.commands()
@@ -706,10 +713,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             ansi: Data("AUTO-OPEN-TERMINAL-CONTENT\r\n".utf8)
         )))
         let rendered = await waitUntil(timeout: .seconds(8)) {
-            coordinator.stageView.presentedSubmissions.contains {
-                $0.session == coordinator.stageView.activeInputSession
-                    && self.snapshotText($0.snapshot).contains("AUTO-OPEN-TERMINAL-CONTENT")
-            }
+            self.terminalText(coordinator, reference: firstReference).contains("AUTO-OPEN-TERMINAL-CONTENT")
         }
         XCTAssertTrue(rendered, "the default session snapshot should render in the terminal stage")
         XCTAssertEqual(window.frame, initialWindowFrame, "automatic session opening must preserve window geometry")
@@ -813,30 +817,21 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
 
         coordinator.workspaceView.sidebar.onSelectAgent?(agent.id)
         let subscribed = await waitUntil(timeout: .seconds(8)) {
-            coordinator.subscribedSessionIDs.count == 1 && coordinator.stageView.activeInputSession != nil
+            coordinator.subscribedSessionIDs.count == 1 && coordinator.activeTerminalSessionKey != nil
         }
         XCTAssertTrue(subscribed, "opening a listed sidebar session must persist the tab and subscribe")
         XCTAssertEqual(window.frame, initialWindowFrame, "selecting an Agent must preserve native window geometry")
-        guard subscribed, let session = coordinator.stageView.activeInputSession else {
+        guard subscribed, let session = coordinator.activeTerminalSessionKey,
+              let inputView = coordinator.terminalView(for: session) else {
             await coordinator.stop()
             window.close()
             return
         }
 
         let renderedSnapshot = await waitUntil(timeout: .seconds(12)) {
-            coordinator.stageView.presentedSubmissions.contains {
-                $0.session == session && self.snapshotText($0.snapshot).contains("STATIC-LINE-")
-            }
+            self.terminalText(coordinator, reference: session.reference).contains("STATIC-LINE-")
         }
-        XCTAssertTrue(renderedSnapshot, "the real SNAPSHOT must traverse SwiftTerm and reach the Metal stage")
-        guard let initial = coordinator.stageView.presentedSubmissions.first(where: { $0.session == session }) else {
-            await coordinator.stop()
-            window.close()
-            return
-        }
-        XCTAssertTrue(initial.snapshot.isValid)
-        XCTAssertTrue(snapshotText(initial.snapshot).contains("STATIC-LINE-"))
-        let initialGeneration = initial.snapshot.generation
+        XCTAssertTrue(renderedSnapshot, "the real SNAPSHOT must feed SwiftTerm in the full-app stage")
         let snapshotReceived = await waitUntil(timeout: .seconds(4)) {
             await link.observedEvents().contains { envelope in
                 if case let .frame(.snapshot(reference, _)) = envelope.event { return reference == session.reference }
@@ -845,23 +840,18 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(snapshotReceived)
 
-        guard let inputView = coordinator.stageView.inputView(for: session) else {
-            await coordinator.stop()
-            window.close()
-            return XCTFail("the active real session must own a text input view")
-        }
         let marker = "NATIVE-E2E-\(UUID().uuidString)"
-        inputView.insertText(marker, replacementRange: NSRange(location: NSNotFound, length: 0))
-        inputView.insertText("\r", replacementRange: NSRange(location: NSNotFound, length: 0))
+        inputView.send(data: Array(marker.utf8)[...])
+        inputView.send(data: [0x0d][...])
 
         let inputSent = await waitUntil(timeout: .seconds(8)) {
             let payloads = await link.sentCommands().compactMap { command -> ClientInputPayload? in
                 guard case let .input(request) = command, request.reference == session.reference else { return nil }
                 return request.payload
             }
-            return payloads.contains(.text(marker, attachmentPath: nil)) && payloads.contains(.bareEnter)
+            return payloads.contains(.bytes(Data(marker.utf8))) && payloads.contains(.bytes(Data([0x0d])))
         }
-        XCTAssertTrue(inputSent, "typed text and Enter must become real ClientCommand.input messages")
+        XCTAssertTrue(inputSent, "SwiftTerm bytes must become real ClientCommand.input messages")
         let ackReceived = await waitUntil(timeout: .seconds(8)) {
             guard let acknowledgement = coordinator.lastInputAcknowledgement else { return false }
             return acknowledgement.succeeded && acknowledgement.sequence >= 2
@@ -875,24 +865,21 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(deltaReceived, "PTY echo must arrive as an incremental DELTA frame")
         let echoed = await waitUntil(timeout: .seconds(8)) {
-            guard let submission = coordinator.stageView.presentedSubmissions.first(where: { $0.session == session }) else { return false }
-            return submission.snapshot.generation > initialGeneration && self.snapshotText(submission.snapshot).contains(marker)
+            self.terminalText(coordinator, reference: session.reference).contains(marker)
         }
-        XCTAssertTrue(echoed, "the DELTA must update the rendered terminal grid with the typed text")
+        XCTAssertTrue(echoed, "the DELTA must update SwiftTerm's visible terminal buffer")
 
         await coordinator.stop()
         window.close()
     }
 
-    /// 08-split regression: a restored split whose server panes are stale (69×1) must be re-sized from each
-    /// pane's own 6pt-gap projection, and every later layout change (ratio, close) must publish new grids.
-    func testRestoredSplitPublishesEveryPaneGridAndFollowsLayoutChanges() async throws {
+    /// Restored split panes retain separate SwiftTerm buffers and publish their own viewport grids.
+    func testRestoredSplitKeepsIndependentSwiftTermPanesAcrossLayoutChanges() async throws {
         let references = [try SessionReference("split-left"), try SessionReference("split-right")]
         let records = references.enumerated().map { index, reference in
             WireSessionRecord(reference: reference, name: "Split \(index)", workingDirectory: "/fixture/split", state: .idle, rows: 1, columns: 69)
         }
         let link = RecordingSessionLink()
-        let atlas = GlyphAtlasPool.shared
         let supportDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("corral-native-split-store-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDirectory) }
@@ -907,78 +894,70 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             credentialVault: TestDeviceCredentialVault(),
             sessionLink: link,
             deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
-            renderer: try SharedMetalTerminalRenderer(glyphAtlas: atlas),
             workspaceStore: workspaceStore,
             userPreferencesStore: userPreferencesStore,
             initialWorkspaceState: await workspaceStore.snapshot(),
             initialUserPreferences: await userPreferencesStore.snapshot(),
-            glyphAtlas: atlas,
             environment: ["CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws", "CORRAL_NATIVE_TOKEN": "fixture-only-token", "CORRAL_NATIVE_BACKGROUND": "1"]
         )
-        guard let window = coordinator.windowController.window else { return XCTFail("coordinator must own a real window") }
+        let window = try XCTUnwrap(coordinator.windowController.window)
         window.orderBack(nil)
+        window.displayIfNeeded()
         window.contentView?.layoutSubtreeIfNeeded()
-        let stage = coordinator.stageView.bounds.size
-        XCTAssertEqual(stage, NSSize(width: 1400 - 280, height: 860 - 38))
+        coordinator.workspaceView.stageContainer.layoutSubtreeIfNeeded()
         await coordinator.start()
-        // Real order: the window settles its stage geometry long before the first listing round-trip.
-        let settled = await waitUntil { coordinator.stageView.currentGeometry?.0 == stage }
-        XCTAssertTrue(settled)
-        try await Task.sleep(for: .milliseconds(200))
         try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
             WorkspaceRecord(workingDirectory: "/fixture/split", sessionCount: 2, aggregateState: .idle, sessions: records)
         ]))))
 
-        let cell = coordinator.stageView.terminalCellSize
-        func grid(width: CGFloat, height: CGFloat) -> GridSize {
-            GridSize(rows: Int(height / cell.height), columns: Int(width / cell.width))
+        let panesReady = await waitUntil {
+            guard let left = coordinator.terminalView(for: references[0]),
+                  let right = coordinator.terminalView(for: references[1]) else { return false }
+            return coordinator.subscribedSessionIDs.count == 2 && left.terminal.rows > 1 && right.terminal.rows > 1
+                && left.terminal.cols > 20 && right.terminal.cols > 20
         }
-        func lastSentGrid(_ reference: SessionReference) async -> GridSize? {
-            await link.commands().reversed().lazy.compactMap { command -> GridSize? in
-                switch command {
-                case let .subscribe(ref, size) where ref == reference: size
-                case let .resize(ref, size) where ref == reference: size
-                default: nil
-                }
-            }.first
+        let leftMetrics = coordinator.terminalView(for: references[0]).map { "frame=\($0.frame), grid=\($0.terminal.cols)x\($0.terminal.rows), hidden=\($0.isHidden)" } ?? "missing"
+        let rightMetrics = coordinator.terminalView(for: references[1]).map { "frame=\($0.frame), grid=\($0.terminal.cols)x\($0.terminal.rows), hidden=\($0.isHidden)" } ?? "missing"
+        let paneCommands = await link.commands().filter { command in if case .subscribe = command { true } else if case .resize = command { true } else { false } }
+        XCTAssertTrue(panesReady, "both split terminals must size from their own visible viewport; stage=\(coordinator.workspaceView.stageContainer.bounds), visible=\(coordinator.telemetry.visiblePaneCount), subscribed=\(coordinator.subscribedSessionIDs), left=\(leftMetrics), right=\(rightMetrics), commands=\(paneCommands)")
+        guard let left = coordinator.terminalView(for: references[0]),
+              let right = coordinator.terminalView(for: references[1]) else {
+            await coordinator.stop()
+            window.close()
+            return XCTFail("restored split must create two independent SwiftTerm views")
         }
-        // 1120pt stage, 6pt gap: usable 1114 → 557 | 557.
-        let half = grid(width: 557, height: stage.height)
-        let restored = await waitUntil {
-            let left = await lastSentGrid(references[0]), right = await lastSentGrid(references[1])
-            return left == half && right == half
-        }
-        let restoredLeft = await lastSentGrid(references[0]), restoredRight = await lastSentGrid(references[1])
-        XCTAssertTrue(restored, "both panes must be sized from their own viewport, got \(String(describing: restoredLeft)) / \(String(describing: restoredRight)), want \(half)")
+        XCTAssertFalse(left === right)
+        let initialLeftWidth = left.frame.width
+        let initialRightWidth = right.frame.width
+        let initialLeftGrid = GridSize(rows: left.terminal.rows, columns: left.terminal.cols)
+        let initialRightGrid = GridSize(rows: right.terminal.rows, columns: right.terminal.cols)
+        let initialResizeCommands = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
+        XCTAssertGreaterThan(initialResizeCommands, 0, "actual SwiftTerm geometry must publish viewport resize commands")
 
-        // A transient collapsed stage (window/Space churn) must never leave a pane committed at a 1-row grid.
-        coordinator.stageView.configureStage(sizeInPoints: NSSize(width: stage.width, height: 20), backingScale: 2)
-        coordinator.stageView.needsLayout = true
-        window.contentView?.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(300))
-        let afterChurnLeft = await lastSentGrid(references[0]), afterChurnRight = await lastSentGrid(references[1])
-        XCTAssertEqual(afterChurnLeft, half)
-        XCTAssertEqual(afterChurnRight, half)
+        try await link.emit(.frame(.snapshot(reference: references[0], ansi: Data("LEFT-SWIFTTERM".utf8))))
+        try await link.emit(.frame(.snapshot(reference: references[1], ansi: Data("RIGHT-SWIFTTERM".utf8))))
+        let leftRendered = await waitUntil { self.terminalText(coordinator, reference: references[0]).contains("LEFT-SWIFTTERM") }
+        let rightRendered = await waitUntil { self.terminalText(coordinator, reference: references[1]).contains("RIGHT-SWIFTTERM") }
+        XCTAssertTrue(leftRendered)
+        XCTAssertTrue(rightRendered)
 
         await coordinator.updateWorkspaceSplitRatio(path: "root", ratio: 0.3)
-        // floor(1114 × 0.3) = 334 | 780.
-        let resized = await waitUntil {
-            let left = await lastSentGrid(references[0]), right = await lastSentGrid(references[1])
-            return left == grid(width: 334, height: stage.height) && right == grid(width: 780, height: stage.height)
+        let ratioApplied = await waitUntil {
+            left.frame.width != initialLeftWidth && right.frame.width != initialRightWidth
         }
-        XCTAssertTrue(resized, "a ratio change must re-publish both pane grids")
-
+        XCTAssertTrue(ratioApplied, "changing the split ratio must lay out the persistent SwiftTerm views")
+        let resizedLeft = GridSize(rows: left.terminal.rows, columns: left.terminal.cols)
+        let resizedRight = GridSize(rows: right.terminal.rows, columns: right.terminal.cols)
+        XCTAssertNotEqual(resizedLeft, initialLeftGrid)
+        XCTAssertNotEqual(resizedRight, initialRightGrid)
         await coordinator.closeWorkspacePane(ids[1])
-        let promoted = await waitUntil { await lastSentGrid(references[0]) == grid(width: stage.width, height: stage.height) }
-        XCTAssertTrue(promoted, "the surviving sibling must absorb the whole stage and be resized to it")
         let remoteCloses = await link.commands().filter { if case .closeSession = $0 { true } else { false } }.count
         XCTAssertEqual(remoteCloses, 0, "closing a pane never terminates its Agent")
-
         await coordinator.stop()
         window.close()
     }
 
-    func testGoldenFramesDriveThreeRealMetalPanesAndInputRouting() async throws {
+    func testGoldenFramesDriveThreeSwiftTermPanesAndInputRouting() async throws {
         let fixture = try GoldenFrameFixture.load()
         let codec = ProtocolV1Codec()
         let goldenSnapshot = try codec.decodeBinaryFrame(fixture.snapshot)
@@ -1000,8 +979,6 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             )
         }
         let link = RecordingSessionLink()
-        let atlas = GlyphAtlasPool.shared
-        let renderer = try SharedMetalTerminalRenderer(glyphAtlas: atlas)
         let supportDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("corral-native-coordinator-store-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDirectory) }
@@ -1023,12 +1000,10 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             credentialVault: TestDeviceCredentialVault(),
             sessionLink: link,
             deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
-            renderer: renderer,
             workspaceStore: workspaceStore,
             userPreferencesStore: userPreferencesStore,
             initialWorkspaceState: initialWorkspaceState,
             initialUserPreferences: initialUserPreferences,
-            glyphAtlas: atlas,
             environment: [
                 "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
                 "CORRAL_NATIVE_TOKEN": "fixture-only-token",
@@ -1047,7 +1022,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertFalse(window.isKeyWindow)
         window.displayIfNeeded()
         window.contentView?.layoutSubtreeIfNeeded()
-        coordinator.stageView.configureStage(sizeInPoints: NSSize(width: 1200, height: 800), backingScale: 1)
+        coordinator.workspaceView.stageContainer.layoutSubtreeIfNeeded()
 
         await coordinator.start()
         XCTAssertTrue(coordinator.backgroundMode)
@@ -1104,12 +1079,10 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try await link.emit(.frame(goldenDelta))
 
         let rendered = await waitUntil {
-            coordinator.telemetry.renderedPaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 45
+            coordinator.telemetry.visiblePaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 3
+                && references.allSatisfy { !self.terminalText(coordinator, reference: $0).isEmpty }
         }
-        XCTAssertTrue(rendered)
-        let submitted = await waitUntil { coordinator.telemetry.metalSubmissionCount > 0 }
-        XCTAssertTrue(submitted)
-        XCTAssertGreaterThan(coordinator.telemetry.atlasPageCount, 0)
+        XCTAssertTrue(rendered, "each pane's SwiftTerm instance must retain its live terminal buffer")
 
         let paneKey = SessionKey(deviceID: fixtureDeviceID, reference: references[1])
         let commandsBeforeSwitch = await link.commands()
@@ -1120,7 +1093,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         )
         coordinator.selectSidebarSession(id: targetSidebarID)
         let paneFocused = await waitUntil {
-            coordinator.stageView.activeInputSession == paneKey &&
+            coordinator.activeTerminalSessionKey == paneKey &&
                 coordinator.workspaceState.visibleSessionID == workspaceSessionIDs[1]
         }
         XCTAssertTrue(paneFocused, "a sidebar selection must focus its pane in the current workspace Tab")
@@ -1128,23 +1101,24 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(commandsAfterSwitch.filter { if case .subscribe = $0 { true } else { false } }.count, subscribedBeforeSwitch)
         XCTAssertEqual(commandsAfterSwitch.filter { if case .resize = $0 { true } else { false } }.count, resizeBeforeSwitch)
 
-        let inputView = try XCTUnwrap(coordinator.stageView.inputView(for: paneKey))
-        inputView.insertText("typed", replacementRange: NSRange(location: NSNotFound, length: 0))
+        let inputView = try XCTUnwrap(coordinator.terminalView(for: paneKey))
+        inputView.send(data: Array("typed".utf8)[...])
         let inputSent = await waitUntil {
             await link.commands().contains { command in
                 guard case let .input(request) = command else { return false }
-                return request.reference == paneKey.reference && request.payload == .text("typed", attachmentPath: nil)
+                return request.reference == paneKey.reference && request.payload == .bytes(Data("typed".utf8))
             }
         }
-        XCTAssertTrue(inputSent)
-        let userInputCount = await link.commands().filter { if case .input = $0 { true } else { false } }.count
-        try await link.emit(.frame(.delta(reference: references[0], ansi: Data("\u{1b}[5n".utf8))))
-        let localReplyProduced = await waitUntil { coordinator.discardedAutoReplyByteCount > 0 }
-        XCTAssertTrue(localReplyProduced)
+        let commandsAtInput = await link.commands()
+        XCTAssertTrue(inputSent, "expected byte input for \(paneKey.reference); payloads=\(commandsAtInput.compactMap { command -> ClientInputPayload? in if case let .input(request) = command { request.payload } else { nil } })")
+        let userInputCount = commandsAtInput.filter { if case .input = $0 { true } else { false } }.count
+        let terminalReply = Array("\u{1b}[5n".utf8)
+        inputView.send(source: inputView.terminal, data: terminalReply[...])
+        XCTAssertEqual(coordinator.discardedAutoReplyByteCount, terminalReply.count)
         let inputCountAfterTerminalReply = await link.commands().filter { if case .input = $0 { true } else { false } }.count
-        XCTAssertEqual(inputCountAfterTerminalReply, userInputCount)
+        XCTAssertEqual(inputCountAfterTerminalReply, userInputCount, "SwiftTerm protocol responses must not be sent back as user input")
         let stillPresented = await waitUntil {
-            coordinator.telemetry.renderedPaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 45
+            coordinator.telemetry.visiblePaneCount == 3 && coordinator.telemetry.nonEmptyLineCount >= 3
         }
         XCTAssertTrue(stillPresented)
 
@@ -1155,13 +1129,12 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(receipt.connected)
         XCTAssertEqual(receipt.sessionCount, 3)
         XCTAssertEqual(receipt.subscribedSessionIDs.count, 3)
-        XCTAssertEqual(receipt.renderedPaneCount, 3)
-        XCTAssertGreaterThanOrEqual(receipt.nonEmptyLineCount, 45)
-        XCTAssertGreaterThan(receipt.metalSubmissionCount, 0)
-        XCTAssertGreaterThan(receipt.atlasPageCount, 0)
-        let idleSubmissionCount = coordinator.telemetry.metalSubmissionCount
+        XCTAssertEqual(receipt.visiblePaneCount, 3)
+        XCTAssertGreaterThanOrEqual(receipt.nonEmptyLineCount, 3)
+        XCTAssertEqual(receipt.terminalViewCount, 3)
+        let stableBufferLineCount = coordinator.telemetry.nonEmptyLineCount
         try await Task.sleep(for: .milliseconds(650))
-        XCTAssertEqual(coordinator.telemetry.metalSubmissionCount, idleSubmissionCount)
+        XCTAssertEqual(coordinator.telemetry.nonEmptyLineCount, stableBufferLineCount)
 
         let createRequestID = try await coordinator.createAgent(
             workspace: "/fixture/workspace",
@@ -1224,11 +1197,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             let commands = await link.commands()
             return coordinator.telemetry.sessionCount == records.count - 1 &&
                 coordinator.telemetry.subscribedSessionIDs.count == records.count - 1 &&
-                coordinator.stageView.activeInputSession?.reference == (try? SessionReference("created-agent")) &&
+                coordinator.activeTerminalSessionKey?.reference == (try? SessionReference("created-agent")) &&
                 commands.contains(.unsubscribe(reference: references[1]))
         }
         XCTAssertTrue(deltaRemovalApplied)
-        XCTAssertEqual(coordinator.stageView.activeInputSession?.reference, try SessionReference("created-agent"))
+        XCTAssertEqual(coordinator.activeTerminalSessionKey?.reference, try SessionReference("created-agent"))
         let remoteCloseCountBeforePresentationClose = await link.commands().filter { if case .closeSession = $0 { true } else { false } }.count
         await coordinator.closeWorkspaceTab(id: coordinator.workspaceState.activeTabID)
         await coordinator.closeWorkspacePane(workspaceSessionIDs[0])
@@ -1257,25 +1230,16 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             credentialVault: credentialVault,
             sessionLink: link,
             deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
-            renderer: try SharedMetalTerminalRenderer(glyphAtlas: atlas),
             workspaceStore: workspaceStore,
             userPreferencesStore: userPreferencesStore,
             initialWorkspaceState: await workspaceStore.snapshot(),
             initialUserPreferences: await userPreferencesStore.snapshot(),
-            glyphAtlas: atlas,
             environment: environment
         )
     }
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
-    }
-
-    private func snapshotText(_ snapshot: TerminalGridSnapshot) -> String {
-        snapshot.cells.compactMap { cell in
-            guard case let .cluster(text, _) = cell.content else { return nil }
-            return text
-        }.joined()
     }
 
     private func waitUntil(

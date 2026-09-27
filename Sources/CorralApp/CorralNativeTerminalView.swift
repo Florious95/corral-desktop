@@ -1,5 +1,6 @@
 import AppKit
 import CorralMetalTerminal
+import CorralUI
 @preconcurrency import SwiftTerm
 
 private struct LocalPasteMonitorToken: @unchecked Sendable {
@@ -10,6 +11,8 @@ private struct LocalPasteMonitorToken: @unchecked Sendable {
 final class CorralNativeTerminalView: TerminalView {
     private let pasteboard: NSPasteboard
     private var controlVPasteMonitor: LocalPasteMonitorToken?
+    private var inputEnabled = false
+    var onDiscardedAutomaticReply: ((Int) -> Void)?
 
     override init(frame: CGRect) {
         pasteboard = .general
@@ -30,6 +33,25 @@ final class CorralNativeTerminalView: TerminalView {
         if let controlVPasteMonitor { NSEvent.removeMonitor(controlVPasteMonitor.value) }
     }
 
+    func setTerminalFont(family: String, size: Int) {
+        let pointSize = CGFloat(size)
+        font = NSFont(name: family, size: pointSize) ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+    }
+
+    func setTerminalColors(foreground: NSColor, background: NSColor) {
+        if let color = Self.swiftTermColor(foreground) { getTerminal().foregroundColor = color }
+        if let color = Self.swiftTermColor(background) { getTerminal().backgroundColor = color }
+        needsDisplay = true
+    }
+
+    private static func swiftTermColor(_ source: NSColor) -> Color? {
+        guard let color = source.usingColorSpace(.deviceRGB) else { return nil }
+        func component(_ value: CGFloat) -> UInt16 {
+            UInt16(min(255, max(0, Int((value * 255).rounded()))))
+        }
+        return Color(red8: component(color.redComponent), green8: component(color.greenComponent), blue8: component(color.blueComponent))
+    }
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if window !== newWindow { removeControlVPasteMonitor() }
         super.viewWillMove(toWindow: newWindow)
@@ -37,7 +59,7 @@ final class CorralNativeTerminalView: TerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        installControlVPasteMonitor()
+        if inputEnabled { installControlVPasteMonitor() }
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -62,20 +84,14 @@ final class CorralNativeTerminalView: TerminalView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = NSMenu(title: "Terminal")
-        for (title, action) in [
-            ("Copy", #selector(copy(_:))),
-            ("Paste", #selector(paste(_:))),
-            ("Select All", #selector(selectAll(_:)))
-        ] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-        }
-        menu.addItem(.separator())
-        let clearItem = NSMenuItem(title: "Clear Buffer", action: #selector(clearTerminalBuffer(_:)), keyEquivalent: "")
-        clearItem.target = self
-        menu.addItem(clearItem)
+        let menu = CorralTerminalContextMenu(
+            onCopy: { [weak self] in guard let self else { return }; self.copy(self) },
+            onPaste: { [weak self] in guard let self else { return }; self.paste(self) },
+            onClear: { [weak self] in guard let self else { return }; self.clearTerminalBuffer(self) }
+        )
+        let selectAll = NSMenuItem(title: "全选", action: #selector(selectAll(_:)), keyEquivalent: "")
+        selectAll.target = self
+        menu.insertItem(selectAll, at: 2)
         return menu
     }
 
@@ -91,7 +107,10 @@ final class CorralNativeTerminalView: TerminalView {
     }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
-        guard !SwiftTermVTReplyFilter.isAutomaticResponse(data) else { return }
+        if SwiftTermVTReplyFilter.isAutomaticResponse(data) {
+            onDiscardedAutomaticReply?(data.count)
+            return
+        }
         terminalDelegate?.send(source: self, data: data)
     }
 
@@ -102,6 +121,13 @@ final class CorralNativeTerminalView: TerminalView {
         guard isVKey, modifiers.contains(.control), !modifiers.contains(.command) else { return false }
         _ = pasteFromClipboard(trigger: .controlV)
         return true
+    }
+
+    func setInputEnabled(_ enabled: Bool) {
+        guard inputEnabled != enabled else { return }
+        inputEnabled = enabled
+        if enabled { installControlVPasteMonitor() }
+        else { removeControlVPasteMonitor() }
     }
 
     private func installControlVPasteMonitor() {

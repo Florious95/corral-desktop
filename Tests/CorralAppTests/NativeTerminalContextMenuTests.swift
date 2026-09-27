@@ -23,23 +23,23 @@ final class CorralNativeTerminalContextMenuTests: XCTestCase {
 
         let menu = try XCTUnwrap(view.menu(for: event))
         let items = menu.items.filter { !$0.isSeparatorItem }
-        XCTAssertEqual(items.map(\.title), ["Copy", "Paste", "Select All", "Clear Buffer"])
+        XCTAssertEqual(items.map(\.title), ["复制", "粘贴", "全选", "清屏"])
         XCTAssertEqual(items.map(\.action), [
-            NSSelectorFromString("copy:"),
-            NSSelectorFromString("paste:"),
+            NSSelectorFromString("copySelection"),
+            NSSelectorFromString("pasteClipboard"),
             NSSelectorFromString("selectAll:"),
-            NSSelectorFromString("clearTerminalBuffer:")
+            NSSelectorFromString("clearScreen")
         ])
-        XCTAssertTrue(items.allSatisfy { $0.target === view })
-        XCTAssertFalse(view.validateUserInterfaceItem(items[0]), "Copy remains disabled without a selection")
-        XCTAssertTrue(view.validateUserInterfaceItem(items[1]))
-        XCTAssertTrue(view.validateUserInterfaceItem(items[2]))
-        XCTAssertTrue(view.validateUserInterfaceItem(items[3]))
+        XCTAssertTrue(items[0].target === menu)
+        XCTAssertTrue(items[1].target === menu)
+        XCTAssertTrue(items[2].target === view)
+        XCTAssertTrue(items[3].target === menu)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(items[1].action), to: menu, from: items[1]))
 
         view.getTerminal().feed(text: "COPY_ME")
         view.selectAll(view)
         XCTAssertTrue(view.selection.active)
-        XCTAssertTrue(view.validateUserInterfaceItem(items[0]), "Copy is enabled once text is selected")
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(items[0].action), to: menu, from: items[0]), "Copy dispatches through the shared terminal context menu")
     }
 
     func testClearBufferActionClearsSwiftTermStateAndSelection() throws {
@@ -60,8 +60,9 @@ final class CorralNativeTerminalContextMenuTests: XCTestCase {
             clickCount: 1,
             pressure: 1
         ))
-        let clearItem = try XCTUnwrap(view.menu(for: event)?.items.first { $0.action == NSSelectorFromString("clearTerminalBuffer:") })
-        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(clearItem.action), to: view, from: clearItem))
+        let menu = try XCTUnwrap(view.menu(for: event))
+        let clearItem = try XCTUnwrap(menu.items.first { $0.action == NSSelectorFromString("clearScreen") })
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(clearItem.action), to: menu, from: clearItem))
         XCTAssertFalse(visibleText(in: view).contains("CLEAR_ME"))
         XCTAssertFalse(view.selection.active)
     }
