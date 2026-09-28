@@ -335,7 +335,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
 
         let leader = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "全自动编排leader" })
         let tabID = coordinator.workspaceState.activeTabID
-        coordinator.workspaceView.sidebar.onSelectAgent?(leader.id)
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(leader.sessionID), .singleClick)
         let opened = await waitUntil {
             coordinator.workspaceState.activeTab?.activeSessionID != nil &&
                 coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "全自动编排leader"
@@ -356,7 +356,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let explicitlyPinned = await waitUntil { coordinator.workspaceState.activeTab?.pinned == true }
         XCTAssertTrue(explicitlyPinned)
         let previewAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
-        coordinator.workspaceView.sidebar.onSelectAgent?(previewAgent.id)
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(previewAgent.sessionID), .singleClick)
         let previewed = await waitUntil {
             coordinator.workspaceState.previewUID != nil &&
                 coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.isPreview == true &&
@@ -448,9 +448,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.createWorkspaceTab()
         let targetTabID = coordinator.workspaceState.activeTabID
         XCTAssertNotEqual(targetTabID, firstTabID)
-        await coordinator.selectWorkspaceTab(id: firstTabID)
+        await coordinator.selectWorkspaceTab(id: targetTabID)
         let secondAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
-        coordinator.workspaceView.onOpenSession?(secondAgent.id, targetTabID, false)
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(secondAgent.sessionID), .singleClick)
 
         let secondOpenedInTarget = await waitUntil {
             coordinator.workspaceState.activeTabID == targetTabID &&
@@ -492,7 +492,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
-    func testOpenSessionFallsBackInsteadOfDroppingForStaleTabID() async throws {
+    func testSidebarOpenUsesTheCoordinatorCurrentTabWithoutATabIDIntent() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
@@ -522,21 +522,19 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.createWorkspaceTab()
         let expectedActiveTabID = coordinator.workspaceState.activeTabID
         let requestedAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "requested" })
-        coordinator.workspaceView.onOpenSession?(requestedAgent.id, UUID(), false)
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(requestedAgent.sessionID), .singleClick)
         let opened = await waitUntil {
             coordinator.workspaceState.activeTabID == expectedActiveTabID &&
                 coordinator.workspaceState.visibleSessionID?.rawValue.hasSuffix(requestedReference.rawValue) == true &&
                 coordinator.activeTerminalSessionKey?.reference == requestedReference &&
                 coordinator.subscribedSessionIDs.contains(requestedReference.rawValue)
         }
-        XCTAssertTrue(opened, "a stale UI Tab ID must not silently discard a valid session-open request")
-        XCTAssertTrue(coordinator.lastConnectionError?.contains("requested workspace Tab no longer exists") == true)
-
-        try await link.emit(.frame(.snapshot(reference: requestedReference, ansi: Data("STALE-TAB-FALLBACK-CONTENT\r\n".utf8))))
+        XCTAssertTrue(opened, "the row intent must open into the active Store Tab")
+        try await link.emit(.frame(.snapshot(reference: requestedReference, ansi: Data("CURRENT-TAB-CONTENT\r\n".utf8))))
         let rendered = await waitUntil {
-            self.terminalText(coordinator, reference: requestedReference).contains("STALE-TAB-FALLBACK-CONTENT")
+            self.terminalText(coordinator, reference: requestedReference).contains("CURRENT-TAB-CONTENT")
         }
-        XCTAssertTrue(rendered, "the fallback session snapshot must still reach the SwiftTerm view")
+        XCTAssertTrue(rendered, "the selected session snapshot must reach the SwiftTerm view")
         await coordinator.stop()
         window.close()
     }
@@ -569,10 +567,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(listed)
         await coordinator.createWorkspaceTab()
-        let targetTabID = coordinator.workspaceState.activeTabID
         let targetAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "race-target" })
         await link.suspendNextSubscribe()
-        coordinator.workspaceView.onOpenSession?(targetAgent.id, targetTabID, false)
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(targetAgent.sessionID), .singleClick)
 
         let sendIsPending = await waitUntil { await link.isSubscribeSuspended(for: racedReference) }
         XCTAssertTrue(sendIsPending, "the fake link must pause after the subscribe request begins")
@@ -1166,7 +1163,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             return
         }
 
-        coordinator.workspaceView.sidebar.onSelectAgent?(agent.id)
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(agent.sessionID), .singleClick)
         let subscribed = await waitUntil(timeout: .seconds(8)) {
             coordinator.subscribedSessionIDs.count == 1 && coordinator.activeTerminalSessionKey != nil
         }
