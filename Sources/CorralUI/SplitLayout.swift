@@ -116,10 +116,9 @@ public enum SplitLayout {
         return ratio == divider.ratio ? nil : ratio
     }
 
-    /// Five-zone hit test for dropping `source` at `point` (legacy `hitTestLeafPanes`). A lone pane splits only
-    /// left/right at its vertical midline; with several panes the nearest normalized edge wins (ties: left, right,
-    /// top, bottom), the central core replaces, and a 3pt hysteresis keeps the previous edge. The candidate layout
-    /// is projected first: any leaf below 120×60 rejects the drop (nil), as do self drops and the 6pt gaps.
+    /// All pane counts use the same five zones: the central 50% by 50% replaces;
+    /// otherwise the nearest normalized edge splits (ties: left, right, top, bottom).
+    /// Reject a candidate if any resulting pane is below 120×60 points.
     public static func dropTarget(at point: CGPoint, source: SessionID, root: WorkspaceLayoutNode?, in bounds: CGRect, previous: DropTarget? = nil) -> DropTarget? {
         guard bounds.contains(point) else { return nil }
         guard let root else { return DropTarget(target: nil, edge: .center, previewFrame: bounds) }
@@ -127,14 +126,7 @@ public enum SplitLayout {
         guard let pane = layout.panes.first(where: { $0.frame.contains(point) }), pane.sessionID != source else { return nil }
         let rect = pane.frame
         let previousEdge = previous?.target == pane.sessionID ? previous?.edge : nil
-        let edge: WorkspaceDropZone
-        if layout.panes.count == 1 {
-            if previousEdge == .left, point.x < rect.midX + hysteresis { edge = .left }
-            else if previousEdge == .right, point.x >= rect.midX - hysteresis { edge = .right }
-            else { edge = point.x - rect.minX < rect.width / 2 ? .left : .right }
-        } else {
-            edge = nearestEdge(u: (point.x - rect.minX) / rect.width, v: (point.y - rect.minY) / rect.height, in: rect.size, previous: previousEdge)
-        }
+        let edge = nearestEdge(u: (point.x - rect.minX) / rect.width, v: (point.y - rect.minY) / rect.height, in: rect.size, previous: previousEdge)
         guard let candidate = root.dropping(source, onto: pane.sessionID, edge: edge) else { return nil }
         let projected = project(candidate, in: bounds)
         guard projected.panes.count == candidate.leafIDs.count,

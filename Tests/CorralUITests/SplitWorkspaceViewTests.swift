@@ -74,12 +74,14 @@ final class SplitWorkspaceViewTests: XCTestCase {
         XCTAssertTrue(overlay.closeButtons.isEmpty, "a lone pane has no card chrome and cannot be closed")
     }
 
-    func testTerminalClicksFallThroughTheFocusedPaneWhileGapsCloseButtonsAndOtherPanesAreOwned() throws {
+    func testTerminalClicksFallThroughEveryPaneAndInvisibleCloseButton() throws {
         let (_, container, overlay) = hosted(grid, focused: a, size: NSSize(width: 1206, height: 806))
         func hit(_ x: CGFloat, _ y: CGFloat) -> NSView? { overlay.hitTest(container.convert(CGPoint(x: x, y: y), from: overlay)) }
         XCTAssertNil(hit(300, 200), "the focused pane belongs to the terminal input below")
         XCTAssertTrue(hit(603, 200) === overlay, "the 6pt gap is the resize handle")
-        XCTAssertTrue(hit(900, 600) === overlay, "clicking another pane focuses it first")
+        XCTAssertNil(hit(900, 600), "the terminal focuses and receives the same first click")
+        XCTAssertNil(hit(1189, 17), "invisible controls must not swallow terminal input")
+        overlay.mouseMoved(with: mouse(.mouseMoved, at: CGPoint(x: 1189, y: 17), in: overlay))
         XCTAssertTrue(hit(1189, 17) === overlay.closeButtons[b])
 
         var focused: SessionID?, closed: SessionID?
@@ -275,6 +277,32 @@ final class SplitWorkspaceViewTests: XCTestCase {
         XCTAssertTrue(blank.isBlankWorkspace)
         XCTAssertTrue(blank.sessionIDs.isEmpty)
         XCTAssertNil(blank.activeSessionID)
+    }
+
+    func testSidebarWindowGestureRejectsLargeMotionAndCrossRowRelease() throws {
+        _ = NSApplication.shared
+        let sidebar = CorralSidebarView()
+        sidebar.setAgents([CorralSidebarAgent(name: "A", sessionID: a), CorralSidebarAgent(name: "B", sessionID: b)])
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 280, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = sidebar
+        window.orderBack(nil)
+        defer { window.close() }
+        sidebar.layoutSubtreeIfNeeded()
+        let table = sidebar.agentsTable
+        var opened: [SessionID] = []
+        sidebar.onSelectAgent = { id, _ in opened.append(id) }
+        let rect = table.rect(ofRow: 0), second = table.rect(ofRow: 1)
+        let start = CGPoint(x: rect.midX, y: rect.midY)
+        for end in [CGPoint(x: start.x + 5, y: start.y), CGPoint(x: start.x, y: second.midY), start] {
+            for (index, type) in [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].enumerated() {
+                let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: table.convert(index == 0 ? start : end, to: nil),
+                    modifierFlags: [], timestamp: 1 + Double(index) * 0.01, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: index, clickCount: 1, pressure: index == 2 ? 0 : 1))
+                window.sendEvent(event)
+            }
+        }
+        XCTAssertEqual(opened, [a], "only the final click dispatches, exactly once")
     }
 
     func testFourPaneSplitNeverWidensOrPinsTheWindow() throws {

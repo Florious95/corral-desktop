@@ -6,6 +6,60 @@ import XCTest
 
 @MainActor
 final class NativeWorkspaceTests: XCTestCase {
+    func testSelectedOverflowTabRemainsVisibleAndCanBeClicked() throws {
+        let tabs = (0..<30).map { CorralTab(title: "Tab \($0)") }
+        let workspace = CorralWorkspaceView(tabs: tabs)
+        workspace.frame = CGRect(x: 0, y: 0, width: 1000, height: 700)
+        workspace.selectTab(id: tabs.last!.id)
+        workspace.layoutSubtreeIfNeeded()
+        workspace.tabBar.layoutSubtreeIfNeeded()
+        let item = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityLabel() == "Tab 29" && $0.accessibilityIdentifier() == "corral.tab" })
+        let rect = workspace.tabBar.convert(item.bounds, from: item)
+        XCTAssertGreaterThan(rect.minX, 0)
+        XCTAssertLessThanOrEqual(rect.maxX, workspace.tabBar.createButton.frame.minX)
+        XCTAssertGreaterThan(item.visibleRect.width, 100)
+    }
+
+    func testTabPressDoesNotSwitchUntilRelease() throws {
+        let first = CorralTab(title: "First"), second = CorralTab(title: "Second")
+        let workspace = CorralWorkspaceView(tabs: [first, second])
+        workspace.frame = CGRect(x: 0, y: 0, width: 1200, height: 700)
+        workspace.layoutSubtreeIfNeeded()
+        let item = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityLabel() == "Second" && $0.accessibilityIdentifier() == "corral.tab" })
+        let point = item.convert(CGPoint(x: item.bounds.midX, y: item.bounds.midY), to: nil)
+        let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 1,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        item.mouseDown(with: down)
+        XCTAssertEqual(workspace.activeTabID, first.id)
+        let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [], timestamp: 1.1,
+            windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
+        item.mouseUp(with: up)
+        XCTAssertEqual(workspace.activeTabID, second.id)
+    }
+
+    func testTabClickThroughWindowSelectsAndReleaseOutsideDoesNot() throws {
+        _ = NSApplication.shared
+        let first = CorralTab(title: "First"), second = CorralTab(title: "Second")
+        let workspace = CorralWorkspaceView(tabs: [first, second])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window)
+        window.orderBack(nil)
+        defer { window.close() }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let item = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityLabel() == "Second" && $0.accessibilityIdentifier() == "corral.tab" })
+        let center = CGPoint(x: item.bounds.midX, y: item.bounds.midY)
+        for finalPoint in [CGPoint(x: item.bounds.maxX + 12, y: center.y), center] {
+            for (index, type) in [NSEvent.EventType.leftMouseDown, .leftMouseUp].enumerated() {
+                let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: item.convert(index == 0 ? center : finalPoint, to: nil),
+                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: index, clickCount: 1, pressure: index == 1 ? 0 : 1))
+                window.sendEvent(event)
+                if index == 0 || finalPoint != center { XCTAssertEqual(workspace.activeTabID, first.id) }
+            }
+        }
+        XCTAssertEqual(workspace.activeTabID, second.id)
+    }
+
     func testLegacyThemeTokensAndSettingsButtons() throws {
         CorralAestheticTokens.themeMode = .dark
         XCTAssertEqual(rgb(CorralAestheticTokens.surface0), 0x171B22)

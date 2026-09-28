@@ -63,6 +63,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         var subscriptionPending = false
         var lastAppliedReceiveOrdinal = ReceiveOrdinal(0)
         var desiredGrid: GridSize?
+        /// Catalog sizes can lag commands already written to the socket.
+        var requestedGrid: GridSize?
         var hasMobile = false
         var mobileCount: UInt32 = 0
         var desktopCount: UInt32 = 0
@@ -129,6 +131,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var started = false
     private var sequence = 0
     private var listingSequence: UInt64 = 0
+    private var hasReconciledInitialListing = false
     private var listingRequestedEpoch: ConnectionEpoch?
     private var nextRequestID: UInt32 = 1
     private var pendingCreateAgentRequests: [UInt32: PendingCreateAgent] = [:]
@@ -152,6 +155,15 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var pendingSessionOpenIntents: [SessionOpenIntent] = []
     private var drainingSessionOpenIntents = false
     private var activeSession: SessionKey?
+
+    private struct PendingInput {
+        let session: SessionKey
+        let connection: AuthenticatedConnection
+        let bytes: Data
+    }
+    private var pendingInput: [PendingInput] = []
+    private var pendingInputBytes = 0
+    private var drainingInput = false
 
     public init(
         deviceRepository: any DeviceRepositoryProtocol,
@@ -190,7 +202,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             CorralTab(
                 id: state.id,
                 title: state.title.isEmpty ? "Terminal" : state.title,
-                contentView: NSView(),
+                contentView: TerminalTabPlaceholderView(),
                 isPinned: state.pinned,
                 isCustomTitle: state.isCustomTitle,
                 isBlankWorkspace: state.isBlank
@@ -348,6 +360,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         devicesCardPanel?.orderOut(nil)
         devicesCardPanel = nil
         terminalRegistry.removeAll()
+        pendingInput.removeAll()
+        pendingInputBytes = 0
         actionTimeoutTasks.values.forEach { $0.cancel() }
         actionTimeoutTasks.removeAll()
         pendingCreateAgentRequests.removeAll()
@@ -427,6 +441,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     public func createWorkspaceTab() async {
         do {
             _ = try await workspaceStore.createTab()
+            hasReconciledInitialListing = true
             await applyWorkspaceState(await workspaceStore.snapshot())
         } catch { lastConnectionError = String(describing: error) }
     }
@@ -500,6 +515,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let state = try await workspaceStore.updateSplitRatio(tabID: tabID, path: path, ratio: ratio)
             layoutPreview = nil
             await applyWorkspaceState(state)
+            for key in visibleSessionKeys() {
+                if let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
+            }
         } catch {
             layoutPreview = nil
             lastConnectionError = String(describing: error)
@@ -570,7 +588,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let tab = oldTabs[stateTab.id] ?? CorralTab(
                 id: stateTab.id,
                 title: presentation.title,
-                contentView: NSView(),
+                contentView: TerminalTabPlaceholderView(),
                 status: statusIndicator(for: descriptor),
                 isPinned: stateTab.pinned,
                 isCustomTitle: stateTab.isCustomTitle,
@@ -604,8 +622,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func ensureTerminalView(for key: SessionKey) -> CorralNativeTerminalView? {
         guard sessions[key] != nil else { return nil }
         if let view = terminalRegistry.view(for: key) { return view }
-        let view = CorralNativeTerminalView(frame: .zero)
+        let view: CorralNativeTerminalView
+#if DEBUG
+        if let directory = try? CorralAcceptanceDriver.directory(environment: environment) {
+            view = CorralNativeTerminalView(frame: .zero, pasteboard: CorralAcceptanceDriver.pasteboard(directory: directory))
+        } else {
+            view = CorralNativeTerminalView(frame: .zero)
+        }
+#else
+        view = CorralNativeTerminalView(frame: .zero)
+#endif
         view.terminalDelegate = self
+        view.onFocus = { [weak self] in
+            guard let self, let id = self.sessions[key]?.descriptor.id,
+                  self.workspaceState.visibleSessionID != id else { return }
+            Task { @MainActor in await self.focusWorkspacePane(id) }
+        }
         view.onDiscardedAutomaticReply = { [weak self] byteCount in
             self?.discardedAutoReplyByteCount += byteCount
         }
@@ -630,7 +662,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func focusVisibleTerminal() {
         guard let sessionID = workspaceState.visibleSessionID,
               let key = sessionKey(for: sessionID),
-              let view = terminalRegistry.view(for: key), !view.isHidden else { return }
+              let view = terminalRegistry.view(for: key), !view.isHidden else {
+            if windowController.window?.firstResponder is TerminalView {
+                windowController.window?.makeFirstResponder(nil)
+            }
+            return
+        }
         windowController.window?.makeFirstResponder(view)
     }
 
@@ -733,6 +770,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     var activeTerminalSessionKey: SessionKey? { activeSession }
 
     func terminalView(for key: SessionKey) -> CorralNativeTerminalView? { terminalRegistry.view(for: key) }
+    func terminalKey(for view: TerminalView) -> SessionKey? { terminalRegistry.key(for: view) }
 
     func terminalView(for reference: SessionReference) -> CorralNativeTerminalView? {
         guard let key = sessionOrder.first(where: { $0.reference == reference }) else { return nil }
@@ -1182,7 +1220,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         do {
             var state = try await workspaceStore.reconcileListing(descriptors)
             let visibleSessionIsLive = state.visibleSessionID.flatMap(sessionKey(for:)).map { $0.deviceID == configuredDeviceID } ?? false
-            if !visibleSessionIsLive, let firstSession = descriptors.first {
+            // A user-created empty Tab is waiting for a selection. Periodic catalog
+            // updates must not fill it or jump to a previously opened first session.
+            let shouldAutoOpen = !hasReconciledInitialListing || state.activeTab?.isImplicitBlank == true || state.visibleSessionID != nil
+            hasReconciledInitialListing = true
+            if shouldAutoOpen, !visibleSessionIsLive, let firstSession = descriptors.first {
                 state = try await workspaceStore.smartOpenSession(firstSession, gesture: .singleClick)
             }
             await applyWorkspaceState(state)
@@ -1501,6 +1543,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             if runtime.descriptor.freshness?.connectionEpoch != origin.connectionEpoch {
                 runtime.subscribed = false
                 runtime.subscriptionPending = false
+                runtime.requestedGrid = nil
                 runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             }
             runtime.descriptor = descriptor
@@ -1519,18 +1562,25 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         updateTerminalStage()
         focusVisibleTerminal()
         for key in visibleSessionKeys() {
-            guard let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending else { continue }
+            guard let connection, key.deviceID == connection.deviceID,
+                  let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending else { continue }
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
                 // Use the server-advertised live grid; inspection mode never substitutes local view dimensions.
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
+                guard self.connection == connection,
+                      sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch else { continue }
                 sessions[key]?.subscriptionPending = false
+                sessions[key]?.subscribed = receipt.socketWritten
+                if receipt.socketWritten { sessions[key]?.requestedGrid = runtime.descriptor.size }
+                scheduleInputDrain()
                 guard receipt.socketWritten else { continue }
-                sessions[key]?.subscribed = true
                 if !noResizeMode, let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
             } catch {
+                guard self.connection == connection else { continue }
                 sessions[key]?.subscriptionPending = false
+                scheduleInputDrain()
                 lastConnectionError = String(describing: error)
             }
         }
@@ -1568,21 +1618,24 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize) async {
         guard !noResizeMode,
-              connection != nil, var runtime = sessions[key], runtime.subscribed,
-              runtime.descriptor.size != grid,
+              let connection, key.deviceID == connection.deviceID,
+              var runtime = sessions[key], runtime.subscribed,
+              runtime.requestedGrid != grid,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
-        let previous = runtime.descriptor.size
-        runtime.descriptor.size = grid
+        let previous = runtime.requestedGrid
+        runtime.requestedGrid = grid
         runtime.desiredGrid = grid
         sessions[key] = runtime
         do {
             let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
+            guard self.connection == connection else { return }
             guard receipt.socketWritten else {
-                if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = previous }
+                if sessions[key]?.requestedGrid == grid { sessions[key]?.requestedGrid = previous }
                 return
             }
         } catch {
-            if sessions[key]?.descriptor.size == grid { sessions[key]?.descriptor.size = previous }
+            guard self.connection == connection else { return }
+            if sessions[key]?.requestedGrid == grid { sessions[key]?.requestedGrid = previous }
             lastConnectionError = String(describing: error)
         }
     }
@@ -1596,18 +1649,55 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let grid = GridSize(rows: newRows, columns: newCols)
         runtime.desiredGrid = grid
         sessions[key] = runtime
-        guard runtime.subscribed else { return }
+        guard runtime.subscribed, layoutPreview == nil else { return }
         Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid) }
     }
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        guard !noResizeMode,
-              let key = terminalRegistry.key(for: source), sessions[key]?.subscribed == true else { return }
+        guard !noResizeMode, !data.isEmpty, let connection,
+              let key = terminalRegistry.key(for: source), key.deviceID == connection.deviceID,
+              let runtime = sessions[key], runtime.subscribed || runtime.subscriptionPending,
+              runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
+              terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden,
+              source.window?.firstResponder === source else { return }
+        guard pendingInputBytes + data.count <= ProtocolV1.maximumInputBytes, pendingInput.count < 1024 else {
+            lastConnectionError = "Terminal input queue is full."
+            showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
+            return
+        }
+        // 32 KiB stays inside the v1 JSON envelope after Base64 encoding. A single
+        // drain preserves key/paste order, including keys entered before subscribe returns.
         let bytes = Data(data)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do { _ = try await inputRouter.routeBytes(bytes, to: key) }
-            catch { lastConnectionError = String(describing: error) }
+        for offset in stride(from: 0, to: bytes.count, by: 32 * 1024) {
+            let chunk = bytes.subdata(in: offset..<min(bytes.count, offset + 32 * 1024))
+            pendingInput.append(PendingInput(session: key, connection: connection, bytes: chunk))
+        }
+        pendingInputBytes += bytes.count
+        scheduleInputDrain()
+    }
+
+    private func scheduleInputDrain() {
+        guard !drainingInput, !pendingInput.isEmpty else { return }
+        drainingInput = true
+        Task { @MainActor [weak self] in await self?.drainInput() }
+    }
+
+    private func drainInput() async {
+        defer { drainingInput = false }
+        while let input = pendingInput.first {
+            if input.connection == connection, sessions[input.session]?.subscriptionPending == true { return }
+            pendingInput.removeFirst()
+            pendingInputBytes -= input.bytes.count
+            guard input.connection == connection, sessions[input.session]?.subscribed == true else {
+                lastConnectionError = "Input cancelled because the session connection changed."
+                showToast("会话连接已变化，待发送输入已取消", kind: .warning)
+                continue
+            }
+            do { _ = try await inputRouter.routeBytes(input.bytes, to: input.session) }
+            catch {
+                lastConnectionError = String(describing: error)
+                showToast("终端输入发送失败：\(error)", kind: .error)
+            }
         }
     }
 

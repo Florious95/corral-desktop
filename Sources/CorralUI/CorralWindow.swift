@@ -3,6 +3,13 @@ import AppKit
 @MainActor
 public final class CorralWindow: NSWindow {
     public static let minimumContentSize = NSSize(width: 1100, height: 700)
+    /// The terminal owns its special paste chord; all other keys follow AppKit's responder chain.
+    public var onTerminalKeyDown: ((NSEvent) -> Bool)?
+
+    public override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, onTerminalKeyDown?(event) == true { return }
+        super.sendEvent(event)
+    }
 
     public init(contentRect: NSRect = NSRect(x: 0, y: 0, width: 1400, height: 860), title: String = "Corral") {
         var boundedContentRect = contentRect.standardized

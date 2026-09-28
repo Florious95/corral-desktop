@@ -4,6 +4,12 @@ import CorralServices
 import CorralUI
 @preconcurrency import SwiftTerm
 
+/// Tabs carry layout identity; the shared stage owns their actual terminal views.
+@MainActor
+final class TerminalTabPlaceholderView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 @MainActor
 final class TerminalSessionRegistry {
     private var views: [SessionKey: CorralNativeTerminalView] = [:]

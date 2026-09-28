@@ -1,11 +1,19 @@
 import AppKit
 import CorralMetalTerminal
+import CorralUI
 import XCTest
 @preconcurrency import SwiftTerm
 @testable import CorralApp
 
 @MainActor
 final class CorralNativeTerminalPasteTests: XCTestCase {
+    func testFontPreferencesResolveIndividualFamiliesAtTheRequestedPointSize() throws {
+        let view = CorralNativeTerminalView(frame: .zero)
+        view.setTerminalFont(family: "'Missing Fixture Font', \"Menlo\", monospace", size: 15)
+        XCTAssertEqual(view.font.familyName, "Menlo")
+        XCTAssertEqual(view.font.pointSize, 15)
+    }
+
     func testTerminalAcceptsFirstMouseForBackgroundWindowClicks() {
         let view = CorralNativeTerminalView(frame: .zero)
         XCTAssertTrue(view.acceptsFirstMouse(for: nil))
@@ -54,6 +62,19 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
 
         let cell = try XCTUnwrap(view.getTerminal().getLine(row: 0)?.getData().first)
         XCTAssertEqual(cell.attribute.bg, .trueColor(red: 40, green: 47, blue: 57))
+    }
+
+    func testControlVUsesTheWindowResponderPathWithoutAnApplicationMonitor() throws {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("keyboard paste", forType: .string)
+        let sink = PasteCapture()
+        let view = CorralNativeTerminalView(frame: .zero, pasteboard: pasteboard)
+        view.terminalDelegate = sink
+        let window = makeBackgroundWindow(containing: view)
+        defer { closeAndDrain(window) }
+        window.sendEvent(keyEvent(modifiers: .control, windowNumber: window.windowNumber))
+        XCTAssertEqual(sink.payloads, [Data("keyboard paste".utf8)])
     }
 
     func testControlVPastesTextOrQuotedImagePathWithoutSendingControlV() throws {
@@ -119,7 +140,7 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         )
     }
 
-    func testWindowDeliveredControlVUsesTheLocalPasteMonitor() throws {
+    func testWindowDeliveredControlVPastesImageThroughTheFocusedResponder() throws {
         let pasteboard = isolatedPasteboard()
         defer { pasteboard.releaseGlobally() }
         pasteboard.setData(samplePNG(), forType: .png)
@@ -131,7 +152,7 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         defer { closeAndDrain(window) }
         XCTAssertTrue(window.firstResponder === view)
 
-        NSApp.sendEvent(keyEvent(modifiers: .control, windowNumber: window.windowNumber))
+        window.sendEvent(keyEvent(modifiers: .control, windowNumber: window.windowNumber))
 
         let payload = try XCTUnwrap(sink.payloads.first.flatMap { String(data: $0, encoding: .utf8) })
         XCTAssertFalse(payload.contains("\u{16}"), "the window-delivered Ctrl+V must not send the raw control byte")
@@ -167,7 +188,7 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
     }
 
     private func makeBackgroundWindow(containing view: NSView) -> NSWindow {
-        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = CorralWindow(contentRect: view.frame)
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentView = view

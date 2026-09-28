@@ -66,18 +66,19 @@ final class SplitLayoutTests: XCTestCase {
         XCTAssertEqual(frames(tall)[b]?.height, 60)
     }
 
-    func testSinglePaneDropUsesTheVerticalMidlineWithHysteresis() throws {
+    func testSinglePaneSupportsAllFiveZonesAndRejectsSelfDrops() throws {
         let stage = CGRect(x: 0, y: 0, width: 1000, height: 600)
-        let left = try XCTUnwrap(SplitLayout.dropTarget(at: CGPoint(x: 400, y: 20), source: s, root: .session(a), in: stage))
-        XCTAssertEqual(left.target, a)
-        XCTAssertEqual(left.edge, .left)
-        XCTAssertEqual(left.previewFrame, CGRect(x: 0, y: 0, width: 497, height: 600), "the preview is the source's slot in the candidate tree")
-        XCTAssertEqual(SplitLayout.dropTarget(at: CGPoint(x: 600, y: 590), source: s, root: .session(a), in: stage)?.edge, .right)
-        XCTAssertEqual(SplitLayout.dropTarget(at: CGPoint(x: 502, y: 300), source: s, root: .session(a), in: stage, previous: left)?.edge, .left)
-        XCTAssertEqual(SplitLayout.dropTarget(at: CGPoint(x: 503, y: 300), source: s, root: .session(a), in: stage, previous: left)?.edge, .right)
-        XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 400, y: 20), source: a, root: .session(a), in: stage), "a pane never drops on itself")
+        for (point, zone) in [(CGPoint(x: 50, y: 300), WorkspaceDropZone.left),
+                              (CGPoint(x: 950, y: 300), .right), (CGPoint(x: 500, y: 20), .top),
+                              (CGPoint(x: 500, y: 580), .bottom), (CGPoint(x: 500, y: 300), .center)] {
+            let drop = try XCTUnwrap(SplitLayout.dropTarget(at: point, source: s, root: .session(a), in: stage))
+            XCTAssertEqual(drop.edge, zone)
+            XCTAssertEqual(drop.target, a)
+            let candidate = try XCTUnwrap(WorkspaceLayoutNode.session(a).dropping(s, onto: a, edge: zone))
+            XCTAssertEqual(drop.previewFrame, SplitLayout.project(candidate, in: stage).frame(of: s))
+        }
+        XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 400, y: 20), source: a, root: .session(a), in: stage))
         XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 1000, y: 20), source: s, root: .session(a), in: stage))
-
         let empty = try XCTUnwrap(SplitLayout.dropTarget(at: CGPoint(x: 10, y: 10), source: s, root: nil, in: stage))
         XCTAssertNil(empty.target)
         XCTAssertEqual(empty.previewFrame, stage)

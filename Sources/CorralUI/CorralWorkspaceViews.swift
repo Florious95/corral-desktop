@@ -49,8 +49,9 @@ public final class CorralTabBarView: NSView {
     public var onContextAction: ((UUID, String) -> Void)?
 
     private let itemsStack = NSStackView()
-    /// Clips overflowing tabs like `.tb-tabs-scroll`, so tab count can never widen the window.
-    private let tabsLane = NSView()
+    /// Keep every Tab reachable without letting its document widen the window.
+    private let tabsLane = NSScrollView()
+    private var revealSelectedTab = false
     private let bottomBorder = NSView()
     private let activeCapsule = NSView()
     private let trafficLightsSpacer = NSView()
@@ -70,7 +71,7 @@ public final class CorralTabBarView: NSView {
         itemsStack.orientation = .horizontal
         itemsStack.alignment = .centerY
         itemsStack.spacing = 4
-        itemsStack.translatesAutoresizingMaskIntoConstraints = false
+        itemsStack.translatesAutoresizingMaskIntoConstraints = true
         activeCapsule.wantsLayer = true
         activeCapsule.layer?.cornerRadius = 6
         activeCapsule.layer?.backgroundColor = CorralAestheticTokens.tabActiveBackground.cgColor
@@ -84,7 +85,14 @@ public final class CorralTabBarView: NSView {
         itemsStack.addSubview(activeCapsule, positioned: .below, relativeTo: nil)
         tabsLane.clipsToBounds = true
         tabsLane.translatesAutoresizingMaskIntoConstraints = false
-        tabsLane.addSubview(itemsStack)
+        tabsLane.automaticallyAdjustsContentInsets = false
+        tabsLane.contentInsets = NSEdgeInsets(top: 0, left: 1, bottom: 0, right: 1)
+        tabsLane.drawsBackground = false
+        tabsLane.borderType = .noBorder
+        tabsLane.hasVerticalScroller = false
+        tabsLane.hasHorizontalScroller = false
+        tabsLane.horizontalScrollElasticity = .allowed
+        tabsLane.documentView = itemsStack
         bottomBorder.wantsLayer = true
         bottomBorder.layer?.backgroundColor = CorralAestheticTokens.borderSubtle.cgColor
         bottomBorder.translatesAutoresizingMaskIntoConstraints = false
@@ -128,7 +136,6 @@ public final class CorralTabBarView: NSView {
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
             expandSidebarButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), expandSidebarButton.centerYAnchor.constraint(equalTo: centerYAnchor), expandSidebarButton.widthAnchor.constraint(equalToConstant: 28), expandSidebarButton.heightAnchor.constraint(equalToConstant: 26),
             itemsLeadingConstraint, tabsLane.centerYAnchor.constraint(equalTo: centerYAnchor), tabsLane.heightAnchor.constraint(equalToConstant: 28), laneHugsTabs,
-            itemsStack.leadingAnchor.constraint(equalTo: tabsLane.leadingAnchor, constant: 1), itemsStack.centerYAnchor.constraint(equalTo: tabsLane.centerYAnchor),
             createButton.leadingAnchor.constraint(equalTo: tabsLane.trailingAnchor, constant: 8), createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             createButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
             dragRegion.leadingAnchor.constraint(equalTo: createButton.trailingAnchor, constant: 8), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -152,6 +159,8 @@ public final class CorralTabBarView: NSView {
         for tab in self.tabs {
             itemsStack.addArrangedSubview(CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self))
         }
+        itemsStack.setFrameSize(NSSize(width: itemsStack.fittingSize.width, height: 28))
+        revealSelectedTab = true
         itemsStack.needsLayout = true
         needsLayout = true
     }
@@ -159,6 +168,10 @@ public final class CorralTabBarView: NSView {
     public override func layout() {
         super.layout()
         itemsStack.layoutSubtreeIfNeeded()
+        if revealSelectedTab, let item = itemsStack.arrangedSubviews.first(where: { ($0 as? CorralTabItemView)?.tab.id == selectedTabID }) {
+            item.scrollToVisible(item.bounds)
+            revealSelectedTab = false
+        }
         guard let selectedTabID, let item = itemsStack.arrangedSubviews.compactMap({ $0 as? CorralTabItemView }).first(where: { $0.tab.id == selectedTabID }), !item.tab.isPinned else {
             activeCapsule.isHidden = true; activeCapsuleFrame = nil; return
         }
@@ -200,7 +213,7 @@ public final class CorralTabBarView: NSView {
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let value = sender.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: value),
               let sourceIndex = tabs.firstIndex(where: { $0.id == id }) else { return false }
-        let x = convert(sender.draggingLocation, from: nil).x
+        let x = itemsStack.convert(sender.draggingLocation, from: nil).x
         let target = itemsStack.arrangedSubviews.compactMap { $0 as? CorralTabItemView }.first { x < $0.frame.midX }
         let targetIndex = target.flatMap { item in tabs.firstIndex(where: { $0.id == item.tab.id }) } ?? tabs.count
         let adjusted = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
@@ -219,6 +232,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     private let selected: Bool
     private var editField: CorralInlineRenameField?
     private var dragStart: NSPoint?
+    private var pressTime: TimeInterval = 0
     private var didStartDrag = false
 
     init(tab: CorralTab, selected: Bool, owner: CorralTabBarView) {
@@ -320,13 +334,14 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 { beginRename(); return }
         dragStart = convert(event.locationInWindow, from: nil)
+        pressTime = event.timestamp
         didStartDrag = false
-        owner?.select(tab.id)
     }
     override func mouseDragged(with event: NSEvent) {
         guard !didStartDrag, let dragStart else { return }
         let point = convert(event.locationInWindow, from: nil)
-        guard hypot(point.x - dragStart.x, point.y - dragStart.y) > 4 else { return }
+        guard event.timestamp - pressTime >= 0.18,
+              hypot(point.x - dragStart.x, point.y - dragStart.y) > 6 else { return }
         didStartDrag = true
         let writer = NSPasteboardItem()
         writer.setString(tab.id.uuidString, forType: .string)
@@ -335,8 +350,14 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         (tab.title as NSString).draw(at: NSPoint(x: 6, y: 6), withAttributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: CorralAestheticTokens.text])
         image.unlockFocus()
         let item = NSDraggingItem(pasteboardWriter: writer)
-        item.setDraggingFrame(convert(bounds, to: nil), contents: image)
+        item.setDraggingFrame(bounds, contents: image)
         beginDraggingSession(with: [item], event: event, source: self)
+    }
+    override func mouseUp(with event: NSEvent) {
+        defer { dragStart = nil }
+        guard dragStart != nil, !didStartDrag,
+              bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        owner?.select(tab.id)
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -581,19 +602,44 @@ final class CorralAgentTableView: NSTableView {
     var onAgentClick: ((SessionID, SessionOpenGesture) -> Void)?
     private var pressedSessionID: SessionID?
     private var pressedGesture: SessionOpenGesture = .singleClick
+    private var pressEvent: NSEvent?
     private var didDrag = false
+    private var dragging = false
 
     override func mouseDown(with event: NSEvent) {
         let row = self.row(at: convert(event.locationInWindow, from: nil))
         pressedSessionID = row >= 0 ? sessionIDForRow?(row) : nil
         pressedGesture = event.clickCount >= 2 ? .doubleClick : .singleClick
+        pressEvent = event
         didDrag = false
-        super.mouseDown(with: event)
+        dragging = false
+        // Agent rows have coordinator-owned selection. NSTableView's nested drag tracking
+        // consumes mouse-up; let this one gesture owner dispatch both clicks and drags.
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard let pressEvent, let sessionID = pressedSessionID, !dragging else { return }
+        let origin = pressEvent.locationInWindow, point = event.locationInWindow
+        guard hypot(point.x - origin.x, point.y - origin.y) > 4 else { return }
         didDrag = true
-        super.mouseDragged(with: event)
+        guard event.timestamp - pressEvent.timestamp >= 0.18 else { return }
+        dragging = true
+        let writer = NSPasteboardItem()
+        writer.setString(sessionID.rawValue, forType: CorralWorkspaceStageView.sessionPasteboardType)
+        let row = self.row(at: convert(origin, from: nil))
+        let rect = rect(ofRow: row)
+        let image = NSImage(size: rect.size)
+        if let bitmap = bitmapImageRepForCachingDisplay(in: rect) {
+            cacheDisplay(in: rect, to: bitmap)
+            image.addRepresentation(bitmap)
+        }
+        let item = NSDraggingItem(pasteboardWriter: writer)
+        item.setDraggingFrame(rect, contents: image)
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    override func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .move : []
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -602,10 +648,11 @@ final class CorralAgentTableView: NSTableView {
         let downSessionID = pressedSessionID
         let gesture = pressedGesture
         let wasDragged = didDrag
-        super.mouseUp(with: event)
         pressedSessionID = nil
+        pressEvent = nil
         pressedGesture = .singleClick
         didDrag = false
+        dragging = false
         dispatchClickIfCompleted(from: downSessionID, to: releasedSessionID, wasDragged: wasDragged, gesture: gesture)
     }
 

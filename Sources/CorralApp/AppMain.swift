@@ -111,6 +111,9 @@ enum LegacyDeviceStoreMigration {
 @MainActor
 final class CorralAppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: CorralApplicationCoordinator?
+#if DEBUG
+    private var acceptanceDriver: CorralAcceptanceDriver?
+#endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let environment = ProcessInfo.processInfo.environment
@@ -122,16 +125,27 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
 
     private func startCoordinator(environment: [String: String], background: Bool) async {
         do {
-            let credentials = AppDeviceCredentialVault()
-            try await LegacyDeviceStoreMigration.migrateIfNeeded(credentialVault: credentials)
+            var supportDirectory: URL?
+#if DEBUG
+            let acceptanceDirectory = try CorralAcceptanceDriver.directory(environment: environment)
+            supportDirectory = acceptanceDirectory?.appendingPathComponent("storage", isDirectory: true)
+#endif
+            let credentials: any DeviceCredentialVault
+            if let supportDirectory {
+                credentials = PrivateFileCredentialVault(directoryURL: supportDirectory.appendingPathComponent("credentials", isDirectory: true))
+            } else {
+                credentials = AppDeviceCredentialVault()
+                try await LegacyDeviceStoreMigration.migrateIfNeeded(credentialVault: credentials)
+            }
             let sessionLink = URLSessionSessionLink(codec: ProtocolV1Codec())
             let lifecycle = CoordinatorDeviceSessionLifecycle(sessionLink: sessionLink)
             let repository = try DeviceRepository(
+                applicationSupportDirectory: supportDirectory,
                 deletionConfirmer: AppKitDeviceDeletionConfirmer(),
                 sessionLifecycle: lifecycle
             )
-            let workspaceStore = try CorralWorkspaceStore()
-            let preferencesStore = try UserPreferencesStore()
+            let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
+            let preferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
             let coordinator = CorralApplicationCoordinator(
                 deviceRepository: repository,
                 credentialVault: credentials,
@@ -152,7 +166,19 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.activate(ignoringOtherApps: true)
             }
             await coordinator.start()
+#if DEBUG
+            if let acceptanceDirectory {
+                let driver = CorralAcceptanceDriver(directory: acceptanceDirectory, coordinator: coordinator)
+                acceptanceDriver = driver
+                driver.start()
+            }
+#endif
         } catch {
+            if background {
+                FileHandle.standardError.write(Data("Corral Native could not start: \(error)\n".utf8))
+                NSApp.terminate(nil)
+                return
+            }
             let alert = NSAlert()
             alert.messageText = "Corral Native could not start"
             alert.informativeText = String(describing: error)

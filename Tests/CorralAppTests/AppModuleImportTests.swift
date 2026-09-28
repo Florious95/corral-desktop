@@ -1645,6 +1645,269 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try? FileManager.default.removeItem(at: telemetryURL)
     }
 
+    // These events are addressed only to this test process's window; no host HID is posted.
+    private func interactionClick(_ view: NSView, at point: CGPoint, jitter: CGFloat = 0, count: Int = 1) throws {
+        let window = try XCTUnwrap(view.window)
+        var events: [NSEvent] = []
+        for (type, offset) in [(NSEvent.EventType.leftMouseDown, CGFloat(0)), (.leftMouseDragged, jitter), (.leftMouseUp, jitter)] {
+            if type == .leftMouseDragged && jitter == 0 { continue }
+            let event = try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: view.convert(CGPoint(x: point.x + offset, y: point.y), to: nil),
+                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1
+            ))
+            events.append(event)
+        }
+        // NSTableView may run a nested tracking loop in mouseDown. Queue the rest of the
+        // gesture first, exactly as the app event queue does for a user's release.
+        for event in events.dropFirst() { NSApp.postEvent(event, atStart: false) }
+        window.sendEvent(events[0])
+        while let event = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantPast, inMode: .default, dequeue: true) {
+            window.sendEvent(event)
+        }
+    }
+
+    private func interactionFixture() async throws -> (CorralApplicationCoordinator, RecordingSessionLink, [SessionReference]) {
+        _ = NSApplication.shared
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws", "CORRAL_NATIVE_TOKEN": "fixture-only",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+        await coordinator.start()
+        let refs = try ["interaction-A", "interaction-B"].map(SessionReference.init)
+        let records = refs.map { WireSessionRecord(reference: $0, name: $0.rawValue, workingDirectory: "/fixture", state: .idle, rows: 24, columns: 80) }
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: 2, aggregateState: .idle, sessions: records)
+        ]))))
+        let ready = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[0].rawValue) }
+        XCTAssertTrue(ready)
+        return (coordinator, link, refs)
+    }
+
+    func testInteractionSidebarMicroMotionStillPreviewsAndDoubleClickPersists() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        let host = try XCTUnwrap(coordinator.workspaceState.activeTab)
+        let agent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == refs[1].rawValue })
+        let sessionID = try XCTUnwrap(agent.sessionID)
+        for jitter: CGFloat in [0.2, 1, 3, 4] {
+            let sidebar = coordinator.workspaceView.sidebar
+            let index = try XCTUnwrap(sidebar.agents.firstIndex { $0.id == agent.id })
+            window.contentView?.layoutSubtreeIfNeeded()
+            let rect = sidebar.agentsTable.rect(ofRow: index)
+            try interactionClick(sidebar.agentsTable, at: CGPoint(x: rect.midX, y: rect.midY), jitter: jitter)
+            let previewed = await waitUntil(timeout: .seconds(1)) { coordinator.workspaceState.previewUID == sessionID }
+            XCTAssertTrue(previewed, "\(jitter)pt of hand motion must preserve a click")
+            XCTAssertEqual(coordinator.workspaceState.activeTab, host)
+            await coordinator.closeWorkspacePane(sessionID)
+        }
+        let table = coordinator.workspaceView.sidebar.agentsTable
+        let index = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.firstIndex { $0.id == agent.id })
+        let rect = table.rect(ofRow: index)
+        try interactionClick(table, at: CGPoint(x: rect.midX, y: rect.midY), count: 2)
+        let permanent = await waitUntil { coordinator.workspaceState.activeTab?.sessionIDs == [sessionID] && coordinator.workspaceState.previewUID == nil }
+        XCTAssertTrue(permanent)
+        XCTAssertEqual(coordinator.workspaceState.tabs.count, 2)
+        XCTAssertEqual(coordinator.workspaceState.tabs.first(where: { $0.id == host.id }), host)
+        try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("B-NONCE-visible".utf8))))
+        let rendered = await waitUntil { self.terminalText(coordinator, reference: refs[1]).contains("B-NONCE-visible") }
+        XCTAssertTrue(rendered)
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testInteractionNewTabDoesNotCoverTerminalAndEmptyTabClearsResponder() async throws {
+        let (coordinator, _, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        await coordinator.createWorkspaceTab()
+        XCTAssertFalse(window.firstResponder is TerminalView, "a blank Tab must not type into its hidden predecessor")
+        let agent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == refs[1].rawValue })
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(agent.sessionID), .singleClick)
+        let opened = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[1].rawValue) }
+        XCTAssertTrue(opened)
+        let view = try XCTUnwrap(coordinator.terminalView(for: refs[1]))
+        window.contentView?.layoutSubtreeIfNeeded()
+        let content = try XCTUnwrap(window.contentView)
+        let point = content.convert(CGPoint(x: 50, y: 100), from: view)
+        XCTAssertTrue(content.hitTest(point) === view, "the real terminal must receive mouse events through the complete workspace hierarchy")
+        window.makeFirstResponder(nil)
+        try interactionClick(view, at: CGPoint(x: 50, y: 100))
+        XCTAssertTrue(window.firstResponder === view)
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testInteractionListingRefreshPreservesExplicitBlankTabForTheNextSelection() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        await coordinator.createWorkspaceTab()
+        let blankID = coordinator.workspaceState.activeTabID
+        let records = refs.map { WireSessionRecord(reference: $0, name: "refreshed-" + $0.rawValue, workingDirectory: "/fixture", state: .idle, rows: 24, columns: 80) }
+        try await link.emit(.control(.listing(SessionListing(requestID: 2, sequence: 2, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: 2, aggregateState: .idle, sessions: records)
+        ]))))
+        let refreshed = await waitUntil { coordinator.workspaceView.sidebar.agents.allSatisfy { $0.name.hasPrefix("refreshed-") } }
+        XCTAssertTrue(refreshed)
+        XCTAssertEqual(coordinator.workspaceState.activeTabID, blankID)
+        XCTAssertTrue(coordinator.workspaceState.activeTab?.isBlank == true)
+        let agent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name.hasSuffix(refs[1].rawValue) })
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(agent.sessionID), .singleClick)
+        let selected = await waitUntil { coordinator.workspaceState.visibleSessionID == agent.sessionID }
+        XCTAssertTrue(selected)
+        XCTAssertEqual(coordinator.workspaceState.activeTabID, blankID)
+        XCTAssertNil(coordinator.workspaceState.previewUID)
+        await coordinator.stop()
+        coordinator.windowController.window?.close()
+    }
+
+    func testInteractionTypingBeforeSubscribeReceiptIsDeliveredOnceInOrder() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        await link.suspendNextSubscribe()
+        let agent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == refs[1].rawValue })
+        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(agent.sessionID), .singleClick)
+        let suspended = await waitUntil { await link.isSubscribeSuspended(for: refs[1]) }
+        XCTAssertTrue(suspended)
+        let view = try XCTUnwrap(coordinator.terminalView(for: refs[1]))
+        window.makeFirstResponder(view)
+        view.insertText("早", replacementRange: NSRange(location: NSNotFound, length: 0))
+        view.insertText("到", replacementRange: NSRange(location: NSNotFound, length: 0))
+        await link.releaseSuspendedSubscribe()
+        let delivered = await waitUntil(timeout: .seconds(1)) {
+            await link.commands().filter { if case .input = $0 { true } else { false } }.count == 2
+        }
+        XCTAssertTrue(delivered, "keys typed while subscribe is pending must not disappear")
+        let inputs = await link.commands().compactMap { command -> ClientInputRequest? in if case let .input(request) = command { request } else { nil } }
+        XCTAssertEqual(inputs.map(\.reference), [refs[1], refs[1]])
+        XCTAssertEqual(inputs.map(\.payload), [.bytes(Data("早".utf8)), .bytes(Data("到".utf8))])
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testInteractionFirstClickInOtherPaneAlsoSendsSGRMouseReport() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        let firstID = try XCTUnwrap(coordinator.workspaceState.visibleSessionID)
+        let key = SessionKey(deviceID: try XCTUnwrap(coordinator.activeTerminalSessionKey).deviceID, reference: refs[1])
+        await coordinator.splitWorkspacePane(key, target: firstID, edge: .right)
+        let first = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        try await link.emit(.frame(.snapshot(reference: refs[0], ansi: Data("\u{1b}[?1000h\u{1b}[?1006hFIRST".utf8))))
+        let rendered = await waitUntil { self.terminalText(coordinator, reference: refs[0]).contains("FIRST") }
+        XCTAssertTrue(rendered)
+        window.contentView?.layoutSubtreeIfNeeded()
+        try interactionClick(first, at: CGPoint(x: 70, y: 90))
+        let clicked = await waitUntil(timeout: .seconds(1)) {
+            await link.commands().contains { command in
+                if case let .input(request) = command, request.reference == refs[0], case let .bytes(bytes) = request.payload {
+                    return bytes.starts(with: [0x1b, 0x5b, 0x3c])
+                }
+                return false
+            }
+        }
+        XCTAssertTrue(clicked, "focusing a pane must not consume the terminal's first mouse down")
+        XCTAssertTrue(window.firstResponder === first)
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testInteractionLargeUnicodePasteFitsEveryWireEnvelopeWithoutLoss() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        let text = String(repeating: "中文", count: 12_000)
+        terminal.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        let delivered = await waitUntil {
+            await link.commands().compactMap { command -> Data? in
+                if case let .input(request) = command, case let .bytes(bytes) = request.payload { return bytes }
+                return nil
+            }.reduce(0) { $0 + $1.count } == text.utf8.count
+        }
+        XCTAssertTrue(delivered)
+        let inputs = await link.commands().compactMap { command -> ClientInputRequest? in
+            if case let .input(request) = command { return request }
+            return nil
+        }
+        var received = Data()
+        for request in inputs {
+            XCTAssertEqual(request.reference, refs[0])
+            XCTAssertLessThanOrEqual(try ProtocolV1Codec().encodeClientCommand(.input(request)).count, 65_536)
+            if case let .bytes(bytes) = request.payload { received.append(bytes) }
+        }
+        XCTAssertEqual(received, Data(text.utf8))
+        await coordinator.stop()
+        coordinator.windowController.window?.close()
+    }
+
+    func testInteractionStaleListingSizeCannotSuppressTheNextSplitResize() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let firstID = try XCTUnwrap(coordinator.workspaceState.visibleSessionID)
+        let key = SessionKey(deviceID: try XCTUnwrap(coordinator.activeTerminalSessionKey).deviceID, reference: refs[1])
+        await coordinator.splitWorkspacePane(key, target: firstID, edge: .right)
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        let narrow = GridSize(rows: terminal.getTerminal().rows, columns: terminal.getTerminal().cols)
+        try await Task.sleep(for: .milliseconds(50))
+        let secondID = try XCTUnwrap(coordinator.workspaceState.visibleSessionID)
+        await coordinator.closeWorkspacePane(secondID)
+        try await Task.sleep(for: .milliseconds(50))
+        // The list was captured before the preceding full-width resize finished.
+        let stale = WireSessionRecord(reference: refs[0], name: "stale-size", workingDirectory: "/fixture", state: .idle,
+            rows: UInt16(narrow.rows), columns: UInt16(narrow.columns))
+        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 2, changedSessions: [stale]))))
+        let listed = await waitUntil { coordinator.workspaceView.sidebar.agents.contains { $0.name == "stale-size" } }
+        XCTAssertTrue(listed)
+        let before = await link.commands().count
+        await coordinator.splitWorkspacePane(key, target: firstID, edge: .right)
+        let resized = await waitUntil(timeout: .seconds(1)) {
+            await link.commands().dropFirst(before).contains(.resize(reference: refs[0], size: narrow))
+        }
+        XCTAssertTrue(resized, "the last sent width was full-width; an old catalog width is not the last requested grid")
+        await coordinator.stop()
+        coordinator.windowController.window?.close()
+    }
+
+    func testInteractionDividerReceivesWindowEventsAndCommitsItsFinalPosition() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        let firstID = try XCTUnwrap(coordinator.workspaceState.visibleSessionID)
+        let key = SessionKey(deviceID: try XCTUnwrap(coordinator.activeTerminalSessionKey).deviceID, reference: refs[1])
+        await coordinator.splitWorkspacePane(key, target: firstID, edge: .right)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let overlay = coordinator.workspaceView.stageContainer.splitView
+        let divider = try XCTUnwrap(overlay.projection.dividers.first)
+        let point = CGPoint(x: divider.frame.midX, y: divider.frame.midY)
+        let initialWidth = try XCTUnwrap(overlay.projection.panes.first).frame.width
+        let content = try XCTUnwrap(window.contentView)
+        XCTAssertTrue(content.hitTest(content.convert(point, from: overlay)) === overlay)
+        try await Task.sleep(for: .milliseconds(50))
+        let beforeResize = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
+        for (type, offset) in [(NSEvent.EventType.leftMouseDown, CGFloat(0)), (.leftMouseDragged, 90), (.leftMouseUp, 90)] {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: type,
+                location: overlay.convert(CGPoint(x: point.x + offset, y: point.y), to: nil), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+            window.sendEvent(event)
+            if type == .leftMouseDown { XCTAssertEqual(overlay.activeDividerPath, "root") }
+            if type == .leftMouseDragged {
+                XCTAssertEqual(overlay.projection.panes.first?.frame.width, initialWidth + 90)
+                try await Task.sleep(for: .milliseconds(50))
+                let resizing = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
+                XCTAssertEqual(resizing, beforeResize, "drag preview is local; only the committed grid resizes the PTY")
+            }
+        }
+        let committed = await waitUntil(timeout: .seconds(1)) {
+            overlay.projection.panes.first?.frame.width == initialWidth + 90 && overlay.activeDividerPath == nil
+        }
+        XCTAssertTrue(committed)
+        let resized = await waitUntil(timeout: .seconds(1)) {
+            await link.commands().filter { if case .resize = $0 { true } else { false } }.count == beforeResize + 2
+        }
+        XCTAssertTrue(resized, "release sends one final resize to each affected pane")
+        await coordinator.stop()
+        window.close()
+    }
+
     private func makeCoordinator(
         link: any SessionLinkProtocol,
         atlas: GlyphAtlasPool,

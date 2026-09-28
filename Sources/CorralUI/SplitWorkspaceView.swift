@@ -44,6 +44,7 @@ public final class SplitWorkspaceView: NSView {
     public required init?(coder: NSCoder) { fatalError("SplitWorkspaceView is created programmatically") }
     public override var isFlipped: Bool { true }
     public override var isOpaque: Bool { false }
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     public func update(root: WorkspaceLayoutNode?, focusedSessionID: SessionID?) {
         if root != self.root { endDrag(committing: false) }
@@ -119,9 +120,8 @@ public final class SplitWorkspaceView: NSView {
     public override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, let superview else { return nil }
         let local = convert(point, from: superview)
-        if let button = closeButtons.values.first(where: { $0.frame.contains(local) }) { return button }
+        if let button = closeButtons.values.first(where: { $0.alphaValue > 0 && $0.frame.contains(local) }) { return button }
         if divider(at: local) != nil { return self }
-        if projection.panes.count > 1, let pane = pane(at: local), pane.sessionID != focusedSessionID { return self }
         return nil
     }
 

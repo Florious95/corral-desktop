@@ -3,10 +3,6 @@ import CorralMetalTerminal
 import CorralUI
 @preconcurrency import SwiftTerm
 
-private struct LocalPasteMonitorToken: @unchecked Sendable {
-    let value: Any
-}
-
 @MainActor
 final class CorralNativeTerminalView: TerminalView {
     static let defaultForegroundColor = NSColor(srgbRed: 213.0 / 255, green: 220.0 / 255, blue: 230.0 / 255, alpha: 1)
@@ -14,8 +10,8 @@ final class CorralNativeTerminalView: TerminalView {
 
     private let pasteboard: NSPasteboard
     private var displayFilter = CorralTerminalFilter()
-    private var controlVPasteMonitor: LocalPasteMonitorToken?
     private var inputEnabled = true
+    var onFocus: (() -> Void)?
     var onDiscardedAutomaticReply: ((Int) -> Void)?
 
     override init(frame: CGRect) {
@@ -36,15 +32,20 @@ final class CorralNativeTerminalView: TerminalView {
         installDarkColors()
     }
 
-    deinit {
-        if let controlVPasteMonitor { NSEvent.removeMonitor(controlVPasteMonitor.value) }
-    }
-
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        onFocus?()
+        super.mouseDown(with: event)
+    }
 
     func setTerminalFont(family: String, size: Int) {
         let pointSize = CGFloat(size)
-        font = NSFont(name: family, size: pointSize) ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        let resolved = family.split(separator: ",").lazy.compactMap { candidate in
+            NSFont(name: String(candidate).trimmingCharacters(in: CharacterSet(charactersIn: " \"'\t")), size: pointSize)
+        }.first ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        if font != resolved { font = resolved }
     }
 
     private func installDarkColors() {
@@ -98,14 +99,31 @@ final class CorralNativeTerminalView: TerminalView {
         return Color(red8: component(color.redComponent), green8: component(color.greenComponent), blue8: component(color.blueComponent))
     }
 
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if window !== newWindow { removeControlVPasteMonitor() }
-        super.viewWillMove(toWindow: newWindow)
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if inputEnabled { installControlVPasteMonitor() }
+        updateBackingScale()
+        if let window = window as? CorralWindow {
+            window.onTerminalKeyDown = { [weak window] event in
+                guard let window, event.window === window,
+                      let view = window.firstResponder as? CorralNativeTerminalView,
+                      view.inputEnabled else { return false }
+                return view.handleControlVPaste(event: event)
+            }
+        }
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateBackingScale()
+    }
+
+    private func updateBackingScale() {
+        guard let window else { return }
+        layer?.contentsScale = window.backingScaleFactor
+        // SwiftTerm snaps cell metrics in its font setter using the current window scale.
+        let currentFont = font
+        font = currentFont
+        needsDisplay = true
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -160,7 +178,7 @@ final class CorralNativeTerminalView: TerminalView {
         terminalDelegate?.send(source: self, data: data)
     }
 
-    /// Shared by the local event monitor and synthetic-event tests.
+    /// Ctrl+V belongs to the terminal responder, alongside ordinary keyboard input.
     func handleControlVPaste(event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
@@ -169,34 +187,7 @@ final class CorralNativeTerminalView: TerminalView {
         return true
     }
 
-    func setInputEnabled(_ enabled: Bool) {
-        guard inputEnabled != enabled else { return }
-        inputEnabled = enabled
-        if enabled { installControlVPasteMonitor() }
-        else { removeControlVPasteMonitor() }
-    }
-
-    private func installControlVPasteMonitor() {
-        removeControlVPasteMonitor()
-        guard window != nil else { return }
-        guard let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            guard let self else { return event }
-            let consumed = MainActor.assumeIsolated {
-                event.window === self.window
-                    && self.window?.firstResponder === self
-                    && self.handleControlVPaste(event: event)
-            }
-            return consumed ? nil : event
-        }) else { return }
-        controlVPasteMonitor = LocalPasteMonitorToken(value: monitor)
-    }
-
-    private func removeControlVPasteMonitor() {
-        if let controlVPasteMonitor {
-            NSEvent.removeMonitor(controlVPasteMonitor.value)
-            self.controlVPasteMonitor = nil
-        }
-    }
+    func setInputEnabled(_ enabled: Bool) { inputEnabled = enabled }
 
     private func handleCommandVPaste() {
         if !pasteFromClipboard(trigger: .commandV) { super.paste(self) }
