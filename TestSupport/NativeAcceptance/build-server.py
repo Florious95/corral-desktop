@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the desktop-pinned real daemon from Git, without modifying its checkout."""
+"""Build the native acceptance daemon from Git, without modifying its checkout."""
 import argparse
 import hashlib
 import json
@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMIT = 'a472d4437885060bc0eaf1838c9149e5242948cb'
+COMMIT = 'f664ec3fde8c96b8d326802dfc92020a2ff818a3'
 parser = argparse.ArgumentParser()
 parser.add_argument('--repository', type=Path, required=True)
 args = parser.parse_args()

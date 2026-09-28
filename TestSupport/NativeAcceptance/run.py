@@ -106,7 +106,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         assert daemon.resolve().is_relative_to((ROOT / '.build').resolve()), 'only a private test binary copy is accepted'
         server_identity = json.loads(daemon.with_name('build.json').read_text())
         if not self.server_binary:
-            assert server_identity['commit'] == 'a472d4437885060bc0eaf1838c9149e5242948cb'
+            assert server_identity['commit'] == 'f664ec3fde8c96b8d326802dfc92020a2ff818a3', 'rebuild the daemon with build-server.py'
         assert hashlib.sha256(daemon.read_bytes()).hexdigest() == server_identity['sha256']
         daemon_process = self.start_process([str(daemon), '-listen', f'127.0.0.1:{port}', '-state-dir', str(self.directory / 'server-state'),
                                             '-upload-dir', str(self.directory / 'uploads')], env, 'daemon')

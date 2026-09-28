@@ -1,7 +1,7 @@
 # Isolated packaged-app acceptance
 
 This runner launches the candidate `.app` executable, a real daemon built from
-the desktop-pinned Corral Core commit, and four real tmux PTYs. It uses only
+the pinned Corral Core commit, and four real tmux PTYs. It uses only
 events addressed to that application's own AppKit window. It never activates
 the app, posts global HID events, opens port 9900, uses the general clipboard,
 or opens the user's device/workspace stores.
@@ -29,7 +29,8 @@ python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-deskto
 ```
 
 The ten-session cases check each preview, permanent Tab and reverse return by
-screenshot OCR. Departed previews must release their subscriptions; permanent
+screenshot OCR and fresh input echo or advancing output; a stale snapshot
+cannot satisfy the live-stream assertion. Departed previews must release their subscriptions; permanent
 Tabs retain them. The stress case keeps nine PTYs producing output, starts the
 sixth completely empty, verifies actual input/echo, and performs 54 rapid
 sidebar clicks before opening all ten permanent Tabs. Window resizing covers
@@ -39,9 +40,13 @@ An optional `--server-binary` must name a private `.build` binary copy whose
 SHA256 matches its adjacent `build.json`; this can test a deployed binary
 without contacting or restarting its production process.
 
-The server builder extracts exactly `a472d4437885060bc0eaf1838c9149e5242948cb`
+The server builder extracts exactly `f664ec3fde8c96b8d326802dfc92020a2ff818a3`
 from Git without changing that repository, then records the source tree,
-compiler and binary hash. The older `Fixtures/bin/agentmirrord` is unsuitable
+compiler and binary hash. This includes the connection-scoped reflow epoch
+fix: older daemons can silently discard all new deltas after a resized session
+is unsubscribed and reopened. Updating the client alone does not fix that
+server-side failure. Fetch `fix/native-preview-epoch` from Corral Core if the
+pinned object is missing. The older `Fixtures/bin/agentmirrord` is unsuitable
 for input acceptance: it ACKs unsupported `input.bytes` as successful bare
 Enter. The runner forwards protocol frames unchanged; it does not emulate or
 repair the service. The nodeprobe tmux adapter rejects all sockets except its
