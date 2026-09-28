@@ -1787,6 +1787,43 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testAbandonedPreviewReleasesSubscriptionAndIgnoresLateReceipt() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        let host = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        let agents = coordinator.workspaceView.sidebar.agents
+        let previewID = try XCTUnwrap(agents.first { $0.name == refs[1].rawValue }?.sessionID)
+        await link.suspendNextSubscribe()
+        coordinator.workspaceView.onSelectAgent?(previewID, .singleClick)
+        let pending = await waitUntil { await link.isSubscribeSuspended(for: refs[1]) }
+        XCTAssertTrue(pending)
+        let abandoned = try XCTUnwrap(coordinator.terminalView(for: refs[1]))
+        coordinator.workspaceView.previewExitButton.performClick(nil)
+        let removed = await waitUntil {
+            let commands = await link.commands()
+            return coordinator.terminalView(for: refs[1]) == nil && commands.contains(.unsubscribe(reference: refs[1]))
+        }
+        XCTAssertTrue(removed)
+        await link.releaseSuspendedSubscribe()
+        try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("STALE PREVIEW".utf8))))
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertNil(coordinator.terminalView(for: refs[1]))
+        XCTAssertEqual(coordinator.subscribedSessionIDs, [refs[0].rawValue])
+        XCTAssertTrue(coordinator.terminalView(for: refs[0]) === host)
+        XCTAssertTrue(window.firstResponder === host)
+        coordinator.workspaceView.onSelectAgent?(previewID, .singleClick)
+        let reopened = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[1].rawValue) }
+        XCTAssertTrue(reopened)
+        let current = try XCTUnwrap(coordinator.terminalView(for: refs[1]))
+        XCTAssertFalse(current === abandoned)
+        try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("NEW PREVIEW".utf8))))
+        let rendered = await waitUntil { self.visibleText(in: current).contains("NEW PREVIEW") }
+        XCTAssertTrue(rendered)
+        XCTAssertFalse(visibleText(in: current).contains("STALE PREVIEW"))
+        await coordinator.stop()
+        window.close()
+    }
+
     func testInteractionFirstClickInOtherPaneAlsoSendsSGRMouseReport() async throws {
         let (coordinator, link, refs) = try await interactionFixture()
         let window = try XCTUnwrap(coordinator.windowController.window)

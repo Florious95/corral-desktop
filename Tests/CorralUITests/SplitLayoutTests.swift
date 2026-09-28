@@ -17,6 +17,17 @@ final class SplitLayoutTests: XCTestCase {
         Dictionary(uniqueKeysWithValues: projection.panes.map { ($0.sessionID, $0.frame) })
     }
 
+    func testNarrowProjectionAdjustsNestedRatiosBeforeViolatingPaneMinimums() {
+        let root = columns(0.5, columns(0.1, .session(a), .session(b)), .session(c))
+        let bounds = CGRect(x: 0, y: 0, width: 372, height: 240)
+        let projection = SplitLayout.project(root, in: bounds)
+        XCTAssertEqual(projection.panes.count, 3)
+        for pane in projection.panes {
+            XCTAssertEqual(pane.frame.width, 120)
+            XCTAssertTrue(bounds.contains(pane.frame))
+        }
+    }
+
     func testProjectionLeavesSixPointGapsWithRemainderToTheSecondChild() {
         let pair = SplitLayout.project(columns(0.5, .session(a), .session(b)), in: CGRect(x: 0, y: 0, width: 1001, height: 600))
         XCTAssertEqual(frames(pair), [a: CGRect(x: 0, y: 0, width: 497, height: 600), b: CGRect(x: 503, y: 0, width: 498, height: 600)])
@@ -54,7 +65,7 @@ final class SplitLayoutTests: XCTestCase {
         XCTAssertEqual(SplitLayout.minimumExtent(of: .session(a), along: .vertical), 60)
         let nested = columns(0.5, .session(a), columns(0.5, .session(b), .session(c)))
         XCTAssertEqual(SplitLayout.minimumExtent(of: columns(0.5, .session(b), .session(c)), along: .horizontal), 246)
-        XCTAssertEqual(SplitLayout.minimumExtent(of: nested, along: .horizontal), 498, "ratio-aware: 246 / 0.5 + 6")
+        XCTAssertEqual(SplitLayout.minimumExtent(of: nested, along: .horizontal), 372, "three panes plus two gaps; ratios adapt to fit")
         XCTAssertEqual(SplitLayout.minimumExtent(of: nested, along: .vertical), 60)
         XCTAssertEqual(SplitLayout.minimumExtent(of: rows(0.5, .session(a), .session(b)), along: .vertical), 126)
 

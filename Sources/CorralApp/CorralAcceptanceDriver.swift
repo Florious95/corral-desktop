@@ -84,6 +84,16 @@ final class CorralAcceptanceDriver {
         window.contentView?.layoutSubtreeIfNeeded()
         switch command["op"] as? String {
         case "state": break
+        case "resize-window":
+            guard let width = command["width"] as? CGFloat, let height = command["height"] as? CGFloat,
+                  width > 0, height > 0 else { throw Failure.invalidCommand }
+            window.setContentSize(NSSize(width: width, height: height))
+        case "sidebar-sequence":
+            guard let sessions = command["sessions"] as? [String] else { throw Failure.invalidCommand }
+            for session in sessions {
+                try await perform(["op": "sidebar", "session": session])
+                try await Task.sleep(for: .milliseconds(30))
+            }
         case "sidebar":
             guard let session = command["session"] as? String,
                   let row = workspace.sidebar.agents.firstIndex(where: { $0.sessionID?.rawValue == session }) else { throw Failure.missingView }
@@ -234,6 +244,8 @@ final class CorralAcceptanceDriver {
         return [
             "pid": ProcessInfo.processInfo.processIdentifier, "windowID": window.windowNumber,
             "windowFrame": rect(window.frame), "backingScale": window.backingScaleFactor,
+            "workspaceFrame": rect(workspace.frame), "sidebarFrame": rect(workspace.sidebar.frame),
+            "stageFrame": rect(workspace.stageContainer.frame),
             "connected": coordinator.connected, "lastError": coordinator.lastConnectionError ?? "",
             "workspace": try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)),
             "subscribed": coordinator.subscribedSessionIDs, "panes": panes,

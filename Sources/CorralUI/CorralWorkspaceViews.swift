@@ -819,7 +819,7 @@ public final class CorralSidebarView: NSView {
         configureScroll(spacesScroll, table: spacesTable); configureScroll(agentsScroll, table: agentsTable)
         spacesHeader.onToggle = { [weak self] in self?.setSpacesExpanded(!(self?.spacesExpanded ?? true)) }
         agentsHeader.onToggle = { [weak self] in self?.setAgentsExpanded(!(self?.agentsExpanded ?? true)) }
-        // The host card is (12, 222×35); the 34×35 settings target sits 8pt from the edge.
+        // The host card shares the footer with the fixed-size settings target.
         let footer = NSView()
         footerBorder.wantsLayer = true; footerBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor; footerBorder.translatesAutoresizingMaskIntoConstraints = false
         devicesButton.title = "查看所有主机"
@@ -830,7 +830,7 @@ public final class CorralSidebarView: NSView {
         for view in [footerBorder, devicesButton, settingsButton] { footer.addSubview(view) }
         NSLayoutConstraint.activate([
             footerBorder.leadingAnchor.constraint(equalTo: footer.leadingAnchor), footerBorder.trailingAnchor.constraint(equalTo: footer.trailingAnchor), footerBorder.topAnchor.constraint(equalTo: footer.topAnchor), footerBorder.heightAnchor.constraint(equalToConstant: 1),
-            devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), devicesButton.widthAnchor.constraint(equalToConstant: 222), devicesButton.heightAnchor.constraint(equalToConstant: 35),
+            devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), devicesButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -4), devicesButton.heightAnchor.constraint(equalToConstant: 35),
             settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -8), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 34), settingsButton.heightAnchor.constraint(equalToConstant: 35)
         ])
         let stack = NSStackView(views: [spacesHeader, spacesScroll, agentsHeader, agentsScroll, footer])
@@ -840,6 +840,7 @@ public final class CorralSidebarView: NSView {
         spacesHeight = spacesScroll.heightAnchor.constraint(equalToConstant: 0)
         let agentsFill = agentsScroll.heightAnchor.constraint(equalToConstant: 10_000); agentsFill.priority = .defaultLow
         NSLayoutConstraint.activate([
+            footer.widthAnchor.constraint(equalTo: widthAnchor),
             spacesHeader.heightAnchor.constraint(equalToConstant: CorralSidebarSectionHeader.height), agentsHeader.heightAnchor.constraint(equalToConstant: CorralSidebarSectionHeader.height),
             spacesHeight, agentsFill, footer.heightAnchor.constraint(equalToConstant: Self.footerHeight),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor), stack.trailingAnchor.constraint(equalTo: trailingAnchor), stack.topAnchor.constraint(equalTo: topAnchor), stack.bottomAnchor.constraint(equalTo: bottomAnchor)
@@ -849,6 +850,9 @@ public final class CorralSidebarView: NSView {
     }
 
     public override func layout() {
+        let spacesLimit = max(0, bounds.height - 2 * CorralSidebarSectionHeader.height - Self.footerHeight - 2 * Self.agentRowHeight)
+        let height = min(CGFloat(spaces.count) * Self.spaceRowHeight, Self.spacesMaximumHeight, spacesLimit)
+        if spacesHeight.constant != height { spacesHeight.constant = height }
         super.layout()
         sizeDocumentView(spacesTable, in: spacesScroll)
         sizeDocumentView(agentsTable, in: agentsScroll)
@@ -1106,7 +1110,7 @@ public final class CorralSidebarTitleBarView: NSView {
         collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏"); collapseButton.setAccessibilityIdentifier("corral.sidebar.toggle")
         NSLayoutConstraint.activate([
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
-            collapseButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 243), collapseButton.topAnchor.constraint(equalTo: topAnchor, constant: 5), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 27),
+            collapseButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9), collapseButton.topAnchor.constraint(equalTo: topAnchor, constant: 5), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 27),
             dragRegion.leadingAnchor.constraint(equalTo: trafficLightsSpacer.trailingAnchor), dragRegion.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor), bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor), bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor), bottomBorder.heightAnchor.constraint(equalToConstant: 1)
         ])
@@ -1220,6 +1224,13 @@ public final class CorralWorkspaceView: NSView {
         if let first = orderedTabs.first { selectTab(id: first.id) }
     }
     public required init?(coder: NSCoder) { fatalError("CorralWorkspaceView is created programmatically") }
+    public override func layout() {
+        // Keep both the sidebar and two minimum-width terminal panes usable in
+        // a one-third-width desktop window. Wide windows retain the full sidebar.
+        let width = sidebarIsVisible ? min(Self.sidebarWidth, max(180, bounds.width - 300)) : 0
+        if sidebarColumnWidth.constant != width { sidebarColumnWidth.constant = width }
+        super.layout()
+    }
     public func addTab(_ tab: CorralTab, select: Bool = true) { guard !tabs.contains(where: { $0.id == tab.id }) else { return }; attach(tab); tabs.append(tab); stageContainer.showEmptyState(false, action: nil); tabBar.setTabs(tabs, selectedTabID: activeTabID); if select || activeTabID == nil { selectTab(id: tab.id) } }
     public func synchronizeWorkspaceTabs(_ tabs: [CorralTab], selectedTabID: UUID, previewSessionID: UUID?) {
         let ordered = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }

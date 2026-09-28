@@ -45,15 +45,15 @@ public enum SplitLayout {
         public let previewFrame: CGRect
     }
 
-    /// Smallest extent along an axis that keeps every leaf of the subtree at its minimum under its current ratios.
+    /// Smallest extent along an axis that fits all leaves; projection clamps
+    /// persisted ratios independently as a window becomes narrower.
     public static func minimumExtent(of node: WorkspaceLayoutNode, along direction: SplitDirection) -> CGFloat {
         switch node {
         case .session: return direction == .horizontal ? minimumPaneWidth : minimumPaneHeight
-        case let .split(splitDirection, ratio, first, second):
+        case let .split(splitDirection, _, first, second):
             let minimumFirst = minimumExtent(of: first, along: direction), minimumSecond = minimumExtent(of: second, along: direction)
             guard splitDirection == direction else { return max(minimumFirst, minimumSecond) }
-            let share = CGFloat(validRatio(ratio))
-            return max(minimumFirst + gap + minimumSecond, max((minimumFirst / share).rounded(.up), (minimumSecond / (1 - share)).rounded(.up)) + gap)
+            return minimumFirst + gap + minimumSecond
         }
     }
 

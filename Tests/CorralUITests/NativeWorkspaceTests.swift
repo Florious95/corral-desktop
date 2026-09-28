@@ -6,6 +6,28 @@ import XCTest
 
 @MainActor
 final class NativeWorkspaceTests: XCTestCase {
+    func testWindowResizesTo800And480WithoutClippingWorkspace() throws {
+        let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "A")])
+        let controller = CorralWindowController(workspaceView: workspace)
+        let window = try XCTUnwrap(controller.window)
+        workspace.sidebar.setSpaces((0..<12).map { CorralSidebarSpace(id: UUID(), name: "Space \($0)") })
+        for (width, height): (CGFloat, CGFloat) in [(1400, 860), (800, 600), (480, 360), (1400, 860)] {
+            window.setContentSize(NSSize(width: width, height: height))
+            window.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(window.frame.width, width)
+            XCTAssertEqual(workspace.bounds.width, width)
+            XCTAssertGreaterThanOrEqual(workspace.sidebar.frame.width, 180)
+            XCTAssertGreaterThanOrEqual(workspace.stageContainer.bounds.width, 246)
+            XCTAssertLessThanOrEqual(workspace.stageContainer.frame.maxX, width)
+            let collapse = workspace.titleBar.collapseButton.convert(workspace.titleBar.collapseButton.bounds, to: workspace.titleBar)
+            XCTAssertLessThanOrEqual(collapse.maxX, workspace.sidebar.frame.width)
+            XCTAssertLessThanOrEqual(workspace.sidebar.devicesButton.frame.maxX, workspace.sidebar.settingsButton.frame.minX - 4)
+            XCTAssertEqual(workspace.sidebar.devicesButton.superview?.frame.width, workspace.sidebar.frame.width)
+            XCTAssertGreaterThanOrEqual(workspace.sidebar.agentsTable.enclosingScrollView?.frame.height ?? 0, 2 * CorralSidebarView.agentRowHeight)
+        }
+        window.close()
+    }
+
     func testSelectedOverflowTabRemainsVisibleAndCanBeClicked() throws {
         let tabs = (0..<30).map { CorralTab(title: "Tab \($0)") }
         let workspace = CorralWorkspaceView(tabs: tabs)
@@ -188,8 +210,8 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(workspace.titleBar.collapseButton.convert(.zero, to: workspace).x, 243, accuracy: 0.1)
         XCTAssertEqual(workspace.tabBar.convert(.zero, to: workspace).x, 280, accuracy: 0.1, "Window-hosted TabBar must remain to the right of the sidebar")
         XCTAssertEqual(initialContentBounds.size, NSSize(width: 1400, height: 860))
-        XCTAssertEqual(window.minSize, NSSize(width: 1100, height: 700))
-        XCTAssertEqual(window.contentMinSize, NSSize(width: 1100, height: 700))
+        XCTAssertEqual(window.minSize, NSSize(width: 480, height: 360))
+        XCTAssertEqual(window.contentMinSize, NSSize(width: 480, height: 360))
 
         let spaces = (0..<12).map { CorralSidebarSpace(id: UUID(), name: "Space \($0) · \(String(repeating: "Long", count: 8))") }
         workspace.sidebar.setSpaces(spaces)
@@ -214,16 +236,16 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(window.contentView?.bounds, initialContentBounds)
 
         // Content must never pin the window open: the controller can still shrink it to the minimum.
-        let minimumFrame = NSRect(origin: initialFrame.origin, size: window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 1100, height: 700)).size)
+        let minimumFrame = NSRect(origin: initialFrame.origin, size: window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 480, height: 360)).size)
         window.setFrame(minimumFrame, display: false)
         window.layoutIfNeeded()
         XCTAssertEqual(window.frame, minimumFrame)
-        XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+        XCTAssertEqual(workspace.sidebar.frame.width, 180, accuracy: 0.1)
         let undersizedController = CorralWindowController(
             workspaceView: CorralWorkspaceView(),
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 500)
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(undersizedController.window?.contentView?.bounds.size, NSSize(width: 1100, height: 700))
+        XCTAssertEqual(undersizedController.window?.contentView?.bounds.size, NSSize(width: 480, height: 360))
     }
 
     func testSelectingAgentDoesNotOpenSettingsOrChangeWindowAndStageBounds() throws {
@@ -287,11 +309,11 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(window.frame, frame)
 
         window.setContentSize(NSSize(width: 900, height: 500))
-        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.width ?? 0, 1100)
-        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.height ?? 0, 700)
+        XCTAssertEqual(window.contentView?.bounds.width, 900)
+        XCTAssertEqual(window.contentView?.bounds.height, 500)
         window.setFrame(NSRect(origin: frame.origin, size: NSSize(width: 900, height: 500)), display: false, animate: false)
-        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.width ?? 0, 1100)
-        XCTAssertGreaterThanOrEqual(window.contentView?.bounds.height ?? 0, 700)
+        XCTAssertEqual(window.contentView?.bounds.width, 900)
+        XCTAssertEqual(window.contentView?.bounds.height, 500)
     }
 
     func testSidebarGeometryMatchesLegacySidebarCSS() throws {

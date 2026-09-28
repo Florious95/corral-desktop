@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 public final class CorralWindow: NSWindow {
-    public static let minimumContentSize = NSSize(width: 1100, height: 700)
+    public static let minimumContentSize = NSSize(width: 480, height: 360)
     /// The terminal owns its special paste chord; all other keys follow AppKit's responder chain.
     public var onTerminalKeyDown: ((NSEvent) -> Bool)?
 

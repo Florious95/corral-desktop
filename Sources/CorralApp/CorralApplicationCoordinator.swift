@@ -1557,20 +1557,40 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func subscribeVisibleSessions() async {
-        guard connection != nil else { return }
+        guard let cleanupConnection = connection else { return }
+        // Permanent Tabs keep their streams. A replaced preview has no workspace
+        // owner, so its PTY subscription and view must not accumulate indefinitely.
+        for (key, view) in terminalRegistry.allViews {
+            guard let runtime = sessions[key],
+                  !retainedSessionIDs.contains(runtime.descriptor.id),
+                  terminalRegistry.view(for: key) === view else { continue }
+            sessions[key]?.subscribed = false
+            sessions[key]?.subscriptionPending = false
+            sessions[key]?.requestedGrid = nil
+            terminalRegistry.remove(key)
+            if runtime.subscribed || runtime.subscriptionPending {
+                do {
+                    let receipt = try await sessionLink.send(.unsubscribe(reference: key.reference))
+                    if !receipt.socketWritten { lastConnectionError = "unsubscribe was not written for \(key.reference.rawValue)" }
+                } catch { lastConnectionError = String(describing: error) }
+            }
+            guard connection == cleanupConnection else { return }
+        }
         for key in visibleSessionKeys() { _ = ensureTerminalView(for: key) }
         updateTerminalStage()
         focusVisibleTerminal()
         for key in visibleSessionKeys() {
             guard let connection, key.deviceID == connection.deviceID,
-                  let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending else { continue }
+                  let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending,
+                  let subscribingView = terminalRegistry.view(for: key) else { continue }
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
                 // Use the server-advertised live grid; inspection mode never substitutes local view dimensions.
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
                 guard self.connection == connection,
-                      sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch else { continue }
+                      sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
+                      terminalRegistry.view(for: key) === subscribingView else { continue }
                 sessions[key]?.subscriptionPending = false
                 sessions[key]?.subscribed = receipt.socketWritten
                 if receipt.socketWritten { sessions[key]?.requestedGrid = runtime.descriptor.size }
@@ -1578,7 +1598,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 guard receipt.socketWritten else { continue }
                 if !noResizeMode, let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
             } catch {
-                guard self.connection == connection else { continue }
+                guard self.connection == connection,
+                      terminalRegistry.view(for: key) === subscribingView else { continue }
                 sessions[key]?.subscriptionPending = false
                 scheduleInputDrain()
                 lastConnectionError = String(describing: error)
@@ -1614,6 +1635,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func visibleSessionKeys() -> [SessionKey] {
         guard let root = workspaceState.visibleRoot else { return [] }
         return root.leafIDs.compactMap(sessionKey(for:)).prefix(maximumVisiblePanes).map { $0 }
+    }
+
+    private var retainedSessionIDs: Set<SessionID> {
+        Set(workspaceState.tabs.flatMap(\.sessionIDs) + (workspaceState.previewUID.map { [$0] } ?? []))
     }
 
     private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize) async {

@@ -31,8 +31,12 @@ def wait_for(fn, timeout=20):
 
 
 class Run:
-    def __init__(self, legacy):
+    def __init__(self, legacy, case='parity', no_resize=False, server_binary=None):
         self.legacy = legacy
+        self.case = case
+        self.no_resize = no_resize
+        self.server_binary = server_binary
+        self.suffixes = 'ABCDEFGHIJ' if case.startswith('many-sessions') else 'ABCD'
         self.directory = Path(tempfile.mkdtemp(prefix='corral-native-acceptance-', dir='/tmp')).resolve()
         self.nonce = secrets.token_hex(4).upper()
         self.processes = []
@@ -78,10 +82,11 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         wrapper.chmod(0o700)
         agent = self.directory / 'codex'
         subprocess.run(['clang', '-D_DARWIN_C_SOURCE', '-Os', str(HERE / 'terminal-fixture.c'), '-o', str(agent)], check=True)
-        for suffix in 'ABCD':
+        for suffix in self.suffixes:
             session = f'ACCEPT-{suffix}-{self.nonce}'
             self.tmux('new-session', '-d', '-s', session, '-x', '110', '-y', '32', '-c', str(self.directory),
-                      str(agent), suffix, self.nonce, str(self.directory / f'input-{suffix}.bin'))
+                      str(agent), suffix, self.nonce, str(self.directory / f'input-{suffix}.bin'),
+                      ('empty' if suffix == 'F' else 'busy') if self.case == 'many-sessions-stress' else 'normal')
             self.tmux('set-option', '-t', session, 'status', 'off')
             self.tmux('select-pane', '-t', session, '-T', session)
         self.refs = {name.split('-')[1]: str(self.socket) + "\x1f" + ref for ref, name in
@@ -97,9 +102,11 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                    NODEPROBE_FIXTURES=str(runtime / 'titles.tsv'), NODEPROBE_PROVIDERS=str(runtime / 'providers.tsv'),
                    AGENTMIRROR_NODEPROBE_PI_EXTENSION=str(runtime / 'nodeprobe-pi-activity.js'),
                    AGENTMIRROR_E2E_DISCOVERY_SOCKET_DIRS=str(self.socket.parent))
-        daemon = ROOT / '.build/native-acceptance-server/agentmirrord'
+        daemon = self.server_binary or ROOT / '.build/native-acceptance-server/agentmirrord'
+        assert daemon.resolve().is_relative_to((ROOT / '.build').resolve()), 'only a private test binary copy is accepted'
         server_identity = json.loads(daemon.with_name('build.json').read_text())
-        assert server_identity['commit'] == 'a472d4437885060bc0eaf1838c9149e5242948cb'
+        if not self.server_binary:
+            assert server_identity['commit'] == 'a472d4437885060bc0eaf1838c9149e5242948cb'
         assert hashlib.sha256(daemon.read_bytes()).hexdigest() == server_identity['sha256']
         daemon_process = self.start_process([str(daemon), '-listen', f'127.0.0.1:{port}', '-state-dir', str(self.directory / 'server-state'),
                                             '-upload-dir', str(self.directory / 'uploads')], env, 'daemon')
@@ -118,6 +125,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         app_env = dict(os.environ, CORRAL_NATIVE_ACCEPTANCE_DIRECTORY=str(self.directory), CORRAL_NATIVE_BACKGROUND='1',
                        CORRAL_NATIVE_ENDPOINT=f'ws://127.0.0.1:{proxy_port}/ws', CORRAL_NATIVE_TOKEN=token)
         app_env.pop('CORRAL_NATIVE_NO_RESIZE', None)
+        if self.no_resize: app_env['CORRAL_NATIVE_NO_RESIZE'] = '1'
         app = ROOT / '.build/CorralNativeDev.app/Contents/MacOS/CorralApp'
         self.app = self.start_process([str(app)], app_env, 'app')
         self.identity = {'app': str(app), 'appSHA256': hashlib.sha256(app.read_bytes()).hexdigest(),
@@ -126,7 +134,8 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                          'worktreeStatus': subprocess.check_output(['git','status','--porcelain'], cwd=ROOT, text=True),
                          'runnerSHA256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                          'server': server_identity, 'daemonPort': port, 'clientPort': proxy_port, 'tmuxSocket': str(self.socket), 'refs': self.refs,
-                         'origin': 'appkit-synthetic', 'systemHID': 'NOT-RUN', 'nativeOSDragTracking': 'NOT-RUN'}
+                         'origin': 'appkit-synthetic', 'systemHID': 'NOT-RUN', 'nativeOSDragTracking': 'NOT-RUN',
+                         'case': self.case, 'noResize': self.no_resize}
         print(f'RUN_DIR={self.directory}', flush=True)
         wait_for(lambda: self.command('state').get('connected'), 25)
         self.state = wait_for(lambda: self.ready_state(), 25)
@@ -134,7 +143,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
 
     def ready_state(self):
         state = self.command('state')
-        return state if len(state['agents']) == 4 and any(self.nonce in '\n'.join(p['rows']) for p in state['panes']) else None
+        return state if len(state['agents']) == len(self.suffixes) and any(self.nonce in '\n'.join(p['rows']) for p in state['panes']) else None
 
     def command(self, op, **kwargs):
         self.command_id += 1
@@ -179,6 +188,14 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
 
     def wire(self):
         return [json.loads(line) for line in (self.directory / 'wire.jsonl').read_text().splitlines()]
+
+    def live_subscriptions(self):
+        live = set()
+        for event in self.wire():
+            if event.get('direction') != 'client-to-daemon': continue
+            if event.get('type') == 'subscribe': live.add(event['payload']['ref'])
+            elif event.get('type') == 'unsubscribe': live.discard(event['payload']['ref'])
+        return live
 
     def settle_geometry(self, state):
         expected = {p['ref'].split('\x1f')[-1]: (p['cols'], len(p['rows']))
@@ -342,6 +359,85 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                    'commands':len(self.receipts)}
         (self.directory/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
 
+    def run_many_sessions(self):
+        identities = {}
+        for gesture, order in [('preview', self.suffixes), ('permanent', self.suffixes), ('return', self.suffixes[::-1])]:
+            for index, suffix in enumerate(order, 1):
+                try:
+                    if gesture == 'preview' and suffix == 'F' and self.case == 'many-sessions-stress':
+                        self.command('sidebar', session=self.session_id(suffix))
+                        state = self.command('state')
+                        pane = self.view(state, suffix)
+                        assert not ''.join(pane['rows']).strip(), 'sixth PTY must start genuinely empty'
+                        assert pane['focused'] and pane['frame'][2] > 120 and pane['frame'][3] > 60
+                        self.capture('sixth-empty-before-input', state)
+                        self.command('key', text='x', plain='x', code=7)
+                        wait_for(lambda: (self.directory/'input-F.bin').read_bytes() == b'x')
+                    state = self.sidebar(suffix, count=2 if gesture == 'permanent' else 1)
+                except Exception:
+                    self.capture(f'{gesture}-{index}-{suffix}-failure', self.command('state'))
+                    raise
+                pane = self.view(state, suffix)
+                if gesture != 'preview' and suffix in identities:
+                    assert pane['viewIdentity'] == identities[suffix], 'switching must retain the terminal view'
+                if gesture == 'permanent': identities[suffix] = pane['viewIdentity']
+                screenshot = self.capture(f'{gesture}-{index}-{suffix}', state)
+                self.output_assertion(screenshot, suffix)
+                if not self.no_resize: self.settle_geometry(state)
+                if gesture == 'preview':
+                    expected = {self.refs['A'], self.refs[suffix]}
+                    live = self.live_subscriptions()
+                    assert set(state['subscribed']) == live == expected, ('departed previews must release their subscriptions', suffix, live, expected)
+                print(f'PASS {gesture} {index}/10 {suffix}: real PTY -> WindowServer OCR', flush=True)
+            if gesture == 'preview' and self.case == 'many-sessions-stress':
+                order = 'BCDEFGHIJABCDEFGHIF' * 3
+                self.command('sidebar-sequence', sessions=[self.session_id(s) for s in order])
+                state = self.visible('F')
+                self.output_assertion(self.capture('rapid-preview-final-F', state), 'F')
+                assert set(state['subscribed']) == self.live_subscriptions() == {self.refs['A'], self.refs['F']}
+                assert len(state['panes']) == 2, 'abandoned preview viewports must be released'
+                print('PASS 54 rapid previews under sustained PTY output; empty/idle sixth remains interactive', flush=True)
+        assert len(identities) == 10 and len(state['subscribed']) == 10
+        assert len(state['workspace']['tabs']) == 10
+        self.write_case_summary()
+
+    def run_window_resize(self):
+        state = self.sidebar('A')
+        width, height = state['stageSize']
+        self.command('drop', session=self.session_id('B'), x=width-10, y=height/2)
+        state = self.visible('B')
+        first_width = state['projection'][0]['frame'][2]
+        self.command('splitter', path='root', delta=round((width-6)/3)-first_width)
+        initial_grids = {p['ref']: (p['cols'], len(p['rows'])) for p in self.command('state')['panes'] if not p['hidden']}
+        for width, height in [(1400, 860), (1000, 720), (800, 700), (640, 600), (480, 480), (480, 360), (1400, 860)]:
+            state = self.command('resize-window', width=width, height=height)
+            screenshot = self.capture(f'window-{width}x{height}', state)
+            assert state['windowFrame'][2:] == [width, height], ('window must accept the requested size', state['windowFrame'])
+            assert state['workspaceFrame'][2:] == [width, height], ('workspace must follow its host', state['workspaceFrame'])
+            sx, sy, sw, sh = state['stageFrame']
+            assert sx >= 0 and sy >= 0 and sx+sw <= width and sy+sh <= height
+            assert len(state['projection']) == 2
+            expected_first = min(max((sw - 6) // 3, 120), sw - 6 - 120)
+            assert abs(state['projection'][0]['frame'][2] - expected_first) <= 1, 'ratio adapts only when a pane minimum requires it'
+            for suffix in 'AB':
+                pane = self.view(state, suffix)
+                x, y, w, h = pane['frame']
+                assert w >= 120 and h >= 60 and x >= 0 and y >= 0 and x+w <= width and y+h <= height, pane['frame']
+                projected = next(p['frame'] for p in state['projection'] if p['id'] == self.session_id(suffix))
+                assert [w, h] == projected[2:], ('terminal and pane chrome must share the same rectangle', pane['frame'], projected)
+                assert (pane['cols'],len(pane['rows'])) != initial_grids[pane['ref']] or width == 1400, 'terminal grid must follow window size'
+                self.output_assertion(screenshot, suffix)
+            if not self.no_resize: self.settle_geometry(state)
+            detail = 'local grids with remote resize blocked' if self.no_resize else 'native grids match real PTY geometry'
+            print(f'PASS window {width}x{height}: both panes visible; {detail}', flush=True)
+        if self.no_resize:
+            assert not any(e.get('type')=='resize' for e in self.wire()), 'inspection must not resize the remote PTY'
+        self.write_case_summary()
+
+    def write_case_summary(self):
+        (self.directory/'summary.json').write_text(json.dumps({'status':'PASS_APP_LOCAL', 'case':self.case,
+            'identity':self.identity, 'commands':len(self.receipts)},ensure_ascii=False,indent=2))
+
     def input_checks(self, suffix):
         path = self.directory / ('input-'+suffix+'.bin')
         baseline = path.read_bytes()
@@ -407,11 +503,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--legacy-root', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize'], default='parity')
+    parser.add_argument('--no-resize', action='store_true')
+    parser.add_argument('--server-binary', type=Path)
     args = parser.parse_args()
-    run = Run(args.legacy_root)
+    run = Run(args.legacy_root, args.case, args.no_resize, args.server_binary)
     try:
         run.start()
         if args.smoke: print('CAPTURE', run.capture('initial', run.state), flush=True)
+        elif args.case.startswith('many-sessions'): run.run_many_sessions()
+        elif args.case == 'window-resize': run.run_window_resize()
         else: run.run_suite()
     except Exception:
         (run.directory/'failure.txt').write_text(traceback.format_exc())

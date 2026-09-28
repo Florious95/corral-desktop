@@ -18,6 +18,27 @@ python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-deskto
 swift test
 ```
 
+P0 regression cases use the same packaged app, daemon, PTYs and WindowServer
+capture path:
+
+```sh
+python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case many-sessions
+python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case many-sessions-stress
+python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case window-resize
+python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case window-resize --no-resize
+```
+
+The ten-session cases check each preview, permanent Tab and reverse return by
+screenshot OCR. Departed previews must release their subscriptions; permanent
+Tabs retain them. The stress case keeps nine PTYs producing output, starts the
+sixth completely empty, verifies actual input/echo, and performs 54 rapid
+sidebar clicks before opening all ten permanent Tabs. Window resizing covers
+1400 down to 480 points with two panes at a 1:2 ratio, local terminal grids and
+real PTY geometry; `--no-resize` requires local reflow with no network resize.
+An optional `--server-binary` must name a private `.build` binary copy whose
+SHA256 matches its adjacent `build.json`; this can test a deployed binary
+without contacting or restarting its production process.
+
 The server builder extracts exactly `a472d4437885060bc0eaf1838c9149e5242948cb`
 from Git without changing that repository, then records the source tree,
 compiler and binary hash. The older `Fixtures/bin/agentmirrord` is unsuitable
