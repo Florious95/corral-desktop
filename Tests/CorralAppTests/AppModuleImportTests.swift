@@ -820,7 +820,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
-    func testNoResizeInspectionSubscribesAtServerGridAndNeverSendsResize() async throws {
+    func testNoResizeInspectionOmitsSubscribeDimensionsAndNeverSendsResize() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
@@ -873,7 +873,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             return false
         })
         guard case let .subscribe(_, size) = subscribe else { return XCTFail("expected subscription command") }
-        XCTAssertEqual(size, serverGrid, "inspection subscribes with the server-advertised grid")
+        XCTAssertNil(size, "inspection subscribe must not carry dimensions that could trigger a server-side resize")
         XCTAssertFalse(commands.contains { if case .resize = $0 { true } else { false } })
 
         await coordinator.stop()

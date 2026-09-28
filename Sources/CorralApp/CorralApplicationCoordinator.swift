@@ -1512,8 +1512,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
-                // Always subscribe using the server-advertised grid; inspection mode never applies local view dimensions.
-                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
+                // Omit dimensions in inspection mode so subscribe cannot resize the server pane.
+                let subscribeSize = noResizeMode ? nil : runtime.descriptor.size
+                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: subscribeSize))
                 sessions[key]?.subscriptionPending = false
                 guard receipt.socketWritten else { continue }
                 sessions[key]?.subscribed = true

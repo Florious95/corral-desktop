@@ -348,8 +348,9 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
         runtime.subscriptionPending = true
         sessions[id] = runtime
         do {
-            // The listing carries the live server grid; never substitute the local view grid here.
-            let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: runtime.descriptor.size))
+            // Omit dimensions in inspection mode; normal mode uses the listing's server grid.
+            let subscribeSize = noResizeMode ? nil : runtime.descriptor.size
+            let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: subscribeSize))
             guard var current = sessions[id] else { return }
             current.subscriptionPending = false
             current.subscribed = receipt.socketWritten

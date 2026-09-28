@@ -43,6 +43,39 @@ final class URLSessionSessionLinkTests: XCTestCase {
         await link.disconnect()
     }
 
+    func testReconnectPreservesDimensionlessInspectionSubscription() async throws {
+        var configuration = URLSessionSessionLink.Configuration()
+        configuration.heartbeatIntervalNanoseconds = 60_000_000_000
+        configuration.initialReconnectDelayNanoseconds = 1_000_000
+        configuration.maximumReconnectDelayNanoseconds = 10_000_000
+        let first = MockWebSocket()
+        let second = MockWebSocket()
+        let factory = MockWebSocketFactory(sockets: [first, second])
+        let link = URLSessionSessionLink(configuration: configuration) { factory.make($0) }
+        let events = try await link.eventStream()
+        let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9919)
+        let reference = try SessionReference("inspection-session")
+
+        let connect = Task {
+            try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: CredentialHandle("test"))
+        }
+        try await waitForAuthentication(on: first)
+        await first.enqueue(.text(authenticationAck()))
+        _ = try await connect.value
+        _ = try await waitForReady(in: events)
+        _ = try await link.send(.subscribe(reference: reference, size: nil))
+
+        await first.fail()
+        try await waitForAuthentication(on: second)
+        await second.enqueue(.text(authenticationAck()))
+        _ = try await waitForReady(in: events)
+        let replayedMessages = await second.sentMessages()
+        let payload = try XCTUnwrap(subscriptionPayload(in: replayedMessages, reference: reference))
+        XCTAssertNil(payload["rows"])
+        XCTAssertNil(payload["cols"])
+        await link.disconnect()
+    }
+
     func testHeartbeatUsesWebSocketPing() async throws {
         var configuration = URLSessionSessionLink.Configuration()
         configuration.heartbeatIntervalNanoseconds = 100_000_000
@@ -174,11 +207,19 @@ final class URLSessionSessionLinkTests: XCTestCase {
     }
 
     private func isSubscription(_ message: WebSocketMessage, reference: SessionReference) -> Bool {
-        guard case let .text(text) = message,
-              let envelope = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
-              envelope["type"] as? String == "subscribe",
-              let payload = envelope["payload"] as? [String: Any] else { return false }
-        return payload["ref"] as? String == reference.rawValue
+        subscriptionPayload(in: [message], reference: reference) != nil
+    }
+
+    private func subscriptionPayload(in messages: [WebSocketMessage], reference: SessionReference) -> [String: Any]? {
+        for message in messages {
+            guard case let .text(text) = message,
+                  let envelope = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+                  envelope["type"] as? String == "subscribe",
+                  let payload = envelope["payload"] as? [String: Any],
+                  payload["ref"] as? String == reference.rawValue else { continue }
+            return payload
+        }
+        return nil
     }
 }
 
