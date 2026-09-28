@@ -55,7 +55,6 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private struct TabPresentation {
         let title: String
         let descriptor: SessionDescriptor?
-        let previewSessionID: SessionID?
     }
 
     private struct RuntimeSession {
@@ -926,12 +925,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         case "pin":
             let pinned = workspaceState.tabs.first(where: { $0.id == id })?.pinned == false
             await pinWorkspaceTab(id, pinned: pinned)
-        case "close":
-            if workspaceState.activeTabID == id, let previewID = workspaceState.previewUID {
-                await closeWorkspacePane(previewID)
-            } else {
-                await closeWorkspaceTab(id: id)
-            }
+        case "close": await closeWorkspaceTab(id: id)
         case "closeOthers": await closeOtherWorkspaceTabs(keeping: id)
         case "closeRight": await closeWorkspaceTabsToRight(of: id)
         case "resetTitle":
@@ -1702,14 +1696,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         tab.provider = presentation.descriptor?.provider
         tab.isPinned = stateTab.pinned
         tab.isCustomTitle = stateTab.isCustomTitle
-        tab.isPreview = presentation.previewSessionID != nil
         tab.badge = count > 0 ? String(count) : nil
         workspaceView.tabBar.setTabs(workspaceView.tabs, selectedTabID: workspaceState.activeTabID)
     }
 
     private func tabPresentation(for tab: WorkspaceTab, in state: CorralWorkspaceState) -> TabPresentation {
-        let previewSessionID = tab.id == state.activeTabID ? state.previewUID : nil
-        let sessionID = previewSessionID ?? tab.activeSessionID
+        let sessionID = tab.activeSessionID
         let descriptor = sessionID.flatMap(sessionKey(for:)).flatMap { sessions[$0]?.descriptor }
         let savedIdentity = sessionID.flatMap { id in state.sessionBindings.first { $0.sessionID == id }?.identity }
         let customTitle = tab.isCustomTitle ? nonEmpty(tab.title) : nil
@@ -1718,7 +1710,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             ?? nonEmpty(savedIdentity?.name)
             ?? directoryTitle(descriptor?.workingDirectory ?? savedIdentity?.workingDirectory)
             ?? "Terminal"
-        return TabPresentation(title: title, descriptor: descriptor, previewSessionID: previewSessionID)
+        return TabPresentation(title: title, descriptor: descriptor)
     }
 
     private func nonEmpty(_ value: String?) -> String? {

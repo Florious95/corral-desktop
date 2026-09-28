@@ -309,7 +309,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
-    func testSidebarAgentOpenUsesRegularTabAndPreviewCloseRestoresPinnedHostTitle() async throws {
+    func testSidebarPreviewKeepsPinnedHostTitleAndClearsWithoutClosingHost() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
@@ -334,8 +334,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(listed)
 
         let leader = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "全自动编排leader" })
+        let leaderSessionID = try XCTUnwrap(leader.sessionID)
         let tabID = coordinator.workspaceState.activeTabID
-        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(leader.sessionID), .singleClick)
+        coordinator.workspaceView.onSelectAgent?(leaderSessionID, .singleClick)
         let opened = await waitUntil {
             coordinator.workspaceState.activeTab?.activeSessionID != nil &&
                 coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "全自动编排leader"
@@ -356,29 +357,40 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let explicitlyPinned = await waitUntil { coordinator.workspaceState.activeTab?.pinned == true }
         XCTAssertTrue(explicitlyPinned)
         let previewAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
-        coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(previewAgent.sessionID), .singleClick)
+        let previewSessionID = try XCTUnwrap(previewAgent.sessionID)
+        coordinator.workspaceView.onSelectAgent?(previewSessionID, .singleClick)
         let previewed = await waitUntil {
-            coordinator.workspaceState.previewUID != nil &&
-                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.isPreview == true &&
-                coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "rust-developer"
+            guard let activeTab = coordinator.workspaceState.activeTab,
+                  let viewTab = coordinator.workspaceView.tabs.first(where: { $0.id == tabID }) else { return false }
+            return coordinator.workspaceState.previewUID == previewSessionID &&
+                coordinator.workspaceState.activeTabID == tabID &&
+                activeTab.activeSessionID == leaderSessionID &&
+                activeTab.root?.leafIDs == [leaderSessionID] &&
+                coordinator.workspaceState.visibleSessionID == previewSessionID &&
+                coordinator.workspaceState.visibleRoot?.leafIDs == [previewSessionID] &&
+                viewTab.isPreview == false &&
+                viewTab.title == "全自动编排leader"
         }
-        XCTAssertTrue(previewed)
+        XCTAssertTrue(previewed, "previewing B must leave the host Tab A title, root, focus, and identity unchanged")
         tab = try XCTUnwrap(coordinator.workspaceView.tabs.first { $0.id == tabID })
         XCTAssertTrue(tab.isPinned, "preview must preserve an explicit pin on its host Tab")
-        XCTAssertEqual(tab.provider, "codex")
-        XCTAssertEqual(tab.status, .idle)
-        let previewClose = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).compactMap { $0 as? NSButton }.first {
-            $0.accessibilityIdentifier() == "corral.tab.close"
+        XCTAssertEqual(tab.provider, "pi", "preview content must not replace the host provider")
+        XCTAssertEqual(tab.status, .working, "preview content must not replace the host status")
+        let previewExit = try XCTUnwrap(descendants(of: coordinator.workspaceView).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "corral.preview.exit"
         })
-        XCTAssertEqual(previewClose.accessibilityLabel(), "关闭预览")
-        previewClose.performClick(previewClose)
+        XCTAssertEqual(previewExit.accessibilityLabel(), "退出预览")
+        previewExit.performClick(previewExit)
         let previewClosed = await waitUntil {
             coordinator.workspaceState.previewUID == nil &&
+                coordinator.workspaceState.activeTab?.activeSessionID == leaderSessionID &&
+                coordinator.workspaceState.visibleSessionID == leaderSessionID &&
+                coordinator.workspaceState.visibleRoot?.leafIDs == [leaderSessionID] &&
                 coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.isPreview == false &&
                 coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title == "全自动编排leader"
         }
         XCTAssertTrue(previewClosed)
-        XCTAssertEqual(coordinator.workspaceState.tabs.count, 1, "closing a preview must not close its durable host")
+        XCTAssertEqual(coordinator.workspaceState.tabs.count, 1, "clearing a preview must not close its durable host")
         XCTAssertTrue(coordinator.workspaceState.activeTab?.pinned == true)
         XCTAssertEqual(coordinator.workspaceView.tabs.first?.provider, "pi")
         XCTAssertEqual(coordinator.workspaceView.tabs.first?.status, .working)
@@ -403,6 +415,24 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.workspaceView.tabs.first(where: { $0.id == tabID })?.title, "Local Agent Title")
         XCTAssertTrue(coordinator.workspaceState.tabs.first(where: { $0.id == tabID })?.isCustomTitle == true)
         XCTAssertTrue(coordinator.workspaceView.sidebar.agents.contains { $0.name == "Updated Agent Name" }, "workspace title overrides must not rename the server Agent")
+
+        await coordinator.pinWorkspaceTab(tabID, pinned: false)
+        let unpinned = await waitUntil { coordinator.workspaceState.activeTab?.pinned == false }
+        XCTAssertTrue(unpinned)
+        coordinator.workspaceView.onSelectAgent?(previewSessionID, .singleClick)
+        let previewAgain = await waitUntil { coordinator.workspaceState.previewUID == previewSessionID }
+        XCTAssertTrue(previewAgain)
+        let tabClose = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "corral.tab.close"
+        })
+        XCTAssertEqual(tabClose.accessibilityLabel(), "关闭工作台")
+        tabClose.performClick(tabClose)
+        let hostClosed = await waitUntil {
+            !coordinator.workspaceState.tabs.contains { $0.id == tabID } &&
+                coordinator.workspaceState.previewUID == nil &&
+                coordinator.workspaceState.activeTab?.isBlank == true
+        }
+        XCTAssertTrue(hostClosed, "the Tab close button must close the host Tab, not only clear its preview")
         await coordinator.stop()
         window.close()
     }
