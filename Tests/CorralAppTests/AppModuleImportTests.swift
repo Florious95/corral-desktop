@@ -785,6 +785,70 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testStandardLaunchSelectsFirstDeviceAndRecoversStaleWorkspaceSession() async throws {
+        let deviceID = DeviceID(UUID().uuidString)
+        let credential = CredentialHandle("fixture-device-credential")
+        let vault = TestDeviceCredentialVault()
+        try await vault.store("fixture-only-token", for: credential)
+        let device = DeviceRecord(
+            id: deviceID,
+            name: "127.0.0.1:9900",
+            endpoint: try ApprovedEndpoint(url: XCTUnwrap(URL(string: "ws://127.0.0.1:9900/ws"))),
+            credential: credential
+        )
+        let oldDeviceID = DeviceID("corral-native-development-endpoint")
+        let staleSession = SessionDescriptor(
+            id: SessionID("stale-test-session"),
+            key: SessionKey(deviceID: oldDeviceID, reference: try SessionReference("stale-test-ref")),
+            name: "old-test-session",
+            workingDirectory: "/tmp/old-test-session",
+            state: .running,
+            size: GridSize(rows: 24, columns: 80)
+        )
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(
+            link: link,
+            atlas: .shared,
+            environment: [:],
+            deviceRepository: FixedDeviceRepository([device]),
+            credentialVault: vault,
+            staleWorkspaceSession: staleSession
+        )
+        await coordinator.start()
+        let listSent = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
+        XCTAssertTrue(listSent, "standard startup should connect to the first persisted device without launch flags")
+        let connectedDeviceID = await link.lastConnectedDeviceID()
+        XCTAssertEqual(connectedDeviceID, deviceID)
+
+        let reference = try SessionReference("live-9900-session")
+        let records = try (0..<62).map { index in
+            WireSessionRecord(
+                reference: try SessionReference(index == 0 ? reference.rawValue : "live-9900-\(index)"),
+                name: "live-agent-\(index)",
+                workingDirectory: "/srv/live",
+                state: .working,
+                rows: 37,
+                columns: 111,
+                provider: "pi",
+                activity: "working",
+                health: "normal"
+            )
+        }
+        let listing = SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/srv/live", sessionCount: records.count, aggregateState: .working, sessions: records)
+        ])
+        try await link.emit(.control(.listing(listing)))
+        let hydrated = await waitUntil {
+            coordinator.sessionCount == records.count
+                && coordinator.activeTerminalSessionKey == SessionKey(deviceID: deviceID, reference: reference)
+                && coordinator.workspaceView.sidebar.agents.count == records.count
+                && coordinator.workspaceView.sidebar.agents.contains(where: { $0.name == "live-agent-0" })
+                && coordinator.subscribedSessionIDs.contains(reference.rawValue)
+        }
+        XCTAssertTrue(hydrated, "a stale saved device binding must not hide the live first session")
+        await coordinator.stop()
+    }
+
     func testInitialListingAutomaticallyOpensAndRendersFirstSession() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
@@ -1560,11 +1624,15 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         environment: [String: String],
         supportDirectory: URL? = nil,
         deviceRepository: any DeviceRepositoryProtocol = EmptyDeviceRepository(),
-        credentialVault: any DeviceCredentialVault = TestDeviceCredentialVault()
+        credentialVault: any DeviceCredentialVault = TestDeviceCredentialVault(),
+        staleWorkspaceSession: SessionDescriptor? = nil
     ) async throws -> CorralApplicationCoordinator {
         let supportDirectory = supportDirectory ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("corral-native-coordinator-store-\(UUID().uuidString)", isDirectory: true)
         let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
+        if let staleWorkspaceSession {
+            _ = try await workspaceStore.smartOpenSession(staleWorkspaceSession, gesture: .doubleClick)
+        }
         let userPreferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
         return CorralApplicationCoordinator(
             deviceRepository: deviceRepository,
@@ -1714,6 +1782,7 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     private var commandsSent: [ClientCommand] = []
     private var connectCalls = 0
     private var lastCredential: CredentialHandle?
+    private var lastDeviceID: DeviceID?
     private var ordinal: UInt64 = 0
     private var shouldSuspendNextSubscribe = false
     private var suspendedSubscribeReference: SessionReference?
@@ -1725,6 +1794,7 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         connectCalls += 1
         lastCredential = credential
+        lastDeviceID = deviceID
         let connection = try AuthenticatedConnection(
             linkInstanceID: LinkInstanceID(),
             deviceID: deviceID,
@@ -1766,6 +1836,7 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     }
     func connectCount() -> Int { connectCalls }
     func lastConnectedCredential() -> CredentialHandle? { lastCredential }
+    func lastConnectedDeviceID() -> DeviceID? { lastDeviceID }
     func commands() -> [ClientCommand] { commandsSent }
     func suspendNextSubscribe() { shouldSuspendNextSubscribe = true }
     func isSubscribeSuspended(for reference: SessionReference) -> Bool {

@@ -323,6 +323,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         do {
             let devices = try await deviceRepository.listDevices()
             cachedDevices = devices
+            if selectedDeviceIDs.count != 1 || devices.first(where: { selectedDeviceIDs.contains($0.id) }) == nil {
+                selectedDeviceIDs = Set(devices.prefix(1).map(\.id))
+            }
             updateSidebar(devices: devices)
             guard let configuration = try await connectionConfiguration(devices: devices) else {
                 await writeTelemetry()
@@ -1170,9 +1173,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard !descriptors.isEmpty else { return }
         do {
             var state = try await workspaceStore.reconcileListing(descriptors)
-            if state.activeTab?.isBlank == true,
-               state.visibleSessionID == nil,
-               let firstSession = descriptors.first {
+            let visibleSessionIsLive = state.visibleSessionID.flatMap(sessionKey(for:)).map { $0.deviceID == configuredDeviceID } ?? false
+            if !visibleSessionIsLive, let firstSession = descriptors.first {
                 state = try await workspaceStore.smartOpenSession(firstSession, gesture: .singleClick)
             }
             await applyWorkspaceState(state)
