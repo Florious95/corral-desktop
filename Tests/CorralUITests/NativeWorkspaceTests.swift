@@ -58,7 +58,7 @@ final class NativeWorkspaceTests: XCTestCase {
     }
 
     func testWorkspaceHasLegacyLeftSidebarAndIndependentHeaders() {
-        let workspace = CorralWorkspaceView()
+        let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "Leader", contentView: NSView())])
         XCTAssertEqual(CorralWorkspaceView.sidebarWidth, 280)
         XCTAssertEqual(CorralWorkspaceView.headerHeight, 38)
         for size in [NSSize(width: 1100, height: 700), NSSize(width: 1400, height: 860), NSSize(width: 1920, height: 1080)] {
@@ -67,13 +67,16 @@ final class NativeWorkspaceTests: XCTestCase {
             XCTAssertEqual(workspace.titleBar.frame.height, 38, accuracy: 0.1)
             XCTAssertEqual(workspace.tabBar.frame.height, 38, accuracy: 0.1)
             XCTAssertEqual(workspace.titleBar.frame.width, 280, accuracy: 0.1)
+            XCTAssertEqual(workspace.titleBar.convert(.zero, to: workspace).x, 0, accuracy: 0.1)
             XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+            XCTAssertEqual(workspace.tabBar.convert(.zero, to: workspace).x, 280, accuracy: 0.1, "TabBar must begin at the right edge of the 280pt sidebar")
             XCTAssertEqual(workspace.tabBar.frame.width, size.width - 280, accuracy: 0.1)
             XCTAssertEqual(workspace.stageContainer.frame.height, size.height - 38, accuracy: 0.1)
         }
         workspace.setSidebarCollapsed(true)
         workspace.layoutSubtreeIfNeeded()
         XCTAssertEqual(workspace.sidebar.frame.width, 0, accuracy: 0.1)
+        XCTAssertEqual(workspace.tabBar.convert(.zero, to: workspace).x, 0, accuracy: 0.1)
         XCTAssertEqual(workspace.tabBar.frame.width, 1920, accuracy: 0.1)
         XCTAssertEqual(workspace.tabBar.frame.height, 38, accuracy: 0.1)
         XCTAssertEqual(workspace.stageContainer.frame.height, 1080 - 38, accuracy: 0.1)
@@ -92,6 +95,7 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(leftButtons[0].frame.minX, 243, accuracy: 0.1)
         XCTAssertEqual(leftButtons[0].frame.size, NSSize(width: 28, height: 27))
         XCTAssertEqual(workspace.titleBar.bounds.maxY - leftButtons[0].frame.maxY, 5, accuracy: 0.1)
+        XCTAssertEqual(workspace.titleBar.collapseButton.convert(.zero, to: workspace).x, 243, accuracy: 0.1)
         XCTAssertTrue(workspace.tabBar.sidebarToggleButton === leftButtons[0])
         XCTAssertTrue(workspace.tabBar.devicesButton === workspace.sidebar.devicesButton)
 
@@ -115,6 +119,10 @@ final class NativeWorkspaceTests: XCTestCase {
         let window = try XCTUnwrap(controller.window as? CorralWindow)
         let initialFrame = window.frame
         let initialContentBounds = try XCTUnwrap(window.contentView).bounds
+        window.contentView?.layoutSubtreeIfNeeded()
+        workspace.layoutSubtreeIfNeeded()
+        XCTAssertEqual(workspace.titleBar.collapseButton.convert(.zero, to: workspace).x, 243, accuracy: 0.1)
+        XCTAssertEqual(workspace.tabBar.convert(.zero, to: workspace).x, 280, accuracy: 0.1, "Window-hosted TabBar must remain to the right of the sidebar")
         XCTAssertEqual(initialContentBounds.size, NSSize(width: 1400, height: 860))
         XCTAssertEqual(window.minSize, NSSize(width: 1100, height: 700))
         XCTAssertEqual(window.contentMinSize, NSSize(width: 1100, height: 700))
@@ -248,11 +256,15 @@ final class NativeWorkspaceTests: XCTestCase {
         let footer = try XCTUnwrap(sidebar.settingsButton.superview)
         XCTAssertEqual(footer.frame.height, 44, accuracy: 0.1)
         XCTAssertEqual(footer.frame.minY, 0, accuracy: 0.1)
-        XCTAssertEqual(sidebar.settingsButton.frame.size, NSSize(width: 34, height: 34))
+        XCTAssertEqual(sidebar.settingsButton.frame.size, NSSize(width: 34, height: 35))
+        XCTAssertEqual(sidebar.settingsButton.frame.minX, 238, accuracy: 0.1)
         XCTAssertEqual(sidebar.settingsButton.frame.maxX, 272, accuracy: 0.1)
+        XCTAssertEqual(sidebar.settingsButton.frame.midY, sidebar.devicesButton.frame.midY, accuracy: 0.1)
         XCTAssertEqual(sidebar.devicesButton.title, "查看所有主机")
         XCTAssertEqual(sidebar.devicesButton.frame.minX, 12, accuracy: 0.1)
         XCTAssertEqual(sidebar.devicesButton.frame.size, NSSize(width: 222, height: 35))
+        XCTAssertEqual(sidebar.devicesButton.layer?.cornerRadius, 8)
+        XCTAssertEqual(sidebar.devicesButton.layer?.borderWidth, 1)
         // The selected Space row paints the legacy selection background.
         let selectedRow = try XCTUnwrap(sidebar.spacesTable.rowView(atRow: 0, makeIfNecessary: true) as? CorralSidebarRowView)
         XCTAssertTrue(selectedRow.isSelected)
@@ -786,6 +798,8 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertLessThanOrEqual(dialog.view.frame.height, 700 - 16, "Must fit the 1100×700 minimum window")
         XCTAssertEqual(dialog.view.layer?.cornerRadius, 18)
         XCTAssertEqual(dialog.view.accessibilityIdentifier(), "corral.settings.dialog")
+        let closeButton = try XCTUnwrap(descendants(of: dialog.view).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "corral.settings.close" })
+        XCTAssertEqual(closeButton.focusRingType, .none)
         let labels = descendants(of: dialog.view).compactMap { ($0 as? NSTextField)?.stringValue }
         for title in ["界面外观", "终端外观", "工作区行为", "主题模式", "字体", "自定义字体栈", "字号", "即时预览", "目录跟踪", "修改即时保存"] {
             XCTAssertTrue(labels.contains(title), "Missing \(title)")

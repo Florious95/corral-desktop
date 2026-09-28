@@ -769,19 +769,19 @@ public final class CorralSidebarView: NSView {
         configureScroll(spacesScroll, table: spacesTable); configureScroll(agentsScroll, table: agentsTable)
         spacesHeader.onToggle = { [weak self] in self?.setSpacesExpanded(!(self?.spacesExpanded ?? true)) }
         agentsHeader.onToggle = { [weak self] in self?.setAgentsExpanded(!(self?.agentsExpanded ?? true)) }
-        // The host picker is 222×35pt at x=12; settings remains 34pt, 8pt from the edge.
+        // The host card is (12, 222×35); the 34×35 settings target sits 8pt from the edge.
         let footer = NSView()
         footerBorder.wantsLayer = true; footerBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor; footerBorder.translatesAutoresizingMaskIntoConstraints = false
         devicesButton.title = "查看所有主机"
         devicesButton.target = self; devicesButton.action = #selector(toggleDevices); devicesButton.image = CorralLegacyIcon.image(.layers, size: 15, tint: CorralAestheticTokens.text); devicesButton.imagePosition = .imageLeading; devicesButton.imageHugsTitle = true
-        devicesButton.font = .systemFont(ofSize: 13, weight: .semibold); devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("查看所有主机"); devicesButton.setAccessibilityIdentifier("corral.sidebar.devices"); devicesButton.translatesAutoresizingMaskIntoConstraints = false
+        devicesButton.font = .systemFont(ofSize: 13, weight: .semibold); devicesButton.isBordered = false; devicesButton.contentTintColor = CorralAestheticTokens.text; devicesButton.setAccessibilityLabel("查看所有主机"); devicesButton.setAccessibilityIdentifier("corral.sidebar.devices"); devicesButton.wantsLayer = true; devicesButton.layer?.backgroundColor = CorralAestheticTokens.surface1.cgColor; devicesButton.layer?.cornerRadius = 8; devicesButton.layer?.borderWidth = 1; devicesButton.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor; devicesButton.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.setAccessibilityIdentifier("corral.sidebar.settings")
         settingsButton.target = self; settingsButton.action = #selector(openSettings); settingsButton.translatesAutoresizingMaskIntoConstraints = false
         for view in [footerBorder, devicesButton, settingsButton] { footer.addSubview(view) }
         NSLayoutConstraint.activate([
             footerBorder.leadingAnchor.constraint(equalTo: footer.leadingAnchor), footerBorder.trailingAnchor.constraint(equalTo: footer.trailingAnchor), footerBorder.topAnchor.constraint(equalTo: footer.topAnchor), footerBorder.heightAnchor.constraint(equalToConstant: 1),
             devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), devicesButton.widthAnchor.constraint(equalToConstant: 222), devicesButton.heightAnchor.constraint(equalToConstant: 35),
-            settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -8), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 34), settingsButton.heightAnchor.constraint(equalToConstant: 34)
+            settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -8), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 34), settingsButton.heightAnchor.constraint(equalToConstant: 35)
         ])
         let stack = NSStackView(views: [spacesHeader, spacesScroll, agentsHeader, agentsScroll, footer])
         stack.orientation = .vertical; stack.alignment = .width; stack.distribution = .fill; stack.spacing = 0; stack.translatesAutoresizingMaskIntoConstraints = false
@@ -867,6 +867,8 @@ public final class CorralSidebarView: NSView {
         agentsTable.backgroundColor = CorralAestheticTokens.surface0
         footerBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor
         devicesButton.image = CorralLegacyIcon.image(.layers, size: 15, tint: CorralAestheticTokens.text)
+        devicesButton.layer?.backgroundColor = CorralAestheticTokens.surface1.cgColor
+        devicesButton.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor
         spacesHeader.refreshTheme(); agentsHeader.refreshTheme()
         settingsButton.refreshTheme()
         spacesTable.reloadData(forRowIndexes: IndexSet(integersIn: 0..<spaces.count), columnIndexes: IndexSet(integer: 0)); agentsTable.reloadData()
@@ -1105,20 +1107,17 @@ public final class CorralWorkspaceView: NSView {
         self.sidebar = sidebar
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.background.cgColor
-        let left = NSView(); left.translatesAutoresizingMaskIntoConstraints = false
-        let right = NSView(); right.translatesAutoresizingMaskIntoConstraints = false
-        for view in [left, right] { addSubview(view) }
-        for view in [titleBar, sidebar] { view.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(view) }
-        for view in [tabBar, stageContainer] { view.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(view) }
-        sidebarColumnWidth = left.widthAnchor.constraint(equalToConstant: Self.sidebarWidth)
+        for view in [titleBar, sidebar, tabBar, stageContainer] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        sidebarColumnWidth = sidebar.widthAnchor.constraint(equalToConstant: Self.sidebarWidth)
         NSLayoutConstraint.activate([
             sidebarColumnWidth,
-            left.leadingAnchor.constraint(equalTo: leadingAnchor), left.topAnchor.constraint(equalTo: topAnchor), left.bottomAnchor.constraint(equalTo: bottomAnchor),
-            right.leadingAnchor.constraint(equalTo: left.trailingAnchor), right.trailingAnchor.constraint(equalTo: trailingAnchor), right.topAnchor.constraint(equalTo: topAnchor), right.bottomAnchor.constraint(equalTo: bottomAnchor),
-            titleBar.leadingAnchor.constraint(equalTo: left.leadingAnchor), titleBar.trailingAnchor.constraint(equalTo: left.trailingAnchor), titleBar.topAnchor.constraint(equalTo: left.topAnchor), titleBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
-            sidebar.leadingAnchor.constraint(equalTo: left.leadingAnchor), sidebar.trailingAnchor.constraint(equalTo: left.trailingAnchor), sidebar.topAnchor.constraint(equalTo: titleBar.bottomAnchor), sidebar.bottomAnchor.constraint(equalTo: left.bottomAnchor),
-            tabBar.leadingAnchor.constraint(equalTo: right.leadingAnchor), tabBar.trailingAnchor.constraint(equalTo: right.trailingAnchor), tabBar.topAnchor.constraint(equalTo: right.topAnchor), tabBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
-            stageContainer.leadingAnchor.constraint(equalTo: right.leadingAnchor), stageContainer.trailingAnchor.constraint(equalTo: right.trailingAnchor), stageContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor), stageContainer.bottomAnchor.constraint(equalTo: right.bottomAnchor)
+            titleBar.leadingAnchor.constraint(equalTo: leadingAnchor), titleBar.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor), titleBar.topAnchor.constraint(equalTo: topAnchor), titleBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            sidebar.leadingAnchor.constraint(equalTo: leadingAnchor), sidebar.topAnchor.constraint(equalTo: titleBar.bottomAnchor), sidebar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor), tabBar.trailingAnchor.constraint(equalTo: trailingAnchor), tabBar.topAnchor.constraint(equalTo: topAnchor), tabBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            stageContainer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor), stageContainer.trailingAnchor.constraint(equalTo: trailingAnchor), stageContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor), stageContainer.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
         titleBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
         tabBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
