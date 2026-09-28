@@ -54,7 +54,6 @@ public final class CorralTabBarView: NSView {
         let provider: String?
         let status: CorralStatusIndicatorView.Status
         let pinned: Bool
-        let selected: Bool
     }
     private var renderedItems: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
     /// Keep every Tab reachable without letting its document widen the window.
@@ -165,16 +164,18 @@ public final class CorralTabBarView: NSView {
         var ordered: [CorralTabItemView] = []
         for tab in self.tabs {
             let appearance = ItemAppearance(title: tab.title, provider: tab.provider, status: tab.status,
-                                            pinned: tab.isPinned, selected: tab.id == selectedTabID)
+                                            pinned: tab.isPinned)
             let item: CorralTabItemView
             if let existing = renderedItems[tab.id], existing.appearance == appearance {
                 item = existing.view
                 item.tab = tab
+                item.setSelected(tab.id == selectedTabID)
             } else { item = CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self) }
             updated[tab.id] = (appearance, item)
             ordered.append(item)
         }
         renderedItems = updated
+        if selectionChanged { revealSelectedTab = true; needsLayout = true }
         let existing = itemsStack.arrangedSubviews
         guard existing.count != ordered.count || zip(existing, ordered).contains(where: { $0 !== $1 }) else { return }
         for view in existing where !ordered.contains(where: { $0 === view }) {
@@ -189,7 +190,6 @@ public final class CorralTabBarView: NSView {
             itemsStack.addSubview(view, positioned: .above, relativeTo: index == 0 ? activeCapsule : ordered[index - 1])
         }
         itemsStack.setFrameSize(NSSize(width: itemsStack.fittingSize.width, height: 28))
-        revealSelectedTab = revealSelectedTab || selectionChanged
         itemsStack.needsLayout = true
         needsLayout = true
     }
@@ -259,7 +259,8 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     private let status = CorralStatusIndicatorView()
     private let title = NSTextField(labelWithString: "")
     private let closeButton = NSButton(title: "", target: nil, action: nil)
-    private let selected: Bool
+    private var selected: Bool
+    private var hovered = false
     private var editField: CorralInlineRenameField?
     private var dragStart: NSPoint?
     private var pressTime: TimeInterval = 0
@@ -272,16 +273,11 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
-        let showsCapsule = selected && !tab.isPinned
-        layer?.backgroundColor = selected && !showsCapsule ? CorralAestheticTokens.tabActiveBackground.cgColor : NSColor.clear.cgColor
-        layer?.borderColor = selected && !showsCapsule ? CorralAestheticTokens.tabActiveBorder.cgColor : NSColor.clear.cgColor
-        layer?.borderWidth = selected && !showsCapsule ? 1 : 0
         status.fillsIdle = true
         status.status = tab.status
         status.translatesAutoresizingMaskIntoConstraints = false
         title.stringValue = tab.title
         title.font = .systemFont(ofSize: 12)
-        title.textColor = selected ? CorralAestheticTokens.text : CorralAestheticTokens.textSecondary
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         title.setAccessibilityIdentifier("corral.tab.title")
@@ -312,7 +308,6 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         closeButton.setAccessibilityLabel("关闭工作台"); closeButton.setAccessibilityIdentifier("corral.tab.close")
         closeButton.target = self
         closeButton.action = #selector(closeTab)
-        closeButton.alphaValue = selected ? 0.7 : 0
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         let showsCloseButton = !tab.isPinned
         if showsCloseButton { addSubview(closeButton) }
@@ -353,8 +348,22 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         setAccessibilityRole(.button)
         setAccessibilityLabel(tab.title)
         setAccessibilityIdentifier("corral.tab")
-        setAccessibilitySelected(selected)
+        updateSelectionAppearance()
         registerForDraggedTypes([.string])
+    }
+    func setSelected(_ selected: Bool) {
+        guard self.selected != selected else { return }
+        self.selected = selected
+        updateSelectionAppearance()
+    }
+    private func updateSelectionAppearance() {
+        let pinnedSelection = selected && tab.isPinned
+        layer?.backgroundColor = (pinnedSelection ? CorralAestheticTokens.tabActiveBackground : (!selected && hovered ? CorralAestheticTokens.hover : NSColor.clear)).cgColor
+        layer?.borderColor = (pinnedSelection ? CorralAestheticTokens.tabActiveBorder : NSColor.clear).cgColor
+        layer?.borderWidth = pinnedSelection ? 1 : 0
+        title.textColor = selected || hovered ? CorralAestheticTokens.text : CorralAestheticTokens.textSecondary
+        closeButton.alphaValue = selected || hovered ? 0.7 : 0
+        setAccessibilitySelected(selected)
     }
     override func accessibilityPerformPress() -> Bool { owner?.select(tab.id); return true }
     override func accessibilityPerformShowMenu() -> Bool { makeContextMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self); return true }
@@ -395,12 +404,12 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
     }
     override func mouseEntered(with event: NSEvent) {
-        closeButton.alphaValue = 0.7
-        if !selected { layer?.backgroundColor = CorralAestheticTokens.hover.cgColor; title.textColor = CorralAestheticTokens.text }
+        hovered = true
+        updateSelectionAppearance()
     }
     override func mouseExited(with event: NSEvent) {
-        closeButton.alphaValue = selected ? 0.7 : 0
-        if !selected { layer?.backgroundColor = NSColor.clear.cgColor; title.textColor = CorralAestheticTokens.textSecondary }
+        hovered = false
+        updateSelectionAppearance()
     }
     override func rightMouseDown(with event: NSEvent) { NSMenu.popUpContextMenu(makeContextMenu(), with: event, for: self) }
     private func makeContextMenu() -> NSMenu {

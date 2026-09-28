@@ -6,6 +6,22 @@ import XCTest
 
 @MainActor
 final class NativeWorkspaceTests: XCTestCase {
+    func testWarmTabSelectionRetainsControlsAndMovesAccessibilitySelection() throws {
+        let tabs = (0..<50).map { CorralTab(title: "Session \($0)", provider: "codex") }
+        let bar = CorralTabBarView(frame: CGRect(x: 0, y: 0, width: 1100, height: 38))
+        bar.setTabs(tabs, selectedTabID: tabs[0].id)
+        let before = descendants(of: bar).filter { $0.accessibilityIdentifier() == "corral.tab" }
+        for index in [1, 25, 49, 0] {
+            bar.setTabs(tabs, selectedTabID: tabs[index].id)
+            bar.layoutSubtreeIfNeeded()
+            let after = descendants(of: bar).filter { $0.accessibilityIdentifier() == "corral.tab" }
+            XCTAssertEqual(after.count, before.count)
+            XCTAssertTrue(zip(before, after).allSatisfy { $0 === $1 }, "selection must not rebuild controls or their layout constraints")
+            XCTAssertEqual(after.filter { $0.isAccessibilitySelected() }.map { $0.accessibilityLabel() }, [tabs[index].title])
+            XCTAssertNotNil(bar.activeCapsuleFrame)
+        }
+    }
+
     func testCatalogRefreshKeepsUnchangedSidebarCellsAndUpdatesOnlyChangedRows() throws {
         let sidebar = CorralSidebarView(frame: CGRect(x: 0, y: 0, width: 280, height: 700))
         let space = CorralSidebarSpace(name: "Project")
