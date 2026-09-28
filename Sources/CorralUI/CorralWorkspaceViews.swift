@@ -581,13 +581,16 @@ final class CorralSidebarSectionHeader: NSView {
 
 @MainActor
 final class CorralAgentTableView: NSTableView {
-    var onAgentClick: ((Int) -> Void)?
-    private var pressedRow: Int?
+    var sessionIDForRow: ((Int) -> SessionID?)?
+    var onAgentClick: ((SessionID, SessionOpenGesture) -> Void)?
+    private var pressedSessionID: SessionID?
+    private var pressedGesture: SessionOpenGesture = .singleClick
     private var didDrag = false
 
     override func mouseDown(with event: NSEvent) {
         let row = self.row(at: convert(event.locationInWindow, from: nil))
-        pressedRow = row >= 0 ? row : nil
+        pressedSessionID = row >= 0 ? sessionIDForRow?(row) : nil
+        pressedGesture = event.clickCount >= 2 ? .doubleClick : .singleClick
         didDrag = false
         super.mouseDown(with: event)
     }
@@ -598,18 +601,21 @@ final class CorralAgentTableView: NSTableView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        let releasedRow = row(at: convert(event.locationInWindow, from: nil))
-        let downRow = pressedRow
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        let releasedSessionID = row >= 0 ? sessionIDForRow?(row) : nil
+        let downSessionID = pressedSessionID
+        let gesture = pressedGesture
         let wasDragged = didDrag
         super.mouseUp(with: event)
-        pressedRow = nil
+        pressedSessionID = nil
+        pressedGesture = .singleClick
         didDrag = false
-        dispatchClickIfCompleted(from: downRow, to: releasedRow, wasDragged: wasDragged)
+        dispatchClickIfCompleted(from: downSessionID, to: releasedSessionID, wasDragged: wasDragged, gesture: gesture)
     }
 
-    func dispatchClickIfCompleted(from pressedRow: Int?, to releasedRow: Int, wasDragged: Bool) {
-        guard !wasDragged, let pressedRow, pressedRow >= 0, pressedRow == releasedRow else { return }
-        onAgentClick?(pressedRow)
+    func dispatchClickIfCompleted(from pressedSessionID: SessionID?, to releasedSessionID: SessionID?, wasDragged: Bool, gesture: SessionOpenGesture = .singleClick) {
+        guard !wasDragged, let pressedSessionID, pressedSessionID == releasedSessionID else { return }
+        onAgentClick?(pressedSessionID, gesture)
     }
 }
 
@@ -642,7 +648,7 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
         } else if agents.indices.contains(row) {
             let agent = agents[row]
             cell.setAccessibilityIdentifier("corral.sidebar.agent"); cell.setAccessibilityLabel(agent.name)
-            cell.onPress = { [weak self] in self?.sidebar?.onSelectAgent?(agent.id) }
+            cell.onPress = { [weak self] in self?.sidebar?.handleAgentAccessibilityPress(id: agent.id) }
             cell.menuProvider = { [weak self] in self?.sidebar?.agentContextMenu(for: agent.id) }
         }
         let rowStack = NSStackView()
@@ -707,9 +713,10 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let table = notification.object as? NSTableView else { return }
         if kind == .spaces, spaces.indices.contains(table.selectedRow) { sidebar?.selectSpace(spaces[table.selectedRow]) }
-        // Agent selection occurs on mouse-down; CorralAgentTableView dispatches only after mouse-up and drag checks.
+        // Agent active/highlight state is coordinator-owned; row clicks only emit an intent after mouse-up.
     }
-    func agentClicked(row: Int) { sidebar?.handleAgentRowClick(at: row) }
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { kind == .spaces }
+    func agentClicked(sessionID: SessionID, gesture: SessionOpenGesture) { sidebar?.handleAgentRowClick(sessionID: sessionID, gesture: gesture) }
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
         guard kind == .agents, agents.indices.contains(row), let sessionID = agents[row].sessionID else { return nil }
         let item = NSPasteboardItem()
@@ -734,7 +741,7 @@ public final class CorralSidebarView: NSView {
     public var onCreateAgent: ((UUID?) -> Void)?
     public var onCreateSpace: (() -> Void)?
     public var onSelectSpace: ((UUID) -> Void)?
-    public var onSelectAgent: ((UUID) -> Void)?
+    public var onSelectAgent: ((SessionID, SessionOpenGesture) -> Void)?
     public var onToggleFavorite: ((UUID, Bool) -> Void)?
     public var onRenameAgent: ((UUID) -> Void)?
     public var onOpenAgent: ((UUID) -> Void)?
@@ -841,9 +848,12 @@ public final class CorralSidebarView: NSView {
         guard let raw = sender.identifier?.rawValue, let id = UUID(uuidString: String(raw.dropFirst(CorralSidebarRowView.hoverControlPrefix.count))) else { return }
         onCreateAgent?(id)
     }
-    func handleAgentRowClick(at row: Int) {
-        guard agents.indices.contains(row) else { return }
-        onSelectAgent?(agents[row].id)
+    func handleAgentRowClick(sessionID: SessionID, gesture: SessionOpenGesture) {
+        onSelectAgent?(sessionID, gesture)
+    }
+    func handleAgentAccessibilityPress(id: UUID) {
+        guard let sessionID = agents.first(where: { $0.id == id })?.sessionID else { return }
+        onSelectAgent?(sessionID, .singleClick)
     }
     fileprivate func selectSpace(_ space: CorralSidebarSpace) {
         selectedSpaceID = space.id
@@ -891,7 +901,9 @@ public final class CorralSidebarView: NSView {
             if lhs.element.isFavorite != rhs.element.isFavorite { return lhs.element.isFavorite }
             return lhs.offset < rhs.offset
         }.map(\.element)
-        agentData.agents = agents; agentsTable.reloadData()
+        agentData.agents = agents
+        agentsTable.deselectAll(nil)
+        agentsTable.reloadData()
     }
     /// Every row's `working / total` is derived from the agents themselves, including real workspace rows.
     private func applyAgentCounts() {
@@ -928,7 +940,11 @@ public final class CorralSidebarView: NSView {
         table.dataSource = data; table.delegate = data; table.usesAutomaticRowHeights = false
         if data.kind == .agents, let agentTable = table as? CorralAgentTableView {
             table.setDraggingSourceOperationMask(.move, forLocal: true)
-            agentTable.onAgentClick = { [weak data] row in data?.agentClicked(row: row) }
+            agentTable.sessionIDForRow = { [weak data] row in
+                guard let data, data.agents.indices.contains(row) else { return nil }
+                return data.agents[row].sessionID
+            }
+            agentTable.onAgentClick = { [weak data] sessionID, gesture in data?.agentClicked(sessionID: sessionID, gesture: gesture) }
         }
     }
     private func configureScroll(_ scroll: NSScrollView, table: NSTableView) {
@@ -1090,7 +1106,7 @@ public final class CorralWorkspaceView: NSView {
     public var onSettings: (() -> Void)?
     public var onCreateAgent: ((UUID?) -> Void)?
     public var onToggleSidebar: (() -> Void)?
-    public var onSelectAgent: ((UUID) -> Void)?
+    public var onSelectAgent: ((SessionID, SessionOpenGesture) -> Void)?
     public var onClosePreview: (() -> Void)?
     public var onOpenSession: ((UUID, UUID?, Bool) -> Void)?
     public var onFocusSession: ((UUID, UUID) -> Void)?
@@ -1124,7 +1140,7 @@ public final class CorralWorkspaceView: NSView {
         tabBar.bindSidebarToggleButton(titleBar.collapseButton)
         tabBar.bindDevicesButton(sidebar.devicesButton)
         sidebar.onSettings = { [weak self] in self?.onSettings?() }; sidebar.onCreateAgent = { [weak self] in self?.onCreateAgent?($0) }; sidebar.onToggleDevices = { [weak self] in self?.onDevices?() }
-        sidebar.onSelectAgent = { [weak self] id in self?.smartOpenSession(id); self?.onSelectAgent?(id) }
+        sidebar.onSelectAgent = { [weak self] sessionID, gesture in self?.onSelectAgent?(sessionID, gesture) }
         tabBar.onSelectTab = { [weak self] in self?.selectTab(id: $0) }; tabBar.onCreateTab = { [weak self] in self?.onCreateTab?() }; tabBar.onCloseTab = { [weak self] in self?.closeTab(id: $0) }
         tabBar.onClosePreview = { [weak self] in self?.onClosePreview?() }
         tabBar.onRenameTab = { [weak self] id, title in self?.renameTab(id: id, title: title) }; tabBar.onReorderTabs = { [weak self] id, index in self?.reorderTab(id: id, to: index) }
@@ -1176,23 +1192,6 @@ public final class CorralWorkspaceView: NSView {
         if let next { selectTab(id: next) }
     }
     public func view(forTab id: UUID) -> NSView? { tabs.first(where: { $0.id == id })?.contentView }
-    public func smartOpenSession(_ sessionID: UUID) {
-        if let existing = tabs.first(where: { $0.sessionIDs.contains(sessionID) || $0.activeSessionID == sessionID }) {
-            previewSessionID = nil; existing.activeSessionID = sessionID; selectTab(id: existing.id); onFocusSession?(sessionID, existing.id); return
-        }
-        guard let current = tabs.first(where: { $0.id == activeTabID }) ?? tabs.first else {
-            previewSessionID = sessionID; onOpenSession?(sessionID, nil, true); return
-        }
-        if current.isBlankWorkspace {
-            current.isBlankWorkspace = false; current.sessionIDs.insert(sessionID); current.activeSessionID = sessionID
-            previewSessionID = nil; onOpenSession?(sessionID, current.id, false)
-        } else {
-            previewSessionID = sessionID
-            current.isPreview = true
-            tabBar.setTabs(tabs, selectedTabID: activeTabID)
-            onOpenSession?(sessionID, current.id, true)
-        }
-    }
     public func renameTab(id: UUID, title: String) { guard !title.isEmpty, let tab = tabs.first(where: { $0.id == id }) else { return }; tab.title = title; tab.isCustomTitle = true; tabBar.setTabs(tabs, selectedTabID: activeTabID) }
     fileprivate func performTabContextAction(_ id: UUID, _ action: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }), let tab = tabs.first(where: { $0.id == id }) else { return }

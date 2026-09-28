@@ -1,4 +1,6 @@
 import AppKit
+import CorralContracts
+import CorralServices
 
 public struct CorralMVPSessionRow: Equatable, Identifiable {
     public let id: UUID
@@ -176,9 +178,13 @@ public final class CorralMVPWorkspaceView: NSView, NSTableViewDataSource, NSTabl
         table.usesAutomaticRowHeights = false
         table.dataSource = self
         table.delegate = self
-        table.onAgentClick = { [weak self] row in
-            guard let self, self.sessions.indices.contains(row) else { return }
-            self.onSelectAgent?(self.sessions[row].id)
+        table.sessionIDForRow = { [weak self] row in
+            guard let self, self.sessions.indices.contains(row) else { return nil }
+            return SessionID(self.sessions[row].id.uuidString)
+        }
+        table.onAgentClick = { [weak self] sessionID, _ in
+            guard let id = UUID(uuidString: sessionID.rawValue) else { return }
+            self?.onSelectAgent?(id)
         }
 
         table.autoresizingMask = [.width]
