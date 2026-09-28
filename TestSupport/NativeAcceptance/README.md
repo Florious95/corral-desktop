@@ -24,6 +24,7 @@ capture path:
 ```sh
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case many-sessions
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case many-sessions-stress
+python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case session-liveness
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case window-resize
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case window-resize --no-resize
 ```
@@ -39,6 +40,17 @@ real PTY geometry; `--no-resize` requires local reflow with no network resize.
 An optional `--server-binary` must name a private `.build` binary copy whose
 SHA256 matches its adjacent `build.json`; this can test a deployed binary
 without contacting or restarting its production process.
+
+`session-liveness` uses 50 distinct, continuously writing PTYs. It checks all
+50 previews and permanent Tabs with fresh output, screenshot OCR, actual input,
+focus and hit testing, then 150 rapid preview and 150 warm Tab switches. Every
+local click must update the visible session within 100 ms; every measured key
+must reach the WebSocket proxy within 100 ms. Full input must reach the real
+PTY within 3 s. `latency.json` separately records the fixture's actual read
+timestamp, P95 and maximum; native socket latency is not end-to-end PTY latency.
+Abandoned previews release both subscriptions and physical views; all 50
+permanent view identities survive warm switching. The observer reads cells
+only from visible panes so it does not introduce hidden-screen scanning work.
 
 The server builder extracts exactly `f664ec3fde8c96b8d326802dfc92020a2ff818a3`
 from Git without changing that repository, then records the source tree,

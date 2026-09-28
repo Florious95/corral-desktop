@@ -1846,7 +1846,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             }
             sidebarDevices.append(CorralSidebarDevice(id: id, name: configuredDeviceName, sessions: deviceSessions, isOnline: connected))
         }
-        workspaceView.sidebar.setDevices(sidebarDevices)
+        workspaceView.sidebar.setDeviceMetadata(sidebarDevices)
 
         let liveDescriptors = sessionOrder.compactMap { sessions[$0]?.descriptor }
         var spacesByDirectory: [String: CorralSidebarSpace] = [:]

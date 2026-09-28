@@ -463,7 +463,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
 public enum CorralSidebarSpaceKind: String, Sendable { case allSpaces, favorites, workspace }
 
 @MainActor
-public struct CorralSidebarSpace: Identifiable, Sendable {
+public struct CorralSidebarSpace: Identifiable, Sendable, Equatable {
     public static let allSpacesID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     public static let favoritesID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
     public let id: UUID
@@ -479,7 +479,7 @@ public struct CorralSidebarSpace: Identifiable, Sendable {
 }
 
 @MainActor
-public struct CorralSidebarAgent: Identifiable, Sendable {
+public struct CorralSidebarAgent: Identifiable, Sendable, Equatable {
     public let id: UUID
     public var name: String
     public var status: CorralStatusIndicatorView.Status
@@ -890,12 +890,14 @@ public final class CorralSidebarView: NSView {
     public required init?(coder: NSCoder) { fatalError("CorralSidebarView is created programmatically") }
     public convenience init(devices: [CorralSidebarDevice]) { self.init(frame: .zero); setDevices(devices) }
     public func setSpaces(_ spaces: [CorralSidebarSpace]) {
+        let previous = self.spaces
         let workspaces = spaces.filter { $0.kind == .workspace && !$0.isVirtual }
         self.spaces = [
             CorralSidebarSpace(id: CorralSidebarSpace.allSpacesID, name: "All Spaces", kind: .allSpaces),
             CorralSidebarSpace(id: CorralSidebarSpace.favoritesID, name: "收藏", kind: .favorites)
         ] + workspaces
         applyAgentCounts()
+        guard self.spaces != previous else { return }
         spaceData.spaces = self.spaces
         if !self.spaces.contains(where: { $0.id == selectedSpaceID }) { selectedSpaceID = CorralSidebarSpace.allSpacesID }
         spacesTable.reloadData()
@@ -933,12 +935,14 @@ public final class CorralSidebarView: NSView {
         onSelectAgent?(sessionID, .singleClick)
     }
     fileprivate func selectSpace(_ space: CorralSidebarSpace) {
+        guard selectedSpaceID != space.id else { return }
         selectedSpaceID = space.id
         spacesTable.reloadData(forRowIndexes: IndexSet(integersIn: 0..<spacesTable.numberOfRows), columnIndexes: IndexSet(integer: 0))
         refreshVisibleAgents(); updateSectionHeaders()
         onSelectSpace?(space.id)
     }
     public func setAgents(_ agents: [CorralSidebarAgent]) {
+        guard allAgents != agents else { return }
         allAgents = agents
         refreshVisibleAgents(); updateSpaceCounts(); updateSectionHeaders()
     }
@@ -962,10 +966,16 @@ public final class CorralSidebarView: NSView {
         updateSectionHeaders()
     }
     public func setDevices(_ devices: [CorralSidebarDevice]) {
-        self.devices = devices
+        setDeviceMetadata(devices)
         let sessions = devices.flatMap { device in device.sessions.map { CorralSidebarAgent(id: $0.id, name: $0.name, status: .idle, deviceName: device.name) } }
         setAgents(sessions)
+    }
+    /// The coordinator supplies full agent identities separately; device metadata must not replace them.
+    public func setDeviceMetadata(_ devices: [CorralSidebarDevice]) {
+        let countChanged = self.devices.count != devices.count
+        self.devices = devices
         deviceBadgeView.configure(deviceName: devices.first?.name ?? "", deviceCount: devices.count)
+        if countChanged { agentsTable.reloadData() }
     }
     private func refreshVisibleAgents() {
         let selectedKind = spaces.first(where: { $0.id == selectedSpaceID })?.kind ?? .allSpaces
@@ -974,13 +984,28 @@ public final class CorralSidebarView: NSView {
         case .favorites: allAgents.filter(\.isFavorite)
         case .workspace: allAgents.filter { $0.spaceID == selectedSpaceID }
         }
-        agents = visible.enumerated().sorted { lhs, rhs in
+        let updated = visible.enumerated().sorted { lhs, rhs in
             if lhs.element.isFavorite != rhs.element.isFavorite { return lhs.element.isFavorite }
             return lhs.offset < rhs.offset
         }.map(\.element)
+        guard updated != agents else { return }
+        let previous = agents
+        agents = updated
         agentData.agents = agents
         agentsTable.deselectAll(nil)
-        agentsTable.reloadData()
+        if previous.map(\.id) != agents.map(\.id) {
+            agentsTable.reloadData()
+        } else {
+            let changed = IndexSet(agents.indices.filter { previous[$0] != agents[$0] })
+            agentsTable.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
+            for index in changed {
+                if let row = agentsTable.rowView(atRow: index, makeIfNecessary: false) as? CorralSidebarRowView {
+                    row.isOpen = agents[index].isOpen
+                    row.isActive = agents[index].isActive
+                    row.needsDisplay = true
+                }
+            }
+        }
     }
     /// Every row's `working / total` is derived from the agents themselves, including real workspace rows.
     private func applyAgentCounts() {
@@ -996,9 +1021,12 @@ public final class CorralSidebarView: NSView {
     }
     private func updateSpaceCounts() {
         guard spaces.count >= 2 else { return }
+        let previous = spaces
         applyAgentCounts()
+        let changed = IndexSet(spaces.indices.filter { previous[$0] != spaces[$0] })
+        guard !changed.isEmpty else { return }
         spaceData.spaces = spaces
-        spacesTable.reloadData(forRowIndexes: IndexSet(integersIn: 0..<spaces.count), columnIndexes: IndexSet(integer: 0))
+        spacesTable.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
     }
     private func updateSectionHeaders() {
         spacesHeader.update(isExpanded: spacesExpanded, hasWorking: spaces.contains { $0.workingCount > 0 })

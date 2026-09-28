@@ -6,6 +6,61 @@ import XCTest
 
 @MainActor
 final class NativeWorkspaceTests: XCTestCase {
+    func testCatalogRefreshKeepsUnchangedSidebarCellsAndUpdatesOnlyChangedRows() throws {
+        let sidebar = CorralSidebarView(frame: CGRect(x: 0, y: 0, width: 280, height: 700))
+        let space = CorralSidebarSpace(name: "Project")
+        var agents = (0..<50).map {
+            CorralSidebarAgent(name: "Session \($0)", provider: "codex", spaceID: space.id,
+                               sessionID: SessionID("session-\($0)"))
+        }
+        sidebar.setSpaces([space])
+        sidebar.setAgents(agents)
+        let device = CorralSidebarDevice(name: "Mac", sessions: agents.map { CorralSidebarSession(id: $0.id, name: $0.name) })
+        sidebar.setDeviceMetadata([device])
+        XCTAssertEqual(sidebar.agents.map(\.sessionID), agents.map(\.sessionID), "device metadata must preserve live session identities")
+        sidebar.layoutSubtreeIfNeeded()
+        let table = sidebar.agentsTable
+        let before = try (0..<3).map { try XCTUnwrap(table.view(atColumn: 0, row: $0, makeIfNecessary: true)) }
+        let spaceCell = try XCTUnwrap(sidebar.spacesTable.view(atColumn: 0, row: 2, makeIfNecessary: true))
+        for _ in 0..<50 {
+            sidebar.setDeviceMetadata([device])
+            sidebar.setSpaces([space])
+            sidebar.setAgents(agents)
+            sidebar.selectSpace(id: CorralSidebarSpace.allSpacesID)
+        }
+        for index in before.indices {
+            XCTAssertTrue(before[index] === table.view(atColumn: 0, row: index, makeIfNecessary: true),
+                          "unchanged catalog/selection must not rebuild every row")
+        }
+        XCTAssertTrue(spaceCell === sidebar.spacesTable.view(atColumn: 0, row: 2, makeIfNecessary: true))
+
+        agents[1].isOpen = true
+        agents[1].isActive = true
+        agents[1].name = "Renamed session"
+        sidebar.setAgents(agents)
+        XCTAssertTrue(before[0] === table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        XCTAssertTrue(before[2] === table.view(atColumn: 0, row: 2, makeIfNecessary: true))
+        let changedRow = try XCTUnwrap(table.rowView(atRow: 1, makeIfNecessary: true) as? CorralSidebarRowView)
+        XCTAssertTrue(changedRow.isActive)
+        XCTAssertTrue(changedRow.isOpen)
+        let changedCell = try XCTUnwrap(table.view(atColumn: 0, row: 1, makeIfNecessary: true))
+        XCTAssertEqual(changedCell.accessibilityLabel(), "Renamed session")
+        var pressed: SessionID?
+        sidebar.onSelectAgent = { session, _ in pressed = session }
+        XCTAssertTrue(changedCell.accessibilityPerformPress())
+        XCTAssertEqual(pressed, agents[1].sessionID)
+
+        agents[1].isFavorite = true
+        agents[1].status = .working
+        sidebar.setAgents(agents)
+        XCTAssertEqual(sidebar.agents.first?.id, agents[1].id)
+        XCTAssertEqual(sidebar.spaces.first { $0.id == space.id }?.workingCount, 1)
+        sidebar.selectSpace(id: space.id)
+        sidebar.setSpaces([])
+        XCTAssertEqual(sidebar.selectedSpaceID, CorralSidebarSpace.allSpacesID)
+        XCTAssertEqual(sidebar.agents.count, 50)
+    }
+
     func testCatalogRefreshPreservesTabControlsAndAnUncommittedRename() throws {
         let tabs = (0..<50).map { CorralTab(title: "Session \($0)", provider: "codex") }
         let bar = CorralTabBarView(frame: CGRect(x: 0, y: 0, width: 1200, height: 38))
