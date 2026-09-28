@@ -53,9 +53,9 @@ public struct TerminalThemePalette: Equatable, Sendable {
         selectionForeground: .init(hex: "#ffffff"),
         ansi16: [
             "#414868", "#f7768e", "#9ece6a", "#e0af68",
-            "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
+            "#7aa2f7", "#bb9af7", "#7dcfff", "#282f39",
             "#787c99", "#ff899d", "#b9f27c", "#ffc777",
-            "#82aaff", "#c099ff", "#86e1fc", "#c8d3f5"
+            "#82aaff", "#c099ff", "#86e1fc", "#282f39"
         ].map { TerminalPaletteColor(hex: $0) }
     )
 

@@ -7,6 +7,18 @@ import XCTest
 final class TerminalEngineTests: XCTestCase {
     private let linkInstanceID = LinkInstanceID()
 
+    func testCorralDarkANSIPaletteHasSixteenExactColorsAndDarkNeutrals() {
+        let palette = CorralTerminalPalette.darkANSI16
+        let rgb8 = palette.map { color in
+            [UInt8(color.red / 257), UInt8(color.green / 257), UInt8(color.blue / 257)]
+        }
+
+        XCTAssertEqual(palette.count, 16)
+        XCTAssertEqual(rgb8, TerminalThemePalette.dark.ansi16.map { [$0.red, $0.green, $0.blue] })
+        XCTAssertEqual(rgb8[7], [0x28, 0x2F, 0x39])
+        XCTAssertEqual(rgb8[15], [0x28, 0x2F, 0x39])
+    }
+
     func testParsesSGRColorsAttributesAndCursorModes() async throws {
         let engine = SwiftTermEngineAdapter(size: GridSize(rows: 2, columns: 8))
         _ = try await feed("\u{1B}[1;3;4;7;38;2;1;2;3mX\u{1B}[3 q\u{1B}[?25l", to: engine)
