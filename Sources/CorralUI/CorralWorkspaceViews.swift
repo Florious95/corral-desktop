@@ -1152,7 +1152,6 @@ public final class CorralWorkspaceView: NSView {
     }
     public func setSidebarCollapsed(_ collapsed: Bool) {
         let isVisible = !collapsed
-        guard sidebarIsVisible != isVisible else { return }
         sidebarIsVisible = isVisible
         sidebarColumnWidth.constant = isVisible ? Self.sidebarWidth : 0
         tabBar.setSidebarCollapsed(collapsed)

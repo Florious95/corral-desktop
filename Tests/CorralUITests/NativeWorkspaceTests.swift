@@ -73,6 +73,15 @@ final class NativeWorkspaceTests: XCTestCase {
             XCTAssertEqual(workspace.tabBar.frame.width, size.width - 280, accuracy: 0.1)
             XCTAssertEqual(workspace.stageContainer.frame.height, size.height - 38, accuracy: 0.1)
         }
+        workspace.sidebar.isHidden = true
+        workspace.titleBar.isHidden = true
+        workspace.setSidebarCollapsed(false)
+        workspace.layoutSubtreeIfNeeded()
+        XCTAssertFalse(workspace.sidebar.isHidden)
+        XCTAssertFalse(workspace.titleBar.isHidden)
+        XCTAssertEqual(workspace.sidebar.frame.width, 280, accuracy: 0.1)
+        XCTAssertEqual(workspace.tabBar.convert(.zero, to: workspace).x, 280, accuracy: 0.1)
+
         workspace.setSidebarCollapsed(true)
         workspace.layoutSubtreeIfNeeded()
         XCTAssertEqual(workspace.sidebar.frame.width, 0, accuracy: 0.1)
@@ -443,6 +452,26 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(closed, agent.id)
         XCTAssertTrue(menu.items.contains { $0.title == "复制会话 ID" })
         XCTAssertEqual(sidebar.agentContextMenu(for: favorite.id)?.items[1].title, "取消收藏")
+    }
+
+    func testSidebarRendersIncomingAgentsWithAllSpacesSelectedByDefault() throws {
+        let space = CorralSidebarSpace(name: "Project")
+        let sidebar = CorralSidebarView()
+        XCTAssertEqual(sidebar.selectedSpaceID, CorralSidebarSpace.allSpacesID)
+        XCTAssertEqual(sidebar.agentsTable.numberOfRows, 0)
+
+        sidebar.setSpaces([space])
+        sidebar.setAgents([CorralSidebarAgent(name: "Incoming session", status: .working, spaceID: space.id)])
+        XCTAssertEqual(sidebar.selectedSpaceID, CorralSidebarSpace.allSpacesID)
+        XCTAssertEqual(sidebar.agents.map(\.name), ["Incoming session"])
+        XCTAssertEqual(sidebar.agentsTable.numberOfRows, 1)
+        let row = try XCTUnwrap(sidebar.agentsTable.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CorralSidebarCellView)
+        XCTAssertEqual(row.accessibilityLabel(), "Incoming session")
+        XCTAssertTrue(descendants(of: row).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "Incoming session" })
+
+        sidebar.setAgents([CorralSidebarAgent(name: "Incoming session"), CorralSidebarAgent(name: "Second session")])
+        XCTAssertEqual(sidebar.agentsTable.numberOfRows, 2, "each agent update reloads the visible table data")
+        XCTAssertEqual(sidebar.agents.map(\.name), ["Incoming session", "Second session"])
     }
 
     func testSpacesRowsFilterAgentsByFavoritesAndWorkspaceAndCanCollapse() {
