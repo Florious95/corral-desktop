@@ -61,6 +61,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         var descriptor: SessionDescriptor
         var subscribed = false
         var subscriptionPending = false
+        var awaitingSnapshot = false
         var lastAppliedReceiveOrdinal = ReceiveOrdinal(0)
         var desiredGrid: GridSize?
         /// Catalog sizes can lag commands already written to the socket.
@@ -154,6 +155,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var uiSessionKeys: [UUID: SessionKey] = [:]
     private var pendingSessionOpenIntents: [SessionOpenIntent] = []
     private var drainingSessionOpenIntents = false
+    private var subscriptionTask: Task<Void, Never>?
+    private var subscriptionUpdateRequested = false
+    private var pendingUnsubscriptions = Set<SessionKey>()
+    private var subscriptionSnapshotTimeout: Task<Void, Never>?
     private var activeSession: SessionKey?
 
     private struct PendingInput {
@@ -368,6 +373,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         pendingCloseSessionRequests.removeAll()
         eventStreamTask?.cancel()
         eventStreamTask = nil
+        subscriptionTask?.cancel()
+        subscriptionTask = nil
+        subscriptionSnapshotTimeout?.cancel()
+        subscriptionSnapshotTimeout = nil
+        subscriptionUpdateRequested = false
+        pendingUnsubscriptions.removeAll()
         await sessionLink.disconnect()
         connection = nil
         connected = false
@@ -612,8 +623,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         )
         workspaceView.stageContainer.splitView.update(root: state.visibleRoot, focusedSessionID: state.visibleSessionID)
         activeSession = state.visibleSessionID.flatMap(sessionKey(for:))
-        updateTerminalStage()
-        await subscribeVisibleSessions()
+        scheduleSubscriptionUpdate()
         updateSidebar(devices: cachedDevices)
         updateWorkspaceTitle(count: sessionCount)
         focusVisibleTerminal()
@@ -1318,7 +1328,19 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 await receive(envelope)
             }
         } catch {
+            guard !Task.isCancelled else { return }
+            await sessionLink.disconnect()
+            connection = nil
             connected = false
+            subscriptionSnapshotTimeout?.cancel()
+            for key in sessions.keys {
+                sessions[key]?.subscribed = false
+                sessions[key]?.subscriptionPending = false
+                sessions[key]?.awaitingSnapshot = false
+            }
+            subscribedSessionIDs = []
+            pendingInput.removeAll()
+            pendingInputBytes = 0
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
             updateSidebar(devices: cachedDevices)
@@ -1491,7 +1513,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         await resolveCreatedAgents(in: order)
         subscribedSessionIDs = sessionOrder.compactMap { sessions[$0]?.subscribed == true ? $0.reference.rawValue : nil }
         updateWorkspaceTitle(count: sessionCount)
-        await subscribeVisibleSessions()
+        scheduleSubscriptionUpdate()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
         updateTerminalStage()
         await writeTelemetry()
@@ -1519,7 +1541,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         await reconcileWorkspaceListing()
         await resolveCreatedAgents(in: sessionOrder)
         updateWorkspaceTitle(count: sessionCount)
-        await subscribeVisibleSessions()
+        scheduleSubscriptionUpdate()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
         updateTerminalStage()
         await writeTelemetry()
@@ -1543,6 +1565,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             if runtime.descriptor.freshness?.connectionEpoch != origin.connectionEpoch {
                 runtime.subscribed = false
                 runtime.subscriptionPending = false
+                runtime.awaitingSnapshot = false
                 runtime.requestedGrid = nil
                 runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             }
@@ -1556,18 +1579,47 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return key
     }
 
-    private func subscribeVisibleSessions() async {
-        guard let cleanupConnection = connection else { return }
-        // Permanent Tabs keep their streams. A replaced preview has no workspace
-        // owner, so its PTY subscription and view must not accumulate indefinitely.
+    private func scheduleSubscriptionUpdate() {
+        // UI identity and focus never wait for the WebSocket writer. Removed
+        // previews leave a release intent even if their subscribe is still in flight.
+        let retained = retainedSessionIDs
         for (key, view) in terminalRegistry.allViews {
             guard let runtime = sessions[key],
-                  !retainedSessionIDs.contains(runtime.descriptor.id),
+                  !retained.contains(runtime.descriptor.id),
                   terminalRegistry.view(for: key) === view else { continue }
+            if runtime.subscribed || runtime.subscriptionPending { pendingUnsubscriptions.insert(key) }
+            terminalRegistry.remove(key)
+        }
+        for key in visibleSessionKeys() { _ = ensureTerminalView(for: key) }
+        updateTerminalStage()
+        focusVisibleTerminal()
+        subscriptionUpdateRequested = true
+        guard subscriptionTask == nil else { return }
+        subscriptionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while self.subscriptionUpdateRequested, !Task.isCancelled {
+                self.subscriptionUpdateRequested = false
+                await self.subscribeVisibleSessions()
+            }
+            self.subscriptionTask = nil
+        }
+    }
+
+    private func subscribeVisibleSessions() async {
+        guard let cleanupConnection = connection else { return }
+        // A socket write is not a completed server subscription. There is only
+        // one initial snapshot in flight; intervening preview clicks replace the
+        // desired workspace instead of queuing obsolete server reflows.
+        guard !sessions.values.contains(where: { $0.awaitingSnapshot }) else { return }
+        // One reconciler owns all subscribe/unsubscribe ordering. The workspace
+        // can advance while it is suspended; each pass reads the latest ownership.
+        for key in sessionOrder {
+            guard let runtime = sessions[key],
+                  pendingUnsubscriptions.contains(key) || !retainedSessionIDs.contains(runtime.descriptor.id) else { continue }
+            pendingUnsubscriptions.remove(key)
             sessions[key]?.subscribed = false
             sessions[key]?.subscriptionPending = false
             sessions[key]?.requestedGrid = nil
-            terminalRegistry.remove(key)
             if runtime.subscribed || runtime.subscriptionPending {
                 do {
                     let receipt = try await sessionLink.send(.unsubscribe(reference: key.reference))
@@ -1576,31 +1628,41 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             }
             guard connection == cleanupConnection else { return }
         }
-        for key in visibleSessionKeys() { _ = ensureTerminalView(for: key) }
-        updateTerminalStage()
-        focusVisibleTerminal()
-        for key in visibleSessionKeys() {
+        let visible = visibleSessionKeys()
+        let retained = retainedSessionIDs
+        let candidates = visible + sessionOrder.filter { key in
+            !visible.contains(key) && sessions[key].map { retained.contains($0.descriptor.id) } == true && terminalRegistry.view(for: key) != nil
+        }
+        for key in candidates {
             guard let connection, key.deviceID == connection.deviceID,
                   let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending,
                   let subscribingView = terminalRegistry.view(for: key) else { continue }
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
-                // Use the server-advertised live grid; inspection mode never substitutes local view dimensions.
-                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
+                sessions[key]?.awaitingSnapshot = true
+                let initialGrid = noResizeMode ? runtime.descriptor.size : (runtime.desiredGrid ?? runtime.descriptor.size)
+                startSubscriptionSnapshotTimeout(for: key, connection: connection)
+                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: initialGrid))
                 guard self.connection == connection,
-                      sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
-                      terminalRegistry.view(for: key) === subscribingView else { continue }
+                      sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch else { continue }
                 sessions[key]?.subscriptionPending = false
                 sessions[key]?.subscribed = receipt.socketWritten
-                if receipt.socketWritten { sessions[key]?.requestedGrid = runtime.descriptor.size }
+                if receipt.socketWritten { sessions[key]?.requestedGrid = initialGrid }
+                if terminalRegistry.view(for: key) !== subscribingView {
+                    if receipt.socketWritten { pendingUnsubscriptions.insert(key) }
+                    subscriptionUpdateRequested = true
+                    break
+                }
                 scheduleInputDrain()
                 guard receipt.socketWritten else { continue }
                 if !noResizeMode, let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
+                if sessions[key]?.awaitingSnapshot == true { break }
             } catch {
-                guard self.connection == connection,
-                      terminalRegistry.view(for: key) === subscribingView else { continue }
+                guard self.connection == connection else { continue }
                 sessions[key]?.subscriptionPending = false
+                sessions[key]?.awaitingSnapshot = false
+                subscriptionSnapshotTimeout?.cancel()
                 scheduleInputDrain()
                 lastConnectionError = String(describing: error)
             }
@@ -1612,6 +1674,18 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         updateTerminalStage()
     }
 
+    private func startSubscriptionSnapshotTimeout(for key: SessionKey, connection: AuthenticatedConnection) {
+        subscriptionSnapshotTimeout?.cancel()
+        subscriptionSnapshotTimeout = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            guard let self, self.connection == connection, self.sessions[key]?.awaitingSnapshot == true else { return }
+            self.sessions[key]?.awaitingSnapshot = false
+            self.pendingUnsubscriptions.insert(key)
+            self.lastConnectionError = "Timed out waiting for the session snapshot."
+            self.scheduleSubscriptionUpdate()
+        }
+    }
+
     private func applyFrame(_ frame: BinaryFrame, origin: SessionEventOrigin) async {
         let reference: SessionReference
         switch frame {
@@ -1620,10 +1694,17 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let key = SessionKey(deviceID: origin.deviceID, reference: reference)
         guard var runtime = sessions[key], runtime.subscribed || runtime.subscriptionPending,
               runtime.descriptor.freshness?.connectionEpoch == origin.connectionEpoch,
-              runtime.lastAppliedReceiveOrdinal < origin.receiveOrdinal,
-              let view = terminalRegistry.view(for: key) else { return }
+              runtime.lastAppliedReceiveOrdinal < origin.receiveOrdinal else { return }
+        if case .snapshot = frame, runtime.awaitingSnapshot {
+            runtime.awaitingSnapshot = false
+            subscriptionSnapshotTimeout?.cancel()
+            subscriptionSnapshotTimeout = nil
+            subscriptionUpdateRequested = true
+        }
         runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
         sessions[key] = runtime
+        if subscriptionUpdateRequested { scheduleSubscriptionUpdate() }
+        guard let view = terminalRegistry.view(for: key) else { return }
         switch frame {
         case let .snapshot(_, bytes): view.replaceSnapshot(bytes)
         case let .delta(_, bytes): view.feedRemoteANSI(Array(bytes)[...])
@@ -1642,7 +1723,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize) async {
-        guard !noResizeMode,
+        guard !noResizeMode, layoutPreview == nil,
               let connection, key.deviceID == connection.deviceID,
               var runtime = sessions[key], runtime.subscribed,
               runtime.requestedGrid != grid,
@@ -1681,7 +1762,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
         guard !noResizeMode, !data.isEmpty, let connection,
               let key = terminalRegistry.key(for: source), key.deviceID == connection.deviceID,
-              let runtime = sessions[key], runtime.subscribed || runtime.subscriptionPending,
+              let runtime = sessions[key], connected,
               runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden,
               source.window?.firstResponder === source else { return }
@@ -1710,7 +1791,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func drainInput() async {
         defer { drainingInput = false }
         while let input = pendingInput.first {
-            if input.connection == connection, sessions[input.session]?.subscriptionPending == true { return }
+            if input.connection == connection, connected,
+               let runtime = sessions[input.session], retainedSessionIDs.contains(runtime.descriptor.id),
+               !runtime.subscribed || runtime.subscriptionPending { return }
             pendingInput.removeFirst()
             pendingInputBytes -= input.bytes.count
             guard input.connection == connection, sessions[input.session]?.subscribed == true else {

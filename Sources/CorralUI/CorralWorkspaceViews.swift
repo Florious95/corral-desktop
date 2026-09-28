@@ -49,6 +49,14 @@ public final class CorralTabBarView: NSView {
     public var onContextAction: ((UUID, String) -> Void)?
 
     private let itemsStack = NSStackView()
+    private struct ItemAppearance: Equatable {
+        let title: String
+        let provider: String?
+        let status: CorralStatusIndicatorView.Status
+        let pinned: Bool
+        let selected: Bool
+    }
+    private var renderedItems: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
     /// Keep every Tab reachable without letting its document widen the window.
     private let tabsLane = NSScrollView()
     private var revealSelectedTab = false
@@ -151,16 +159,37 @@ public final class CorralTabBarView: NSView {
 
     public func setTabs(_ tabs: [CorralTab], selectedTabID: UUID?) {
         self.tabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
+        let selectionChanged = self.selectedTabID != selectedTabID
         self.selectedTabID = selectedTabID
-        for view in itemsStack.arrangedSubviews {
+        var updated: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
+        var ordered: [CorralTabItemView] = []
+        for tab in self.tabs {
+            let appearance = ItemAppearance(title: tab.title, provider: tab.provider, status: tab.status,
+                                            pinned: tab.isPinned, selected: tab.id == selectedTabID)
+            let item: CorralTabItemView
+            if let existing = renderedItems[tab.id], existing.appearance == appearance {
+                item = existing.view
+                item.tab = tab
+            } else { item = CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self) }
+            updated[tab.id] = (appearance, item)
+            ordered.append(item)
+        }
+        renderedItems = updated
+        let existing = itemsStack.arrangedSubviews
+        guard existing.count != ordered.count || zip(existing, ordered).contains(where: { $0 !== $1 }) else { return }
+        for view in existing where !ordered.contains(where: { $0 === view }) {
             itemsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        for tab in self.tabs {
-            itemsStack.addArrangedSubview(CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self))
+        for (index, view) in ordered.enumerated() {
+            if itemsStack.arrangedSubviews.indices.contains(index), itemsStack.arrangedSubviews[index] === view { continue }
+            if view.superview === itemsStack { itemsStack.removeArrangedSubview(view) }
+            itemsStack.insertArrangedSubview(view, at: index)
+            // Keep accessibility/subview traversal in the same order as the lane.
+            itemsStack.addSubview(view, positioned: .above, relativeTo: index == 0 ? activeCapsule : ordered[index - 1])
         }
         itemsStack.setFrameSize(NSSize(width: itemsStack.fittingSize.width, height: 28))
-        revealSelectedTab = true
+        revealSelectedTab = revealSelectedTab || selectionChanged
         itemsStack.needsLayout = true
         needsLayout = true
     }
@@ -196,6 +225,7 @@ public final class CorralTabBarView: NSView {
         bottomBorder.layer?.backgroundColor = CorralAestheticTokens.borderSubtle.cgColor
         expandSidebarButton.contentTintColor = CorralAestheticTokens.icon
         createButton.contentTintColor = CorralAestheticTokens.icon
+        renderedItems.removeAll()
         setTabs(tabs, selectedTabID: selectedTabID)
     }
     public func rename(_ tabID: UUID) {
@@ -224,7 +254,7 @@ public final class CorralTabBarView: NSView {
 
 @MainActor
 private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSource {
-    let tab: CorralTab
+    var tab: CorralTab
     private weak var owner: CorralTabBarView?
     private let status = CorralStatusIndicatorView()
     private let title = NSTextField(labelWithString: "")

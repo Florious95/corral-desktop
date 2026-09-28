@@ -3,12 +3,14 @@ import Foundation
 
 public enum SessionLinkTransportError: Error, Equatable, Sendable {
     case sendQueueFull
+    case sendTimedOut
 }
 
 /// Native WebSocket implementation of the frozen Protocol v1 session-link contract.
 public actor URLSessionSessionLink: SessionLinkProtocol {
     struct Configuration: Sendable {
         var maximumQueuedMessages: Int = 256
+        var sendTimeoutNanoseconds: UInt64 = 5_000_000_000
         var maximumBufferedEvents: UInt32 = 128
         var maximumBufferedBytes: UInt64 = 16 * 1_024 * 1_024
         var maximumBufferedControls: UInt32 = 32
@@ -24,6 +26,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     }
 
     private struct PendingSend {
+        let id = UUID()
         let command: ClientCommand
         let attempt: UInt64
         let epoch: ConnectionEpoch
@@ -50,7 +53,8 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     private var heartbeatTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var senderTask: Task<Void, Never>?
-    private var senderRunning = false
+    private var sendTimeoutTask: Task<Void, Never>?
+    private var inFlight: PendingSend?
     private var eventStreamClaimed = false
     private var outbound: [PendingSend] = []
     private var subscriptions: [SessionReference: DesiredSubscription] = [:]
@@ -68,6 +72,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         transportFactory: @escaping @Sendable (URL) -> any WebSocketConnection
     ) {
         precondition(configuration.maximumQueuedMessages > 0)
+        precondition(configuration.sendTimeoutNanoseconds > 0)
         precondition(configuration.maximumBufferedEvents > 0)
         precondition(configuration.maximumBufferedBytes > 0)
         precondition(configuration.maximumBufferedControls <= configuration.maximumBufferedEvents)
@@ -103,6 +108,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         self.deviceID = deviceID
         self.credential = credential
         if let previousSocket { await previousSocket.close() }
+        await eventMailbox.discardBufferedEvents()
         guard currentLifecycle == lifecycle else { throw CancellationError() }
 
         do {
@@ -154,6 +160,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         let previousSocket = socket
         socket = nil
         if let previousSocket { await previousSocket.close() }
+        await eventMailbox.discardBufferedEvents()
         guard currentLifecycle == lifecycle else { return }
         await setState(.disconnected)
     }
@@ -228,12 +235,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     }
 
     private func startSenderIfNeeded() {
-        guard !senderRunning else { return }
-        senderRunning = true
-        senderTask = Task { [weak self] in await self?.drainOutbound() }
-    }
-
-    private func drainOutbound() async {
+        guard inFlight == nil else { return }
         while !outbound.isEmpty {
             let item = outbound.removeFirst()
             guard item.attempt == activeAttempt,
@@ -252,28 +254,50 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
                 continue
             }
 
-            do {
-                try await candidate.send(.text(bytes.utf8String))
-                updateDesiredSubscription(for: item.command)
-                item.continuation.resume(returning: CommandSendReceipt(
-                    requestID: requestID(for: item.command),
-                    socketWritten: true
-                ))
-            } catch {
-                let failure: Error
-                if case let .input(request) = item.command {
-                    failure = SessionLinkFailure.inputOutcomeUnknown(requestID: request.sequence)
-                } else {
-                    failure = sessionFailure(for: error)
-                }
-                item.continuation.resume(throwing: failure)
-                if activeAttempt == item.attempt { await transportFailed(attempt: item.attempt, error: error) }
-                break
+            inFlight = item
+            senderTask = Task { [weak self] in
+                do {
+                    try await candidate.send(.text(bytes.utf8String))
+                    await self?.completeSend(id: item.id, error: nil)
+                } catch { await self?.completeSend(id: item.id, error: error) }
             }
+            // Do not use a task group: an uncooperative socket operation would
+            // keep the group's scope (and every caller) suspended past its deadline.
+            sendTimeoutTask = Task { [weak self, configuration] in
+                do { try await Task.sleep(nanoseconds: configuration.sendTimeoutNanoseconds) }
+                catch { return }
+                await self?.completeSend(id: item.id, error: SessionLinkTransportError.sendTimedOut, timedOut: true)
+            }
+            return
         }
-        senderRunning = false
+    }
+
+    private func completeSend(id: UUID, error: Error?, timedOut: Bool = false) async {
+        // Disconnect owns continuation completion. An old socket's late callback
+        // must neither resume it twice nor alter subscriptions in the new epoch.
+        guard let item = inFlight, item.id == id else { return }
+        inFlight = nil
+        if timedOut { senderTask?.cancel() }
+        else { sendTimeoutTask?.cancel() }
         senderTask = nil
-        if !outbound.isEmpty { startSenderIfNeeded() }
+        sendTimeoutTask = nil
+        if let error {
+            item.continuation.resume(throwing: inFlightFailure(for: item, error: error))
+            await transportFailed(attempt: item.attempt, error: error)
+        } else if activeAttempt == item.attempt, epoch == item.epoch {
+            updateDesiredSubscription(for: item.command)
+            item.continuation.resume(returning: CommandSendReceipt(requestID: requestID(for: item.command), socketWritten: true))
+        } else {
+            item.continuation.resume(throwing: inFlightFailure(for: item, error: SessionLinkFailure.disconnected))
+        }
+        startSenderIfNeeded()
+    }
+
+    private func inFlightFailure(for item: PendingSend, error: Error) -> Error {
+        if case let .input(request) = item.command {
+            return SessionLinkFailure.inputOutcomeUnknown(requestID: request.sequence)
+        }
+        return error
     }
 
     private func updateDesiredSubscription(for command: ClientCommand) {
@@ -457,6 +481,14 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     }
 
     private func failQueuedSends(_ error: Error) {
+        senderTask?.cancel()
+        senderTask = nil
+        sendTimeoutTask?.cancel()
+        sendTimeoutTask = nil
+        if let item = inFlight {
+            inFlight = nil
+            item.continuation.resume(throwing: inFlightFailure(for: item, error: error))
+        }
         let pending = outbound
         outbound.removeAll()
         for item in pending { item.continuation.resume(throwing: error) }
@@ -481,7 +513,29 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             receiveOrdinal: ReceiveOrdinal(receiveOrdinal)
         )
         guard let envelope = try? SessionEventEnvelope(origin: origin, wireByteCount: wireByteCount, event: event) else { return }
-        await eventMailbox.enqueue(envelope)
+        do {
+            switch event {
+            case .connectionChanged, .failed:
+                // Failure handling can cancel the task that detected it. Its
+                // connection-state notification must still reach the consumer.
+                try await eventMailbox.enqueue(envelope, cancellable: false)
+            default: try await eventMailbox.enqueue(envelope)
+            }
+        }
+        catch is CancellationError { return }
+        catch {
+            // A single unbufferable event is fatal. Never leave a live socket
+            // behind a terminated stream that silently ignores all future output.
+            cancelCurrentTasks()
+            failQueuedSends(error)
+            activeAttempt = nil
+            endpoint = nil
+            credential = nil
+            state = .failed(.eventBufferOverflow)
+            let previous = socket
+            socket = nil
+            await previous?.close()
+        }
     }
 
     private func sessionFailure(for error: Error) -> SessionLinkFailure {
@@ -571,46 +625,126 @@ private actor EventMailbox: SessionEventStream {
     private var buffer: [SessionEventEnvelope] = []
     private var bufferedBytes: UInt64 = 0
     private var bufferedControls: UInt32 = 0
-    private var waiter: CheckedContinuation<SessionEventEnvelope?, Error>?
+    private var waiter: (id: UUID, continuation: CheckedContinuation<SessionEventEnvelope?, Error>)?
+    private struct Producer {
+        let id: UUID
+        let event: SessionEventEnvelope
+        let continuation: CheckedContinuation<Void, Error>
+    }
+    // The single receiver suspends here instead of reading more WebSocket data.
+    // Lifecycle publishers join the same FIFO, preserving receiveOrdinal order.
+    private var producers: [Producer] = []
     private var terminalError: SessionLinkFailure?
     private var finished = false
 
     init(budget: SessionEventStreamBudget) { self.budget = budget }
 
-    func enqueue(_ event: SessionEventEnvelope) {
-        guard !finished else { return }
+    private func isControl(_ event: SessionEventEnvelope) -> Bool {
+        if case .control = event.event { return true }
+        return false
+    }
+
+    private func hasCapacity(for event: SessionEventEnvelope) -> Bool {
+        buffer.count < budget.maximumBufferedEvents &&
+            event.wireByteCount <= budget.maximumBufferedBytes - bufferedBytes &&
+            (!isControl(event) || bufferedControls < budget.maximumBufferedControls)
+    }
+
+    private func append(_ event: SessionEventEnvelope) {
+        buffer.append(event)
+        bufferedBytes += event.wireByteCount
+        if isControl(event) { bufferedControls += 1 }
+    }
+
+    func enqueue(_ event: SessionEventEnvelope, cancellable: Bool = true) async throws {
+        if cancellable { try Task.checkCancellation() }
+        guard !finished else { throw terminalError ?? SessionLinkFailure.disconnected }
+        guard event.wireByteCount <= budget.maximumBufferedBytes else {
+            finish(with: .eventBufferOverflow)
+            throw SessionLinkFailure.eventBufferOverflow
+        }
         if let waiter {
             self.waiter = nil
-            waiter.resume(returning: event)
+            waiter.continuation.resume(returning: event)
             return
         }
-        let (newBytes, overflow) = bufferedBytes.addingReportingOverflow(event.wireByteCount)
-        let isControl: Bool
-        if case .control = event.event { isControl = true } else { isControl = false }
-        let controlsExceeded = isControl && bufferedControls >= budget.maximumBufferedControls
-        guard !overflow, buffer.count < budget.maximumBufferedEvents, newBytes <= budget.maximumBufferedBytes, !controlsExceeded else {
-            finish(with: .eventBufferOverflow)
+        if producers.isEmpty, hasCapacity(for: event) {
+            append(event)
             return
         }
-        buffer.append(event)
-        bufferedBytes = newBytes
-        if isControl { bufferedControls += 1 }
+        let id = UUID()
+        if !cancellable {
+            return try await withCheckedThrowingContinuation { continuation in
+                producers.append(Producer(id: id, event: event, continuation: continuation))
+            }
+        }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { producers.append(Producer(id: id, event: event, continuation: continuation)) }
+            }
+        } onCancel: {
+            Task { await self.cancelProducer(id) }
+        }
+    }
+
+    private func admitProducers() {
+        while let first = producers.first, hasCapacity(for: first.event) {
+            producers.removeFirst()
+            append(first.event)
+            first.continuation.resume()
+        }
+    }
+
+    private func cancelProducer(_ id: UUID) {
+        guard let index = producers.firstIndex(where: { $0.id == id }) else { return }
+        producers.remove(at: index).continuation.resume(throwing: CancellationError())
+        admitProducers()
     }
 
     func next() async throws -> SessionEventEnvelope? {
+        try Task.checkCancellation()
+        guard waiter == nil else { throw SessionLinkFailure.concurrentEventRead }
         if !buffer.isEmpty {
             let event = buffer.removeFirst()
             bufferedBytes -= event.wireByteCount
-            if case .control = event.event { bufferedControls -= 1 }
+            if isControl(event) { bufferedControls -= 1 }
+            admitProducers()
             return event
         }
-        if let terminalError {
-            self.terminalError = nil
-            throw terminalError
+        // A zero control-buffer budget can still deliver a control directly.
+        if !producers.isEmpty {
+            let first = producers.removeFirst()
+            first.continuation.resume()
+            return first.event
         }
+        if let terminalError { throw terminalError }
         if finished { return nil }
-        guard waiter == nil else { throw SessionLinkFailure.concurrentEventRead }
-        return try await withCheckedThrowingContinuation { waiter = $0 }
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { waiter = (id, continuation) }
+            }
+        } onCancel: {
+            Task { await self.cancelReader(id) }
+        }
+    }
+
+    private func cancelReader(_ id: UUID) {
+        guard let waiter, waiter.id == id else { return }
+        self.waiter = nil
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+
+    /// Explicit disconnect/connect invalidates the old epoch's queued work.
+    /// Release a backpressured receiver even when the consumer has been stopped.
+    func discardBufferedEvents() {
+        buffer.removeAll()
+        bufferedBytes = 0
+        bufferedControls = 0
+        for producer in producers { producer.continuation.resume(throwing: CancellationError()) }
+        producers.removeAll()
     }
 
     func finish(with error: SessionLinkFailure?) {
@@ -620,10 +754,12 @@ private actor EventMailbox: SessionEventStream {
         buffer.removeAll()
         bufferedBytes = 0
         bufferedControls = 0
+        for producer in producers { producer.continuation.resume(throwing: error ?? .disconnected) }
+        producers.removeAll()
         if let waiter {
             self.waiter = nil
-            if let error { waiter.resume(throwing: error) }
-            else { waiter.resume(returning: nil) }
+            if let error { waiter.continuation.resume(throwing: error) }
+            else { waiter.continuation.resume(returning: nil) }
         }
     }
 }

@@ -14,6 +14,8 @@ final class CorralAcceptanceDriver {
     let coordinator: CorralApplicationCoordinator
     private var task: Task<Void, Never>?
     private var drag: AcceptanceDraggingInfo?
+    private var lastKeyDispatchTime: TimeInterval = 0
+    private var switchSamples: [[String: Any]] = []
 
     static func directory(environment: [String: String]) throws -> URL? {
         guard let path = environment["CORRAL_NATIVE_ACCEPTANCE_DIRECTORY"] else { return nil }
@@ -90,8 +92,16 @@ final class CorralAcceptanceDriver {
             window.setContentSize(NSSize(width: width, height: height))
         case "sidebar-sequence":
             guard let sessions = command["sessions"] as? [String] else { throw Failure.invalidCommand }
+            switchSamples = []
             for session in sessions {
+                let started = ProcessInfo.processInfo.systemUptime
                 try await perform(["op": "sidebar", "session": session])
+                while coordinator.workspaceState.visibleSessionID?.rawValue != session,
+                      ProcessInfo.processInfo.systemUptime - started < 0.1 {
+                    try await Task.sleep(for: .milliseconds(1))
+                }
+                switchSamples.append(["requested": session, "visible": coordinator.workspaceState.visibleSessionID?.rawValue ?? "",
+                                      "milliseconds": (ProcessInfo.processInfo.systemUptime - started) * 1000])
                 try await Task.sleep(for: .milliseconds(30))
             }
         case "sidebar":
@@ -145,6 +155,7 @@ final class CorralAcceptanceDriver {
             // A background test window is intentionally not the app's key window.
             // Route exactly to its shortcut chain and first responder, without activation.
             if !flags.contains(.command) || !window.performKeyEquivalent(with: event) {
+                lastKeyDispatchTime = Date().timeIntervalSince1970
                 window.sendEvent(event)
             }
         case "ime":
@@ -227,9 +238,12 @@ final class CorralAcceptanceDriver {
         for view in views {
             let terminal = view.getTerminal()
             let frame = view.convert(view.bounds, to: nil)
-            let rows = (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }
+            // Hidden Tabs are checked when selected. Reading every hidden cell
+            // on every probe would make the observer itself a UI workload.
+            let rows = view.isHidden ? [] : (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }
             panes.append([
                 "hidden": view.isHidden, "focused": window.firstResponder === view,
+                "hitTestMatches": window.contentView?.hitTest(view.convert(CGPoint(x: 60, y: 80), to: window.contentView)) === view,
                 "ref": coordinator.terminalKey(for: view)?.reference.rawValue ?? "",
                 "viewIdentity": String(describing: ObjectIdentifier(view)),
                 "frame": rect(frame), "pixelROI": rect(CGRect(x: frame.minX * window.backingScaleFactor,
@@ -247,6 +261,10 @@ final class CorralAcceptanceDriver {
             "workspaceFrame": rect(workspace.frame), "sidebarFrame": rect(workspace.sidebar.frame),
             "stageFrame": rect(workspace.stageContainer.frame),
             "connected": coordinator.connected, "lastError": coordinator.lastConnectionError ?? "",
+            "lastKeyDispatchTime": lastKeyDispatchTime,
+            "switchSamples": switchSamples,
+            "inputAckSequence": coordinator.lastInputAcknowledgement?.sequence ?? 0,
+            "inputAckSucceeded": coordinator.lastInputAcknowledgement?.succeeded ?? false,
             "workspace": try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)),
             "subscribed": coordinator.subscribedSessionIDs, "panes": panes,
             "previewUID": state.previewUID?.rawValue ?? "",

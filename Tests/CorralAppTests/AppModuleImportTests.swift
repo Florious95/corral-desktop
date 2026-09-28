@@ -621,6 +621,99 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testSidebarKeepsSwitchingWhileAnEarlierSubscribeIsBlocked() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token", "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+        await coordinator.start()
+        let records = try (0..<3).map { index in
+            WireSessionRecord(reference: try SessionReference("blocked-\(index)"), name: "session-\(index)", workingDirectory: "/fixture",
+                              state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        }
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: 3, aggregateState: .idle, sessions: records)
+        ]))))
+        let listed = await waitUntil { coordinator.subscribedSessionIDs.contains(records[0].reference.rawValue) }
+        XCTAssertTrue(listed)
+        let ids = try (0..<3).map { index in
+            try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "session-\(index)" }?.sessionID)
+        }
+        await link.suspendNextSubscribe()
+        coordinator.workspaceView.onSelectAgent?(ids[1], .singleClick)
+        let blocked = await waitUntil { await link.isSubscribeSuspended(for: records[1].reference) }
+        XCTAssertTrue(blocked)
+        coordinator.workspaceView.onSelectAgent?(ids[2], .singleClick)
+        let switched = await waitUntil(timeout: .milliseconds(250)) {
+            guard let view = coordinator.terminalView(for: records[2].reference) else { return false }
+            return coordinator.workspaceState.visibleSessionID == ids[2] && !view.isHidden && window.firstResponder === view
+        }
+        XCTAssertTrue(switched, "local workspace and focus must not wait for a network write")
+        await link.releaseSuspendedSubscribe()
+        let settled = await waitUntil {
+            coordinator.subscribedSessionIDs.contains(records[2].reference.rawValue) && coordinator.terminalView(for: records[1].reference) == nil
+        }
+        XCTAssertTrue(settled)
+        let commands = await link.commands()
+        XCTAssertTrue(commands.contains { if case .unsubscribe(reference: records[1].reference) = $0 { true } else { false } })
+        await coordinator.stop()
+        window.close()
+    }
+
+    func testRapidPreviewsCoalesceBehindTheInitialSnapshotAndKeepTypedInput() async throws {
+        let link = RecordingSessionLink(automaticSnapshots: false)
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws", "CORRAL_NATIVE_TOKEN": "fixture-only",
+            "CORRAL_NATIVE_BACKGROUND": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+        await coordinator.start()
+        let refs = try (0..<50).map { try SessionReference("snapshot-gate-\($0)") }
+        let records = refs.map { WireSessionRecord(reference: $0, name: $0.rawValue, workingDirectory: "/fixture", state: .idle, rows: 24, columns: 80) }
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture", sessionCount: 50, aggregateState: .idle, sessions: records)
+        ]))))
+        let host = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[0].rawValue) }
+        XCTAssertTrue(host)
+        try await link.emit(.frame(.snapshot(reference: refs[0], ansi: Data("HOST".utf8))))
+        for reference in refs.dropFirst() {
+            let id = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == reference.rawValue }?.sessionID)
+            coordinator.workspaceView.onSelectAgent?(id, .singleClick)
+            let switched = await waitUntil(timeout: .milliseconds(250)) { coordinator.workspaceState.visibleSessionID == id }
+            XCTAssertTrue(switched)
+        }
+        let before = await link.commands().filter { if case .subscribe = $0 { true } else { false } }
+        XCTAssertEqual(before.count, 2, "only the host and the first preview may reach a slow peer")
+        let view = try XCTUnwrap(coordinator.terminalView(for: refs[49]))
+        XCTAssertTrue(window.firstResponder === view)
+        view.insertText("x", replacementRange: NSRange(location: NSNotFound, length: 0))
+        let queuedCommands = await link.commands()
+        XCTAssertFalse(queuedCommands.contains { if case .input = $0 { true } else { false } })
+        try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("OLD PREVIEW".utf8))))
+        let newest = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[49].rawValue) }
+        XCTAssertTrue(newest)
+        try await link.emit(.frame(.snapshot(reference: refs[49], ansi: Data("NEWEST PREVIEW".utf8))))
+        let delivered = await waitUntil {
+            await link.commands().contains { if case let .input(request) = $0 { request.reference == refs[49] && request.payload == .bytes(Data("x".utf8)) } else { false } }
+        }
+        XCTAssertTrue(delivered)
+        let rendered = await waitUntil { self.visibleText(in: view).contains("NEWEST PREVIEW") }
+        XCTAssertTrue(rendered)
+        XCTAssertFalse(visibleText(in: view).contains("OLD PREVIEW"))
+        let after = await link.commands()
+        XCTAssertEqual(after.filter { if case .subscribe = $0 { true } else { false } }.count, 3)
+        XCTAssertTrue(after.contains(.unsubscribe(reference: refs[1])))
+        XCTAssertEqual(coordinator.telemetry.terminalViewCount, 2)
+        await coordinator.stop()
+        window.close()
+    }
+
     func testFullCoordinatorReplacesSnapshotsAndKeepsRemoteHistoryOutOfLiveBuffer() async throws {
         let reference = try SessionReference("snapshot-boundary")
         let link = RecordingSessionLink()
@@ -1309,8 +1402,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let initialRightWidth = right.frame.width
         let initialLeftGrid = GridSize(rows: left.terminal.rows, columns: left.terminal.cols)
         let initialRightGrid = GridSize(rows: right.terminal.rows, columns: right.terminal.cols)
-        let initialResizeCommands = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
-        XCTAssertGreaterThan(initialResizeCommands, 0, "actual SwiftTerm geometry must publish viewport resize commands")
+        let initialCommands = await link.commands()
+        XCTAssertTrue(initialCommands.contains(.subscribe(reference: references[0], size: initialLeftGrid)))
+        XCTAssertTrue(initialCommands.contains(.subscribe(reference: references[1], size: initialRightGrid)))
+        XCTAssertFalse(initialCommands.contains { if case .resize = $0 { true } else { false } },
+                       "initial subscriptions already carry the measured grid; a second reflow would block input")
 
         try await link.emit(.frame(.snapshot(reference: references[0], ansi: Data("LEFT-SWIFTTERM".utf8))))
         try await link.emit(.frame(.snapshot(reference: references[1], ansi: Data("RIGHT-SWIFTTERM".utf8))))
@@ -1713,6 +1809,8 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(permanent)
         XCTAssertEqual(coordinator.workspaceState.tabs.count, 2)
         XCTAssertEqual(coordinator.workspaceState.tabs.first(where: { $0.id == host.id }), host)
+        let subscribed = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[1].rawValue) }
+        XCTAssertTrue(subscribed)
         try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("B-NONCE-visible".utf8))))
         let rendered = await waitUntil { self.terminalText(coordinator, reference: refs[1]).contains("B-NONCE-visible") }
         XCTAssertTrue(rendered)
@@ -1799,12 +1897,11 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(pending)
         let abandoned = try XCTUnwrap(coordinator.terminalView(for: refs[1]))
         coordinator.workspaceView.previewExitButton.performClick(nil)
-        let removed = await waitUntil {
-            let commands = await link.commands()
-            return coordinator.terminalView(for: refs[1]) == nil && commands.contains(.unsubscribe(reference: refs[1]))
-        }
+        let removed = await waitUntil { coordinator.terminalView(for: refs[1]) == nil }
         XCTAssertTrue(removed)
         await link.releaseSuspendedSubscribe()
+        let released = await waitUntil { await link.commands().contains(.unsubscribe(reference: refs[1])) }
+        XCTAssertTrue(released, "release follows the in-flight subscribe in the single writer's order")
         try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("STALE PREVIEW".utf8))))
         try await Task.sleep(for: .milliseconds(40))
         XCTAssertNil(coordinator.terminalView(for: refs[1]))
@@ -1912,6 +2009,22 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.splitWorkspacePane(key, target: firstID, edge: .right)
         window.contentView?.layoutSubtreeIfNeeded()
         let overlay = coordinator.workspaceView.stageContainer.splitView
+        let initialGridsSent = await waitUntil {
+            guard coordinator.subscribedSessionIDs.count == 2 else { return false }
+            let commands = await link.commands()
+            return refs.allSatisfy { ref in
+                guard let view = coordinator.terminalView(for: ref) else { return false }
+                let grid = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                let lastGrid = commands.reversed().compactMap { command -> GridSize? in
+                    switch command {
+                    case let .subscribe(reference, size), let .resize(reference, size): reference == ref ? size : nil
+                    default: nil
+                    }
+                }.first
+                return lastGrid == grid
+            }
+        }
+        XCTAssertTrue(initialGridsSent, "finish initial split geometry before measuring a separate divider gesture")
         let divider = try XCTUnwrap(overlay.projection.dividers.first)
         let point = CGPoint(x: divider.frame.midX, y: divider.frame.midY)
         let initialWidth = try XCTUnwrap(overlay.projection.panes.first).frame.width
@@ -2117,6 +2230,10 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     private var shouldSuspendNextResize = false
     private var suspendedResizeGrid: GridSize?
     private var resizeRelease: CheckedContinuation<Void, Never>?
+    private var snapshotCounts: [SessionReference: Int] = [:]
+    private let automaticSnapshots: Bool
+
+    init(automaticSnapshots: Bool = true) { self.automaticSnapshots = automaticSnapshots }
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         connectCalls += 1
@@ -2135,11 +2252,20 @@ private actor RecordingSessionLink: SessionLinkProtocol {
 
     func send(_ command: ClientCommand) async throws -> CommandSendReceipt {
         commandsSent.append(command)
+        let snapshotCount: Int?
+        if case let .subscribe(reference, _) = command { snapshotCount = snapshotCounts[reference, default: 0] }
+        else { snapshotCount = nil }
         if case let .subscribe(reference, _) = command, shouldSuspendNextSubscribe {
             shouldSuspendNextSubscribe = false
             suspendedSubscribeReference = reference
             await withCheckedContinuation { subscribeRelease = $0 }
             suspendedSubscribeReference = nil
+        }
+        // The peer answers a subscription with an initial snapshot. A test may
+        // supply its own snapshot while the write receipt is suspended.
+        if automaticSnapshots, case let .subscribe(reference, _) = command,
+           snapshotCounts[reference, default: 0] == snapshotCount {
+            try await emit(.frame(.snapshot(reference: reference, ansi: Data())))
         }
         if case let .resize(_, size) = command, shouldSuspendNextResize {
             shouldSuspendNextResize = false
@@ -2182,6 +2308,7 @@ private actor RecordingSessionLink: SessionLinkProtocol {
 
     func emit(_ event: SessionEvent) async throws {
         guard let authenticated else { throw SessionLinkFailure.disconnected }
+        if case let .frame(.snapshot(reference, _)) = event { snapshotCounts[reference, default: 0] += 1 }
         ordinal += 1
         let origin = SessionEventOrigin(
             linkInstanceID: authenticated.linkInstanceID,

@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <string.h>
 #include <poll.h>
+#include <time.h>
 
 // A real PTY endpoint: all input receipts come from read(STDIN_FILENO), never the client or proxy.
 int main(int argc, char **argv) {
@@ -19,6 +20,11 @@ int main(int argc, char **argv) {
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw)) return 4;
     int log = open(argv[3], O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (log < 0) return 5;
+    char timing_path[4096];
+    snprintf(timing_path, sizeof(timing_path), "%s.timing.jsonl", argv[3]);
+    FILE *timing = fopen(timing_path, "wx");
+    if (!timing) return 5;
+    unsigned long input_offset = 0;
     printf("\033[2J\033[H\033]2;ACCEPT-%s-%s\007", argv[1], argv[2]);
     for (int line = 0; !empty && line < 24; line++) {
         printf("\033[38;2;213;220;230m%s/%s %02d | Corral Native 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n", argv[1], argv[2], line);
@@ -40,6 +46,12 @@ int main(int argc, char **argv) {
         }
         ssize_t count = read(STDIN_FILENO, buffer, sizeof(buffer));
         if (count <= 0) { if (errno == EINTR) continue; break; }
+        struct timespec received;
+        clock_gettime(CLOCK_REALTIME, &received);
+        fprintf(timing, "{\"at\":%ld.%09ld,\"offset\":%lu,\"length\":%zd}\n",
+                received.tv_sec, received.tv_nsec, input_offset, count);
+        fflush(timing);
+        input_offset += count;
         for (ssize_t offset = 0; offset < count;) {
             ssize_t written = write(log, buffer + offset, (size_t)(count - offset));
             if (written <= 0) return 6;

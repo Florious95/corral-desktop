@@ -4,6 +4,133 @@ import Foundation
 import XCTest
 
 final class URLSessionSessionLinkTests: XCTestCase {
+    func testStalledWriteTimesOutWithoutReplayingInputAndReconnects() async throws {
+        var configuration = URLSessionSessionLink.Configuration()
+        configuration.sendTimeoutNanoseconds = 40_000_000
+        configuration.initialReconnectDelayNanoseconds = 1_000_000
+        let first = MockWebSocket()
+        let second = MockWebSocket()
+        let factory = MockWebSocketFactory(sockets: [first, second])
+        let link = URLSessionSessionLink(configuration: configuration) { factory.make($0) }
+        let connect = Task { try await link.connect(to: ApprovedEndpoint(host: "127.0.0.1", port: 9919),
+            deviceID: DeviceID("deadline"), credential: CredentialHandle("test")) }
+        try await waitForAuthentication(on: first)
+        await first.enqueue(.text(authenticationAck()))
+        _ = try await connect.value
+        await first.blockNextSend()
+        let input = try ClientInputRequest(sequence: 42, reference: SessionReference("input"), payload: .bytes(Data("x".utf8)))
+        do { _ = try await link.send(.input(input)); XCTFail("The socket write is still blocked") }
+        catch { XCTAssertEqual(error as? SessionLinkFailure, .inputOutcomeUnknown(requestID: 42)) }
+        try await waitForAuthentication(on: second)
+        await second.enqueue(.text(authenticationAck()))
+        let stream = try await link.eventStream()
+        while try await waitForReady(in: stream).epoch != ConnectionEpoch(2) {}
+        _ = try await link.send(.list(requestID: 2))
+        let messages = await second.sentMessages()
+        XCTAssertFalse(messages.contains { if case let .text(text) = $0 { text.contains("\"input\"") } else { false } })
+        await first.releaseSend()
+        await link.disconnect()
+    }
+
+    func testDisconnectUnblocksSaturatedMailboxWithoutAConsumer() async throws {
+        var configuration = URLSessionSessionLink.Configuration()
+        configuration.maximumBufferedEvents = 8
+        configuration.maximumBufferedControls = 4
+        let socket = MockWebSocket()
+        let link = URLSessionSessionLink(configuration: configuration) { _ in socket }
+        let stream = try await link.eventStream()
+        let connect = Task { try await link.connect(to: ApprovedEndpoint(host: "127.0.0.1", port: 9919),
+            deviceID: DeviceID("saturated"), credential: CredentialHandle("test")) }
+        try await waitForAuthentication(on: socket)
+        await socket.enqueue(.text(authenticationAck()))
+        _ = try await connect.value
+        _ = try await waitForReady(in: stream)
+        let codec = BinaryV1Codec()
+        for _ in 0..<32 { await socket.enqueue(.binary(try codec.encodeBinaryFrame(.delta(reference: SessionReference("busy"), ansi: Data("x".utf8))))) }
+        try await Task.sleep(for: .milliseconds(40))
+        let stopped = expectation(description: "disconnect releases a backpressured producer")
+        let stopping = Task { await link.disconnect(); stopped.fulfill() }
+        await fulfillment(of: [stopped], timeout: 1)
+        await stopping.value
+        let event = try await stream.next()
+        XCTAssertEqual(event?.event, .connectionChanged(.disconnected))
+    }
+
+    func testDisconnectReleasesInFlightInputAndNewConnectionSender() async throws {
+        let first = MockWebSocket()
+        let second = MockWebSocket()
+        let factory = MockWebSocketFactory(sockets: [first, second])
+        let link = URLSessionSessionLink(configuration: .init()) { factory.make($0) }
+        let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9919)
+        let device = DeviceID("blocked-writer")
+        let connect = Task { try await link.connect(to: endpoint, deviceID: device, credential: CredentialHandle("test")) }
+        try await waitForAuthentication(on: first)
+        await first.enqueue(.text(authenticationAck()))
+        _ = try await connect.value
+        await first.blockNextSend()
+        let oldFinished = expectation(description: "in-flight input resolved without waiting for the transport")
+        let input = try ClientInputRequest(sequence: 1, reference: SessionReference("old"), payload: .bytes(Data("x".utf8)))
+        let sending = Task {
+            do { _ = try await link.send(.input(input)); XCTFail("A disconnected in-flight input must not report success") }
+            catch { XCTAssertEqual(error as? SessionLinkFailure, .inputOutcomeUnknown(requestID: 1)) }
+            oldFinished.fulfill()
+        }
+        for _ in 0..<200 {
+            if await first.isSendBlocked() { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await link.disconnect()
+        let reconnect = Task { try await link.connect(to: endpoint, deviceID: device, credential: CredentialHandle("test")) }
+        try await waitForAuthentication(on: second)
+        await second.enqueue(.text(authenticationAck()))
+        _ = try await reconnect.value
+        let newFinished = expectation(description: "new connection is not blocked by the old sender")
+        let fresh = Task {
+            do { _ = try await link.send(.list(requestID: 2)) }
+            catch { XCTFail("New connection failed: \(error)") }
+            newFinished.fulfill()
+        }
+        await fulfillment(of: [oldFinished, newFinished], timeout: 1)
+        // A deliberately uncooperative socket returns late, after the epoch has changed.
+        await first.releaseSend()
+        await sending.value
+        await fresh.value
+        await link.disconnect()
+    }
+
+    func testSlowConsumerBackpressuresWithoutLosingTerminalStream() async throws {
+        var configuration = URLSessionSessionLink.Configuration()
+        configuration.maximumBufferedEvents = 8
+        configuration.maximumBufferedControls = 4
+        configuration.heartbeatIntervalNanoseconds = 60_000_000_000
+        let socket = MockWebSocket()
+        let link = URLSessionSessionLink(configuration: configuration) { _ in socket }
+        let stream = try await link.eventStream()
+        let connect = Task {
+            try await link.connect(to: ApprovedEndpoint(host: "127.0.0.1", port: 9919),
+                                   deviceID: DeviceID("slow-reader"), credential: CredentialHandle("test"))
+        }
+        try await waitForAuthentication(on: socket)
+        await socket.enqueue(.text(authenticationAck()))
+        _ = try await connect.value
+        _ = try await waitForReady(in: stream)
+        let reference = try SessionReference("live-output")
+        let codec = BinaryV1Codec()
+        for index in 0..<64 {
+            let frame = BinaryFrame.delta(reference: reference, ansi: Data("FRAME-\(index)\r\n".utf8))
+            await socket.enqueue(.binary(try codec.encodeBinaryFrame(frame)))
+        }
+        // A render/persistence stall must slow the producer, not permanently finish the only stream.
+        try await Task.sleep(for: .milliseconds(100))
+        for index in 0..<64 {
+            let event = try await stream.next()
+            XCTAssertEqual(event?.event, .frame(.delta(reference: reference, ansi: Data("FRAME-\(index)\r\n".utf8))))
+        }
+        let receipt = try await link.send(.list(requestID: 99))
+        XCTAssertTrue(receipt.socketWritten)
+        await link.disconnect()
+    }
+
     func testReconnectIncrementsEpochPreservesSubscriptionAndEventOrdinals() async throws {
         var configuration = URLSessionSessionLink.Configuration()
         configuration.heartbeatIntervalNanoseconds = 60_000_000_000
@@ -230,10 +357,22 @@ private actor MockWebSocket: WebSocketConnection {
     private var receiveFailure: SessionLinkFailure?
     private var outgoing: [WebSocketMessage] = []
     private var pings = 0
+    private var blockSend = false
+    private var blockedSend: CheckedContinuation<Void, Never>?
 
     func start() async throws {}
 
-    func send(_ message: WebSocketMessage) async throws { outgoing.append(message) }
+    func send(_ message: WebSocketMessage) async throws {
+        outgoing.append(message)
+        if blockSend {
+            blockSend = false
+            await withCheckedContinuation { blockedSend = $0 }
+        }
+    }
+
+    func blockNextSend() { blockSend = true }
+    func isSendBlocked() -> Bool { blockedSend != nil }
+    func releaseSend() { blockedSend?.resume(); blockedSend = nil }
 
     func receive() async throws -> WebSocketMessage {
         if !incoming.isEmpty { return incoming.removeFirst() }

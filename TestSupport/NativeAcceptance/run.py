@@ -3,6 +3,7 @@
 AppKit events stay in the app; captures use only its exact WindowServer ID.
 """
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -37,6 +38,7 @@ class Run:
         self.no_resize = no_resize
         self.server_binary = server_binary
         self.suffixes = 'ABCDEFGHIJ' if case.startswith('many-sessions') else 'ABCD'
+        if case == 'session-liveness': self.suffixes = [f'S{i:02}' for i in range(50)]
         self.directory = Path(tempfile.mkdtemp(prefix='corral-native-acceptance-', dir='/tmp')).resolve()
         self.nonce = secrets.token_hex(4).upper()
         self.processes = []
@@ -86,7 +88,8 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
             session = f'ACCEPT-{suffix}-{self.nonce}'
             self.tmux('new-session', '-d', '-s', session, '-x', '110', '-y', '32', '-c', str(self.directory),
                       str(agent), suffix, self.nonce, str(self.directory / f'input-{suffix}.bin'),
-                      ('empty' if suffix == 'F' else 'busy') if self.case == 'many-sessions-stress' else 'normal')
+                      ('empty' if suffix == 'F' else 'busy') if self.case == 'many-sessions-stress'
+                      else 'busy' if self.case == 'session-liveness' else 'normal')
             self.tmux('set-option', '-t', session, 'status', 'off')
             self.tmux('select-pane', '-t', session, '-T', session)
         self.refs = {name.split('-')[1]: str(self.socket) + "\x1f" + ref for ref, name in
@@ -139,6 +142,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         print(f'RUN_DIR={self.directory}', flush=True)
         wait_for(lambda: self.command('state').get('connected'), 25)
         self.state = wait_for(lambda: self.ready_state(), 25)
+        self.ids = {suffix: next(a['id'] for a in self.state['agents'] if a['id'].endswith(ref)) for suffix, ref in self.refs.items()}
         print('APP_CONNECTED', json.dumps(self.state['agents']), flush=True)
 
     def ready_state(self):
@@ -160,7 +164,8 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
             return result if result.get('id') == self.command_id else None
         result = wait_for(get, 25)
         self.receipts.append({'command': data, 'reply': result})
-        (self.directory / 'commands.json').write_text(json.dumps(self.receipts, ensure_ascii=False, indent=2))
+        if self.case != 'session-liveness':
+            (self.directory / 'commands.json').write_text(json.dumps(self.receipts, ensure_ascii=False, indent=2))
         assert result['ok'], result
         return result['state']
 
@@ -170,6 +175,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         return path
 
     def session_id(self, suffix):
+        if hasattr(self, 'ids'): return self.ids[suffix]
         return next(a['id'] for a in self.command('state')['agents'] if a['id'].endswith(self.refs[suffix]))
 
     def view(self, state, suffix, visible=True):
@@ -415,6 +421,85 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         assert len(state['workspace']['tabs']) == 10
         self.write_case_summary()
 
+    def run_session_liveness(self):
+        latencies = []
+        send_latencies = []
+        identities = {}
+        host = self.suffixes[0]
+
+        def verify(suffix, label):
+            state = self.visible(suffix)
+            pane = self.view(state, suffix)
+            assert state['connected'] and not state['lastError'], state['lastError']
+            assert pane['focused'] and pane['hitTestMatches'], 'visible terminal must own focus and hit testing'
+            assert len([p for p in state['panes'] if not p['hidden']]) == 1, 'exactly one preview surface'
+            before_live = max(map(int, re.findall(r'LIVE-(\d+)', '\n'.join(pane['rows']))))
+            path = self.directory / f'input-{suffix}.bin'
+            baseline = path.read_bytes()
+            marker = f'{label}-{suffix}'.encode()
+            ack = state['inputAckSequence']
+            state = self.command('key', text=marker.decode(), code=0)
+            dispatched = state['lastKeyDispatchTime']
+            wait_for(lambda: path.read_bytes() == baseline + marker, 3)
+            timing = [json.loads(line) for line in path.with_suffix('.bin.timing.jsonl').read_text().splitlines()]
+            received = next(e['at'] for e in timing if e['offset'] + e['length'] >= len(baseline) + len(marker))
+            latency = (received - dispatched) * 1000
+            latencies.append(latency)
+            assert latency >= 0, ('invalid timing receipt', suffix, latency)
+            # "Key sent" ends at the observed WebSocket write. The frozen Core
+            # subsequently runs tmux commands; retain its separate PTY latency.
+            written = next(e['at'] for e in reversed(self.wire()) if e.get('type') == 'input' and
+                           e['payload']['ref'] == self.refs[suffix] and base64.b64decode(e['payload']['bytes']) == marker)
+            send_latency = max(0, written - dispatched * 1000)  # proxy clock has 1 ms resolution
+            send_latencies.append(send_latency)
+            assert send_latency < 100, ('native key-to-socket deadline (ms)', suffix, send_latency)
+
+            def advanced():
+                current = self.command('state')
+                assert current['connected'], current['lastError']
+                numbers = re.findall(r'LIVE-(\d+)', '\n'.join(self.view(current, suffix)['rows']))
+                return current if numbers and max(map(int, numbers)) > before_live and current['inputAckSequence'] > ack and current['inputAckSucceeded'] else None
+
+            state = wait_for(advanced, 5)
+            screenshot = self.capture(label+'-'+suffix, state)
+            self.output_assertion(screenshot, suffix)
+            return state
+
+        for suffix in self.suffixes:
+            self.command('sidebar', session=self.ids[suffix])
+            state = verify(suffix, 'preview')
+            expected = {self.refs[host], self.refs[suffix]}
+            assert set(state['subscribed']) == self.live_subscriptions() == expected
+            assert len(state['panes']) == len(expected), 'departed previews must release their physical views'
+            print(f'PASS preview {suffix}: live output, focus/hit-test, key-to-PTY {latencies[-1]:.2f} ms', flush=True)
+        for iteration in range(3):
+            order = self.suffixes[::-1] if iteration % 2 == 0 else self.suffixes
+            switched = self.command('sidebar-sequence', sessions=[self.ids[s] for s in order])
+            assert len(switched['switchSamples']) == 50
+            assert all(s['requested'] == s['visible'] and s['milliseconds'] < 100 for s in switched['switchSamples']), 'every local click must advance the stage within 100 ms'
+            state = verify(order[-1], f'rapid-{iteration}')
+            assert len(state['panes']) == len({host, order[-1]})
+            assert set(state['subscribed']) == self.live_subscriptions() == {self.refs[host], self.refs[order[-1]]}
+        for suffix in self.suffixes:
+            self.command('sidebar', session=self.ids[suffix], count=2)
+            state = verify(suffix, 'permanent')
+            identities[suffix] = self.view(state, suffix)['viewIdentity']
+            print(f'PASS permanent {suffix}: live output and key-to-PTY {latencies[-1]:.2f} ms', flush=True)
+        assert len(state['workspace']['tabs']) == len(state['panes']) == len(state['subscribed']) == 50
+        for iteration in range(3):
+            order = self.suffixes[::-1] if iteration % 2 == 0 else self.suffixes
+            switched = self.command('sidebar-sequence', sessions=[self.ids[s] for s in order])
+            assert len(switched['switchSamples']) == 50
+            assert all(s['requested'] == s['visible'] and s['milliseconds'] < 100 for s in switched['switchSamples'])
+            state = verify(order[-1], f'warm-{iteration}')
+            assert all(self.view(state, s, visible=False)['viewIdentity'] == identities[s] for s in self.suffixes)
+        self.input_checks(self.suffixes[0])
+        (self.directory/'latency.json').write_text(json.dumps({'samples':latencies, 'maximumMs':max(latencies),
+            'p95Ms': sorted(latencies)[int(len(latencies)*.95)], 'boundary':'AppKit key dispatch -> read(STDIN_FILENO)',
+            'nativeKeyToSocketMs': send_latencies, 'nativeKeyToSocketMaxMs': max(send_latencies),
+            'deliveryDeadlineSeconds': 3, 'nativeSendDeadlineMs': 100}, indent=2))
+        self.write_case_summary()
+
     def run_window_resize(self):
         state = self.sidebar('A')
         width, height = state['stageSize']
@@ -517,7 +602,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--legacy-root', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
-    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize'], default='parity')
+    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness'], default='parity')
     parser.add_argument('--no-resize', action='store_true')
     parser.add_argument('--server-binary', type=Path)
     args = parser.parse_args()
@@ -525,6 +610,7 @@ def main():
     try:
         run.start()
         if args.smoke: print('CAPTURE', run.capture('initial', run.state), flush=True)
+        elif args.case == 'session-liveness': run.run_session_liveness()
         elif args.case.startswith('many-sessions'): run.run_many_sessions()
         elif args.case == 'window-resize': run.run_window_resize()
         else: run.run_suite()

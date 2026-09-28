@@ -6,6 +6,26 @@ import XCTest
 
 @MainActor
 final class NativeWorkspaceTests: XCTestCase {
+    func testCatalogRefreshPreservesTabControlsAndAnUncommittedRename() throws {
+        let tabs = (0..<50).map { CorralTab(title: "Session \($0)", provider: "codex") }
+        let bar = CorralTabBarView(frame: CGRect(x: 0, y: 0, width: 1200, height: 38))
+        bar.setTabs(tabs, selectedTabID: tabs[0].id)
+        let before = descendants(of: bar).filter { $0.accessibilityIdentifier() == "corral.tab" }
+        bar.rename(tabs[0].id)
+        let editor = try XCTUnwrap(descendants(of: bar).first { $0 is CorralInlineRenameField } as? CorralInlineRenameField)
+        editor.stringValue = "An unfinished title"
+        for _ in 0..<50 { bar.setTabs(tabs, selectedTabID: tabs[0].id) }
+        let after = descendants(of: bar).filter { $0.accessibilityIdentifier() == "corral.tab" }
+        XCTAssertEqual(before.map(ObjectIdentifier.init), after.map(ObjectIdentifier.init), "unchanged catalog data must not recreate 50 AppKit controls")
+        XCTAssertTrue(editor.isDescendant(of: bar), "catalog refresh must not destroy an in-progress edit")
+        tabs[49].status = .working
+        bar.setTabs(tabs, selectedTabID: tabs[0].id)
+        XCTAssertTrue(editor.isDescendant(of: bar), "a different Tab's status update must leave this edit intact")
+        XCTAssertEqual(editor.stringValue, "An unfinished title")
+        editor.finish(commit: true)
+        XCTAssertEqual(tabs[0].title, "An unfinished title")
+    }
+
     func testWindowResizesTo800And480WithoutClippingWorkspace() throws {
         let workspace = CorralWorkspaceView(tabs: [CorralTab(title: "A")])
         let controller = CorralWindowController(workspaceView: workspace)
