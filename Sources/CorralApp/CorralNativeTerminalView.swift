@@ -9,6 +9,9 @@ private struct LocalPasteMonitorToken: @unchecked Sendable {
 
 @MainActor
 final class CorralNativeTerminalView: TerminalView {
+    static let defaultForegroundColor = NSColor(srgbRed: 213.0 / 255, green: 220.0 / 255, blue: 230.0 / 255, alpha: 1)
+    static let defaultBackgroundColor = NSColor(srgbRed: 16.0 / 255, green: 17.0 / 255, blue: 21.0 / 255, alpha: 1)
+
     private let pasteboard: NSPasteboard
     private var controlVPasteMonitor: LocalPasteMonitorToken?
     private var inputEnabled = true
@@ -17,16 +20,19 @@ final class CorralNativeTerminalView: TerminalView {
     override init(frame: CGRect) {
         pasteboard = .general
         super.init(frame: frame)
+        installDarkColors()
     }
 
     init(frame: CGRect, pasteboard: NSPasteboard) {
         self.pasteboard = pasteboard
         super.init(frame: frame)
+        installDarkColors()
     }
 
     required init?(coder: NSCoder) {
         pasteboard = .general
         super.init(coder: coder)
+        installDarkColors()
     }
 
     deinit {
@@ -38,6 +44,11 @@ final class CorralNativeTerminalView: TerminalView {
     func setTerminalFont(family: String, size: Int) {
         let pointSize = CGFloat(size)
         font = NSFont(name: family, size: pointSize) ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+    }
+
+    private func installDarkColors() {
+        installColors(CorralTerminalPalette.darkANSI16)
+        setTerminalColors(foreground: Self.defaultForegroundColor, background: Self.defaultBackgroundColor)
     }
 
     func setTerminalColors(foreground: NSColor, background: NSColor) {

@@ -11,6 +11,28 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         XCTAssertTrue(view.acceptsFirstMouse(for: nil))
     }
 
+    func testDarkTerminalDefaultsRemainReadableWithDarkANSIWhites() {
+        let view = CorralNativeTerminalView(frame: .zero)
+        let terminal = view.getTerminal()
+        let rgb8: (SwiftTerm.Color) -> [UInt8] = { color in
+            [UInt8(color.red / 257), UInt8(color.green / 257), UInt8(color.blue / 257)]
+        }
+        XCTAssertEqual(rgb8(terminal.foregroundColor), [213, 220, 230])
+        XCTAssertEqual(rgb8(terminal.backgroundColor), [16, 17, 21])
+        XCTAssertEqual(rgb8(CorralTerminalPalette.darkANSI16[7]), [40, 47, 57])
+        XCTAssertEqual(rgb8(CorralTerminalPalette.darkANSI16[15]), [40, 47, 57])
+
+        func luminance(_ color: [UInt8]) -> Double {
+            let channels = color.map { component -> Double in
+                let value = Double(component) / 255
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+        }
+        let contrast = (luminance(rgb8(terminal.foregroundColor)) + 0.05) / (luminance(rgb8(terminal.backgroundColor)) + 0.05)
+        XCTAssertGreaterThan(contrast, 4.5)
+    }
+
     func testControlVPastesTextOrQuotedImagePathWithoutSendingControlV() throws {
         let pasteboard = isolatedPasteboard()
         defer { pasteboard.releaseGlobally() }

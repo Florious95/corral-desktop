@@ -527,13 +527,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
-    private var terminalStageBackground: NSColor {
-        NSColor(srgbRed: 16.0 / 255.0, green: 17.0 / 255.0, blue: 21.0 / 255.0, alpha: 1)
-    }
-
-    private var terminalStageForeground: NSColor {
-        NSColor(srgbRed: 213.0 / 255.0, green: 220.0 / 255.0, blue: 230.0 / 255.0, alpha: 1)
-    }
+    private var terminalStageBackground: NSColor { CorralNativeTerminalView.defaultBackgroundColor }
+    private var terminalStageForeground: NSColor { CorralNativeTerminalView.defaultForegroundColor }
 
     private func applyTerminalStageAppearance() {
         let darkAppearance = NSAppearance(named: .darkAqua)
