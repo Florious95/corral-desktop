@@ -43,7 +43,7 @@ final class URLSessionSessionLinkTests: XCTestCase {
         await link.disconnect()
     }
 
-    func testReconnectPreservesDimensionlessInspectionSubscription() async throws {
+    func testReconnectPreservesSubscribeGrid() async throws {
         var configuration = URLSessionSessionLink.Configuration()
         configuration.heartbeatIntervalNanoseconds = 60_000_000_000
         configuration.initialReconnectDelayNanoseconds = 1_000_000
@@ -55,6 +55,7 @@ final class URLSessionSessionLinkTests: XCTestCase {
         let events = try await link.eventStream()
         let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9919)
         let reference = try SessionReference("inspection-session")
+        let serverGrid = GridSize(rows: 37, columns: 111)
 
         let connect = Task {
             try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: CredentialHandle("test"))
@@ -63,7 +64,7 @@ final class URLSessionSessionLinkTests: XCTestCase {
         await first.enqueue(.text(authenticationAck()))
         _ = try await connect.value
         _ = try await waitForReady(in: events)
-        _ = try await link.send(.subscribe(reference: reference, size: nil))
+        _ = try await link.send(.subscribe(reference: reference, size: serverGrid))
 
         await first.fail()
         try await waitForAuthentication(on: second)
@@ -71,8 +72,8 @@ final class URLSessionSessionLinkTests: XCTestCase {
         _ = try await waitForReady(in: events)
         let replayedMessages = await second.sentMessages()
         let payload = try XCTUnwrap(subscriptionPayload(in: replayedMessages, reference: reference))
-        XCTAssertNil(payload["rows"])
-        XCTAssertNil(payload["cols"])
+        XCTAssertEqual(payload["rows"] as? Int, serverGrid.rows)
+        XCTAssertEqual(payload["cols"] as? Int, serverGrid.columns)
         await link.disconnect()
     }
 

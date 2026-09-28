@@ -477,7 +477,7 @@ public struct AgentMirrorUploadResponse: Codable, Equatable, Sendable {
 /// Client-to-server commands only. Server responses cannot be passed to a sender.
 public enum ClientCommand: Equatable, Sendable {
     case list(requestID: UInt32)
-    case subscribe(reference: SessionReference, size: GridSize?)
+    case subscribe(reference: SessionReference, size: GridSize)
     case unsubscribe(reference: SessionReference)
     case input(ClientInputRequest)
     case scrollback(reference: SessionReference, metadata: ScrollbackMetadata)

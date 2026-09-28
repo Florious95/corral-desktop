@@ -348,9 +348,8 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
         runtime.subscriptionPending = true
         sessions[id] = runtime
         do {
-            // Omit dimensions in inspection mode; normal mode uses the listing's server grid.
-            let subscribeSize = noResizeMode ? nil : runtime.descriptor.size
-            let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: subscribeSize))
+            // Use the server-advertised live grid; inspection mode never substitutes local view dimensions.
+            let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: runtime.descriptor.size))
             guard var current = sessions[id] else { return }
             current.subscriptionPending = false
             current.subscribed = receipt.socketWritten
@@ -507,7 +506,8 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
     public func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        guard let id = idByTerminalView[ObjectIdentifier(source)],
+        guard !noResizeMode,
+              let id = idByTerminalView[ObjectIdentifier(source)],
               let runtime = sessions[id], runtime.subscribed else { return }
         enqueueInput(reference: runtime.descriptor.key.reference, bytes: Data(data))
     }

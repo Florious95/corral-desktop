@@ -189,6 +189,43 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testMVPInspectionUsesServerGridAndBlocksResizeAndInput() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = CorralMVPCoordinator(
+            sessionLink: link,
+            environment: [
+                "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+                "CORRAL_NATIVE_TOKEN": "fixture-test-only",
+                "CORRAL_NATIVE_NO_RESIZE": "1"
+            ]
+        )
+        coordinator.window.contentView = nil
+        await coordinator.start()
+        let reference = try SessionReference("mvp-inspection-session")
+        let serverGrid = GridSize(rows: 37, columns: 111)
+        let record = WireSessionRecord(
+            reference: reference, name: "inspection", workingDirectory: "/fixture/inspection",
+            state: .working, rows: 37, columns: 111, provider: "pi", activity: "working", health: "normal"
+        )
+        try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(workingDirectory: "/fixture/inspection", sessionCount: 1, aggregateState: .working, sessions: [record])
+        ]))))
+        let subscribed = await waitUntilMVP {
+            await link.commands().contains { if case .subscribe(reference: reference, _) = $0 { true } else { false } }
+        }
+        XCTAssertTrue(subscribed)
+        let terminalView = try XCTUnwrap(coordinator.workspaceView.stageContainer.subviews.first as? TerminalView)
+        coordinator.sizeChanged(source: terminalView, newCols: 144, newRows: 50)
+        let inputBytes = Array("must-not-send".utf8)
+        terminalView.send(data: inputBytes[...])
+
+        let commands = await link.commands()
+        XCTAssertTrue(commands.contains { if case .subscribe(reference: reference, size: serverGrid) = $0 { true } else { false } })
+        XCTAssertFalse(commands.contains { if case .resize = $0 { true } else { false } })
+        XCTAssertFalse(commands.contains { if case .input = $0 { true } else { false } })
+        await coordinator.stop()
+    }
+
     func testWarmSessionSwitchesPersistentTerminalViewsWithoutResubscribe() async throws {
         let link = RecordingSessionLink()
         let coordinator = CorralMVPCoordinator(
@@ -820,7 +857,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
-    func testNoResizeInspectionOmitsSubscribeDimensionsAndNeverSendsResize() async throws {
+    func testNoResizeInspectionUsesServerGridAndNeverSendsResize() async throws {
         let link = RecordingSessionLink()
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
@@ -862,6 +899,8 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(subscribed)
         let terminal = try XCTUnwrap(descendants(of: window.contentView!).compactMap { $0 as? TerminalView }.first)
         coordinator.sizeChanged(source: terminal, newCols: 144, newRows: 50)
+        let inputBytes: [UInt8] = [0x03]
+        coordinator.send(source: terminal, data: inputBytes[...])
         let frame = window.frame
         window.setFrame(NSRect(x: frame.minX, y: frame.minY, width: frame.width + 240, height: frame.height + 160), display: true)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -873,8 +912,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             return false
         })
         guard case let .subscribe(_, size) = subscribe else { return XCTFail("expected subscription command") }
-        XCTAssertNil(size, "inspection subscribe must not carry dimensions that could trigger a server-side resize")
+        XCTAssertEqual(size, serverGrid, "inspection subscribe must request the existing server-advertised grid")
         XCTAssertFalse(commands.contains { if case .resize = $0 { true } else { false } })
+        XCTAssertFalse(commands.contains { if case .input = $0 { true } else { false } })
 
         await coordinator.stop()
         window.close()

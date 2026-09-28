@@ -28,17 +28,8 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             guard requestID > 0 else { throw V1ControlCodecError.invalidField("req_id") }
             return try encodeEnvelope(type: "list", payload: ListPayload(requestID: requestID))
         case let .subscribe(reference, size):
-            let rows: UInt16?
-            let columns: UInt16?
-            if let size {
-                guard size.fitsProtocolV1 else { throw V1ControlCodecError.invalidField("rows/cols") }
-                rows = UInt16(size.rows)
-                columns = UInt16(size.columns)
-            } else {
-                rows = nil
-                columns = nil
-            }
-            return try encodeEnvelope(type: "subscribe", payload: SubscribePayload(ref: reference.rawValue, rows: rows, columns: columns))
+            guard size.fitsProtocolV1 else { throw V1ControlCodecError.invalidField("rows/cols") }
+            return try encodeEnvelope(type: "subscribe", payload: SubscribePayload(ref: reference.rawValue, rows: UInt16(size.rows), columns: UInt16(size.columns)))
         case let .unsubscribe(reference):
             return try encodeEnvelope(type: "unsubscribe", payload: ReferencePayload(ref: reference.rawValue))
         case let .input(request):
@@ -390,8 +381,8 @@ private struct CloseSessionPayload: Encodable {
 }
 private struct SubscribePayload: Encodable {
     let ref: String
-    let rows: UInt16?
-    let columns: UInt16?
+    let rows: UInt16
+    let columns: UInt16
     enum CodingKeys: String, CodingKey { case ref, rows, columns = "cols" }
 }
 

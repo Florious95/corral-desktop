@@ -20,7 +20,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     }
 
     private enum DesiredSubscription: Sendable {
-        case subscribed(GridSize?)
+        case subscribed(GridSize)
     }
 
     private struct PendingSend {

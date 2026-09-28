@@ -1512,9 +1512,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
-                // Omit dimensions in inspection mode so subscribe cannot resize the server pane.
-                let subscribeSize = noResizeMode ? nil : runtime.descriptor.size
-                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: subscribeSize))
+                // Use the server-advertised live grid; inspection mode never substitutes local view dimensions.
+                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
                 sessions[key]?.subscriptionPending = false
                 guard receipt.socketWritten else { continue }
                 sessions[key]?.subscribed = true
@@ -1591,7 +1590,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        guard let key = terminalRegistry.key(for: source), sessions[key]?.subscribed == true else { return }
+        guard !noResizeMode,
+              let key = terminalRegistry.key(for: source), sessions[key]?.subscribed == true else { return }
         let bytes = Data(data)
         Task { @MainActor [weak self] in
             guard let self else { return }

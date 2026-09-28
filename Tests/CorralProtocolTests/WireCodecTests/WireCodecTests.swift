@@ -24,22 +24,17 @@ final class WireCodecTests: XCTestCase {
         XCTAssertTrue(sessions.first?.reference.rawValue.contains("\u{1F}%0") ?? false)
     }
 
-    func testSubscribeOmitsDimensionsWhenNoSizeIsRequested() throws {
+    func testSubscribeEncodesRequestedServerGrid() throws {
         let codec = JSONV1Codec()
         let reference = try SessionReference("inspection-session")
-        let data = try codec.encodeClientCommand(.subscribe(reference: reference, size: nil))
+        let data = try codec.encodeClientCommand(.subscribe(reference: reference, size: GridSize(rows: 37, columns: 111)))
         let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
 
         XCTAssertEqual(envelope["type"] as? String, "subscribe")
         XCTAssertEqual(payload["ref"] as? String, reference.rawValue)
-        XCTAssertNil(payload["rows"])
-        XCTAssertNil(payload["cols"])
-
-        let sized = try codec.encodeClientCommand(.subscribe(reference: reference, size: GridSize(rows: 24, columns: 80)))
-        let sizedPayload = try XCTUnwrap((JSONSerialization.jsonObject(with: sized) as? [String: Any])?["payload"] as? [String: Any])
-        XCTAssertEqual(sizedPayload["rows"] as? Int, 24)
-        XCTAssertEqual(sizedPayload["cols"] as? Int, 80)
+        XCTAssertEqual(payload["rows"] as? Int, 37)
+        XCTAssertEqual(payload["cols"] as? Int, 111)
     }
 
     func testCapturedBinarySnapshotAndDeltaRoundTripByteForByte() throws {
