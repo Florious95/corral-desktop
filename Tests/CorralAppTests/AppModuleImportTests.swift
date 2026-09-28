@@ -1754,7 +1754,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             ))
             events.append(event)
         }
-        // NSTableView may run a nested tracking loop in mouseDown. Queue the rest of the
+        // CorralAgentTableView owns its gesture without nested tracking. Keep the
+        // exact synthetic coordinates out of AppKit's posted-event coalescing.
+        if view is NSTableView {
+            for event in events { window.sendEvent(event) }
+            return
+        }
+        // Other views may run a nested tracking loop in mouseDown. Queue the rest of the
         // gesture first, exactly as the app event queue does for a user's release.
         for event in events.dropFirst() { NSApp.postEvent(event, atStart: false) }
         window.sendEvent(events[0])

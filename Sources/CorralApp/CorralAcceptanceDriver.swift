@@ -229,6 +229,13 @@ final class CorralAcceptanceDriver {
                 eventNumber: 0, clickCount: count, pressure: type == .leftMouseUp ? 0 : 1) else { throw Failure.invalidCommand }
             return event
         }
+        // The sidebar's custom table does not nest a tracking loop. Posting its
+        // synthetic drag events can coalesce and alter a precise 4pt gesture.
+        if view is NSTableView {
+            if events[0].type == .leftMouseDown { lastMouseDownDispatchUptime = ProcessInfo.processInfo.systemUptime }
+            for event in events { window.sendEvent(event) }
+            return
+        }
         for event in events.dropFirst() { NSApp.postEvent(event, atStart: false) }
         if events[0].type == .leftMouseDown { lastMouseDownDispatchUptime = ProcessInfo.processInfo.systemUptime }
         window.sendEvent(events[0])
