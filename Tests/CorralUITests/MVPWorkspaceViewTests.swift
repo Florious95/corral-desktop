@@ -1,4 +1,5 @@
 import AppKit
+import CorralContracts
 @testable import CorralUI
 import XCTest
 
@@ -99,9 +100,10 @@ final class MVPWorkspaceViewTests: XCTestCase {
         XCTAssertIdentical(stage.superview, permanentStageContainer)
         XCTAssertEqual(permanentStageContainer.subviews.filter { $0 === stage }.count, 1)
 
-        table.dispatchClickIfCompleted(from: 0, to: 0, wasDragged: false)
-        table.dispatchClickIfCompleted(from: 1, to: 1, wasDragged: false)
-        table.dispatchClickIfCompleted(from: 0, to: 0, wasDragged: true)
+        let firstKey = SessionID(firstID.uuidString), secondKey = SessionID(secondID.uuidString)
+        table.dispatchClickIfCompleted(from: firstKey, to: firstKey, wasDragged: false)
+        table.dispatchClickIfCompleted(from: secondKey, to: secondKey, wasDragged: false)
+        table.dispatchClickIfCompleted(from: firstKey, to: firstKey, wasDragged: true)
         XCTAssertEqual(selected, [firstID, secondID], "each completed row click dispatches its UUID; drags never open")
 
         let cell = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CorralSidebarCellView)

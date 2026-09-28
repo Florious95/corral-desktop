@@ -1,5 +1,6 @@
 import AppKit
 import CorralContracts
+import CorralServices
 @testable import CorralUI
 import XCTest
 
@@ -187,7 +188,8 @@ final class NativeWorkspaceTests: XCTestCase {
         window.contentView?.layoutSubtreeIfNeeded()
         workspace.layoutSubtreeIfNeeded()
         workspace.sidebar.layoutSubtreeIfNeeded()
-        let agent = CorralSidebarAgent(id: sessionID, name: "Agent")
+        let sessionKey = SessionID(sessionID.uuidString)
+        let agent = CorralSidebarAgent(id: sessionID, name: "Agent", sessionID: sessionKey)
         workspace.sidebar.setAgents([agent] + (0..<40).map { CorralSidebarAgent(name: "Agent \($0)") })
         workspace.sidebar.layoutSubtreeIfNeeded()
         let clipView = try XCTUnwrap(workspace.sidebar.agentsTable.enclosingScrollView?.contentView)
@@ -203,21 +205,19 @@ final class NativeWorkspaceTests: XCTestCase {
         let frame = window.frame
         let contentBounds = try XCTUnwrap(window.contentView).bounds
         var settingsCount = 0
-        var selectedAgent: UUID?
-        var focusedSession: (UUID, UUID)?
+        var selectedAgent: (SessionID, SessionOpenGesture)?
         workspace.onSettings = { settingsCount += 1 }
-        workspace.onSelectAgent = { selectedAgent = $0 }
-        workspace.onFocusSession = { focusedSession = ($0, $1) }
-        workspace.sidebar.agentsTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        XCTAssertNil(selectedAgent, "selection alone is not a completed Agent click")
+        workspace.onSelectAgent = { selectedAgent = ($0, $1) }
+        XCTAssertNil(selectedAgent, "table selection is not a business action")
         let rowCell = try XCTUnwrap(workspace.sidebar.agentsTable.view(atColumn: 0, row: 0, makeIfNecessary: true))
         XCTAssertTrue(rowCell.accessibilityPerformPress())
         workspace.layoutSubtreeIfNeeded()
         workspace.stageContainer.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(selectedAgent, sessionID)
-        XCTAssertEqual(focusedSession?.0, sessionID)
-        XCTAssertEqual(focusedSession?.1, tab.id)
+        XCTAssertEqual(selectedAgent?.0, sessionKey)
+        XCTAssertEqual(selectedAgent?.1, .singleClick)
+        XCTAssertEqual(workspace.activeTabID, tab.id)
+        XCTAssertTrue(tab.sessionIDs.contains(sessionID), "AXPress emits intent without changing coordinator-owned tabs")
         XCTAssertEqual(settingsCount, 0)
         XCTAssertEqual(window.frame, frame)
         XCTAssertEqual(window.contentView?.bounds, contentBounds)
@@ -347,11 +347,12 @@ final class NativeWorkspaceTests: XCTestCase {
 
         // Sidebar rows: AXPress opens / selects, custom actions mirror the row context menus.
         let space = CorralSidebarSpace(name: "Project")
-        let agent = CorralSidebarAgent(name: "leader", spaceID: space.id)
+        let sessionKey = SessionID("dev::leader")
+        let agent = CorralSidebarAgent(name: "leader", spaceID: space.id, sessionID: sessionKey)
         let sidebar = workspace.sidebar
         sidebar.setSpaces([space]); sidebar.setAgents([agent])
-        var selectedAgent: UUID?; var favorite: (UUID, Bool)?; var renamedAgent: UUID?; var closed: UUID?; var created: UUID??
-        sidebar.onSelectAgent = { selectedAgent = $0 }
+        var selectedAgent: (SessionID, SessionOpenGesture)?; var favorite: (UUID, Bool)?; var renamedAgent: UUID?; var closed: UUID?; var created: UUID??
+        sidebar.onSelectAgent = { selectedAgent = ($0, $1) }
         sidebar.onToggleFavorite = { favorite = ($0, $1) }
         sidebar.onRenameAgent = { renamedAgent = $0 }
         sidebar.onCloseAgent = { closed = $0 }
@@ -361,7 +362,8 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(agentCell.accessibilityLabel(), "leader")
         XCTAssertEqual(agentCell.accessibilityRole(), .button)
         XCTAssertTrue(agentCell.accessibilityPerformPress())
-        XCTAssertEqual(selectedAgent, agent.id)
+        XCTAssertEqual(selectedAgent?.0, sessionKey)
+        XCTAssertEqual(selectedAgent?.1, .singleClick)
         XCTAssertEqual(agentCell.accessibilityCustomActions()?.map(\.name), ["重命名", "收藏", "关闭", "复制会话 ID"])
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[0].handler?() ?? false)
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[1].handler?() ?? false)
@@ -574,38 +576,26 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(indicator.layer?.shadowOpacity, 0)
     }
 
-    func testSmartOpenSessionFocusesExistingFillsBlankOrUsesPreviewWithoutDuplicateTab() {
+    func testSessionClicksEmitTypedIntentWithoutMutatingCoordinatorOwnedTabs() throws {
         let existingSession = UUID()
         let existing = CorralTab(title: "Existing", contentView: NSView(), sessionIDs: [existingSession], isBlankWorkspace: false)
         let blank = CorralTab(title: "Blank", contentView: NSView(), isBlankWorkspace: true)
         let workspace = CorralWorkspaceView(tabs: [existing, blank])
-        var focused: (UUID, UUID)?
-        var opened: (UUID, UUID?, Bool)?
-        workspace.onFocusSession = { focused = ($0, $1) }
-        workspace.onOpenSession = { opened = ($0, $1, $2) }
-
         workspace.selectTab(id: blank.id)
-        workspace.smartOpenSession(existingSession)
-        XCTAssertEqual(workspace.activeTabID, existing.id)
-        XCTAssertEqual(focused?.0, existingSession)
-        XCTAssertEqual(focused?.1, existing.id)
-        XCTAssertNil(opened)
+        let sessionKey = SessionID("device::target")
+        workspace.sidebar.setAgents([CorralSidebarAgent(name: "target", sessionID: sessionKey)])
+        var intents: [(SessionID, SessionOpenGesture)] = []
+        workspace.onSelectAgent = { intents.append(($0, $1)) }
+        let table = try XCTUnwrap(workspace.sidebar.agentsTable as? CorralAgentTableView)
 
-        workspace.selectTab(id: blank.id)
-        let filledSession = UUID()
-        workspace.smartOpenSession(filledSession)
-        XCTAssertFalse(blank.isBlankWorkspace)
-        XCTAssertTrue(blank.sessionIDs.contains(filledSession))
-        XCTAssertEqual(opened?.0, filledSession)
-        XCTAssertEqual(opened?.1, blank.id)
-        XCTAssertEqual(opened?.2, false)
-
-        let previewSession = UUID()
-        workspace.smartOpenSession(previewSession)
-        XCTAssertEqual(workspace.previewSessionID, previewSession)
-        XCTAssertEqual(opened?.0, previewSession)
-        XCTAssertEqual(opened?.1, blank.id)
-        XCTAssertEqual(opened?.2, true)
+        table.dispatchClickIfCompleted(from: sessionKey, to: sessionKey, wasDragged: false, gesture: .singleClick)
+        table.dispatchClickIfCompleted(from: sessionKey, to: sessionKey, wasDragged: false, gesture: .doubleClick)
+        XCTAssertEqual(intents.map(\.0), [sessionKey, sessionKey])
+        XCTAssertEqual(intents.map(\.1), [.singleClick, .doubleClick])
+        XCTAssertEqual(workspace.activeTabID, blank.id)
+        XCTAssertTrue(blank.isBlankWorkspace)
+        XCTAssertTrue(blank.sessionIDs.isEmpty)
+        XCTAssertEqual(existing.sessionIDs, [existingSession])
         XCTAssertEqual(workspace.tabs.count, 2)
     }
 

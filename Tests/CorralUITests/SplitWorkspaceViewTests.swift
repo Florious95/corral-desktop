@@ -25,11 +25,10 @@ final class SplitWorkspaceViewTests: XCTestCase {
         return (window, container, overlay)
     }
 
-    private func completeAgentClick(on sidebar: CorralSidebarView, row: Int) throws {
-        sidebar.agentsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+    private func completeAgentClick(on sidebar: CorralSidebarView, row: Int, gesture: SessionOpenGesture = .singleClick) throws {
         let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
-        XCTAssertEqual(table.selectedRow, row)
-        table.dispatchClickIfCompleted(from: row, to: row, wasDragged: false)
+        let sessionID = try XCTUnwrap(sidebar.agents[row].sessionID)
+        table.dispatchClickIfCompleted(from: sessionID, to: sessionID, wasDragged: false, gesture: gesture)
     }
 
     private func mouse(_ type: NSEvent.EventType, at point: CGPoint, in overlay: SplitWorkspaceView) -> NSEvent {
@@ -207,49 +206,74 @@ final class SplitWorkspaceViewTests: XCTestCase {
         XCTAssertFalse(dropped)
     }
 
-    func testSidebarAgentClicksOpenEachRowWhileSelectionAloneNeverOpensAPreview() throws {
-        let firstID = UUID(), secondID = UUID()
+    func testAgentHighlightIsCoordinatorOwnedAndRowsDoNotSelectLocally() throws {
+        let firstKey = SessionID("dev::active"), secondKey = SessionID("dev::inactive")
         let sidebar = CorralSidebarView()
         sidebar.setAgents([
+            CorralSidebarAgent(name: "active", isActive: true, sessionID: firstKey),
+            CorralSidebarAgent(name: "inactive", sessionID: secondKey)
+        ])
+        let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
+        XCTAssertEqual(table.selectedRow, -1)
+        XCTAssertFalse(table.delegate?.tableView?(table, shouldSelectRow: 1) ?? true)
+        let activeRow = try XCTUnwrap(table.rowView(atRow: 0, makeIfNecessary: true) as? CorralSidebarRowView)
+        XCTAssertTrue(activeRow.isActive)
+
+        table.dispatchClickIfCompleted(from: secondKey, to: secondKey, wasDragged: false)
+        XCTAssertEqual(table.selectedRow, -1)
+        XCTAssertTrue(activeRow.isActive, "a click cannot speculate coordinator-owned active state")
+        sidebar.setAgents([
+            CorralSidebarAgent(name: "active", sessionID: firstKey),
+            CorralSidebarAgent(name: "inactive", isActive: true, sessionID: secondKey)
+        ])
+        let updatedRow = try XCTUnwrap(table.rowView(atRow: 1, makeIfNecessary: true) as? CorralSidebarRowView)
+        XCTAssertTrue(updatedRow.isActive)
+    }
+
+    func testSidebarAgentClicksDispatchTypedIntentAndSuppressDragOrMismatchedRelease() throws {
+        let firstID = UUID(), secondID = UUID()
+        let sidebar = CorralSidebarView()
+        let secondSessionID = SessionID("dev::B")
+        sidebar.setAgents([
             CorralSidebarAgent(id: firstID, name: "first", sessionID: s),
-            CorralSidebarAgent(id: secondID, name: "second")
+            CorralSidebarAgent(id: secondID, name: "second", sessionID: secondSessionID)
         ])
         let writer = try XCTUnwrap(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 0) as? NSPasteboardItem)
         XCTAssertEqual(writer.string(forType: CorralWorkspaceStageView.sessionPasteboardType), s.rawValue)
         XCTAssertNil(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 1))
         XCTAssertNil(sidebar.spacesTable.dataSource?.tableView?(sidebar.spacesTable, pasteboardWriterForRow: 0))
 
-        var opened: [UUID] = []
-        sidebar.onSelectAgent = { opened.append($0) }
-        sidebar.agentsTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        XCTAssertTrue(opened.isEmpty, "mouse-down selection starts drags; only a completed click opens the Agent")
+        var opened: [(SessionID, SessionOpenGesture)] = []
+        sidebar.onSelectAgent = { opened.append(($0, $1)) }
         let table = try XCTUnwrap(sidebar.agentsTable as? CorralAgentTableView)
-        table.dispatchClickIfCompleted(from: 0, to: 0, wasDragged: true)
-        table.dispatchClickIfCompleted(from: 0, to: 1, wasDragged: false)
-        XCTAssertTrue(opened.isEmpty, "dragging or releasing outside the row must not open a preview")
+        XCTAssertEqual(table.selectedRow, -1, "Agent highlight is driven only by coordinator state")
+        table.dispatchClickIfCompleted(from: s, to: s, wasDragged: true)
+        table.dispatchClickIfCompleted(from: s, to: secondSessionID, wasDragged: false)
+        XCTAssertTrue(opened.isEmpty, "dragging or releasing on a different session must not dispatch")
 
-        for row in [0, 1, 0] { try completeAgentClick(on: sidebar, row: row) }
-        XCTAssertEqual(opened, [firstID, secondID, firstID])
+        try completeAgentClick(on: sidebar, row: 0)
+        try completeAgentClick(on: sidebar, row: 1)
+        try completeAgentClick(on: sidebar, row: 0, gesture: .doubleClick)
+        XCTAssertEqual(opened.map(\.0), [s, secondSessionID, s])
+        XCTAssertEqual(opened.map(\.1), [.singleClick, .singleClick, .doubleClick])
     }
 
-    func testSidebarAgentClickFillsAndShowsTheNewlyCreatedTab() throws {
-        let sessionID = UUID()
+    func testSidebarAgentClickOnlyEmitsTypedIntentAndLeavesWorkspaceStateToCoordinator() throws {
+        let sessionID = SessionID("dev::target")
         let blank = CorralTab(title: "New Tab", isBlankWorkspace: true)
-        let workspace = CorralWorkspaceView(tabs: [])
-        workspace.addTab(blank)
-        workspace.sidebar.setAgents([CorralSidebarAgent(id: sessionID, name: "next agent", sessionID: SessionID(sessionID.uuidString))])
-        var opened: (UUID, UUID?, Bool)?
-        workspace.onOpenSession = { opened = ($0, $1, $2) }
+        let workspace = CorralWorkspaceView(tabs: [blank])
+        workspace.sidebar.setAgents([CorralSidebarAgent(name: "next agent", sessionID: sessionID)])
+        var opened: [(SessionID, SessionOpenGesture)] = []
+        workspace.onSelectAgent = { opened.append(($0, $1)) }
 
-        try completeAgentClick(on: workspace.sidebar, row: 0)
+        try completeAgentClick(on: workspace.sidebar, row: 0, gesture: .doubleClick)
+        XCTAssertEqual(opened.count, 1)
+        XCTAssertEqual(opened.first?.0, sessionID)
+        XCTAssertEqual(opened.first?.1, .doubleClick)
         XCTAssertEqual(workspace.activeTabID, blank.id)
-        XCTAssertFalse(blank.isBlankWorkspace)
-        XCTAssertEqual(blank.activeSessionID, sessionID)
-        XCTAssertTrue(blank.sessionIDs.contains(sessionID))
-        XCTAssertFalse(blank.contentView.isHidden)
-        XCTAssertEqual(opened?.0, sessionID)
-        XCTAssertEqual(opened?.1, blank.id)
-        XCTAssertEqual(opened?.2, false)
+        XCTAssertTrue(blank.isBlankWorkspace)
+        XCTAssertTrue(blank.sessionIDs.isEmpty)
+        XCTAssertNil(blank.activeSessionID)
     }
 
     func testFourPaneSplitNeverWidensOrPinsTheWindow() throws {
