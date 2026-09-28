@@ -34,6 +34,14 @@ final class CorralNativeTerminalView: TerminalView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        // Reconcile search, cursor and display state after engine-only background feeds.
+        getTerminal().updateFullScreen()
+        feed(byteArray: [])
+        needsDisplay = true
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         onFocus?()
@@ -64,19 +72,27 @@ final class CorralNativeTerminalView: TerminalView {
         displayFilter.reset()
         let normalized = Data(Self.normalizeSnapshotLineEndings(bytes))
         let mapped = CorralTerminalFilter.remapTrueColorBackground(normalized)
-        feed(byteArray: Array(mapped)[...])
+        feedMappedANSI(mapped)
     }
 
     func feedRemoteANSI(_ bytes: ArraySlice<UInt8>) {
         let mapped = displayFilter.process(Data(bytes))
         guard !mapped.isEmpty else { return }
-        feed(byteArray: Array(mapped)[...])
+        feedMappedANSI(mapped)
     }
 
     func finishRemoteANSI() {
         let remaining = displayFilter.finish()
         guard !remaining.isEmpty else { return }
-        feed(byteArray: Array(remaining)[...])
+        feedMappedANSI(remaining)
+    }
+
+    private func feedMappedANSI(_ bytes: Data) {
+        // Hidden permanent Tabs still parse every byte in order. TerminalView.feed
+        // also schedules per-view blink scans/paints; that work belongs only to
+        // visible panes and can otherwise starve the shared event consumer.
+        if isHiddenOrHasHiddenAncestor { getTerminal().feed(buffer: Array(bytes)[...]) }
+        else { feed(byteArray: Array(bytes)[...]) }
     }
 
     private static func normalizeSnapshotLineEndings(_ data: Data) -> [UInt8] {
