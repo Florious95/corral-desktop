@@ -33,6 +33,29 @@ final class CorralNativeTerminalPasteTests: XCTestCase {
         XCTAssertGreaterThan(contrast, 4.5)
     }
 
+    func testSnapshotFilterRemapsOnlyTheExactTrueColorBackground() throws {
+        let view = CorralNativeTerminalView(frame: .zero)
+        view.replaceSnapshot(Data("\u{1b}[38;2;244;244;240m\u{1b}[48;2;244;244;240mX".utf8))
+
+        let cell = try XCTUnwrap(view.getTerminal().getLine(row: 0)?.getData().first)
+        XCTAssertEqual(cell.attribute.fg, .trueColor(red: 244, green: 244, blue: 240))
+        XCTAssertEqual(cell.attribute.bg, .trueColor(red: 40, green: 47, blue: 57))
+
+        let nearMatch = CorralNativeTerminalView(frame: .zero)
+        nearMatch.replaceSnapshot(Data("\u{1b}[48;2;245;244;240mY".utf8))
+        let nearMatchCell = try XCTUnwrap(nearMatch.getTerminal().getLine(row: 0)?.getData().first)
+        XCTAssertEqual(nearMatchCell.attribute.bg, .trueColor(red: 245, green: 244, blue: 240))
+    }
+
+    func testDeltaFilterRemapsBackgroundTokenSplitAcrossFrames() throws {
+        let view = CorralNativeTerminalView(frame: .zero)
+        view.feedRemoteANSI(Array("\u{1b}[48;2;244;244;".utf8)[...])
+        view.feedRemoteANSI(Array("240mX".utf8)[...])
+
+        let cell = try XCTUnwrap(view.getTerminal().getLine(row: 0)?.getData().first)
+        XCTAssertEqual(cell.attribute.bg, .trueColor(red: 40, green: 47, blue: 57))
+    }
+
     func testControlVPastesTextOrQuotedImagePathWithoutSendingControlV() throws {
         let pasteboard = isolatedPasteboard()
         defer { pasteboard.releaseGlobally() }

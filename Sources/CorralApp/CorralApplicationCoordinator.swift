@@ -1539,18 +1539,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
               let view = terminalRegistry.view(for: key) else { return }
         runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
         sessions[key] = runtime
-#if DEBUG
-        if case let .snapshot(_, bytes) = frame,
-           runtime.descriptor.name == "排查新加坡 VPN 82 主机代理故障",
-           key.deviceID == configuredDeviceID {
-            let url = URL(fileURLWithPath: "/tmp/corral-native-snapshot.raw")
-            try? bytes.write(to: url, options: .atomic)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        }
-#endif
         switch frame {
         case let .snapshot(_, bytes): view.replaceSnapshot(bytes)
-        case let .delta(_, bytes): view.feed(byteArray: Array(bytes)[...])
+        case let .delta(_, bytes): view.feedRemoteANSI(Array(bytes)[...])
         case .scrollback: return
         }
         await writeTelemetry()

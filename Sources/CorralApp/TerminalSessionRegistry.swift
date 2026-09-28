@@ -29,6 +29,7 @@ final class TerminalSessionRegistry {
     func remove(_ key: SessionKey) -> CorralNativeTerminalView? {
         guard let view = views.removeValue(forKey: key) else { return nil }
         keysByView.removeValue(forKey: ObjectIdentifier(view))
+        view.finishRemoteANSI()
         view.terminalDelegate = nil
         view.setInputEnabled(false)
         view.removeFromSuperview()

@@ -13,6 +13,7 @@ final class CorralNativeTerminalView: TerminalView {
     static let defaultBackgroundColor = NSColor(srgbRed: 16.0 / 255, green: 17.0 / 255, blue: 21.0 / 255, alpha: 1)
 
     private let pasteboard: NSPasteboard
+    private var displayFilter = CorralTerminalFilter()
     private var controlVPasteMonitor: LocalPasteMonitorToken?
     private var inputEnabled = true
     var onDiscardedAutomaticReply: ((Int) -> Void)?
@@ -59,7 +60,22 @@ final class CorralNativeTerminalView: TerminalView {
 
     func replaceSnapshot(_ bytes: Data) {
         getTerminal().resetToInitialState()
-        feed(byteArray: Self.normalizeSnapshotLineEndings(bytes)[...])
+        displayFilter.reset()
+        let normalized = Data(Self.normalizeSnapshotLineEndings(bytes))
+        let mapped = CorralTerminalFilter.remapTrueColorBackground(normalized)
+        feed(byteArray: Array(mapped)[...])
+    }
+
+    func feedRemoteANSI(_ bytes: ArraySlice<UInt8>) {
+        let mapped = displayFilter.process(Data(bytes))
+        guard !mapped.isEmpty else { return }
+        feed(byteArray: Array(mapped)[...])
+    }
+
+    func finishRemoteANSI() {
+        let remaining = displayFilter.finish()
+        guard !remaining.isEmpty else { return }
+        feed(byteArray: Array(remaining)[...])
     }
 
     private static func normalizeSnapshotLineEndings(_ data: Data) -> [UInt8] {

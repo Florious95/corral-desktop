@@ -115,7 +115,10 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
         inputTask = nil
         pendingResize = nil
         pendingInputs.removeAll(keepingCapacity: false)
-        for runtime in sessions.values { runtime.terminalView?.terminalDelegate = nil }
+        for runtime in sessions.values {
+            runtime.terminalView?.finishRemoteANSI()
+            runtime.terminalView?.terminalDelegate = nil
+        }
         await sessionLink.disconnect()
         connection = nil
         connected = false
@@ -252,7 +255,11 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
             ansi,
             precedingCarriageReturn: isSnapshot ? false : runtime.lastByteWasCarriageReturn
         )
-        terminalView.feed(byteArray: normalized.bytes[...])
+        if isSnapshot {
+            terminalView.replaceSnapshot(Data(normalized.bytes))
+        } else {
+            terminalView.feedRemoteANSI(normalized.bytes[...])
+        }
         if var current = sessions[id] {
             current.lastByteWasCarriageReturn = normalized.trailingCarriageReturn
             sessions[id] = current
@@ -379,6 +386,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
                 idByReference.removeValue(forKey: runtime.descriptor.key.reference)
                 if let view = runtime.terminalView {
                     idByTerminalView.removeValue(forKey: ObjectIdentifier(view))
+                    view.finishRemoteANSI()
                     view.terminalDelegate = nil
                 }
             }
@@ -404,6 +412,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
             guard let id = idByReference.removeValue(forKey: reference) else { continue }
             if let runtime = sessions.removeValue(forKey: id), let view = runtime.terminalView {
                 idByTerminalView.removeValue(forKey: ObjectIdentifier(view))
+                view.finishRemoteANSI()
                 view.terminalDelegate = nil
             }
             sessionOrder.removeAll { $0 == id }
