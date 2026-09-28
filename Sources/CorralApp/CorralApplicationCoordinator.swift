@@ -97,6 +97,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private let telemetryURL: URL?
     private let telemetryWriter = AtomicTelemetryWriter()
     private let maximumVisiblePanes: Int
+    private let noResizeMode: Bool
     private var sidebarDeviceIDs: [DeviceID: UUID] = [:]
     private var activeWorkspaceTabID: UUID
     private var connection: AuthenticatedConnection?
@@ -171,6 +172,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         self.activeWorkspaceTabID = initialWorkspaceState.activeTabID
         self.environment = environment
         self.maximumVisiblePanes = maximumVisiblePanes
+        self.noResizeMode = environment["CORRAL_NATIVE_NO_RESIZE"] == "1"
         self.backgroundMode = environment["CORRAL_NATIVE_BACKGROUND"] == "1"
         if let output = environment["CORRAL_NATIVE_TELEMETRY_OUT"], !output.isEmpty {
             telemetryURL = URL(fileURLWithPath: output).standardizedFileURL
@@ -1510,11 +1512,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             do {
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
+                // Always subscribe using the server-advertised grid; inspection mode never applies local view dimensions.
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: runtime.descriptor.size))
                 sessions[key]?.subscriptionPending = false
                 guard receipt.socketWritten else { continue }
                 sessions[key]?.subscribed = true
-                if let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
+                if !noResizeMode, let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
             } catch {
                 sessions[key]?.subscriptionPending = false
                 lastConnectionError = String(describing: error)
@@ -1553,7 +1556,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize) async {
-        guard connection != nil, var runtime = sessions[key], runtime.subscribed,
+        guard !noResizeMode,
+              connection != nil, var runtime = sessions[key], runtime.subscribed,
               runtime.descriptor.size != grid,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
         let previous = runtime.descriptor.size
@@ -1573,7 +1577,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        guard newCols > 0, newRows > 0,
+        guard !noResizeMode,
+              newCols > 0, newRows > 0,
               newCols <= Int(UInt16.max), newRows <= Int(UInt16.max),
               newRows <= 1_000_000 / newCols,
               let key = terminalRegistry.key(for: source), var runtime = sessions[key] else { return }

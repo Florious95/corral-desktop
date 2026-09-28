@@ -42,6 +42,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
     private let sessionLink: any SessionLinkProtocol
     private let endpoint: ApprovedEndpoint?
     private let credential: CredentialHandle?
+    private let noResizeMode: Bool
     private let deviceID = DeviceID("corral-native-mvp")
     private var connection: AuthenticatedConnection?
     private var eventTask: Task<Void, Never>?
@@ -68,6 +69,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
         self.workspaceView = workspaceView
         self.endpoint = try? CorralMVPConfiguration.endpoint(environment: environment)
         self.credential = environment["CORRAL_NATIVE_TOKEN"].flatMap { $0.isEmpty ? nil : CredentialHandle($0) }
+        self.noResizeMode = environment["CORRAL_NATIVE_NO_RESIZE"] == "1"
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
@@ -270,7 +272,8 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
     }
 
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        guard newCols > 0, newRows > 0,
+        guard !noResizeMode,
+              newCols > 0, newRows > 0,
               newCols <= Int(UInt16.max), newRows <= Int(UInt16.max),
               newRows <= 1_000_000 / newCols,
               let id = idByTerminalView[ObjectIdentifier(source)], var runtime = sessions[id] else { return }
@@ -284,7 +287,8 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
     }
 
     private func scheduleResize(for id: UUID, grid: GridSize) {
-        guard selectedAgentID == id, var runtime = sessions[id], runtime.subscribed,
+        guard !noResizeMode,
+              selectedAgentID == id, var runtime = sessions[id], runtime.subscribed,
               runtime.descriptor.size != grid, runtime.lastResizeGrid != grid,
               runtime.resizePendingGrid != grid else { return }
         resizeRequestGeneration &+= 1
@@ -304,7 +308,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
     }
 
     private func applyResize(_ request: ResizeRequest) async {
-        guard isCurrentResize(request), let runtime = sessions[request.sessionID] else {
+        guard !noResizeMode, isCurrentResize(request), let runtime = sessions[request.sessionID] else {
             clearPendingResize(request)
             return
         }
@@ -344,12 +348,13 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
         runtime.subscriptionPending = true
         sessions[id] = runtime
         do {
+            // The listing carries the live server grid; never substitute the local view grid here.
             let receipt = try await sessionLink.send(.subscribe(reference: runtime.descriptor.key.reference, size: runtime.descriptor.size))
             guard var current = sessions[id] else { return }
             current.subscriptionPending = false
             current.subscribed = receipt.socketWritten
             sessions[id] = current
-            if receipt.socketWritten, let grid = current.desiredGrid {
+            if !noResizeMode, receipt.socketWritten, let grid = current.desiredGrid {
                 scheduleResize(for: id, grid: grid)
             } else if !receipt.socketWritten {
                 lastConnectionError = "Subscription was not sent"

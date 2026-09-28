@@ -820,6 +820,66 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testNoResizeInspectionSubscribesAtServerGridAndNeverSendsResize() async throws {
+        let link = RecordingSessionLink()
+        let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
+            "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws",
+            "CORRAL_NATIVE_TOKEN": "fixture-only-token",
+            "CORRAL_NATIVE_BACKGROUND": "1",
+            "CORRAL_NATIVE_NO_RESIZE": "1"
+        ])
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        window.orderBack(nil)
+        window.displayIfNeeded()
+        await coordinator.start()
+        let listRequested = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
+        XCTAssertTrue(listRequested)
+
+        let reference = try SessionReference("no-resize-inspection")
+        let serverGrid = GridSize(rows: 37, columns: 111)
+        let listing = SessionListing(requestID: 1, sequence: 1, workspaces: [
+            WorkspaceRecord(
+                workingDirectory: "/fixture/workspace",
+                sessionCount: 1,
+                aggregateState: .working,
+                sessions: [WireSessionRecord(
+                    reference: reference,
+                    name: "inspection-agent",
+                    workingDirectory: "/fixture/workspace",
+                    state: .working,
+                    rows: UInt16(serverGrid.rows),
+                    columns: UInt16(serverGrid.columns),
+                    provider: "pi",
+                    activity: "working",
+                    health: "normal"
+                )]
+            )
+        ])
+        try await link.emit(.control(.listing(listing)))
+        let subscribed = await waitUntil {
+            coordinator.sessionCount == 1 && coordinator.subscribedSessionIDs.contains(reference.rawValue)
+        }
+        XCTAssertTrue(subscribed)
+        let terminal = try XCTUnwrap(descendants(of: window.contentView!).compactMap { $0 as? TerminalView }.first)
+        coordinator.sizeChanged(source: terminal, newCols: 144, newRows: 50)
+        let frame = window.frame
+        window.setFrame(NSRect(x: frame.minX, y: frame.minY, width: frame.width + 240, height: frame.height + 160), display: true)
+        window.contentView?.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+
+        let commands = await link.commands()
+        let subscribe = try XCTUnwrap(commands.first {
+            if case let .subscribe(candidate, _) = $0 { return candidate == reference }
+            return false
+        })
+        guard case let .subscribe(_, size) = subscribe else { return XCTFail("expected subscription command") }
+        XCTAssertEqual(size, serverGrid, "inspection subscribes with the server-advertised grid")
+        XCTAssertFalse(commands.contains { if case .resize = $0 { true } else { false } })
+
+        await coordinator.stop()
+        window.close()
+    }
+
     func testColdStartRestoresListedSessionIntoDarkStageWhenActiveTabIsBlank() async throws {
         let supportDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("corral-native-cold-start-\(UUID().uuidString)", isDirectory: true)
