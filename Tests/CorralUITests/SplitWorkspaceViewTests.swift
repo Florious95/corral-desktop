@@ -240,7 +240,8 @@ final class SplitWorkspaceViewTests: XCTestCase {
         ])
         let writer = try XCTUnwrap(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 0) as? NSPasteboardItem)
         XCTAssertEqual(writer.string(forType: CorralWorkspaceStageView.sessionPasteboardType), s.rawValue)
-        XCTAssertNil(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 1))
+        let secondWriter = try XCTUnwrap(sidebar.agentsTable.dataSource?.tableView?(sidebar.agentsTable, pasteboardWriterForRow: 1) as? NSPasteboardItem)
+        XCTAssertEqual(secondWriter.string(forType: CorralWorkspaceStageView.sessionPasteboardType), secondSessionID.rawValue)
         XCTAssertNil(sidebar.spacesTable.dataSource?.tableView?(sidebar.spacesTable, pasteboardWriterForRow: 0))
 
         var opened: [(SessionID, SessionOpenGesture)] = []
