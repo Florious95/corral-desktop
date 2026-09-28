@@ -44,7 +44,9 @@ without contacting or restarting its production process.
 `session-liveness` uses 50 distinct, continuously writing PTYs. It checks all
 50 previews and permanent Tabs with fresh output, screenshot OCR, actual input,
 focus and hit testing, then 150 rapid preview and 150 warm Tab switches. Every
-local click must update the visible session within 100 ms; every measured key
+local click must update the visible session within 100 ms of mouse-down dispatch;
+the probe retains the separate row-locating/scroll/layout preparation time and
+the original total duration in each `switchSamples` entry. Every measured key
 must reach the WebSocket proxy within 100 ms. Full input must reach the real
 PTY within 3 s. `latency.json` separately records the fixture's actual read
 timestamp, P95 and maximum; native socket latency is not end-to-end PTY latency.

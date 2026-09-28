@@ -15,6 +15,7 @@ final class CorralAcceptanceDriver {
     private var task: Task<Void, Never>?
     private var drag: AcceptanceDraggingInfo?
     private var lastKeyDispatchTime: TimeInterval = 0
+    private var lastMouseDownDispatchUptime: TimeInterval = 0
     private var switchSamples: [[String: Any]] = []
 
     static func directory(environment: [String: String]) throws -> URL? {
@@ -94,14 +95,21 @@ final class CorralAcceptanceDriver {
             guard let sessions = command["sessions"] as? [String] else { throw Failure.invalidCommand }
             switchSamples = []
             for session in sessions {
-                let started = ProcessInfo.processInfo.systemUptime
+                let preparationStarted = ProcessInfo.processInfo.systemUptime
                 try await perform(["op": "sidebar", "session": session])
+                // Locating/scrolling a test row is fixture preparation. Start
+                // the response clock where the actual mouse-down is delivered.
+                let started = lastMouseDownDispatchUptime
                 while coordinator.workspaceState.visibleSessionID?.rawValue != session,
                       ProcessInfo.processInfo.systemUptime - started < 0.1 {
                     try await Task.sleep(for: .milliseconds(1))
                 }
+                let observed = ProcessInfo.processInfo.systemUptime
                 switchSamples.append(["requested": session, "visible": coordinator.workspaceState.visibleSessionID?.rawValue ?? "",
-                                      "milliseconds": (ProcessInfo.processInfo.systemUptime - started) * 1000])
+                                      "milliseconds": (observed - started) * 1000,
+                                      "preparationMilliseconds": (started - preparationStarted) * 1000,
+                                      "totalMilliseconds": (observed - preparationStarted) * 1000,
+                                      "dispatchUptime": started, "observedUptime": observed])
                 try await Task.sleep(for: .milliseconds(30))
             }
         case "sidebar":
@@ -222,6 +230,7 @@ final class CorralAcceptanceDriver {
             return event
         }
         for event in events.dropFirst() { NSApp.postEvent(event, atStart: false) }
+        if events[0].type == .leftMouseDown { lastMouseDownDispatchUptime = ProcessInfo.processInfo.systemUptime }
         window.sendEvent(events[0])
         while let event = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantPast, inMode: .default, dequeue: true) { window.sendEvent(event) }
     }
