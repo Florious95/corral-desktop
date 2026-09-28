@@ -381,6 +381,20 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                 if gesture != 'preview' and suffix in identities:
                     assert pane['viewIdentity'] == identities[suffix], 'switching must retain the terminal view'
                 if gesture == 'permanent': identities[suffix] = pane['viewIdentity']
+                if self.case == 'many-sessions-stress' and suffix != 'F':
+                    previous = max(map(int, re.findall(r'LIVE-(\d+)', '\n'.join(pane['rows']))))
+                    def advanced():
+                        current = self.command('state')
+                        values = re.findall(r'LIVE-(\d+)', '\n'.join(self.view(current, suffix)['rows']))
+                        return current if values and max(map(int, values)) > previous else None
+                    state = wait_for(advanced)
+                else:
+                    marker = f'{gesture}-{suffix}'
+                    self.command('key', text=marker, code=0)
+                    def echoed():
+                        current = self.command('state')
+                        return current if marker.encode().hex() in ''.join(self.view(current, suffix)['rows']) else None
+                    state = wait_for(echoed)
                 screenshot = self.capture(f'{gesture}-{index}-{suffix}', state)
                 self.output_assertion(screenshot, suffix)
                 if not self.no_resize: self.settle_geometry(state)
