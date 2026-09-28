@@ -43,7 +43,6 @@ public final class CorralTabBarView: NSView {
     public var onSelectTab: ((UUID) -> Void)?
     public var onCreateTab: (() -> Void)?
     public var onCloseTab: ((UUID) -> Void)?
-    public var onClosePreview: (() -> Void)?
     public var onRenameTab: ((UUID, String) -> Void)?
     public var onToggleSidebar: (() -> Void)?
     public var onReorderTabs: ((UUID, Int) -> Void)?
@@ -192,7 +191,6 @@ public final class CorralTabBarView: NSView {
 
     fileprivate func select(_ id: UUID) { onSelectTab?(id) }
     fileprivate func close(_ id: UUID) { onCloseTab?(id) }
-    fileprivate func closePreview() { onClosePreview?() }
     fileprivate func commitRename(_ id: UUID, _ title: String) { onRenameTab?(id, title) }
     fileprivate func performContextAction(_ id: UUID, _ action: String) { onContextAction?(id, action) }
     @objc private func toggleSidebar() { onToggleSidebar?() }
@@ -266,13 +264,13 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         closeButton.imagePosition = .imageOnly
         closeButton.isBordered = false
         closeButton.contentTintColor = CorralAestheticTokens.textMuted
-        closeButton.toolTip = tab.isPreview ? "关闭预览" : "关闭工作台"
-        closeButton.setAccessibilityLabel(closeButton.toolTip ?? "关闭工作台"); closeButton.setAccessibilityIdentifier("corral.tab.close")
+        closeButton.toolTip = "关闭工作台"
+        closeButton.setAccessibilityLabel("关闭工作台"); closeButton.setAccessibilityIdentifier("corral.tab.close")
         closeButton.target = self
         closeButton.action = #selector(closeTab)
         closeButton.alphaValue = selected ? 0.7 : 0
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        let showsCloseButton = !tab.isPinned || tab.isPreview
+        let showsCloseButton = !tab.isPinned
         if showsCloseButton { addSubview(closeButton) }
         let textWidth = ceil((tab.title as NSString).size(withAttributes: [.font: title.font!]).width)
         let fixedChromeWidth: CGFloat = 8 + 6 + 6 + 20 + (showsCloseButton ? 36 : 8)
@@ -363,7 +361,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         addMenuItem(menu, title: "向右拆分", action: "splitRight")
         addMenuItem(menu, title: "向下拆分", action: "splitDown")
         menu.addItem(.separator())
-        addMenuItem(menu, title: tab.isPreview ? "关闭预览" : "关闭工作台", action: "close")
+        addMenuItem(menu, title: "关闭工作台", action: "close")
         let unpinnedCount = owner?.tabs.filter { !$0.isPinned }.count ?? 0
         let others = addMenuItem(menu, title: "关闭其他工作台", action: "closeOthers"); others.isEnabled = unpinnedCount > 1 && !tab.isPinned
         let right = addMenuItem(menu, title: "关闭右侧所有工作台", action: "closeRight"); right.isEnabled = (owner?.tabs.firstIndex(where: { $0.id == tab.id }) ?? 0) < (owner?.tabs.count ?? 1) - 1
@@ -389,9 +387,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     }
     @objc private func contextAction(_ item: NSMenuItem) { owner?.performContextAction(tab.id, item.representedObject as? String ?? "") }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
-    @objc private func closeTab() {
-        if tab.isPreview { owner?.closePreview() } else { owner?.close(tab.id) }
-    }
+    @objc private func closeTab() { owner?.close(tab.id) }
     @objc private func renameFromMenu() { beginRename() }
     @objc private func togglePin() { owner?.performContextAction(tab.id, "pin") }
     func beginRename() {
@@ -1102,6 +1098,9 @@ public final class CorralWorkspaceView: NSView {
     public private(set) var tabs: [CorralTab] = []
     public private(set) var activeTabID: UUID?
     public let titleBar = CorralSidebarTitleBarView()
+    private let previewBanner = NSView()
+    private let previewLabel = NSTextField(labelWithString: "正在预览")
+    public let previewExitButton = NSButton(title: "退出预览", target: nil, action: nil)
     public var onCreateTab: (() -> Void)?
     public var onSettings: (() -> Void)?
     public var onCreateAgent: ((UUID?) -> Void)?
@@ -1123,18 +1122,41 @@ public final class CorralWorkspaceView: NSView {
         self.sidebar = sidebar
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.background.cgColor
-        for view in [titleBar, sidebar, tabBar, stageContainer] {
+        for view in [titleBar, sidebar, tabBar, stageContainer, previewBanner] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         sidebarColumnWidth = sidebar.widthAnchor.constraint(equalToConstant: Self.sidebarWidth)
+        previewBanner.wantsLayer = true
+        previewBanner.layer?.cornerRadius = 8
+        previewBanner.layer?.borderWidth = 1
+        previewBanner.identifier = NSUserInterfaceItemIdentifier("corral.preview.banner")
+        previewBanner.isHidden = true
+        previewLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        previewLabel.textColor = CorralAestheticTokens.text
+        previewLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewExitButton.isBordered = false
+        previewExitButton.contentTintColor = CorralAestheticTokens.textSecondary
+        previewExitButton.focusRingType = .none
+        previewExitButton.setAccessibilityLabel("退出预览")
+        previewExitButton.setAccessibilityIdentifier("corral.preview.exit")
+        previewExitButton.target = self
+        previewExitButton.action = #selector(exitPreview)
+        previewExitButton.translatesAutoresizingMaskIntoConstraints = false
+        previewBanner.addSubview(previewLabel)
+        previewBanner.addSubview(previewExitButton)
         NSLayoutConstraint.activate([
             sidebarColumnWidth,
             titleBar.leadingAnchor.constraint(equalTo: leadingAnchor), titleBar.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor), titleBar.topAnchor.constraint(equalTo: topAnchor), titleBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
             sidebar.leadingAnchor.constraint(equalTo: leadingAnchor), sidebar.topAnchor.constraint(equalTo: titleBar.bottomAnchor), sidebar.bottomAnchor.constraint(equalTo: bottomAnchor),
             tabBar.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor), tabBar.trailingAnchor.constraint(equalTo: trailingAnchor), tabBar.topAnchor.constraint(equalTo: topAnchor), tabBar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
-            stageContainer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor), stageContainer.trailingAnchor.constraint(equalTo: trailingAnchor), stageContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor), stageContainer.bottomAnchor.constraint(equalTo: bottomAnchor)
+            stageContainer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor), stageContainer.trailingAnchor.constraint(equalTo: trailingAnchor), stageContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor), stageContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            previewBanner.trailingAnchor.constraint(equalTo: stageContainer.trailingAnchor, constant: -12), previewBanner.topAnchor.constraint(equalTo: stageContainer.topAnchor, constant: 12), previewBanner.widthAnchor.constraint(equalToConstant: 196), previewBanner.heightAnchor.constraint(equalToConstant: 34),
+            previewLabel.leadingAnchor.constraint(equalTo: previewBanner.leadingAnchor, constant: 10), previewLabel.centerYAnchor.constraint(equalTo: previewBanner.centerYAnchor), previewLabel.trailingAnchor.constraint(lessThanOrEqualTo: previewExitButton.leadingAnchor, constant: -6),
+            previewExitButton.trailingAnchor.constraint(equalTo: previewBanner.trailingAnchor, constant: -8), previewExitButton.centerYAnchor.constraint(equalTo: previewBanner.centerYAnchor), previewExitButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 62)
         ])
+        previewBanner.layer?.backgroundColor = CorralAestheticTokens.surface2.cgColor
+        previewBanner.layer?.borderColor = CorralAestheticTokens.borderSubtle.cgColor
         titleBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
         tabBar.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
         tabBar.bindSidebarToggleButton(titleBar.collapseButton)
@@ -1142,7 +1164,6 @@ public final class CorralWorkspaceView: NSView {
         sidebar.onSettings = { [weak self] in self?.onSettings?() }; sidebar.onCreateAgent = { [weak self] in self?.onCreateAgent?($0) }; sidebar.onToggleDevices = { [weak self] in self?.onDevices?() }
         sidebar.onSelectAgent = { [weak self] sessionID, gesture in self?.onSelectAgent?(sessionID, gesture) }
         tabBar.onSelectTab = { [weak self] in self?.selectTab(id: $0) }; tabBar.onCreateTab = { [weak self] in self?.onCreateTab?() }; tabBar.onCloseTab = { [weak self] in self?.closeTab(id: $0) }
-        tabBar.onClosePreview = { [weak self] in self?.onClosePreview?() }
         tabBar.onRenameTab = { [weak self] id, title in self?.renameTab(id: id, title: title) }; tabBar.onReorderTabs = { [weak self] id, index in self?.reorderTab(id: id, to: index) }
         tabBar.onContextAction = { [weak self] id, action in self?.performTabContextAction(id, action) }
         stageContainer.onCreateAgent = { [weak self] in self?.onCreateAgent?(nil) }
@@ -1161,7 +1182,7 @@ public final class CorralWorkspaceView: NSView {
         self.tabs = ordered
         activeTabID = selectedTabID
         self.previewSessionID = previewSessionID
-        for tab in ordered { tab.isPreview = tab.id == selectedTabID && previewSessionID != nil }
+        previewBanner.isHidden = previewSessionID == nil
         stageContainer.activeTabID = selectedTabID
         for tab in ordered { tab.contentView.isHidden = tab.id != selectedTabID }
         tabBar.setTabs(ordered, selectedTabID: selectedTabID)
@@ -1177,8 +1198,6 @@ public final class CorralWorkspaceView: NSView {
     public func selectTab(id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         tabSwitchTelemetry.beginSwitch(); defer { tabSwitchTelemetry.endSwitch() }
-        previewSessionID = nil
-        for tab in tabs { tab.isPreview = false }
         activeTabID = id; stageContainer.activeTabID = id
         for tab in tabs { tab.contentView.isHidden = tab.id != id }
         tabBar.setTabs(tabs, selectedTabID: id)
@@ -1197,8 +1216,7 @@ public final class CorralWorkspaceView: NSView {
         guard let index = tabs.firstIndex(where: { $0.id == id }), let tab = tabs.first(where: { $0.id == id }) else { return }
         switch action {
         case "pin", "splitRight", "splitDown": onTabContextAction?(id, action)
-        case "close":
-            if tab.isPreview { onClosePreview?() } else { tabBar.close(id) }
+        case "close": tabBar.close(id)
         case "closeOthers": tabs.filter { $0.id != id && !$0.isPinned }.map(\.id).forEach(closeTab(id:))
         case "closeRight": Array(tabs.suffix(from: index + 1)).filter { !$0.isPinned }.map(\.id).forEach(closeTab(id:))
         case "resetTitle": tab.title = tab.defaultTitle; tab.isCustomTitle = false; tabBar.setTabs(tabs, selectedTabID: activeTabID); onTabContextAction?(id, action)
@@ -1238,6 +1256,7 @@ public final class CorralWorkspaceView: NSView {
         let view = tab.contentView; view.translatesAutoresizingMaskIntoConstraints = false; view.isHidden = true; stageContainer.addTabContent(view)
         NSLayoutConstraint.activate([view.leadingAnchor.constraint(equalTo: stageContainer.leadingAnchor), view.trailingAnchor.constraint(equalTo: stageContainer.trailingAnchor), view.topAnchor.constraint(equalTo: stageContainer.topAnchor), view.bottomAnchor.constraint(equalTo: stageContainer.bottomAnchor)])
     }
+    @objc private func exitPreview() { if previewSessionID != nil { onClosePreview?() } }
     private func firstFocusableView(in view: NSView) -> NSView? { if view.acceptsFirstResponder { return view }; for child in view.subviews { if let result = firstFocusableView(in: child) { return result } }; return nil }
     private func applyTheme(to view: NSView) {
         if view === self || view === sidebar || view === titleBar || view === tabBar { view.layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor }

@@ -616,7 +616,7 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(workspace.tabs.map(\.id), [pinned.id, second.id, first.id])
     }
 
-    func testPinnedAndRegularTabsKeepReadableTitlesAndPreviewClosesOnlyItsPreview() throws {
+    func testPinnedAndRegularTabsKeepReadableTitlesAndPreviewExitIsIndependentFromTabClose() throws {
         let pinned = CorralTab(title: "全自动编排leader", status: .working, isPinned: true, provider: "pi")
         let regular = CorralTab(title: "Workspace · Rust", provider: "codex")
         let workspace = CorralWorkspaceView(tabs: [pinned, regular])
@@ -652,18 +652,35 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(descendants(of: regularItem).contains { $0.accessibilityIdentifier() == "corral.tab.close" })
 
         var closedPreview = false
+        var closedTabs: [UUID] = []
         workspace.onClosePreview = { closedPreview = true }
+        workspace.tabBar.onCloseTab = { closedTabs.append($0) }
         let previewID = UUID()
+        let previewBanner = try XCTUnwrap(descendants(of: workspace).first { $0.identifier?.rawValue == "corral.preview.banner" })
+        XCTAssertTrue(previewBanner.isHidden)
         workspace.synchronizeWorkspaceTabs([pinned, regular], selectedTabID: pinned.id, previewSessionID: previewID)
         workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
-        let previewItem = try item(title: pinned.title)
-        let closePreview = try XCTUnwrap(descendants(of: previewItem).compactMap { $0 as? NSButton }.first {
+        XCTAssertFalse(previewBanner.isHidden)
+        XCTAssertEqual(workspace.previewExitButton.accessibilityLabel(), "退出预览")
+        XCTAssertFalse(pinned.isPreview)
+        XCTAssertFalse(regular.isPreview, "preview state belongs to the Store, not its host Tab")
+        let currentPinnedItem = try item(title: pinned.title)
+        let currentRegularItem = try item(title: regular.title)
+        XCTAssertFalse(descendants(of: currentPinnedItem).contains { $0.accessibilityIdentifier() == "corral.tab.close" })
+        let closeTab = try XCTUnwrap(descendants(of: currentRegularItem).compactMap { $0 as? NSButton }.first {
             $0.accessibilityIdentifier() == "corral.tab.close"
         })
-        XCTAssertEqual(closePreview.accessibilityLabel(), "关闭预览")
-        closePreview.performClick(closePreview)
-        XCTAssertTrue(closedPreview)
-        XCTAssertEqual(workspace.tabs.count, 2, "closing preview must not remove the durable host Tab")
+        XCTAssertEqual(closeTab.accessibilityLabel(), "关闭工作台")
+
+        closeTab.performClick(closeTab)
+        XCTAssertEqual(closedTabs, [regular.id], "a regular Tab x always closes that Tab")
+        XCTAssertFalse(closedPreview, "Tab close never exits preview")
+        XCTAssertFalse(previewBanner.isHidden, "closing another Tab does not change Store-owned preview state")
+
+        workspace.previewExitButton.performClick(nil)
+        XCTAssertTrue(closedPreview, "the independent preview control emits onClosePreview")
+        XCTAssertEqual(closedTabs, [regular.id])
+        XCTAssertEqual(workspace.tabs.count, 2)
     }
 
     func testTabSwitchPreserves45RowSnapshotAndRecordsNoTerminalWork() throws {
