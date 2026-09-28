@@ -55,9 +55,13 @@ final class NativeWorkspaceTests: XCTestCase {
         sidebar.setAgents(agents)
         XCTAssertEqual(sidebar.agents.first?.id, agents[1].id)
         XCTAssertEqual(sidebar.spaces.first { $0.id == space.id }?.workingCount, 1)
+        var selectedSpace: UUID?
+        sidebar.onSelectSpace = { selectedSpace = $0 }
         sidebar.selectSpace(id: space.id)
+        XCTAssertEqual(selectedSpace, space.id)
         sidebar.setSpaces([])
         XCTAssertEqual(sidebar.selectedSpaceID, CorralSidebarSpace.allSpacesID)
+        XCTAssertEqual(selectedSpace, CorralSidebarSpace.allSpacesID, "fallback must update the coordinator's selection too")
         XCTAssertEqual(sidebar.agents.count, 50)
     }
 

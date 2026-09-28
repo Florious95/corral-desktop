@@ -899,12 +899,14 @@ public final class CorralSidebarView: NSView {
         applyAgentCounts()
         guard self.spaces != previous else { return }
         spaceData.spaces = self.spaces
-        if !self.spaces.contains(where: { $0.id == selectedSpaceID }) { selectedSpaceID = CorralSidebarSpace.allSpacesID }
+        let selectionWasRemoved = !self.spaces.contains { $0.id == selectedSpaceID }
+        if selectionWasRemoved { selectedSpaceID = CorralSidebarSpace.allSpacesID }
         spacesTable.reloadData()
         spacesHeight.constant = min(CGFloat(self.spaces.count) * Self.spaceRowHeight, Self.spacesMaximumHeight)
         if let index = self.spaces.firstIndex(where: { $0.id == selectedSpaceID }) { spacesTable.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
         refreshVisibleAgents()
         updateSectionHeaders()
+        if selectionWasRemoved { onSelectSpace?(selectedSpaceID) }
     }
     public func agentContextMenu(for id: UUID) -> NSMenu? {
         guard let agent = agents.first(where: { $0.id == id }) else { return nil }

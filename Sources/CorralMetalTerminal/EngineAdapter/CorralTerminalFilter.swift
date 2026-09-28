@@ -2,10 +2,10 @@ import Foundation
 
 /// Applies Corral's dark-theme override to one known light truecolor background SGR.
 public struct CorralTerminalFilter: Sendable {
-    private static let source = Array("\u{1B}[48;2;244;244;240m".utf8)
-    private static let replacement = Array("\u{1B}[48;2;40;47;57m".utf8)
+    private static let source = Data("\u{1B}[48;2;244;244;240m".utf8)
+    private static let replacement = Data("\u{1B}[48;2;40;47;57m".utf8)
 
-    private var pending: [UInt8] = []
+    private var pending = Data()
 
     public init() {}
 
@@ -19,29 +19,31 @@ public struct CorralTerminalFilter: Sendable {
 
     /// Rewrites complete matches while retaining a possible token prefix for the next delta.
     public mutating func process(_ data: Data) -> Data {
-        var input = pending
-        input.append(contentsOf: data)
+        var input = data
+        if !pending.isEmpty { input = pending; input.append(data) }
         pending.removeAll(keepingCapacity: true)
 
-        var output: [UInt8] = []
-        output.reserveCapacity(input.count)
-        var index = 0
-        while index < input.count {
-            let remaining = input.count - index
-            if remaining >= Self.source.count,
-               input[index..<(index + Self.source.count)].elementsEqual(Self.source) {
-                output.append(contentsOf: Self.replacement)
-                index += Self.source.count
-            } else if remaining < Self.source.count,
-                      Self.source.starts(with: input[index...]) {
-                pending.append(contentsOf: input[index...])
+        // Foundation searches and copies whole byte spans. Comparing the SGR
+        // at every printable byte made this override dominate busy PTY streams.
+        var output = Data()
+        var start = input.startIndex
+        while let match = input.range(of: Self.source, in: start..<input.endIndex) {
+            output.append(input[start..<match.lowerBound])
+            output.append(Self.replacement)
+            start = match.upperBound
+        }
+        var end = input.endIndex
+        // Only this bounded suffix can be the start of a token split across frames.
+        for count in stride(from: min(end - start, Self.source.count - 1), through: 1, by: -1) {
+            if Self.source.starts(with: input.suffix(count)) {
+                pending = Data(input.suffix(count))
+                end -= count
                 break
-            } else {
-                output.append(input[index])
-                index += 1
             }
         }
-        return Data(output)
+        if output.isEmpty { return input[input.startIndex..<end] }
+        output.append(input[start..<end])
+        return output
     }
 
     /// Emits an unfinished candidate unchanged when the stream is permanently ending.
