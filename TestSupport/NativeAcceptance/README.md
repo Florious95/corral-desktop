@@ -18,6 +18,12 @@ python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-deskto
 swift test
 ```
 
+`package-app.sh` builds the actual development bundle with `-O`, including
+SwiftTerm. It retains DEBUG and symbols for this private acceptance entrypoint.
+SwiftPM's default unoptimized build is useful for stepping through source, but
+must not be substituted for the packaged binary in throughput acceptance.
+Use `swift test -Xswiftc -O` to check the same optimized Swift build settings.
+
 P0 regression cases use the same packaged app, daemon, PTYs and WindowServer
 capture path:
 

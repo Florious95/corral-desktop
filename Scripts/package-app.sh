@@ -5,7 +5,10 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 APP="$ROOT/.build/CorralNativeDev.app"
 
 cd "$ROOT"
-swift build --configuration debug --product CorralApp
+# This is a user-facing development bundle: optimize the terminal engine and
+# renderer as well as the app. Keep DEBUG, symbols and the isolated acceptance
+# entrypoint, but do not ship SwiftPM's default -Onone interpreter hot paths.
+swift build --configuration debug --product CorralApp -Xswiftc -O
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$ROOT/.build/debug/CorralApp" "$APP/Contents/MacOS/CorralApp"
