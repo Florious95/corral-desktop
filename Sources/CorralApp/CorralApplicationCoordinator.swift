@@ -88,6 +88,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         var removedFromListing = false
     }
 
+    private struct SessionOpenIntent {
+        let key: SessionKey
+        let gesture: SessionOpenGesture
+    }
+
     private let deviceRepository: any DeviceRepositoryProtocol
     private let credentialVault: any DeviceCredentialVault
     private let sessionLink: any SessionLinkProtocol
@@ -145,6 +150,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var sessionOrder: [SessionKey] = []
     private var sessions: [SessionKey: RuntimeSession] = [:]
     private var uiSessionKeys: [UUID: SessionKey] = [:]
+    private var pendingSessionOpenIntents: [SessionOpenIntent] = []
+    private var drainingSessionOpenIntents = false
     private var activeSession: SessionKey?
 
     public init(
@@ -228,16 +235,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             Task { @MainActor in await self.persistSidebarVisibility() }
         }
         workspaceView.onDevices = { [weak self] in self?.presentDevicesPopover() }
-        workspaceView.onOpenSession = { [weak self] id, tabID, preview in
-            guard let self else { return }
-            guard let key = self.uiSessionKeys[id] else {
-                self.lastConnectionError = "The selected Agent no longer maps to a live session."
-                self.showToast("无法打开会话：Agent 状态已过期，请刷新列表", kind: .error)
-                return
-            }
-            Task { @MainActor in
-                await self.openSession(key, gesture: preview ? .singleClick : .doubleClick, in: tabID)
-            }
+        workspaceView.onSelectAgent = { [weak self] sessionID, gesture in
+            self?.enqueueSessionOpen(sessionID, gesture: gesture)
         }
         workspaceView.onFocusSession = { [weak self] id, tabID in
             guard let self, let key = self.uiSessionKeys[id] else { return }
@@ -377,6 +376,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
+    private func enqueueSessionOpen(_ sessionID: SessionID, gesture: SessionOpenGesture) {
+        guard let key = sessionKey(for: sessionID) else {
+            lastConnectionError = "The selected Agent no longer maps to a live session."
+            showToast("无法打开会话：Agent 状态已过期，请刷新列表", kind: .error)
+            return
+        }
+        pendingSessionOpenIntents.append(SessionOpenIntent(key: key, gesture: gesture))
+        guard !drainingSessionOpenIntents else { return }
+        drainingSessionOpenIntents = true
+        Task { @MainActor [weak self] in await self?.drainSessionOpenIntents() }
+    }
+
+    private func drainSessionOpenIntents() async {
+        while !pendingSessionOpenIntents.isEmpty {
+            let intent = pendingSessionOpenIntents.removeFirst()
+            await openSession(intent.key, gesture: intent.gesture)
+        }
+        drainingSessionOpenIntents = false
+    }
+
     public func openSession(
         _ key: SessionKey,
         gesture: SessionOpenGesture = .singleClick,
@@ -393,8 +412,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 let state = try await workspaceStore.switchTab(tabID)
                 targetTabWasStale = state.activeTabID != tabID
             }
-            let state = try await workspaceStore.smartOpenSession(descriptor, gesture: gesture)
-            await applyWorkspaceState(state)
+            _ = try await workspaceStore.smartOpenSession(descriptor, gesture: gesture)
+            await applyWorkspaceState(await workspaceStore.snapshot())
             if targetTabWasStale {
                 lastConnectionError = "The requested workspace Tab no longer exists; opened in the active Tab."
                 showToast("目标标签页已失效，会话已在当前标签页打开", kind: .warning)
@@ -1504,6 +1523,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard connection != nil else { return }
         for key in visibleSessionKeys() { _ = ensureTerminalView(for: key) }
         updateTerminalStage()
+        focusVisibleTerminal()
         for key in visibleSessionKeys() {
             guard let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending else { continue }
             do {
