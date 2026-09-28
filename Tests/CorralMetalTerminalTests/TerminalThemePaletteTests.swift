@@ -20,6 +20,14 @@ final class TerminalThemePaletteTests: XCTestCase {
         XCTAssertEqual(palette.color(forANSIIndex: 1).hexRGB, "#f7768e")
     }
 
+    func testDarkANSINeutralsKeepDefaultForegroundReadableOnCards() {
+        let palette = TerminalThemePalette.dark
+        for index in [7, 15] {
+            XCTAssertEqual(palette.ansi16[index].hexRGB, "#282f39")
+            XCTAssertGreaterThan(contrastRatio(palette.foreground, palette.ansi16[index]), 4.5)
+        }
+    }
+
     func testLightPaletteMatchesLegacyThemeAndANSIOrder() {
         let palette = TerminalThemePalette.light
         XCTAssertEqual(palette.background.hexRGB, "#fbfaf8")
@@ -36,5 +44,17 @@ final class TerminalThemePaletteTests: XCTestCase {
             "#3a68b0", "#8448a4", "#28788c", "#3a3835"
         ])
         XCTAssertEqual(palette.color(forANSIIndex: 1).hexRGB, "#8c2438")
+    }
+
+    private func contrastRatio(_ first: TerminalPaletteColor, _ second: TerminalPaletteColor) -> Double {
+        func luminance(_ color: TerminalPaletteColor) -> Double {
+            func linear(_ component: UInt8) -> Double {
+                let value = Double(component) / 255
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
+        }
+        let values = [luminance(first), luminance(second)].sorted(by: >)
+        return (values[0] + 0.05) / (values[1] + 0.05)
     }
 }
