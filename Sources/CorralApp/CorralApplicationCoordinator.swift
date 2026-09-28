@@ -651,10 +651,37 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         view.onDiscardedAutomaticReply = { [weak self] byteCount in
             self?.discardedAutoReplyByteCount += byteCount
         }
+        view.workspaceContextMenuActions = { [weak self] in
+            guard let self, let descriptor = self.sessions[key]?.descriptor else { return .inactive }
+            let favoriteKey = self.favoriteKey(for: descriptor)
+            return CorralTerminalContextMenu.WorkspaceActions(
+                isFavorite: self.workspaceState.favorites.contains(favoriteKey),
+                onAdapt: { [weak self] in self?.reflowCurrentWindow() },
+                onToggleFavorite: { [weak self] in
+                    guard let self else { return }
+                    let isFavorite = self.workspaceState.favorites.contains(favoriteKey)
+                    Task { @MainActor in await self.setWorkspaceFavorite(favoriteKey, isFavorite: !isFavorite) }
+                },
+                onClosePane: { [weak self] in
+                    guard let self else { return }
+                    Task { @MainActor in await self.closeWorkspacePane(descriptor.id) }
+                }
+            )
+        }
         view.setTerminalFont(family: userPreferences.fontFamily, size: userPreferences.fontSize)
         view.setTerminalColors(foreground: terminalStageForeground, background: terminalStageBackground)
         terminalRegistry.insert(view, for: key)
         return view
+    }
+
+    private func reflowCurrentWindow() {
+        windowController.window?.layoutIfNeeded()
+        workspaceView.needsLayout = true
+        workspaceView.layoutSubtreeIfNeeded()
+        workspaceView.stageContainer.needsLayout = true
+        workspaceView.stageContainer.layoutSubtreeIfNeeded()
+        workspaceView.stageContainer.splitView.update(root: layoutPreview ?? workspaceState.visibleRoot, focusedSessionID: workspaceState.visibleSessionID)
+        updateTerminalStage()
     }
 
     private func updateTerminalStage() {

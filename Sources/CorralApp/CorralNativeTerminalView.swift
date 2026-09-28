@@ -13,6 +13,7 @@ final class CorralNativeTerminalView: TerminalView {
     private var inputEnabled = true
     var onFocus: (() -> Void)?
     var onDiscardedAutomaticReply: ((Int) -> Void)?
+    var workspaceContextMenuActions: (() -> CorralTerminalContextMenu.WorkspaceActions)?
 
     override init(frame: CGRect) {
         pasteboard = .general
@@ -164,15 +165,17 @@ final class CorralNativeTerminalView: TerminalView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = CorralTerminalContextMenu(
+        let location = convert(event.locationInWindow, from: nil)
+        let hasWorkspaceContext = !bounds.isEmpty && bounds.contains(location)
+        let selectAllItem = NSMenuItem(title: "全选", action: #selector(selectAll(_:)), keyEquivalent: "")
+        selectAllItem.target = self
+        return CorralTerminalContextMenu(
             onCopy: { [weak self] in guard let self else { return }; self.copy(self) },
             onPaste: { [weak self] in guard let self else { return }; self.paste(self) },
-            onClear: { [weak self] in guard let self else { return }; self.clearTerminalBuffer(self) }
+            onClear: { [weak self] in guard let self else { return }; self.clearTerminalBuffer(self) },
+            selectAllMenuItem: selectAllItem,
+            workspaceActions: hasWorkspaceContext ? workspaceContextMenuActions?() ?? .inactive : nil
         )
-        let selectAll = NSMenuItem(title: "全选", action: #selector(selectAll(_:)), keyEquivalent: "")
-        selectAll.target = self
-        menu.insertItem(selectAll, at: 2)
-        return menu
     }
 
     override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
