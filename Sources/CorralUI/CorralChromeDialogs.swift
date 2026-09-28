@@ -285,7 +285,7 @@ public final class SettingsDialogViewController: CorralDialogViewController {
         let subtitle = label("微调终端外观，让工作区更顺手。", size: 12, color: CorralAestheticTokens.textSecondary)
         let heading = vertical([title, subtitle], spacing: 6)
         let closeButton = NSButton(image: CorralLegacyIcon.image(.close, size: 12) ?? NSImage(), target: self, action: #selector(close))
-        closeButton.isBordered = false; closeButton.contentTintColor = CorralAestheticTokens.textSecondary; closeButton.wantsLayer = true
+        closeButton.isBordered = false; closeButton.focusRingType = .none; closeButton.contentTintColor = CorralAestheticTokens.textSecondary; closeButton.wantsLayer = true
         closeButton.layer?.backgroundColor = CorralAestheticTokens.fillSubtle.cgColor; closeButton.layer?.cornerRadius = 15
         closeButton.setAccessibilityLabel("关闭设置"); closeButton.setAccessibilityIdentifier("corral.settings.close")
         pin(closeButton, width: 30, height: 30)
