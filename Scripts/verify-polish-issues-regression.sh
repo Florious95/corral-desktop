@@ -17,6 +17,7 @@ LABELS=(
   "Issue 10 — local daemon auto-connect"
   "Issue 11 — split pane close and adapt actions"
   "Issue 14 — tab folder tracking and space session filtering"
+  "Issue 15 — devices popover toggle dismissal"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -31,6 +32,7 @@ FILTERS=(
   "Issue10LocalDaemonAutoConnectTests/testPersistedLocalDeviceUsesMacOSTokenToAuthenticateAndListSessions"
   "Issue11ContextMenuActionsTests/testBothSplitPaneMenusExposeActionsAndClosingLeftPaneRemovesIt"
   "Issue14TabFolderTrackingTests/testSwitchingTabSelectsItsSpaceAndFiltersSessionsToThatSpace"
+  "Issue15DevicesPopoverToggleTests/testDevicesButtonSecondActivationClosesPopover"
 )
 
 TOTAL=${#FILTERS[@]}
