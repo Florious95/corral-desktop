@@ -1197,7 +1197,7 @@ public final class CorralSidebarView: NSView {
     }
     private func configureScroll(_ scroll: NSScrollView, table: NSTableView) {
         table.autoresizingMask = [.width]
-        scroll.documentView = table; scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.borderType = .noBorder; scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = table; scroll.drawsBackground = false; scroll.hasVerticalScroller = false; scroll.autohidesScrollers = true; scroll.borderType = .noBorder; scroll.translatesAutoresizingMaskIntoConstraints = false
     }
     private func sizeDocumentView(_ table: NSTableView, in scroll: NSScrollView) {
         let rowsHeight = CGFloat(table.numberOfRows) * (table === spacesTable ? Self.spaceRowHeight : Self.agentRowHeight)
