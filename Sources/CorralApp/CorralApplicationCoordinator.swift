@@ -645,6 +645,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private func applyWorkspaceState(_ state: CorralWorkspaceState) async {
         guard state.isValid else { return }
+        let activeTabChanged = state.activeTabID != workspaceState.activeTabID
         workspaceState = state
         activeWorkspaceTabID = state.activeTabID
         let oldTabs = Dictionary(uniqueKeysWithValues: workspaceView.tabs.map { ($0.id, $0) })
@@ -681,6 +682,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         scheduleSubscriptionUpdate()
         updateSidebar(devices: cachedDevices)
         updateWorkspaceTitle(count: sessionCount)
+        if activeTabChanged { reflowAndResizeVisibleSessions(visibleSessionKeys()) }
         focusVisibleTerminal()
     }
 
@@ -745,17 +747,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func adaptTerminalWindow(for key: SessionKey) {
         guard let runtime = sessions[key],
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
-        forcedResizeSessionKeys.insert(key)
-        reflowCurrentWindow()
-        guard forcedResizeSessionKeys.contains(key),
-              let view = terminalRegistry.view(for: key), !view.isHidden,
-              view.terminal.cols > 0, view.terminal.rows > 0 else {
-            forcedResizeSessionKeys.remove(key)
-            return
+        reflowAndResizeVisibleSessions([key])
+    }
+
+    private func reflowAndResizeVisibleSessions(_ keys: [SessionKey]) {
+        let visibleKeys = keys.filter { key in
+            guard let runtime = sessions[key] else { return false }
+            return terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id)
         }
-        // Re-enter SwiftTerm's size delegate even when layout did not change the grid. The marked callback
-        // bypasses requestedGrid de-duplication exactly once and sends the current measured PTY dimensions.
-        view.resize(cols: view.terminal.cols, rows: view.terminal.rows)
+        for key in visibleKeys { forcedResizeSessionKeys.insert(key) }
+        reflowCurrentWindow()
+        for key in visibleKeys where forcedResizeSessionKeys.contains(key) {
+            guard let view = terminalRegistry.view(for: key), !view.isHidden,
+                  view.terminal.cols > 0, view.terminal.rows > 0 else {
+                forcedResizeSessionKeys.remove(key)
+                continue
+            }
+            // Re-enter SwiftTerm's size delegate even when layout did not change the grid. The marked callback
+            // bypasses requestedGrid de-duplication exactly once and sends the current measured PTY dimensions.
+            view.resize(cols: view.terminal.cols, rows: view.terminal.rows)
+        }
     }
 
     private func updateTerminalStage() {
