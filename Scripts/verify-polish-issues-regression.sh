@@ -14,6 +14,7 @@ LABELS=(
   "Issue 7 — Tab context menu actions"
   "Issue 8 — sidebar section toggle stability"
   "Issue 9 — sidebar scrollbars omission"
+  "Issue 10 — local daemon auto-connect"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -25,6 +26,7 @@ FILTERS=(
   "Issue7TabMenuTests/testTabContextMenuOmitsSplitActionsAndKeepsWorkspaceActions"
   "Issue8SidebarSectionToggleTests/testAgentsThenSpacesHeaderTogglesKeepSidebarAndWindowGeometryStable"
   "SidebarScrollbarOmissionTests/testSpacesAndAgentsHideScrollbarsAndRetainScrollableContent"
+  "Issue10LocalDaemonAutoConnectTests/testEmptyDeviceStoreAutoConnectsToLocalDaemonUsingHomeTokenFile"
 )
 
 TOTAL=${#FILTERS[@]}
