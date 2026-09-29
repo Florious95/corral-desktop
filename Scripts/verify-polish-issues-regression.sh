@@ -15,6 +15,7 @@ LABELS=(
   "Issue 8 — sidebar section toggle stability"
   "Issue 9 — sidebar scrollbars omission"
   "Issue 10 — local daemon auto-connect"
+  "Issue 11 — split pane close and adapt actions"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -27,6 +28,7 @@ FILTERS=(
   "Issue8SidebarSectionToggleTests/testAgentsThenSpacesHeaderTogglesKeepSidebarAndWindowGeometryStable"
   "SidebarScrollbarOmissionTests/testSpacesAndAgentsHideScrollbarsAndRetainScrollableContent"
   "Issue10LocalDaemonAutoConnectTests/testPersistedLocalDeviceUsesMacOSTokenToAuthenticateAndListSessions"
+  "Issue11ContextMenuActionsTests/testBothSplitPaneMenusExposeActionsAndClosingLeftPaneRemovesIt"
 )
 
 TOTAL=${#FILTERS[@]}
