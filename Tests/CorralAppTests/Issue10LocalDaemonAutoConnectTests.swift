@@ -64,7 +64,7 @@ final class Issue10LocalDaemonAutoConnectTests: XCTestCase {
         await coordinator.stop()
     }
 
-    func testFreshInstallWithMacOSPersistedTokenAuthenticatesAndListsSessions() async throws {
+    func testPersistedLocalDeviceUsesMacOSTokenToAuthenticateAndListSessions() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("corral-issue10-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -84,8 +84,15 @@ final class Issue10LocalDaemonAutoConnectTests: XCTestCase {
 
         let support = root.appendingPathComponent("support", isDirectory: true)
         let repository = try DeviceRepository(applicationSupportDirectory: support)
+        let localDevice = DeviceRecord(
+            id: LocalDaemonTokenDiscovery.deviceID,
+            name: LocalDaemonTokenDiscovery.deviceName,
+            endpoint: LocalDaemonTokenDiscovery.endpoint,
+            credential: LocalDaemonTokenDiscovery.credentialHandle
+        )
+        try await repository.save(localDevice)
         let initialDevices = try await repository.listDevices()
-        XCTAssertTrue(initialDevices.isEmpty)
+        XCTAssertEqual(initialDevices, [localDevice])
         let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: support)
         let preferencesStore = try UserPreferencesStore(applicationSupportDirectory: support)
         let link = Issue10PairingSessionLink()

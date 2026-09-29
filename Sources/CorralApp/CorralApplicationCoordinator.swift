@@ -1406,9 +1406,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let storedToken: String?
             if let existing { storedToken = try await credentialVault.resolve(existing.credential) }
             else { storedToken = nil }
-            guard let token = environmentToken
+            var token = environmentToken
                 ?? LocalDaemonTokenDiscovery.valid(localToken)
-                ?? LocalDaemonTokenDiscovery.valid(storedToken) else { return nil }
+                ?? LocalDaemonTokenDiscovery.valid(storedToken)
+            if token == nil, endpoint.port == LocalDaemonTokenDiscovery.endpoint.port {
+                token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentialVault)
+            }
+            guard let token else { return nil }
             return ConnectionConfiguration(
                 endpoint: endpoint,
                 token: token,
@@ -1419,9 +1423,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let selected = selectedDeviceIDs.count == 1 ? selectedDeviceIDs.first : nil
         guard let device = devices.first(where: { $0.id == selected }) ?? devices.first else { return nil }
         let storedToken = try await credentialVault.resolve(device.credential)
-        guard let token = environmentToken
+        var token = environmentToken
             ?? LocalDaemonTokenDiscovery.valid(localToken)
-            ?? LocalDaemonTokenDiscovery.valid(storedToken) else { return nil }
+            ?? LocalDaemonTokenDiscovery.valid(storedToken)
+        if token == nil, device.endpoint.port == LocalDaemonTokenDiscovery.endpoint.port {
+            token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentialVault)
+        }
+        guard let token else { return nil }
         return ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id, deviceName: device.name)
     }
 
