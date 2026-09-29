@@ -16,7 +16,7 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
             context: nil, eventNumber: 1, clickCount: 1, pressure: 1
         ))
         let menu = try XCTUnwrap(view.menu(for: event) as? CorralTerminalContextMenu)
-        XCTAssertFalse(menu.items.contains { ["收藏", "关闭此分屏", "适应当前窗口"].contains($0.title) })
+        XCTAssertFalse(menu.items.contains { ["收藏", "取消收藏", "关闭此分屏", "适应当前窗口"].contains($0.title) })
     }
 
     func testWindowCoordinateAtLeftPaneEdgeKeepsWorkspaceActions() async throws {
@@ -40,7 +40,7 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
         XCTAssertEqual(event.locationInWindow, locationInWindow)
         XCTAssertEqual(event.windowNumber, fixture.window.windowNumber)
         let menu = try XCTUnwrap(terminal.menu(for: event) as? CorralTerminalContextMenu)
-        XCTAssertTrue(menu.items.contains { $0.title == "收藏" })
+        XCTAssertFalse(menu.items.contains { ["收藏", "取消收藏"].contains($0.title) })
         XCTAssertTrue(menu.items.contains { $0.title == "关闭此分屏" })
         XCTAssertTrue(menu.items.contains { $0.title == "适应当前窗口" })
         await fixture.coordinator.stop()
@@ -60,7 +60,7 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
         let rightMenu = try contextMenu(for: rightView, in: fixture.window)
 
         for menu in [leftMenu, rightMenu] {
-            XCTAssertTrue(menu.items.contains { $0.title == "收藏" })
+            XCTAssertFalse(menu.items.contains { ["收藏", "取消收藏"].contains($0.title) })
             XCTAssertTrue(menu.items.contains { $0.title == "关闭此分屏" })
             XCTAssertTrue(menu.items.contains { $0.title == "适应当前窗口" })
         }
@@ -78,19 +78,6 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
                 XCTAssertTrue(edgeMenu.items.contains { $0.title == "适应当前窗口" }, "Workspace fit must remain available at Pane edges")
             }
         }
-        let leftFavorite = try XCTUnwrap(leftMenu.items.first { $0.title == "收藏" })
-        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(leftFavorite.action), to: leftFavorite.target, from: leftFavorite))
-        let leftFavorited = await waitUntil {
-            fixture.coordinator.workspaceView.sidebar.agents.first { $0.name == fixture.references[0].rawValue }?.isFavorite == true
-        }
-        XCTAssertTrue(leftFavorited, "The left Pane menu must run its real favorite callback, not an inactive no-op")
-        let rightFavorite = try XCTUnwrap(rightMenu.items.first { $0.title == "收藏" })
-        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(rightFavorite.action), to: rightFavorite.target, from: rightFavorite))
-        let rightFavorited = await waitUntil {
-            fixture.coordinator.workspaceView.sidebar.agents.first { $0.name == fixture.references[1].rawValue }?.isFavorite == true
-        }
-        XCTAssertTrue(rightFavorited, "The right Pane menu must run its real favorite callback, not an inactive no-op")
-
         let leftID = fixture.sessionIDs[0]
         let rightID = fixture.sessionIDs[1]
         let rightFrame = try XCTUnwrap(splitView.projection.panes.first { $0.sessionID == rightID }).frame

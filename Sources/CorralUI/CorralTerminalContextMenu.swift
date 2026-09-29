@@ -4,18 +4,13 @@ import AppKit
 public final class CorralTerminalContextMenu: NSMenu {
     @MainActor
     public struct WorkspaceActions {
-        public let isFavorite: Bool
         public let onAdapt: () -> Void
-        public let onToggleFavorite: () -> Void
         public let onClosePane: () -> Void
 
-        public init(isFavorite: Bool, onAdapt: @escaping () -> Void, onToggleFavorite: @escaping () -> Void, onClosePane: @escaping () -> Void) {
-            self.isFavorite = isFavorite
+        public init(onAdapt: @escaping () -> Void, onClosePane: @escaping () -> Void) {
             self.onAdapt = onAdapt
-            self.onToggleFavorite = onToggleFavorite
             self.onClosePane = onClosePane
         }
-
     }
 
     private let copy: () -> Void
@@ -41,7 +36,6 @@ public final class CorralTerminalContextMenu: NSMenu {
         autoenablesItems = false
         if workspaceActions != nil {
             addItem("适应当前窗口", action: #selector(adaptCurrentWindow))
-            addItem(workspaceActions?.isFavorite == true ? "取消收藏" : "收藏", action: #selector(toggleFavorite))
             addItem("关闭此分屏", action: #selector(closePane))
             addItem(.separator())
         }
@@ -62,7 +56,6 @@ public final class CorralTerminalContextMenu: NSMenu {
     }
 
     @objc private func adaptCurrentWindow() { workspaceActions?.onAdapt() }
-    @objc private func toggleFavorite() { workspaceActions?.onToggleFavorite() }
     @objc private func closePane() { workspaceActions?.onClosePane() }
     @objc private func copySelection() { copy() }
     @objc private func pasteClipboard() { paste() }

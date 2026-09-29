@@ -11,9 +11,7 @@ final class Issue1TerminalContextMenuTests: XCTestCase {
         let terminal = CorralNativeTerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 480), pasteboard: pasteboard)
         var actions: [String] = []
         terminal.workspaceContextMenuActions = {
-            .init(isFavorite: false,
-                  onAdapt: { actions.append("adapt") },
-                  onToggleFavorite: { actions.append("favorite") },
+            .init(onAdapt: { actions.append("adapt") },
                   onClosePane: { actions.append("close") })
         }
         let rightClick = try XCTUnwrap(NSEvent.mouseEvent(
@@ -32,7 +30,6 @@ final class Issue1TerminalContextMenuTests: XCTestCase {
         let actual = menu.items.map { $0.isSeparatorItem ? "<separator>" : $0.title }
         XCTAssertEqual(actual, [
             "适应当前窗口",
-            "收藏",
             "关闭此分屏",
             "<separator>",
             "复制",
@@ -40,10 +37,12 @@ final class Issue1TerminalContextMenuTests: XCTestCase {
             "全选",
             "<separator>",
             "清屏",
-        ], "Terminal context menu is missing the complete workspace action group")
-        for item in menu.items where ["适应当前窗口", "收藏", "关闭此分屏"].contains(item.title) {
+        ], "Terminal menu must retain its required workspace and terminal actions without sidebar-only favorites")
+        XCTAssertFalse(actual.contains("收藏"), "Favorite belongs to the sidebar session row, not the terminal context menu")
+        XCTAssertFalse(actual.contains("取消收藏"), "Unfavorite belongs to the sidebar session row, not the terminal context menu")
+        for item in menu.items where ["适应当前窗口", "关闭此分屏"].contains(item.title) {
             XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
         }
-        XCTAssertEqual(actions, ["adapt", "favorite", "close"])
+        XCTAssertEqual(actions, ["adapt", "close"])
     }
 }

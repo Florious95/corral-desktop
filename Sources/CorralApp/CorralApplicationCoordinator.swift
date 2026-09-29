@@ -712,16 +712,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             guard let self,
                   let runtime = self.sessions[key],
                   self.terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return nil }
-            let favoriteKey = self.favoriteKey(for: runtime.descriptor)
             return CorralTerminalContextMenu.WorkspaceActions(
-                isFavorite: self.workspaceState.favorites.contains(favoriteKey),
                 onAdapt: { [weak self] in self?.adaptTerminalWindow(for: key) },
-                onToggleFavorite: { [weak self] in
-                    guard let self, let runtime = self.sessions[key] else { return }
-                    let favoriteKey = self.favoriteKey(for: runtime.descriptor)
-                    let isFavorite = self.workspaceState.favorites.contains(favoriteKey)
-                    Task { @MainActor in await self.setWorkspaceFavorite(favoriteKey, isFavorite: !isFavorite) }
-                },
                 onClosePane: { [weak self] in
                     guard let self, let paneID = self.sessions[key]?.descriptor.id else { return }
                     Task { @MainActor in await self.closeWorkspacePane(paneID) }
