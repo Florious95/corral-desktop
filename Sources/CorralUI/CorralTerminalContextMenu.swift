@@ -16,7 +16,6 @@ public final class CorralTerminalContextMenu: NSMenu {
             self.onClosePane = onClosePane
         }
 
-        public static var inactive: WorkspaceActions { WorkspaceActions(isFavorite: false, onAdapt: {}, onToggleFavorite: {}, onClosePane: {}) }
     }
 
     private let copy: () -> Void

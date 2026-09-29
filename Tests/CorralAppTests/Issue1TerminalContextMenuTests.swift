@@ -9,6 +9,13 @@ final class Issue1TerminalContextMenuTests: XCTestCase {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.corral.issue1-context-menu.\(UUID().uuidString)"))
         defer { pasteboard.releaseGlobally() }
         let terminal = CorralNativeTerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 480), pasteboard: pasteboard)
+        var actions: [String] = []
+        terminal.workspaceContextMenuActions = {
+            .init(isFavorite: false,
+                  onAdapt: { actions.append("adapt") },
+                  onToggleFavorite: { actions.append("favorite") },
+                  onClosePane: { actions.append("close") })
+        }
         let rightClick = try XCTUnwrap(NSEvent.mouseEvent(
             with: .rightMouseDown,
             location: NSPoint(x: 32, y: 32),
@@ -34,5 +41,9 @@ final class Issue1TerminalContextMenuTests: XCTestCase {
             "<separator>",
             "清屏",
         ], "Terminal context menu is missing the complete workspace action group")
+        for item in menu.items where ["适应当前窗口", "收藏", "关闭此分屏"].contains(item.title) {
+            XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        }
+        XCTAssertEqual(actions, ["adapt", "favorite", "close"])
     }
 }

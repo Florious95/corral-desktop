@@ -117,6 +117,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var directoriesBySpaceID: [UUID: String] = [:]
     /// Live divider-drag layout: moves Metal viewports without resizing any server pane until the ratio commits.
     private var layoutPreview: WorkspaceLayoutNode?
+    /// The next SwiftTerm size callback for this view must reach the PTY even at an unchanged grid.
+    private var forcedResizeSessionKeys = Set<SessionKey>()
     private var sessionUIIDs: [SessionID: UUID] = [:]
     private var sessionUIIDsByIdentity: [WorkspaceSessionIdentity: UUID] = [:]
     private var selectedSidebarSpaceID = CorralSidebarSpace.allSpacesID
@@ -704,19 +706,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             self?.discardedAutoReplyByteCount += byteCount
         }
         view.workspaceContextMenuActions = { [weak self] in
-            guard let self, let descriptor = self.sessions[key]?.descriptor else { return .inactive }
-            let favoriteKey = self.favoriteKey(for: descriptor)
+            guard let self,
+                  let runtime = self.sessions[key],
+                  self.terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return nil }
+            let favoriteKey = self.favoriteKey(for: runtime.descriptor)
             return CorralTerminalContextMenu.WorkspaceActions(
                 isFavorite: self.workspaceState.favorites.contains(favoriteKey),
-                onAdapt: { [weak self] in self?.reflowCurrentWindow() },
+                onAdapt: { [weak self] in self?.adaptTerminalWindow(for: key) },
                 onToggleFavorite: { [weak self] in
-                    guard let self else { return }
+                    guard let self, let runtime = self.sessions[key] else { return }
+                    let favoriteKey = self.favoriteKey(for: runtime.descriptor)
                     let isFavorite = self.workspaceState.favorites.contains(favoriteKey)
                     Task { @MainActor in await self.setWorkspaceFavorite(favoriteKey, isFavorite: !isFavorite) }
                 },
                 onClosePane: { [weak self] in
-                    guard let self else { return }
-                    Task { @MainActor in await self.closeWorkspacePane(descriptor.id) }
+                    guard let self, let paneID = self.sessions[key]?.descriptor.id else { return }
+                    Task { @MainActor in await self.closeWorkspacePane(paneID) }
                 }
             )
         }
@@ -734,6 +739,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         workspaceView.stageContainer.layoutSubtreeIfNeeded()
         workspaceView.stageContainer.splitView.update(root: layoutPreview ?? workspaceState.visibleRoot, focusedSessionID: workspaceState.visibleSessionID)
         updateTerminalStage()
+    }
+
+    private func adaptTerminalWindow(for key: SessionKey) {
+        guard let runtime = sessions[key],
+              terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
+        forcedResizeSessionKeys.insert(key)
+        reflowCurrentWindow()
+        guard forcedResizeSessionKeys.contains(key),
+              let view = terminalRegistry.view(for: key), !view.isHidden,
+              view.terminal.cols > 0, view.terminal.rows > 0 else {
+            forcedResizeSessionKeys.remove(key)
+            return
+        }
+        // Re-enter SwiftTerm's size delegate even when layout did not change the grid. The marked callback
+        // bypasses requestedGrid de-duplication exactly once and sends the current measured PTY dimensions.
+        view.resize(cols: view.terminal.cols, rows: view.terminal.rows)
     }
 
     private func updateTerminalStage() {
@@ -1833,11 +1854,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         Set(workspaceState.tabs.flatMap(\.sessionIDs) + (workspaceState.previewUID.map { [$0] } ?? []))
     }
 
-    private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize) async {
+    private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize, force: Bool = false) async {
         guard !noResizeMode, layoutPreview == nil,
               let connection, key.deviceID == connection.deviceID,
               var runtime = sessions[key], runtime.subscribed,
-              runtime.requestedGrid != grid,
+              (force || runtime.requestedGrid != grid),
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
         let previous = runtime.requestedGrid
         runtime.requestedGrid = grid
@@ -1858,16 +1879,18 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        guard let key = terminalRegistry.key(for: source) else { return }
+        let force = forcedResizeSessionKeys.remove(key) != nil
         guard !noResizeMode,
               newCols > 0, newRows > 0,
               newCols <= Int(UInt16.max), newRows <= Int(UInt16.max),
               newRows <= 1_000_000 / newCols,
-              let key = terminalRegistry.key(for: source), var runtime = sessions[key] else { return }
+              var runtime = sessions[key] else { return }
         let grid = GridSize(rows: newRows, columns: newCols)
         runtime.desiredGrid = grid
         sessions[key] = runtime
         guard runtime.subscribed, layoutPreview == nil else { return }
-        Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid) }
+        Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid, force: force) }
     }
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
