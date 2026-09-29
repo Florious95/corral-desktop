@@ -418,9 +418,6 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         if tab.isCustomTitle { addMenuItem(menu, title: "恢复自动标题", action: "resetTitle") }
         addMenuItem(menu, title: tab.isPinned ? "取消固定" : "固定到最左", action: "pin")
         menu.addItem(.separator())
-        addMenuItem(menu, title: "向右拆分", action: "splitRight")
-        addMenuItem(menu, title: "向下拆分", action: "splitDown")
-        menu.addItem(.separator())
         addMenuItem(menu, title: "关闭工作台", action: "close")
         let unpinnedCount = owner?.tabs.filter { !$0.isPinned }.count ?? 0
         let others = addMenuItem(menu, title: "关闭其他工作台", action: "closeOthers"); others.isEnabled = unpinnedCount > 1 && !tab.isPinned
