@@ -151,12 +151,18 @@ final class CorralNativeTerminalView: TerminalView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard Self.isCommandVPaste(event), event.window === window,
-              window?.firstResponder === self else {
+        guard event.window === window, window?.firstResponder === self else {
             return super.performKeyEquivalent(with: event)
         }
-        handleCommandVPaste()
-        return true
+        if Self.isCommandVPaste(event) {
+            handleCommandVPaste()
+            return true
+        }
+        if Self.isCommandCCopy(event) {
+            copy(self)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func interpretKeyEvents(_ eventArray: [NSEvent]) {
@@ -223,6 +229,12 @@ final class CorralNativeTerminalView: TerminalView {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let isVKey = event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v"
         return isVKey && modifiers.contains(.command) && !modifiers.contains(.control)
+    }
+
+    private static func isCommandCCopy(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isCKey = event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c"
+        return isCKey && modifiers.contains(.command) && !modifiers.contains(.control)
     }
 
     @discardableResult
