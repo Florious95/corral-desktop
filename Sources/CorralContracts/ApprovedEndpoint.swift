@@ -109,7 +109,7 @@ public struct CredentialHandle: RawRepresentable, Codable, Hashable, Sendable {
     public init(rawValue: String) { self.rawValue = rawValue }
 }
 
-/// Non-secret marker used only to request the trusted loopback peer flow; never sent on the wire.
+/// Legacy marker retained for compatibility; it is not a token and does not bypass authentication.
 public enum SessionLinkCredential {
     public static let localPeerAnonymous = CredentialHandle("corral-local-peer-anonymous")
 }

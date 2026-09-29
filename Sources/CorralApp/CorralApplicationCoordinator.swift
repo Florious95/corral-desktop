@@ -1419,20 +1419,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let selected = selectedDeviceIDs.count == 1 ? selectedDeviceIDs.first : nil
         guard let device = devices.first(where: { $0.id == selected }) ?? devices.first else { return nil }
         let storedToken = try await credentialVault.resolve(device.credential)
-        let token = environmentToken
+        guard let token = environmentToken
             ?? LocalDaemonTokenDiscovery.valid(localToken)
-            ?? LocalDaemonTokenDiscovery.valid(storedToken)
-        if let token {
-            return ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id, deviceName: device.name)
-        }
-        guard device.id == LocalDaemonTokenDiscovery.deviceID,
-              device.endpoint == LocalDaemonTokenDiscovery.endpoint else { return nil }
-        return ConnectionConfiguration(
-            endpoint: device.endpoint,
-            token: SessionLinkCredential.localPeerAnonymous.rawValue,
-            deviceID: device.id,
-            deviceName: device.name
-        )
+            ?? LocalDaemonTokenDiscovery.valid(storedToken) else { return nil }
+        return ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id, deviceName: device.name)
     }
 
     private func consume(_ stream: any SessionEventStream) async {

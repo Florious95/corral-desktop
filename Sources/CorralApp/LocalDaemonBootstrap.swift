@@ -14,7 +14,10 @@ enum LocalDaemonTokenDiscovery {
 
         let home = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 }
             ?? FileManager.default.homeDirectoryForCurrentUser.path
-        for relativePath in [".corral/token", ".config/corral/token", ".config/agentmirror/token"] {
+        for relativePath in [
+            ".corral/token", ".config/corral/token", ".config/agentmirror/token",
+            "Library/Application Support/agentmirror/token", "Library/Application Support/corral/token"
+        ] {
             if let token = readToken(at: URL(fileURLWithPath: home).appendingPathComponent(relativePath)) {
                 return token
             }

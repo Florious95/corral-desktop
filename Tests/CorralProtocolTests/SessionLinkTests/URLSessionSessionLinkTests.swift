@@ -280,30 +280,30 @@ final class URLSessionSessionLinkTests: XCTestCase {
         XCTAssertEqual(try ApprovedEndpoint(host: "127.0.0.1", port: 9900).url.absoluteString, "ws://127.0.0.1:9900/ws")
     }
 
-    func testLoopback9900UsesMockSocket() async throws {
+    func testLoopback9900RequiresAuthenticationBeforeReady() async throws {
         let socket = MockWebSocket()
         let factory = MockWebSocketFactory(sockets: [socket])
         let link = URLSessionSessionLink(configuration: .init()) { factory.make($0) }
         let endpoint = try ApprovedEndpoint(url: XCTUnwrap(URL(string: "ws://127.0.0.1:9900/ws")))
         let connect = Task {
-            try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: CredentialHandle("test"))
+            try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: SessionLinkCredential.localPeerAnonymous)
         }
 
-        try await waitForAuthentication(on: socket)
+        try await waitForAuthentication(on: socket, token: SessionLinkCredential.localPeerAnonymous.rawValue)
         await socket.enqueue(.text(authenticationAck()))
         _ = try await connect.value
         XCTAssertEqual(factory.createdURLs.map(\.absoluteString), ["ws://127.0.0.1:9900/ws"])
         await link.disconnect()
     }
 
-    private func waitForAuthentication(on socket: MockWebSocket) async throws {
+    private func waitForAuthentication(on socket: MockWebSocket, token: String = "test") async throws {
         for _ in 0..<200 {
             if await socket.sentMessages().contains(where: { message in
                 guard case let .text(text) = message,
                       let envelope = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
                       envelope["type"] as? String == "auth",
                       let payload = envelope["payload"] as? [String: Any] else { return false }
-                return payload["token"] as? String == "test"
+                return payload["token"] as? String == token
             }) { return }
             try await Task.sleep(nanoseconds: 5_000_000)
         }

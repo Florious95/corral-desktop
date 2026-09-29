@@ -181,32 +181,28 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         epoch = ConnectionEpoch(epoch.rawValue + 1)
         let connectionEpoch = epoch
         let candidate = transportFactory(endpoint.url)
-        let isAnonymousLocalPeer = credential == SessionLinkCredential.localPeerAnonymous
-            && endpoint.host == "127.0.0.1" && endpoint.port == 9900
         socket = candidate
         await setState(.transportOpen(connectionEpoch))
 
         do {
             try await candidate.start()
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
-            if !isAnonymousLocalPeer {
-                await setState(.authenticating(connectionEpoch))
-                let auth = try codec.encodeAuthentication(AuthToken(credential.rawValue))
-                try await candidate.send(.text(auth.utf8String))
-                let response = try await candidate.receive()
-                guard case let .text(text) = response else {
-                    throw SessionLinkFailure.protocolViolation("Expected a text authentication acknowledgement")
-                }
-                let control: ControlMessage
-                do { control = try codec.decodeControlMessage(Data(text.utf8)) }
-                catch { throw SessionLinkFailure.protocolViolation("Invalid authentication acknowledgement: \(error)") }
-                guard case let .authAck(ok, _, _) = control else {
-                    throw SessionLinkFailure.protocolViolation("Expected auth_ack before other controls")
-                }
-                guard ok else { throw SessionLinkFailure.unauthorized }
-                guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
-                await publish(.control(control))
+            await setState(.authenticating(connectionEpoch))
+            let auth = try codec.encodeAuthentication(AuthToken(credential.rawValue))
+            try await candidate.send(.text(auth.utf8String))
+            let response = try await candidate.receive()
+            guard case let .text(text) = response else {
+                throw SessionLinkFailure.protocolViolation("Expected a text authentication acknowledgement")
             }
+            let control: ControlMessage
+            do { control = try codec.decodeControlMessage(Data(text.utf8)) }
+            catch { throw SessionLinkFailure.protocolViolation("Invalid authentication acknowledgement: \(error)") }
+            guard case let .authAck(ok, _, _) = control else {
+                throw SessionLinkFailure.protocolViolation("Expected auth_ack before other controls")
+            }
+            guard ok else { throw SessionLinkFailure.unauthorized }
+            guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
+            await publish(.control(control))
 
             if restoreSubscriptions { try await restoreDesiredSubscriptions(on: candidate) }
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }

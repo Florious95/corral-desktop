@@ -290,10 +290,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
-    func testEmptyCoordinatorAutoConnectsLocalDaemonAndPreservesPreferences() async throws {
+    func testEmptyCoordinatorAuthenticatesLocalDaemonAndPreservesPreferences() async throws {
         let link = RecordingSessionLink()
         let atlas = GlyphAtlasPool.shared
-        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: ["CORRAL_NATIVE_TEST_MODE": "1"])
+        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [
+            "CORRAL_NATIVE_TEST_MODE": "1",
+            "CORRAL_NATIVE_TOKEN": "fixture-local-token"
+        ])
 
         await coordinator.start()
 
@@ -951,7 +954,8 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-periodic-\(UUID().uuidString).json")
         let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [
             "CORRAL_NATIVE_TELEMETRY_OUT": url.path,
-            "CORRAL_NATIVE_TEST_MODE": "1"
+            "CORRAL_NATIVE_TEST_MODE": "1",
+            "CORRAL_NATIVE_TOKEN": "fixture-local-token"
         ])
 
         await coordinator.start()
