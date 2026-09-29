@@ -26,7 +26,7 @@ FILTERS=(
   "Issue7TabMenuTests/testTabContextMenuOmitsSplitActionsAndKeepsWorkspaceActions"
   "Issue8SidebarSectionToggleTests/testAgentsThenSpacesHeaderTogglesKeepSidebarAndWindowGeometryStable"
   "SidebarScrollbarOmissionTests/testSpacesAndAgentsHideScrollbarsAndRetainScrollableContent"
-  "Issue10LocalDaemonAutoConnectTests/testFreshInstallWithMacOSPersistedTokenAuthenticatesAndListsSessions"
+  "Issue10LocalDaemonAutoConnectTests/testPersistedLocalDeviceUsesMacOSTokenToAuthenticateAndListSessions"
 )
 
 TOTAL=${#FILTERS[@]}
