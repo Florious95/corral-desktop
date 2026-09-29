@@ -847,6 +847,7 @@ public final class CorralSidebarView: NSView {
     private var allAgents: [CorralSidebarAgent] = []
     private let footerBorder = NSView()
     private var spacesHeight: NSLayoutConstraint!
+    private var agentsHeight: NSLayoutConstraint!
     public static let spaceRowHeight: CGFloat = 32
     public static let agentRowHeight: CGFloat = 34
     public static let spacesMaximumHeight: CGFloat = 288
@@ -874,16 +875,19 @@ public final class CorralSidebarView: NSView {
             devicesButton.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12), devicesButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), devicesButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -4), devicesButton.heightAnchor.constraint(equalToConstant: 35),
             settingsButton.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -8), settingsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor), settingsButton.widthAnchor.constraint(equalToConstant: 34), settingsButton.heightAnchor.constraint(equalToConstant: 35)
         ])
-        let stack = NSStackView(views: [spacesHeader, spacesScroll, agentsHeader, agentsScroll, footer])
+        let spacer = NSView()
+        let stack = NSStackView(views: [spacesHeader, spacesScroll, agentsHeader, agentsScroll, spacer, footer])
         stack.orientation = .vertical; stack.alignment = .width; stack.distribution = .fill; stack.spacing = 0; stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setClippingResistancePriority(.defaultLow, for: .vertical)
         addSubview(stack)
         spacesHeight = spacesScroll.heightAnchor.constraint(equalToConstant: 0)
-        let agentsFill = agentsScroll.heightAnchor.constraint(equalToConstant: 10_000); agentsFill.priority = .defaultLow
+        agentsHeight = agentsScroll.heightAnchor.constraint(equalToConstant: 0)
+        let spacerFill = spacer.heightAnchor.constraint(equalToConstant: 10_000)
+        spacerFill.priority = .defaultLow
         NSLayoutConstraint.activate([
             footer.widthAnchor.constraint(equalTo: widthAnchor),
             spacesHeader.heightAnchor.constraint(equalToConstant: CorralSidebarSectionHeader.height), agentsHeader.heightAnchor.constraint(equalToConstant: CorralSidebarSectionHeader.height),
-            spacesHeight, agentsFill, footer.heightAnchor.constraint(equalToConstant: Self.footerHeight),
+            spacesHeight, agentsHeight, spacerFill, footer.heightAnchor.constraint(equalToConstant: Self.footerHeight),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor), stack.trailingAnchor.constraint(equalTo: trailingAnchor), stack.topAnchor.constraint(equalTo: topAnchor), stack.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
         setSpaces([])
@@ -891,12 +895,20 @@ public final class CorralSidebarView: NSView {
     }
 
     public override func layout() {
-        let spacesLimit = max(0, bounds.height - 2 * CorralSidebarSectionHeader.height - Self.footerHeight - 2 * Self.agentRowHeight)
-        let height = min(CGFloat(spaces.count) * Self.spaceRowHeight, Self.spacesMaximumHeight, spacesLimit)
-        if spacesHeight.constant != height { spacesHeight.constant = height }
+        updateScrollHeights()
         super.layout()
         sizeDocumentView(spacesTable, in: spacesScroll)
         sizeDocumentView(agentsTable, in: agentsScroll)
+    }
+    private func updateScrollHeights() {
+        let available = max(0, bounds.height - 2 * CorralSidebarSectionHeader.height - Self.footerHeight)
+        let minimumAgentsSpace = agentsExpanded ? min(2 * Self.agentRowHeight, available) : 0
+        let spacesLimit = max(0, available - minimumAgentsSpace)
+        let spacesContentHeight = CGFloat(spaces.count) * Self.spaceRowHeight
+        let spacesHeightValue = spacesExpanded ? min(spacesContentHeight, Self.spacesMaximumHeight, spacesLimit) : 0
+        let agentsHeightValue = agentsExpanded ? max(0, available - spacesHeightValue) : 0
+        if spacesHeight.constant != spacesHeightValue { spacesHeight.constant = spacesHeightValue }
+        if agentsHeight.constant != agentsHeightValue { agentsHeight.constant = agentsHeightValue }
     }
     public required init?(coder: NSCoder) { fatalError("CorralSidebarView is created programmatically") }
     public convenience init(devices: [CorralSidebarDevice]) { self.init(frame: .zero); setDevices(devices) }
@@ -913,7 +925,7 @@ public final class CorralSidebarView: NSView {
         let selectionWasRemoved = !self.spaces.contains { $0.id == selectedSpaceID }
         if selectionWasRemoved { selectedSpaceID = CorralSidebarSpace.allSpacesID }
         spacesTable.reloadData()
-        spacesHeight.constant = min(CGFloat(self.spaces.count) * Self.spaceRowHeight, Self.spacesMaximumHeight)
+        updateScrollHeights()
         if let index = self.spaces.firstIndex(where: { $0.id == selectedSpaceID }) { spacesTable.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
         refreshVisibleAgents()
         updateSectionHeaders()
@@ -959,12 +971,20 @@ public final class CorralSidebarView: NSView {
         allAgents = agents
         refreshVisibleAgents(); updateSpaceCounts(); updateSectionHeaders()
     }
-    public func setSpacesExpanded(_ expanded: Bool) { spacesExpanded = expanded; spacesScroll.isHidden = !expanded; updateSectionHeaders() }
+    public func setSpacesExpanded(_ expanded: Bool) {
+        spacesExpanded = expanded
+        updateScrollHeights()
+        updateSectionHeaders()
+    }
     public func selectSpace(id: UUID) {
         guard let space = spaces.first(where: { $0.id == id }) else { return }
         selectSpace(space)
     }
-    public func setAgentsExpanded(_ expanded: Bool) { agentsExpanded = expanded; agentsScroll.isHidden = !expanded; updateSectionHeaders() }
+    public func setAgentsExpanded(_ expanded: Bool) {
+        agentsExpanded = expanded
+        updateScrollHeights()
+        updateSectionHeaders()
+    }
     public func clearSelectedSession() { agentsTable.deselectAll(nil) }
     @discardableResult
     public func selectSession(id: SessionID) -> Bool {
@@ -1269,6 +1289,7 @@ public final class CorralWorkspaceView: NSView {
             addSubview(view)
         }
         sidebarColumnWidth = sidebar.widthAnchor.constraint(equalToConstant: Self.sidebarWidth)
+        sidebarColumnWidth.priority = .required
         previewBanner.wantsLayer = true
         previewBanner.layer?.cornerRadius = 8
         previewBanner.layer?.borderWidth = 1
