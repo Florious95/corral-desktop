@@ -411,10 +411,17 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
             WorkspaceRecord(workingDirectory: "/Users/fixture", sessionCount: records.count, aggregateState: .working, sessions: records)
         ]))))
-        let listed = await waitUntil { coordinator.sessionCount == 2 && coordinator.workspaceView.sidebar.agents.count == 2 }
+        let sidebar = coordinator.workspaceView.sidebar
+        let listed = await waitUntil {
+            coordinator.sessionCount == 2 &&
+                sidebar.spaces.contains { $0.name == "Aaron" } &&
+                sidebar.spaces.contains { $0.name == "rust" }
+        }
         XCTAssertTrue(listed)
 
-        let leader = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "全自动编排leader" })
+        let leaderSpace = try XCTUnwrap(sidebar.spaces.first { $0.name == "Aaron" })
+        sidebar.selectSpace(id: leaderSpace.id)
+        let leader = try XCTUnwrap(sidebar.agents.first { $0.name == "全自动编排leader" })
         let leaderSessionID = try XCTUnwrap(leader.sessionID)
         let tabID = coordinator.workspaceState.activeTabID
         coordinator.workspaceView.onSelectAgent?(leaderSessionID, .singleClick)
@@ -437,7 +444,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.pinWorkspaceTab(tabID, pinned: true)
         let explicitlyPinned = await waitUntil { coordinator.workspaceState.activeTab?.pinned == true }
         XCTAssertTrue(explicitlyPinned)
-        let previewAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
+        let rustSpace = try XCTUnwrap(sidebar.spaces.first { $0.name == "rust" })
+        sidebar.selectSpace(id: rustSpace.id)
+        let previewAgent = try XCTUnwrap(sidebar.agents.first { $0.name == "rust-developer" })
         let previewSessionID = try XCTUnwrap(previewAgent.sessionID)
         coordinator.workspaceView.onSelectAgent?(previewSessionID, .singleClick)
         let previewed = await waitUntil {
@@ -560,7 +569,10 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let targetTabID = coordinator.workspaceState.activeTabID
         XCTAssertNotEqual(targetTabID, firstTabID)
         await coordinator.selectWorkspaceTab(id: targetTabID)
-        let secondAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "rust-developer" })
+        let sidebar = coordinator.workspaceView.sidebar
+        let rustSpace = try XCTUnwrap(sidebar.spaces.first { $0.name == "rust" })
+        sidebar.selectSpace(id: rustSpace.id)
+        let secondAgent = try XCTUnwrap(sidebar.agents.first { $0.name == "rust-developer" })
         coordinator.workspaceView.onSelectAgent?(try XCTUnwrap(secondAgent.sessionID), .singleClick)
 
         let secondOpenedInTarget = await waitUntil {
@@ -581,7 +593,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(secondRendered, "the new session snapshot must feed the selected SwiftTerm view")
 
-        let firstAgent = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == "leader" })
+        let leaderSpace = try XCTUnwrap(sidebar.spaces.first { $0.name == "leader" })
+        sidebar.selectSpace(id: leaderSpace.id)
+        let firstAgent = try XCTUnwrap(sidebar.agents.first { $0.name == "leader" })
         coordinator.selectSidebarSession(id: firstAgent.id)
         let returnedToFirst = await waitUntil {
             coordinator.workspaceState.activeTabID == firstTabID &&

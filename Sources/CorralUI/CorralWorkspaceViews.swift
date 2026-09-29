@@ -1012,8 +1012,19 @@ public final class CorralSidebarView: NSView {
         onSelectAgent?(sessionID, .singleClick)
     }
     fileprivate func selectSpace(_ space: CorralSidebarSpace) {
-        guard selectedSpaceID != space.id else { return }
+        let row = spaces.firstIndex { $0.id == space.id }
+        if selectedSpaceID == space.id {
+            if let row, spacesTable.selectedRow != row {
+                spacesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                spacesTable.scrollRowToVisible(row)
+            }
+            return
+        }
         selectedSpaceID = space.id
+        if let row {
+            spacesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            spacesTable.scrollRowToVisible(row)
+        }
         spacesTable.reloadData(forRowIndexes: IndexSet(integersIn: 0..<spacesTable.numberOfRows), columnIndexes: IndexSet(integer: 0))
         refreshVisibleAgents(); updateSectionHeaders()
         onSelectSpace?(space.id)
@@ -1043,13 +1054,10 @@ public final class CorralSidebarView: NSView {
         guard let agent = allAgents.first(where: { $0.sessionID == id }) else { return false }
         setSpacesExpanded(true)
         setAgentsExpanded(true)
-        if let spaceID = agent.spaceID,
-           let row = spaces.firstIndex(where: { $0.id == spaceID }) {
-            spacesTable.scrollRowToVisible(row)
-        }
-        if !agents.contains(where: { $0.sessionID == id }) {
-            selectSpace(id: CorralSidebarSpace.allSpacesID)
-        }
+        let spaceID = agent.spaceID.flatMap { id in
+            spaces.contains { $0.id == id && $0.kind == .workspace } ? id : nil
+        } ?? CorralSidebarSpace.allSpacesID
+        selectSpace(id: spaceID)
         guard let row = agents.firstIndex(where: { $0.sessionID == id }) else { return false }
         agentsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         agentsTable.scrollRowToVisible(row)
