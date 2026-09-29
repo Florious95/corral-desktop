@@ -165,8 +165,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let session: SessionKey
         let connection: AuthenticatedConnection
         let bytes: Data
+        let isScrollWheel: Bool
+    }
+    private struct BufferedScrollWheelInput {
+        let session: SessionKey
+        let connection: AuthenticatedConnection
+        var bytes: Data
     }
     private var pendingInput: [PendingInput] = []
+    private var pendingScrollWheelInput: [BufferedScrollWheelInput] = []
+    private var scrollWheelFlushTask: Task<Void, Never>?
     private var pendingInputBytes = 0
     private var drainingInput = false
 
@@ -1793,19 +1801,79 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
               runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden,
               source.window?.firstResponder === source else { return }
-        guard pendingInputBytes + data.count <= ProtocolV1.maximumInputBytes, pendingInput.count < 1024 else {
+        let bytes = Data(data)
+        guard pendingInputBytes + bytes.count <= ProtocolV1.maximumInputBytes else {
+            lastConnectionError = "Terminal input queue is full."
+            showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
+            return
+        }
+        if Self.isScrollWheelInput(data) {
+            let canMerge = pendingScrollWheelInput.last.map {
+                $0.session == key && $0.connection == connection && $0.bytes.count + bytes.count <= 32 * 1024
+            } ?? false
+            guard canMerge || pendingInput.count + pendingScrollWheelInput.count < 1024 else {
+                lastConnectionError = "Terminal input queue is full."
+                showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
+                return
+            }
+            if canMerge { pendingScrollWheelInput[pendingScrollWheelInput.count - 1].bytes.append(bytes) }
+            else { pendingScrollWheelInput.append(BufferedScrollWheelInput(session: key, connection: connection, bytes: bytes)) }
+            pendingInputBytes += bytes.count
+            scheduleScrollWheelInputFlush()
+            return
+        }
+        flushPendingScrollWheelInput()
+        let chunkSize = 32 * 1024
+        let chunkCount = (bytes.count + chunkSize - 1) / chunkSize
+        guard pendingInput.count + chunkCount <= 1024 else {
             lastConnectionError = "Terminal input queue is full."
             showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
             return
         }
         // 32 KiB stays inside the v1 JSON envelope after Base64 encoding. A single
         // drain preserves key/paste order, including keys entered before subscribe returns.
-        let bytes = Data(data)
-        for offset in stride(from: 0, to: bytes.count, by: 32 * 1024) {
-            let chunk = bytes.subdata(in: offset..<min(bytes.count, offset + 32 * 1024))
-            pendingInput.append(PendingInput(session: key, connection: connection, bytes: chunk))
+        for offset in stride(from: 0, to: bytes.count, by: chunkSize) {
+            let chunk = bytes.subdata(in: offset..<min(bytes.count, offset + chunkSize))
+            pendingInput.append(PendingInput(session: key, connection: connection, bytes: chunk, isScrollWheel: false))
         }
         pendingInputBytes += bytes.count
+        scheduleInputDrain()
+    }
+
+    private static func isScrollWheelInput(_ data: ArraySlice<UInt8>) -> Bool {
+        let bytes = Array(data)
+        if bytes == [0x1b, 0x5b, 0x41] || bytes == [0x1b, 0x5b, 0x42]
+            || bytes == [0x1b, 0x4f, 0x41] || bytes == [0x1b, 0x4f, 0x42] {
+            return true
+        }
+        guard bytes.count >= 4, bytes[0] == 0x1b, bytes[1] == 0x5b else { return false }
+        if bytes[2] == 0x4d { return (96...124).contains(Int(bytes[3])) }
+        let digitsStart = bytes[2] == 0x3c ? 3 : 2
+        var separator = digitsStart
+        while separator < bytes.count, (0x30...0x39).contains(bytes[separator]) { separator += 1 }
+        guard separator > digitsStart, separator < bytes.count, bytes[separator] == 0x3b,
+              let button = Int(String(decoding: bytes[digitsStart..<separator], as: UTF8.self)) else { return false }
+        return bytes[2] == 0x3c ? (button & 0x40) != 0 : (96...124).contains(button)
+    }
+
+    private func scheduleScrollWheelInputFlush() {
+        guard scrollWheelFlushTask == nil else { return }
+        scrollWheelFlushTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 16_000_000) }
+            catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.flushPendingScrollWheelInput()
+        }
+    }
+
+    private func flushPendingScrollWheelInput() {
+        guard !pendingScrollWheelInput.isEmpty else { return }
+        scrollWheelFlushTask?.cancel()
+        scrollWheelFlushTask = nil
+        pendingInput.append(contentsOf: pendingScrollWheelInput.map {
+            PendingInput(session: $0.session, connection: $0.connection, bytes: $0.bytes, isScrollWheel: true)
+        })
+        pendingScrollWheelInput.removeAll(keepingCapacity: true)
         scheduleInputDrain()
     }
 
@@ -1828,10 +1896,28 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 showToast("会话连接已变化，待发送输入已取消", kind: .warning)
                 continue
             }
-            do { _ = try await inputRouter.routeBytes(input.bytes, to: input.session) }
-            catch {
-                lastConnectionError = String(describing: error)
-                showToast("终端输入发送失败：\(error)", kind: .error)
+            if input.isScrollWheel {
+                var wheelBytes = input.bytes
+                var wheelReportCount = 1
+                while let next = pendingInput.first, next.isScrollWheel,
+                      next.connection == input.connection, next.session == input.session,
+                      wheelReportCount < 64, wheelBytes.count + next.bytes.count <= 32 * 1024 {
+                    pendingInput.removeFirst()
+                    pendingInputBytes -= next.bytes.count
+                    wheelBytes.append(next.bytes)
+                    wheelReportCount += 1
+                }
+                do { _ = try await inputRouter.routeBytes(wheelBytes, to: input.session) }
+                catch {
+                    lastConnectionError = String(describing: error)
+                    showToast("终端输入发送失败：\(error)", kind: .error)
+                }
+            } else {
+                do { _ = try await inputRouter.routeBytes(input.bytes, to: input.session) }
+                catch {
+                    lastConnectionError = String(describing: error)
+                    showToast("终端输入发送失败：\(error)", kind: .error)
+                }
             }
         }
     }
