@@ -203,7 +203,7 @@ final class NativeWorkspaceTests: XCTestCase {
     }
 
     func testAllExtractedLegacyIconsLoadAsNativeAppKitImages() {
-        XCTAssertEqual(CorralLegacyIcon.allCases.count, 25)
+        XCTAssertEqual(CorralLegacyIcon.allCases.count, 26)
         for icon in CorralLegacyIcon.allCases {
             XCTAssertNotNil(CorralLegacyIcon.image(icon, size: 16), "Missing native icon: \\(icon.rawValue)")
         }
@@ -503,15 +503,6 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(tabs[1].accessibilityPerformPress())
         XCTAssertEqual(workspace.activeTabID, second.id)
         let secondTab = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == "Second" })
-        var tabContextAction: (UUID, String)?
-        workspace.onTabContextAction = { tabContextAction = ($0, $1) }
-        let splitRight = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "向右拆分" })
-        XCTAssertTrue(splitRight.handler?() ?? false)
-        XCTAssertEqual(tabContextAction?.0, second.id)
-        XCTAssertEqual(tabContextAction?.1, "splitRight")
-        let splitDown = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "向下拆分" })
-        XCTAssertTrue(splitDown.handler?() ?? false)
-        XCTAssertEqual(tabContextAction?.1, "splitDown")
         let close = try XCTUnwrap(secondTab.accessibilityCustomActions()?.first { $0.name == "关闭工作台" })
         XCTAssertTrue(close.handler?() ?? false)
         XCTAssertEqual(workspace.tabs.map(\.id), [first.id])

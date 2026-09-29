@@ -4,7 +4,7 @@ import CorralMetalTerminal
 import CorralProtocol
 import CorralServices
 import CorralUI
-import SwiftTerm
+@testable import SwiftTerm
 import XCTest
 @testable import CorralApp
 
@@ -306,6 +306,81 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let persistedPreferences = await coordinator.userPreferencesStore.snapshot()
         XCTAssertEqual(persistedPreferences, preferences)
         XCTAssertTrue(coordinator.workspaceView.sidebar.isHidden)
+        await coordinator.stop()
+    }
+
+    func testTerminalColorsAndANSIPaletteFollowDarkLightPreferenceTransitions() async throws {
+        let (coordinator, _, refs) = try await interactionFixture()
+        defer { coordinator.windowController.window?.close() }
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0])).getTerminal()
+        let rgb: (SwiftTerm.Color) -> [UInt16] = { [$0.red, $0.green, $0.blue] }
+
+        try await coordinator.updateUserPreferences(UserPreferences(theme: .dark))
+        let dark = (foreground: rgb(terminal.foregroundColor), background: rgb(terminal.backgroundColor), palette: rgb(terminal.ansiColors[7]))
+        try await coordinator.updateUserPreferences(UserPreferences(theme: .light))
+        let light = (foreground: rgb(terminal.foregroundColor), background: rgb(terminal.backgroundColor), palette: rgb(terminal.ansiColors[7]))
+
+        XCTAssertNotEqual(light.background, dark.background, "light appearance must change the terminal background")
+        XCTAssertNotEqual(light.foreground, dark.foreground, "light appearance must change the terminal foreground")
+        XCTAssertNotEqual(light.palette, dark.palette, "light appearance must install a corresponding ANSI palette")
+        XCTAssertGreaterThan(light.background[0], dark.background[0], "light terminal background must be brighter than dark")
+        await coordinator.stop()
+    }
+
+    func testTabBarSwitchSynchronizesSidebarSelectionAndScrollsTheActiveRowIntoView() async throws {
+        let (coordinator, _, refs) = try await interactionFixture(sessionCount: 40)
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { window.close() }
+        let workspace = coordinator.workspaceView
+        let sidebar = workspace.sidebar
+        let table = sidebar.agentsTable
+        let rowsReady = await waitUntil { sidebar.agents.count == refs.count && table.numberOfRows == refs.count }
+        XCTAssertTrue(rowsReady)
+
+        let sessionA = try XCTUnwrap(sidebar.agents.first { $0.name == refs[0].rawValue }?.sessionID)
+        let sessionB = try XCTUnwrap(sidebar.agents.first { $0.name == refs.last?.rawValue }?.sessionID)
+        let tabAID = coordinator.workspaceState.activeTabID
+        let rowB = try XCTUnwrap(sidebar.agents.firstIndex { $0.sessionID == sessionB })
+        table.scrollRowToVisible(rowB)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let rowBRect = table.rect(ofRow: rowB)
+        try interactionClick(table, at: CGPoint(x: rowBRect.midX, y: rowBRect.midY), count: 2)
+        let openedB = await waitUntil {
+            coordinator.workspaceState.tabs.count == 2 &&
+                coordinator.workspaceState.activeTab?.activeSessionID == sessionB
+        }
+        XCTAssertTrue(openedB)
+        let tabBID = coordinator.workspaceState.activeTabID
+        XCTAssertEqual(coordinator.workspaceState.visibleSessionID, sessionB)
+
+        func tabItem(_ tab: CorralTab) throws -> NSView {
+            try XCTUnwrap(descendants(of: workspace.tabBar).first {
+                $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == tab.title
+            })
+        }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let tabAItem = try tabItem(try XCTUnwrap(workspace.tabs.first { $0.id == tabAID }))
+        try interactionClick(tabAItem, at: CGPoint(x: tabAItem.bounds.midX, y: tabAItem.bounds.midY))
+        let switchedToA = await waitUntil {
+            coordinator.workspaceState.activeTabID == tabAID && coordinator.workspaceState.visibleSessionID == sessionA
+        }
+        XCTAssertTrue(switchedToA)
+        let rowA = try XCTUnwrap(sidebar.agents.firstIndex { $0.sessionID == sessionA })
+        XCTAssertEqual(table.selectedRow, rowA, "Tab A must select its session in the sidebar")
+        XCTAssertTrue(sidebar.agents[rowA].isActive)
+
+        table.scrollRowToVisible(0)
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertFalse(table.visibleRect.intersects(table.rect(ofRow: rowB)), "the fixture must put Tab B's row offscreen before switching back")
+        let tabBItem = try tabItem(try XCTUnwrap(workspace.tabs.first { $0.id == tabBID }))
+        try interactionClick(tabBItem, at: CGPoint(x: tabBItem.bounds.midX, y: tabBItem.bounds.midY))
+        let switchedToB = await waitUntil {
+            coordinator.workspaceState.activeTabID == tabBID && coordinator.workspaceState.visibleSessionID == sessionB
+        }
+        XCTAssertTrue(switchedToB)
+        XCTAssertEqual(table.selectedRow, rowB, "Tab B must select its session in the sidebar")
+        XCTAssertTrue(sidebar.agents[rowB].isActive)
+        XCTAssertTrue(table.visibleRect.contains(table.rect(ofRow: rowB)), "Tab B's selected sidebar row must scroll into view")
         await coordinator.stop()
     }
 
@@ -1769,9 +1844,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         }
     }
 
-    private func interactionFixture() async throws -> (CorralApplicationCoordinator, RecordingSessionLink, [SessionReference]) {
+    private func interactionFixture(inputSendDelay: Duration = .zero, sessionCount: Int = 2) async throws -> (CorralApplicationCoordinator, RecordingSessionLink, [SessionReference]) {
         _ = NSApplication.shared
-        let link = RecordingSessionLink()
+        let link = RecordingSessionLink(inputSendDelay: inputSendDelay)
         let coordinator = try await makeCoordinator(link: link, atlas: .shared, environment: [
             "CORRAL_NATIVE_ENDPOINT": "ws://127.0.0.1:9919/ws", "CORRAL_NATIVE_TOKEN": "fixture-only",
             "CORRAL_NATIVE_BACKGROUND": "1"
@@ -1780,7 +1855,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.orderBack(nil)
         window.contentView?.layoutSubtreeIfNeeded()
         await coordinator.start()
-        let refs = try ["interaction-A", "interaction-B"].map(SessionReference.init)
+        let refs = try (0..<max(2, sessionCount)).map { index in
+            try SessionReference(index == 0 ? "interaction-A" : index == 1 ? "interaction-B" : "interaction-\(index)")
+        }
         let records = refs.map { WireSessionRecord(reference: $0, name: $0.rawValue, workingDirectory: "/fixture", state: .idle, rows: 24, columns: 80) }
         try await link.emit(.control(.listing(SessionListing(requestID: 1, sequence: 1, workspaces: [
             WorkspaceRecord(workingDirectory: "/fixture", sessionCount: 2, aggregateState: .idle, sessions: records)
@@ -1951,6 +2028,58 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertTrue(window.firstResponder === first)
         await coordinator.stop()
         window.close()
+    }
+
+    func testHighRateWheelBurstHasNoPostGestureInputTail() async throws {
+        let (coordinator, link, refs) = try await interactionFixture(inputSendDelay: .milliseconds(50))
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { window.close() }
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        try await link.emit(.frame(.snapshot(reference: refs[0], ansi: Data("\u{1b}[?1000h\u{1b}[?1006hWHEEL_READY".utf8))))
+        let ready = await waitUntil { self.terminalText(coordinator, reference: refs[0]).contains("WHEEL_READY") }
+        XCTAssertTrue(ready)
+
+        window.contentView?.layoutSubtreeIfNeeded()
+        let content = try XCTUnwrap(window.contentView)
+        let point = CGPoint(x: terminal.bounds.midX, y: terminal.bounds.midY)
+        XCTAssertTrue(content.hitTest(terminal.convert(point, to: content)) === terminal)
+        XCTAssertTrue(window.makeFirstResponder(terminal))
+        let location = terminal.convert(point, to: nil)
+        for _ in 0..<500 {
+            terminal.scrollWheel(with: ScrollBurstEvent(window: window, location: location, delta: 2))
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let gestureStoppedAt = ProcessInfo.processInfo.systemUptime
+
+        var previousCount = (await link.inputProgress()).completed
+        var idleSince: TimeInterval?
+        let drainDeadline = gestureStoppedAt + 20
+        while ProcessInfo.processInfo.systemUptime < drainDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+            let progress = await link.inputProgress()
+            let now = ProcessInfo.processInfo.systemUptime
+            if progress.completed == previousCount {
+                if idleSince == nil { idleSince = now }
+                if now - (idleSince ?? now) >= 0.25 { break }
+            } else {
+                previousCount = progress.completed
+                idleSince = nil
+            }
+        }
+
+        let finalProgress = await link.inputProgress()
+        let wheelStepCount = (await link.commands()).reduce(into: 0) { count, command in
+            guard case let .input(request) = command,
+                  request.reference == refs[0],
+                  case let .bytes(bytes) = request.payload else { return }
+            let payload = String(decoding: bytes, as: UTF8.self)
+            count += payload.components(separatedBy: "\u{1b}[<64;").count - 1
+            count += payload.components(separatedBy: "\u{1b}[<65;").count - 1
+        }
+        XCTAssertGreaterThan(wheelStepCount, 200, "The burst must deliver more than 200 SGR wheel steps, regardless of input-frame batching")
+        let tailMilliseconds = ((finalProgress.lastCompletedAt ?? gestureStoppedAt) - gestureStoppedAt) * 1_000
+        XCTAssertLessThanOrEqual(tailMilliseconds, 300, "The terminal still processed queued wheel reports \(Int(tailMilliseconds)) ms after the gesture stopped")
+        await coordinator.stop()
     }
 
     func testInteractionLargeUnicodePasteFitsEveryWireEnvelopeWithoutLoss() async throws {
@@ -2238,8 +2367,14 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     private var resizeRelease: CheckedContinuation<Void, Never>?
     private var snapshotCounts: [SessionReference: Int] = [:]
     private let automaticSnapshots: Bool
+    private let inputSendDelay: Duration
+    private var completedInputCount = 0
+    private var lastInputCompletedAt: TimeInterval?
 
-    init(automaticSnapshots: Bool = true) { self.automaticSnapshots = automaticSnapshots }
+    init(automaticSnapshots: Bool = true, inputSendDelay: Duration = .zero) {
+        self.automaticSnapshots = automaticSnapshots
+        self.inputSendDelay = inputSendDelay
+    }
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         connectCalls += 1
@@ -2258,6 +2393,11 @@ private actor RecordingSessionLink: SessionLinkProtocol {
 
     func send(_ command: ClientCommand) async throws -> CommandSendReceipt {
         commandsSent.append(command)
+        if case .input = command {
+            if inputSendDelay > .zero { try await Task.sleep(for: inputSendDelay) }
+            completedInputCount += 1
+            lastInputCompletedAt = ProcessInfo.processInfo.systemUptime
+        }
         let snapshotCount: Int?
         if case let .subscribe(reference, _) = command { snapshotCount = snapshotCounts[reference, default: 0] }
         else { snapshotCount = nil }
@@ -2297,6 +2437,7 @@ private actor RecordingSessionLink: SessionLinkProtocol {
     func lastConnectedCredential() -> CredentialHandle? { lastCredential }
     func lastConnectedDeviceID() -> DeviceID? { lastDeviceID }
     func commands() -> [ClientCommand] { commandsSent }
+    func inputProgress() -> (completed: Int, lastCompletedAt: TimeInterval?) { (completedInputCount, lastInputCompletedAt) }
     func suspendNextSubscribe() { shouldSuspendNextSubscribe = true }
     func isSubscribeSuspended(for reference: SessionReference) -> Bool {
         suspendedSubscribeReference == reference && subscribeRelease != nil
@@ -2324,6 +2465,32 @@ private actor RecordingSessionLink: SessionLinkProtocol {
         )
         await stream.yield(try SessionEventEnvelope(origin: origin, wireByteCount: 0, event: event))
     }
+}
+
+@MainActor
+private final class ScrollBurstEvent: NSEvent {
+    private let target: NSWindow
+    private let location: NSPoint
+    private let amount: CGFloat
+    private let number: Int
+
+    init(window: NSWindow, location: NSPoint, delta: CGFloat) {
+        target = window
+        number = window.windowNumber
+        self.location = location
+        amount = delta
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { fatalError("scroll-burst event is test-only") }
+    override var type: NSEvent.EventType { .scrollWheel }
+    override var window: NSWindow? { target }
+    override var windowNumber: Int { number }
+    override var locationInWindow: NSPoint { location }
+    override var modifierFlags: NSEvent.ModifierFlags { [] }
+    override var deltaY: CGFloat { amount }
+    override var scrollingDeltaY: CGFloat { amount }
+    override var hasPreciseScrollingDeltas: Bool { false }
 }
 
 private actor RecordingEventStream: SessionEventStream {
