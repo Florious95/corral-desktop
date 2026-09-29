@@ -16,6 +16,7 @@ LABELS=(
   "Issue 9 — sidebar scrollbars omission"
   "Issue 10 — local daemon auto-connect"
   "Issue 11 — split pane close and adapt actions"
+  "Issue 14 — tab folder tracking and space session filtering"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -29,6 +30,7 @@ FILTERS=(
   "SidebarScrollbarOmissionTests/testSpacesAndAgentsHideScrollbarsAndRetainScrollableContent"
   "Issue10LocalDaemonAutoConnectTests/testPersistedLocalDeviceUsesMacOSTokenToAuthenticateAndListSessions"
   "Issue11ContextMenuActionsTests/testBothSplitPaneMenusExposeActionsAndClosingLeftPaneRemovesIt"
+  "Issue14TabFolderTrackingTests/testSwitchingTabSelectsItsSpaceAndFiltersSessionsToThatSpace"
 )
 
 TOTAL=${#FILTERS[@]}
