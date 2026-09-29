@@ -142,7 +142,7 @@ public final class CorralMVPWorkspaceView: NSView, NSTableViewDataSource, NSTabl
             sidebarHeaderBorder.bottomAnchor.constraint(equalTo: sidebarHeader.bottomAnchor),
             sidebarHeaderBorder.heightAnchor.constraint(equalToConstant: 1),
             collapseButton.leadingAnchor.constraint(equalTo: sidebarHeader.leadingAnchor, constant: 243),
-            collapseButton.topAnchor.constraint(equalTo: sidebarHeader.topAnchor, constant: 5),
+            collapseButton.centerYAnchor.constraint(equalTo: sidebarHeader.centerYAnchor),
             collapseButton.widthAnchor.constraint(equalToConstant: 28),
             collapseButton.heightAnchor.constraint(equalToConstant: 27),
             sidebarFooter.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),

@@ -1179,7 +1179,7 @@ public final class CorralSidebarTitleBarView: NSView {
         collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏"); collapseButton.setAccessibilityIdentifier("corral.sidebar.toggle")
         NSLayoutConstraint.activate([
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
-            collapseButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9), collapseButton.topAnchor.constraint(equalTo: topAnchor, constant: 5), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 27),
+            collapseButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9), collapseButton.centerYAnchor.constraint(equalTo: centerYAnchor), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 27),
             dragRegion.leadingAnchor.constraint(equalTo: trafficLightsSpacer.trailingAnchor), dragRegion.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor), bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor), bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor), bottomBorder.heightAnchor.constraint(equalToConstant: 1)
         ])

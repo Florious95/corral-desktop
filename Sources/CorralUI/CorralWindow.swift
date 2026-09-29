@@ -51,15 +51,16 @@ public final class CorralWindow: NSWindow {
         fatalError("CorralWindow is created programmatically")
     }
 
-    /// Repositions the native close, minimize, and zoom controls within the transparent title bar.
-    public func positionTrafficLights(leftInset: CGFloat = 16, topInset: CGFloat = 14) {
+    /// Repositions native window controls; without an explicit inset their centers match the workspace header.
+    public func positionTrafficLights(leftInset: CGFloat = 16, topInset: CGFloat? = nil) {
         let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
         for (index, type) in buttons.enumerated() {
             guard let button = standardWindowButton(type), let parent = button.superview else { continue }
             let spacing = button.frame.width + 7
+            let inset = topInset ?? (CorralWorkspaceView.headerHeight - button.frame.height) / 2
             let origin = NSPoint(
                 x: leftInset + CGFloat(index) * spacing,
-                y: parent.bounds.height - topInset - button.frame.height
+                y: parent.bounds.height - inset - button.frame.height
             )
             button.setFrameOrigin(origin)
         }
