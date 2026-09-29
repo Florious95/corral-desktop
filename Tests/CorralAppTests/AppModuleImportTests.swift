@@ -290,16 +290,19 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
-    func testUnconfiguredCoordinatorDoesNotConnect() async throws {
+    func testEmptyCoordinatorAutoConnectsLocalDaemonAndPreservesPreferences() async throws {
         let link = RecordingSessionLink()
         let atlas = GlyphAtlasPool.shared
-        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [:])
+        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: ["CORRAL_NATIVE_TEST_MODE": "1"])
 
         await coordinator.start()
 
-        XCTAssertFalse(coordinator.connected)
+        XCTAssertTrue(coordinator.connected)
+        XCTAssertTrue(coordinator.workspaceView.sidebar.devices.contains {
+            $0.isOnline && ($0.name.localizedCaseInsensitiveContains("local") || $0.name.contains("本机"))
+        })
         let connectCount = await link.connectCount()
-        XCTAssertEqual(connectCount, 0)
+        XCTAssertEqual(connectCount, 1)
         let preferences = UserPreferences(theme: .light, fontFamily: "Menlo, monospace", fontSize: 16, followDirectory: true, sidebarCollapsed: true)
         try await coordinator.updateUserPreferences(preferences)
         XCTAssertEqual(coordinator.userPreferences, preferences)
@@ -942,11 +945,14 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
-    func testTelemetryReceiptRefreshesPeriodicallyWithoutConnecting() async throws {
+    func testTelemetryReceiptRefreshesPeriodicallyDuringLocalAutoconnect() async throws {
         let link = RecordingSessionLink()
         let atlas = GlyphAtlasPool.shared
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("corral-native-periodic-\(UUID().uuidString).json")
-        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: ["CORRAL_NATIVE_TELEMETRY_OUT": url.path])
+        let coordinator = try await makeCoordinator(link: link, atlas: atlas, environment: [
+            "CORRAL_NATIVE_TELEMETRY_OUT": url.path,
+            "CORRAL_NATIVE_TEST_MODE": "1"
+        ])
 
         await coordinator.start()
         let initial = try Data(contentsOf: url)
@@ -958,7 +964,9 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertFalse(initial.isEmpty)
         XCTAssertFalse(refreshed.isEmpty)
         XCTAssertGreaterThan(refreshedDate, initialDate)
-        XCTAssertFalse(try JSONDecoder().decode(CorralApplicationTelemetry.self, from: refreshed).connected)
+        XCTAssertTrue(try JSONDecoder().decode(CorralApplicationTelemetry.self, from: refreshed).connected)
+        let connectCount = await link.connectCount()
+        XCTAssertEqual(connectCount, 1)
         await coordinator.stop()
         try? FileManager.default.removeItem(at: url)
     }
