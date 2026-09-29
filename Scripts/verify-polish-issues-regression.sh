@@ -21,6 +21,7 @@ LABELS=(
   "Issue 15 — devices popover toggle dismissal"
   "Issue 16 — tab switch reflow sync"
   "PR 3 — drag split midline projection"
+  "PR 4 — suppress autofill xpc and context menu"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -39,6 +40,7 @@ FILTERS=(
   "Issue15DevicesPopoverToggleTests/testDevicesButtonSecondActivationClosesPopover"
   "Issue16MultiTabReflowSyncTests/testWindowResizeReflowsInactiveTabWhenItBecomesActive"
   "DragSplitMidlineProjectionTests/testMidlineLeftAndRightHoverProjectHalfPaneAndSplitTowardPointerSide"
+  "AutoFillSubprocessSuppressionTests/testTerminalTextInputClientDeclaresNoAutofillContentType"
 )
 
 TOTAL=${#FILTERS[@]}
