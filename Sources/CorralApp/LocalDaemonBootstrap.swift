@@ -48,7 +48,7 @@ enum LocalDaemonTokenDiscovery {
 
 /// App-launch-only daemon guard. Coordinator tests use an injected SessionLink and never probe host port 9900.
 enum LocalDaemonSupervisor {
-    static func ensureLocalDaemonRunning(token: String, environment: [String: String]) async {
+    static func ensureLocalDaemonRunning(token: String?, environment: [String: String]) async {
         guard environment["CORRAL_NATIVE_ENDPOINT"].flatMap({ $0.isEmpty ? nil : $0 }) == nil,
               !isUnitTestProcess(environment),
               !portIsListening() else { return }
@@ -57,7 +57,11 @@ enum LocalDaemonSupervisor {
             guard FileManager.default.isExecutableFile(atPath: executable.path) else { continue }
             let process = Process()
             process.executableURL = executable
-            process.arguments = ["-listen", "127.0.0.1:9900", "-token", token]
+            var arguments = ["-listen", "127.0.0.1:9900"]
+            if let token = LocalDaemonTokenDiscovery.valid(token) {
+                arguments += ["-token", token]
+            }
+            process.arguments = arguments
             process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = FileHandle.nullDevice

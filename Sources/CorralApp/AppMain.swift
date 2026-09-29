@@ -168,8 +168,8 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
             let hasExplicitEndpoint = environment["CORRAL_NATIVE_ENDPOINT"].flatMap({ $0.isEmpty ? nil : $0 }) != nil
             let startupDevices = try await repository.listDevices()
             let startupUsesLocalHost = startupDevices.first?.id == LocalDaemonTokenDiscovery.deviceID || startupDevices.isEmpty
-            if !hasExplicitEndpoint, startupUsesLocalHost,
-               let token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentials) {
+            if !hasExplicitEndpoint, startupUsesLocalHost {
+                let token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentials)
                 await LocalDaemonSupervisor.ensureLocalDaemonRunning(token: token, environment: environment)
             }
             await coordinator.start()
