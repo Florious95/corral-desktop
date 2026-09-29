@@ -12,6 +12,8 @@ LABELS=(
   "Issue 5 — Tab/sidebar selection sync"
   "Issue 6 — Git branch icon rendering"
   "Issue 7 — Tab context menu actions"
+  "Issue 8 — sidebar section toggle stability"
+  "Issue 9 — sidebar scrollbars omission"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -21,6 +23,8 @@ FILTERS=(
   "CorralApplicationCoordinatorTests/testTabBarSwitchSynchronizesSidebarSelectionAndScrollsTheActiveRowIntoView"
   "Issue6GitBranchIconTests/testGitBranchIconAssetIsRegisteredAndRenderable"
   "Issue7TabMenuTests/testTabContextMenuOmitsSplitActionsAndKeepsWorkspaceActions"
+  "Issue8SidebarSectionToggleTests/testAgentsThenSpacesHeaderTogglesKeepSidebarAndWindowGeometryStable"
+  "SidebarScrollbarOmissionTests/testSpacesAndAgentsHideScrollbarsAndRetainScrollableContent"
 )
 
 TOTAL=${#FILTERS[@]}
