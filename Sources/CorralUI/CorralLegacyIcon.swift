@@ -4,7 +4,7 @@ import AppKit
 public enum CorralLegacyIcon: String, CaseIterable {
     case sidebar, search, sun, moon, chevronDown, folder, grid, star, starOutline
     case layers, monitor, qr, gear, check, close, plus, split, closeLeft, closeRight
-    case terminal, arrowUp, pin, reflow, edit, trash
+    case terminal, arrowUp, pin, reflow, edit, trash, gitBranch
 
     public static func image(_ icon: Self, size: CGFloat = 16, tint: NSColor = CorralAestheticTokens.textSecondary) -> NSImage? {
         let (body, strokeWidth, fill, stroke): (String, String, String, String) = switch icon {
@@ -33,6 +33,7 @@ public enum CorralLegacyIcon: String, CaseIterable {
         case .reflow: (#"<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>"#, "1.8", "none", "currentColor")
         case .edit: (#"<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>"#, "1.8", "none", "currentColor")
         case .trash: (#"<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>"#, "1.8", "none", "currentColor")
+        case .gitBranch: (#"<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M6 12h3c4 0 7-1.8 7-4"/>"#, "2", "none", "currentColor")
         }
         let components = tint.usingColorSpace(.sRGB)
         let hex = String(format: "#%02X%02X%02X", Int((components?.redComponent ?? 0) * 255), Int((components?.greenComponent ?? 0) * 255), Int((components?.blueComponent ?? 0) * 255))
