@@ -478,6 +478,11 @@ public struct CorralSidebarSpace: Identifiable, Sendable, Equatable {
     public var agentCount: Int
     public var kind: CorralSidebarSpaceKind
     public var isVirtual: Bool { kind != .workspace }
+    public var isBranchWorkspace: Bool {
+        name.lowercased().split(whereSeparator: { $0 == "/" || $0 == "\\" }).contains {
+            $0 == "branch" || $0 == "feature" || $0.hasPrefix("branch-") || $0.hasPrefix("feature-")
+        }
+    }
     public init(id: UUID = UUID(), name: String, workingCount: Int = 0, agentCount: Int = 0, isVirtual: Bool = false, kind: CorralSidebarSpaceKind = .workspace) {
         self.id = id; self.name = name; self.workingCount = workingCount; self.agentCount = agentCount
         self.kind = isVirtual ? (name == "收藏" ? .favorites : .allSpaces) : kind
@@ -738,7 +743,7 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
             contentInset = 20
             let space = spaces[row]
             let isSelected = space.id == sidebar?.selectedSpaceID
-            let iconName: CorralLegacyIcon = switch space.kind { case .allSpaces: .grid; case .favorites: .star; case .workspace: .folder }
+            let iconName: CorralLegacyIcon = switch space.kind { case .allSpaces: .grid; case .favorites: .star; case .workspace: space.isBranchWorkspace ? .gitBranch : .folder }
             let icon = NSImageView(image: CorralLegacyIcon.image(iconName, size: 15) ?? NSImage())
             icon.contentTintColor = space.kind == .favorites ? CorralAestheticTokens.warning : CorralAestheticTokens.icon
             let label = NSTextField(labelWithString: space.name)
