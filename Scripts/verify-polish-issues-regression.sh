@@ -19,6 +19,7 @@ LABELS=(
   "Issue 13 — split layout padding symmetry"
   "Issue 14 — tab folder tracking and space session filtering"
   "Issue 15 — devices popover toggle dismissal"
+  "Issue 16 — tab switch reflow sync"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -35,6 +36,7 @@ FILTERS=(
   "Issue13SplitLayoutPaddingTests/testSplitTerminalViewportsKeepFivePointLeadingInsetWithoutRightGap"
   "Issue14TabFolderTrackingTests/testSwitchingTabSelectsItsSpaceAndFiltersSessionsToThatSpace"
   "Issue15DevicesPopoverToggleTests/testDevicesButtonSecondActivationClosesPopover"
+  "Issue16MultiTabReflowSyncTests/testWindowResizeReflowsInactiveTabWhenItBecomesActive"
 )
 
 TOTAL=${#FILTERS[@]}
