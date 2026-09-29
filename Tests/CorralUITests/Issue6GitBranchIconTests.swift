@@ -50,9 +50,21 @@ final class Issue6GitBranchIconTests: XCTestCase {
             expectedData,
             "A branch workspace must render the dedicated Git three-way branch vector, not a folder or [?] fallback"
         )
+        try exportRenderedEvidenceIfRequested(actual)
     }
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private func exportRenderedEvidenceIfRequested(_ image: NSImage) throws {
+        guard let path = ProcessInfo.processInfo.environment["CORRAL_ISSUE6_EVIDENCE_DIR"] else { return }
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil))
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let directory = URL(fileURLWithPath: path, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try png.write(to: directory.appendingPathComponent("06-rendered-git-branch-row.png"))
     }
 }
