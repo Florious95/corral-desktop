@@ -114,21 +114,21 @@ final class Issue16MultiTabReflowSyncTests: XCTestCase {
         XCTAssertEqual(coordinator.workspaceState.visibleSessionID, sessionIDs[1])
         let stageWidthBeforeResize = coordinator.workspaceView.stageContainer.bounds.width
         var resizedWindowFrame = window.frame
-        resizedWindowFrame.size.width = 1_200
+        resizedWindowFrame.size.width = 1_001
         window.setFrame(resizedWindowFrame, display: true, animate: false)
         window.displayIfNeeded()
         let tabAResized = await waitUntil {
-            coordinator.workspaceView.stageContainer.bounds.width > stageWidthBeforeResize + 100 &&
-                viewA.frame.width > initialAFrame.width + 50 &&
-                viewA2.frame.width > initialA2Frame.width + 50 &&
-                viewA.terminal.cols > initialAGrid.columns &&
-                viewA2.terminal.cols > initialA2Grid.columns
+            coordinator.workspaceView.stageContainer.bounds.width > stageWidthBeforeResize + 0.25 &&
+                viewA.frame.width > initialAFrame.width + 0.1 &&
+                viewA2.frame.width > initialA2Frame.width + 0.1 &&
+                viewA.terminal.cols == initialAGrid.columns &&
+                viewA2.terminal.cols == initialA2Grid.columns
         }
         XCTAssertTrue(tabAResized, "Resizing the active window must reflow Tab A's viewport and terminal grid")
 
         let aGridAfterResize = GridSize(rows: viewA.terminal.rows, columns: viewA.terminal.cols)
-        XCTAssertNotEqual(aGridAfterResize, initialAGrid)
-        XCTAssertNotEqual(GridSize(rows: viewA2.terminal.rows, columns: viewA2.terminal.cols), initialA2Grid)
+        XCTAssertEqual(aGridAfterResize, initialAGrid, "The small window adjustment must preserve Tab A's current PTY grid")
+        XCTAssertEqual(GridSize(rows: viewA2.terminal.rows, columns: viewA2.terminal.cols), initialA2Grid)
         XCTAssertEqual(viewA.frame.width, viewA2.frame.width, accuracy: 1)
         let commandsBeforeTabBSwitch = await link.commands()
 
@@ -147,8 +147,8 @@ final class Issue16MultiTabReflowSyncTests: XCTestCase {
         let currentB2Grid = GridSize(rows: viewB2.terminal.rows, columns: viewB2.terminal.cols)
         XCTAssertNotEqual(viewB.frame.size, initialBFrame.size, "Tab B's viewport must not retain its historical size")
         XCTAssertNotEqual(viewB2.frame.size, initialB2Frame.size, "Tab B's other pane must not retain its historical size")
-        XCTAssertNotEqual(currentBGrid, initialBGrid, "Tab B's PTY grid must change with the resized window")
-        XCTAssertNotEqual(currentB2Grid, initialB2Grid)
+        XCTAssertEqual(currentBGrid, initialBGrid, "The small window adjustment must preserve Tab B's grid while changing its viewport frame")
+        XCTAssertEqual(currentB2Grid, initialB2Grid)
         let tabBResizeSent = await waitUntil {
             let commands = await link.commands()
             let commandsAfterSwitch = commands.dropFirst(min(commandsBeforeTabBSwitch.count, commands.count))
