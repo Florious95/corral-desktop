@@ -88,7 +88,13 @@ final class NativeTerminalStageView: NSView {
                 view.setInputEnabled(false)
                 continue
             }
-            view.frame = pane.frame
+            let leadingInset = panes.count > 1 ? CorralMVPWorkspaceView.terminalViewportLeadingInset : 0
+            view.frame = CGRect(
+                x: pane.frame.minX + leadingInset,
+                y: pane.frame.minY,
+                width: max(0, pane.frame.width - leadingInset),
+                height: pane.frame.height
+            )
             view.isHidden = false
             view.setInputEnabled(id == focusedSessionID)
         }
