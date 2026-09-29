@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import CorralContracts
 import CorralServices
 
@@ -59,6 +60,7 @@ public final class CorralTabBarView: NSView {
     /// Keep every Tab reachable without letting its document widen the window.
     private let tabsLane = NSScrollView()
     private var revealSelectedTab = false
+    private var capsuleSelectionAnimationPending = false
     private let bottomBorder = NSView()
     private let activeCapsule = NSView()
     private let trafficLightsSpacer = NSView()
@@ -175,7 +177,11 @@ public final class CorralTabBarView: NSView {
             ordered.append(item)
         }
         renderedItems = updated
-        if selectionChanged { revealSelectedTab = true; needsLayout = true }
+        if selectionChanged {
+            revealSelectedTab = true
+            capsuleSelectionAnimationPending = true
+            needsLayout = true
+        }
         let existing = itemsStack.arrangedSubviews
         guard existing.count != ordered.count || zip(existing, ordered).contains(where: { $0 !== $1 }) else { return }
         for view in existing where !ordered.contains(where: { $0 === view }) {
@@ -202,11 +208,38 @@ public final class CorralTabBarView: NSView {
             revealSelectedTab = false
         }
         guard let selectedTabID, let item = itemsStack.arrangedSubviews.compactMap({ $0 as? CorralTabItemView }).first(where: { $0.tab.id == selectedTabID }), !item.tab.isPinned else {
-            activeCapsule.isHidden = true; activeCapsuleFrame = nil; return
+            activeCapsule.isHidden = true
+            activeCapsuleFrame = nil
+            capsuleSelectionAnimationPending = false
+            return
         }
-        activeCapsule.frame = item.frame
-        activeCapsule.isHidden = false
-        activeCapsuleFrame = item.frame
+        let targetFrame = item.frame
+        let canSlide = capsuleSelectionAnimationPending && activeCapsuleFrame != nil && !activeCapsule.isHidden
+        if canSlide {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.18, 0.89, 0.32, 1.12)
+                context.allowsImplicitAnimation = true
+                activeCapsule.animator().frame = targetFrame
+                activeCapsule.animator().alphaValue = 1
+            }
+        } else if capsuleSelectionAnimationPending {
+            activeCapsule.frame = targetFrame
+            activeCapsule.alphaValue = 0
+            activeCapsule.isHidden = false
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                context.allowsImplicitAnimation = true
+                activeCapsule.animator().alphaValue = 1
+            }
+        } else {
+            activeCapsule.frame = targetFrame
+            activeCapsule.alphaValue = 1
+            activeCapsule.isHidden = false
+        }
+        activeCapsuleFrame = targetFrame
+        capsuleSelectionAnimationPending = false
     }
     public func bindSidebarToggleButton(_ button: NSButton) { sidebarToggleButton = button }
     public func bindDevicesButton(_ button: NSButton) { devicesButton = button }
@@ -571,6 +604,25 @@ final class CorralSidebarRowView: NSTableRowView {
         guard let color = fillColor else { return }
         color.setFill()
         NSBezierPath(roundedRect: backgroundRect, xRadius: backgroundRadius, yRadius: backgroundRadius).fill()
+    }
+    func animateFavoritePin() {
+        wantsLayer = true
+        guard let layer else { return }
+        let pulse = CALayer()
+        pulse.frame = backgroundRect
+        pulse.cornerRadius = backgroundRadius
+        pulse.backgroundColor = CorralAestheticTokens.warning.withAlphaComponent(0.2).cgColor
+        pulse.opacity = 0
+        layer.insertSublayer(pulse, at: 0)
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = [0, 0.55, 0]
+        animation.keyTimes = [0, 0.2, 1]
+        animation.duration = 0.38
+        animation.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+        pulse.add(animation, forKey: "favorite-pin-highlight")
+        DispatchQueue.main.asyncAfter(deadline: .now() + animation.duration + 0.03) { [weak pulse] in
+            pulse?.removeFromSuperlayer()
+        }
     }
     override func drawSelection(in dirtyRect: NSRect) {}
     override func updateTrackingAreas() {
@@ -1044,8 +1096,16 @@ public final class CorralSidebarView: NSView {
         agents = updated
         agentData.agents = agents
         agentsTable.deselectAll(nil)
-        if previous.map(\.id) != agents.map(\.id) {
-            agentsTable.reloadData()
+        let previousIDs = previous.map(\.id)
+        let updatedIDs = agents.map(\.id)
+        if previousIDs != updatedIDs {
+            if previousIDs.count == updatedIDs.count, Set(previousIDs) == Set(updatedIDs) {
+                let previouslyFavorited = Set(previous.filter(\.isFavorite).map(\.id))
+                let newlyFavorited = Set(agents.filter(\.isFavorite).map(\.id)).subtracting(previouslyFavorited)
+                animateAgentReorder(from: previous, to: agents, highlighting: newlyFavorited)
+            } else {
+                agentsTable.reloadData()
+            }
         } else {
             let changed = IndexSet(agents.indices.filter { previous[$0] != agents[$0] })
             agentsTable.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
@@ -1056,6 +1116,38 @@ public final class CorralSidebarView: NSView {
                     row.needsDisplay = true
                 }
             }
+        }
+    }
+    private func animateAgentReorder(from previous: [CorralSidebarAgent], to updated: [CorralSidebarAgent], highlighting favoriteIDs: Set<UUID>) {
+        let oldIDs = previous.map(\.id)
+        let newIDs = updated.map(\.id)
+        var order = oldIDs
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.38
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+            context.allowsImplicitAnimation = true
+            agentsTable.beginUpdates()
+            for (destination, id) in newIDs.enumerated() {
+                guard let source = order.firstIndex(of: id), source != destination else { continue }
+                agentsTable.moveRow(at: source, to: destination)
+                order.insert(order.remove(at: source), at: destination)
+            }
+            agentsTable.endUpdates()
+        }
+        let previousByID = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
+        let updatedByID = Dictionary(uniqueKeysWithValues: updated.map { ($0.id, $0) })
+        let changedIDs = Set(updated.compactMap { previousByID[$0.id] != $0 ? $0.id : nil })
+        let changedRows = IndexSet(newIDs.enumerated().compactMap { changedIDs.contains($0.element) ? $0.offset : nil })
+        if !changedRows.isEmpty {
+            agentsTable.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integer: 0))
+        }
+        agentsTable.layoutSubtreeIfNeeded()
+        for id in favoriteIDs {
+            guard let rowIndex = agents.firstIndex(where: { $0.id == id }),
+                  let row = agentsTable.rowView(atRow: rowIndex, makeIfNecessary: true) as? CorralSidebarRowView else { continue }
+            row.isOpen = updatedByID[id]?.isOpen ?? row.isOpen
+            row.isActive = updatedByID[id]?.isActive ?? row.isActive
+            row.animateFavoritePin()
         }
     }
     /// Every row's `working / total` is derived from the agents themselves, including real workspace rows.
