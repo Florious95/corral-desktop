@@ -526,7 +526,7 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(agentCell.accessibilityPerformPress())
         XCTAssertEqual(selectedAgent?.0, sessionKey)
         XCTAssertEqual(selectedAgent?.1, .singleClick)
-        XCTAssertEqual(agentCell.accessibilityCustomActions()?.map(\.name), ["重命名", "收藏", "关闭", "复制会话 ID"])
+        XCTAssertEqual(agentCell.accessibilityCustomActions()?.map(\.name), ["重命名", "收藏", "关闭 agent-cli", "复制会话 ID"])
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[0].handler?() ?? false)
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[1].handler?() ?? false)
         XCTAssertTrue(agentCell.accessibilityCustomActions()?[2].handler?() ?? false)
@@ -602,7 +602,7 @@ final class NativeWorkspaceTests: XCTestCase {
         sidebar.onRenameAgent = { renamed = $0 }
         sidebar.onCloseAgent = { closed = $0 }
         let menu = try XCTUnwrap(sidebar.agentContextMenu(for: agent.id))
-        XCTAssertEqual(menu.items.map(\.title), ["重命名", "收藏", "", "关闭", "复制会话 ID"])
+        XCTAssertEqual(menu.items.map(\.title), ["重命名", "收藏", "", "关闭 agent-cli", "复制会话 ID"])
         XCTAssertTrue(menu.items.allSatisfy { $0.isSeparatorItem || $0.target != nil })
         let renameItem = try XCTUnwrap(menu.items.first { $0.title == "重命名" })
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(renameItem.action), to: renameItem.target, from: renameItem))
@@ -611,7 +611,7 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(favoriteItem.action), to: favoriteItem.target, from: favoriteItem))
         XCTAssertEqual(favoriteChange?.0, agent.id)
         XCTAssertEqual(favoriteChange?.1, true)
-        let closeItem = try XCTUnwrap(menu.items.first { $0.title == "关闭" })
+        let closeItem = try XCTUnwrap(menu.items.first { $0.title == "关闭 agent-cli" })
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(closeItem.action), to: closeItem.target, from: closeItem))
         XCTAssertEqual(closed, agent.id)
         XCTAssertTrue(menu.items.contains { $0.title == "复制会话 ID" })

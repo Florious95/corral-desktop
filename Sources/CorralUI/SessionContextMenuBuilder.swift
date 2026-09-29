@@ -31,7 +31,7 @@ public final class SessionContextMenuController: NSObject {
         favoriteItem.target = self
         favoriteItem.image = CorralLegacyIcon.image(isFavorite ? .star : .starOutline, size: 15)
         menu.addItem(.separator())
-        let closeItem = menu.addItem(withTitle: "关闭", action: #selector(closeSession), keyEquivalent: "")
+        let closeItem = menu.addItem(withTitle: "关闭 agent-cli", action: #selector(closeSession), keyEquivalent: "")
         closeItem.target = self
         closeItem.image = CorralLegacyIcon.image(.trash, size: 15)
         let copyItem = menu.addItem(withTitle: "复制会话 ID", action: #selector(copySessionID), keyEquivalent: "")
