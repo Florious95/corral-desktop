@@ -25,4 +25,34 @@ final class Issue6GitBranchIconTests: XCTestCase {
         }
         XCTAssertGreaterThan(paintedPixels, 0, "The vector/symbol asset must paint visible pixels")
     }
+
+    func testWorkspaceSpaceRowRendersDedicatedGitBranchIcon() throws {
+        let sidebar = CorralSidebarView(frame: NSRect(x: 0, y: 0, width: 280, height: 700))
+        let branchSpace = CorralSidebarSpace(id: UUID(), name: "feature/main", kind: .workspace)
+        sidebar.setSpaces([branchSpace])
+        sidebar.layoutSubtreeIfNeeded()
+
+        // All Spaces and 收藏 precede real workspace rows in the delivery view.
+        let row = try XCTUnwrap(
+            sidebar.spacesTable.delegate?.tableView?(sidebar.spacesTable, viewFor: nil, row: 2) as? CorralSidebarCellView,
+            "The Git branch workspace row must be rendered by the sidebar"
+        )
+        let iconView = try XCTUnwrap(
+            descendants(of: row).compactMap { $0 as? NSImageView }.first,
+            "The Git branch workspace row must expose an icon image view"
+        )
+        let actual = try XCTUnwrap(iconView.image, "The Git branch workspace row must not use an empty/missing-glyph image")
+        let expected = try XCTUnwrap(CorralLegacyIcon.image(.gitBranch, size: 15))
+        let actualData = try XCTUnwrap(actual.tiffRepresentation)
+        let expectedData = try XCTUnwrap(expected.tiffRepresentation)
+        XCTAssertEqual(
+            actualData,
+            expectedData,
+            "A branch workspace must render the dedicated Git three-way branch vector, not a folder or [?] fallback"
+        )
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
 }
