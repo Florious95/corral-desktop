@@ -120,6 +120,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var sessionUIIDs: [SessionID: UUID] = [:]
     private var sessionUIIDsByIdentity: [WorkspaceSessionIdentity: UUID] = [:]
     private var selectedSidebarSpaceID = CorralSidebarSpace.allSpacesID
+    private var lastSidebarSelectionTabID: UUID?
+    private var lastSidebarSelectionSessionID: SessionID?
+    private var sidebarSessionSelectionPending = false
     private var selectedDeviceIDs = Set<DeviceID>()
     private var activeDialog: CorralDialogViewController?
     private var settingsDialog: SettingsDialogViewController?
@@ -2026,6 +2029,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         workspaceView.sidebar.setSpaces(Array(spacesByDirectory.values).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
         workspaceView.sidebar.setAgents(agents)
         workspaceView.sidebar.selectSpace(id: selectedSidebarSpaceID)
+        synchronizeSidebarSelectionIfNeeded()
+    }
+
+    private func synchronizeSidebarSelectionIfNeeded() {
+        let tabID = workspaceState.activeTabID
+        let sessionID = workspaceState.visibleSessionID
+        guard tabID != lastSidebarSelectionTabID || sessionID != lastSidebarSelectionSessionID || sidebarSessionSelectionPending else { return }
+        lastSidebarSelectionTabID = tabID
+        guard let sessionID else {
+            workspaceView.sidebar.clearSelectedSession()
+            lastSidebarSelectionSessionID = nil
+            sidebarSessionSelectionPending = false
+            return
+        }
+        if workspaceView.sidebar.selectSession(id: sessionID) {
+            lastSidebarSelectionSessionID = sessionID
+            sidebarSessionSelectionPending = false
+        } else {
+            sidebarSessionSelectionPending = true
+        }
     }
 
     private func updateWorkspaceTitle(count: Int) {

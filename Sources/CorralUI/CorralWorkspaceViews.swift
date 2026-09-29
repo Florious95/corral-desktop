@@ -963,6 +963,24 @@ public final class CorralSidebarView: NSView {
         selectSpace(space)
     }
     public func setAgentsExpanded(_ expanded: Bool) { agentsExpanded = expanded; agentsScroll.isHidden = !expanded; updateSectionHeaders() }
+    public func clearSelectedSession() { agentsTable.deselectAll(nil) }
+    @discardableResult
+    public func selectSession(id: SessionID) -> Bool {
+        guard let agent = allAgents.first(where: { $0.sessionID == id }) else { return false }
+        setSpacesExpanded(true)
+        setAgentsExpanded(true)
+        if let spaceID = agent.spaceID,
+           let row = spaces.firstIndex(where: { $0.id == spaceID }) {
+            spacesTable.scrollRowToVisible(row)
+        }
+        if !agents.contains(where: { $0.sessionID == id }) {
+            selectSpace(id: CorralSidebarSpace.allSpacesID)
+        }
+        guard let row = agents.firstIndex(where: { $0.sessionID == id }) else { return false }
+        agentsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        agentsTable.scrollRowToVisible(row)
+        return true
+    }
     public func refreshTheme() {
         layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         spacesTable.backgroundColor = CorralAestheticTokens.surface0
