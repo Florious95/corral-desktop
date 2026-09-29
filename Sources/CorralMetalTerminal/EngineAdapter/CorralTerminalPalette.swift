@@ -8,4 +8,10 @@ public enum CorralTerminalPalette {
             SwiftTerm.Color(red8: UInt16($0.red), green8: UInt16($0.green), blue8: UInt16($0.blue))
         }
     }
+
+    public static var lightANSI16: [SwiftTerm.Color] {
+        TerminalThemePalette.light.ansi16.map {
+            SwiftTerm.Color(red8: UInt16($0.red), green8: UInt16($0.green), blue8: UInt16($0.blue))
+        }
+    }
 }

@@ -7,6 +7,8 @@ import CorralUI
 final class CorralNativeTerminalView: TerminalView {
     static let defaultForegroundColor = NSColor(srgbRed: 213.0 / 255, green: 220.0 / 255, blue: 230.0 / 255, alpha: 1)
     static let defaultBackgroundColor = NSColor(srgbRed: 16.0 / 255, green: 17.0 / 255, blue: 21.0 / 255, alpha: 1)
+    static let lightForegroundColor = NSColor(srgbRed: 58.0 / 255, green: 56.0 / 255, blue: 53.0 / 255, alpha: 1)
+    static let lightBackgroundColor = NSColor(srgbRed: 251.0 / 255, green: 250.0 / 255, blue: 248.0 / 255, alpha: 1)
 
     private let pasteboard: NSPasteboard
     private var displayFilter = CorralTerminalFilter()
@@ -57,9 +59,14 @@ final class CorralNativeTerminalView: TerminalView {
         if font != resolved { font = resolved }
     }
 
-    private func installDarkColors() {
-        installColors(CorralTerminalPalette.darkANSI16)
-        setTerminalColors(foreground: Self.defaultForegroundColor, background: Self.defaultBackgroundColor)
+    private func installDarkColors() { applyTerminalTheme(isDark: true) }
+
+    func applyTerminalTheme(isDark: Bool) {
+        installColors(isDark ? CorralTerminalPalette.darkANSI16 : CorralTerminalPalette.lightANSI16)
+        setTerminalColors(
+            foreground: isDark ? Self.defaultForegroundColor : Self.lightForegroundColor,
+            background: isDark ? Self.defaultBackgroundColor : Self.lightBackgroundColor
+        )
     }
 
     func setTerminalColors(foreground: NSColor, background: NSColor) {

@@ -177,6 +177,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var scrollWheelFlushTask: Task<Void, Never>?
     private var pendingInputBytes = 0
     private var drainingInput = false
+    // Keep the legacy dark terminal until a preference or system appearance change is applied.
+    private var hasAppliedTerminalThemePreference = false
 
     public init(
         deviceRepository: any DeviceRepositoryProtocol,
@@ -237,6 +239,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         self.windowController = CorralWindowController(workspaceView: workspaceView)
         workspaceView.selectTab(id: initialWorkspaceState.activeTabID)
         applyPreferences(initialUserPreferences)
+        workspaceView.onEffectiveAppearanceChanged = { [weak self] in
+            guard let self else { return }
+            self.hasAppliedTerminalThemePreference = true
+            self.applyTerminalStageAppearance()
+            let isDark = self.isDarkTerminalTheme
+            for (_, view) in self.terminalRegistry.allViews { view.applyTerminalTheme(isDark: isDark) }
+        }
         workspaceView.tabBar.onSelectTab = { [weak self] id in
             Task { @MainActor in await self?.selectWorkspaceTab(id: id) }
         }
@@ -559,18 +568,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     public func updateUserPreferences(_ preferences: UserPreferences) async throws {
         let stored = try await userPreferencesStore.update(preferences)
+        hasAppliedTerminalThemePreference = true
         applyPreferences(stored)
         await writeTelemetry()
     }
 
     private func applyPreferences(_ preferences: UserPreferences) {
         userPreferences = preferences
-        let appearance: NSAppearance?
-        switch preferences.theme {
-        case .dark: appearance = NSAppearance(named: .darkAqua)
-        case .light: appearance = NSAppearance(named: .aqua)
-        case .system: appearance = nil
-        }
+        let appearance = workspaceAppearanceOverride
         windowController.window?.appearance = appearance
         workspaceView.appearance = appearance
         workspaceView.setTheme(CorralThemeMode(rawValue: preferences.theme.rawValue) ?? .system)
@@ -578,20 +583,44 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         applyTerminalStageAppearance()
         for (_, view) in terminalRegistry.allViews {
             view.setTerminalFont(family: preferences.fontFamily, size: preferences.fontSize)
-            view.setTerminalColors(foreground: terminalStageForeground, background: terminalStageBackground)
+            view.applyTerminalTheme(isDark: isDarkTerminalTheme)
         }
     }
 
-    private var terminalStageBackground: NSColor { CorralNativeTerminalView.defaultBackgroundColor }
-    private var terminalStageForeground: NSColor { CorralNativeTerminalView.defaultForegroundColor }
+    private var workspaceAppearanceOverride: NSAppearance? {
+        switch userPreferences.theme {
+        case .dark: NSAppearance(named: .darkAqua)
+        case .light: NSAppearance(named: .aqua)
+        case .system: nil
+        }
+    }
+
+    private var terminalAppearanceOverride: NSAppearance? {
+        guard hasAppliedTerminalThemePreference else { return NSAppearance(named: .darkAqua) }
+        return workspaceAppearanceOverride
+    }
+
+    private var isDarkTerminalTheme: Bool {
+        guard hasAppliedTerminalThemePreference else { return true }
+        switch userPreferences.theme {
+        case .dark: return true
+        case .light: return false
+        case .system:
+            let appearance = windowController.window?.effectiveAppearance ?? NSApp.effectiveAppearance
+            return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
+
+    private var terminalStageBackground: NSColor {
+        isDarkTerminalTheme ? CorralNativeTerminalView.defaultBackgroundColor : CorralNativeTerminalView.lightBackgroundColor
+    }
 
     private func applyTerminalStageAppearance() {
-        let darkAppearance = NSAppearance(named: .darkAqua)
         let background = terminalStageBackground.cgColor
-        workspaceView.stageContainer.appearance = darkAppearance
+        workspaceView.stageContainer.appearance = terminalAppearanceOverride
         workspaceView.stageContainer.wantsLayer = true
         workspaceView.stageContainer.layer?.backgroundColor = background
-        terminalStageView.appearance = darkAppearance
+        terminalStageView.appearance = terminalAppearanceOverride
         terminalStageView.wantsLayer = true
         terminalStageView.layer?.backgroundColor = background
     }
@@ -677,7 +706,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             )
         }
         view.setTerminalFont(family: userPreferences.fontFamily, size: userPreferences.fontSize)
-        view.setTerminalColors(foreground: terminalStageForeground, background: terminalStageBackground)
+        view.applyTerminalTheme(isDark: isDarkTerminalTheme)
         terminalRegistry.insert(view, for: key)
         return view
     }
@@ -702,6 +731,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             focusedSessionID: workspaceState.visibleSessionID,
             views: views
         )
+        applyTerminalStageAppearance()
     }
 
     private func focusVisibleTerminal() {

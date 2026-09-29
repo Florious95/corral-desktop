@@ -1231,12 +1231,14 @@ public final class CorralWorkspaceView: NSView {
     public var onFocusSession: ((UUID, UUID) -> Void)?
     public var onDevices: (() -> Void)?
     public var onTabContextAction: ((UUID, String) -> Void)?
+    public var onEffectiveAppearanceChanged: (() -> Void)?
     public private(set) var previewSessionID: UUID?
     public var isSidebarCollapsed: Bool { !sidebarIsVisible }
     public static let sidebarWidth: CGFloat = 280
     public static let headerHeight: CGFloat = 38
     private var sidebarColumnWidth: NSLayoutConstraint!
     private var sidebarIsVisible = true
+    private var lastObservedEffectiveAppearance: NSAppearance.Name?
 
     public init(tabs: [CorralTab] = [], sidebar: CorralSidebarView = CorralSidebarView()) {
         self.sidebar = sidebar
@@ -1293,6 +1295,15 @@ public final class CorralWorkspaceView: NSView {
         if let first = orderedTabs.first { selectTab(id: first.id) }
     }
     public required init?(coder: NSCoder) { fatalError("CorralWorkspaceView is created programmatically") }
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        let current = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) ?? .aqua
+        guard current != lastObservedEffectiveAppearance else { return }
+        lastObservedEffectiveAppearance = current
+        guard CorralAestheticTokens.themeMode == .system else { return }
+        setTheme(.system)
+        onEffectiveAppearanceChanged?()
+    }
     public override func layout() {
         // Keep both the sidebar and two minimum-width terminal panes usable in
         // a one-third-width desktop window. Wide windows retain the full sidebar.
@@ -1365,6 +1376,7 @@ public final class CorralWorkspaceView: NSView {
     }
     public func setTheme(_ mode: CorralThemeMode) {
         CorralAestheticTokens.themeMode = mode
+        lastObservedEffectiveAppearance = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) ?? .aqua
         window?.backgroundColor = CorralAestheticTokens.surface0
         titleBar.refreshTheme(); sidebar.refreshTheme(); tabBar.refreshTheme()
         applyTheme(to: self)
