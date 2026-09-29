@@ -77,11 +77,12 @@ final class SplitLayoutTests: XCTestCase {
         XCTAssertEqual(frames(tall)[b]?.height, 60)
     }
 
-    func testSinglePaneSupportsAllFiveZonesAndRejectsSelfDrops() throws {
+    func testSinglePaneSupportsEdgeZonesAndCentralMidlineSplitsAndRejectsSelfDrops() throws {
         let stage = CGRect(x: 0, y: 0, width: 1000, height: 600)
         for (point, zone) in [(CGPoint(x: 50, y: 300), WorkspaceDropZone.left),
                               (CGPoint(x: 950, y: 300), .right), (CGPoint(x: 500, y: 20), .top),
-                              (CGPoint(x: 500, y: 580), .bottom), (CGPoint(x: 500, y: 300), .center)] {
+                              (CGPoint(x: 500, y: 580), .bottom), (CGPoint(x: 480, y: 300), .left),
+                              (CGPoint(x: 520, y: 300), .right), (CGPoint(x: 500, y: 300), .right)] {
             let drop = try XCTUnwrap(SplitLayout.dropTarget(at: point, source: s, root: .session(a), in: stage))
             XCTAssertEqual(drop.edge, zone)
             XCTAssertEqual(drop.target, a)
@@ -95,7 +96,7 @@ final class SplitLayoutTests: XCTestCase {
         XCTAssertEqual(empty.previewFrame, stage)
     }
 
-    func testMultiPaneDropPicksTheNearestNormalizedEdgeWithCenterCoreAndHysteresis() throws {
+    func testMultiPaneDropPicksNearestEdgeOrPaneMidlineWithHysteresis() throws {
         let stage = CGRect(x: 0, y: 0, width: 1000, height: 600)
         let root = columns(0.5, .session(a), .session(b)) // A: 0..<497
         func edge(_ x: CGFloat, _ y: CGFloat, previous: SplitLayout.DropTarget? = nil) -> WorkspaceDropZone? {
@@ -105,7 +106,8 @@ final class SplitLayoutTests: XCTestCase {
         XCTAssertEqual(edge(480, 300), .right)
         XCTAssertEqual(edge(248, 10), .top)
         XCTAssertEqual(edge(248, 590), .bottom)
-        XCTAssertEqual(edge(248, 300), .center)
+        XCTAssertEqual(edge(248, 300), .left, "the left side of A's midline splits left")
+        XCTAssertEqual(edge(248.5, 300), .right, "the midline tie deterministically splits right")
         XCTAssertEqual(edge(10, 10), .top, "diagonal corners resolve by normalized distance, not by axis order")
         XCTAssertEqual(edge(62.125, 75), .left, "exact ties (u = v = 0.125) prefer left > right > top > bottom")
 
@@ -118,10 +120,10 @@ final class SplitLayoutTests: XCTestCase {
         let top = try XCTUnwrap(SplitLayout.dropTarget(at: CGPoint(x: 248, y: 10), source: s, root: root, in: stage))
         XCTAssertEqual(top.target, a)
         XCTAssertEqual(top.previewFrame, CGRect(x: 0, y: 0, width: 497, height: 297))
-        let center = try XCTUnwrap(SplitLayout.dropTarget(at: CGPoint(x: 700, y: 300), source: s, root: root, in: stage))
-        XCTAssertEqual(center.target, b)
-        XCTAssertEqual(center.edge, .center)
-        XCTAssertEqual(center.previewFrame, CGRect(x: 503, y: 0, width: 497, height: 600))
+        let midlineSplit = try XCTUnwrap(SplitLayout.dropTarget(at: CGPoint(x: 700, y: 300), source: s, root: root, in: stage))
+        XCTAssertEqual(midlineSplit.target, b)
+        XCTAssertEqual(midlineSplit.edge, .left)
+        XCTAssertEqual(midlineSplit.previewFrame, CGRect(x: 337, y: 0, width: 328, height: 600))
         XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 499, y: 300), source: s, root: root, in: stage), "the 6pt gap is not a pane")
     }
 
@@ -130,8 +132,8 @@ final class SplitLayoutTests: XCTestCase {
         let narrow = columns(0.5, .session(a), .session(b))
         let narrowStage = CGRect(x: 0, y: 0, width: 300, height: 600)
         XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 5, y: 300), source: s, root: narrow, in: narrowStage))
-        XCTAssertEqual(SplitLayout.dropTarget(at: CGPoint(x: 70, y: 300), source: s, root: narrow, in: narrowStage)?.edge, .center,
-                       "replacing a pane never changes geometry")
+        XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 70, y: 300), source: s, root: narrow, in: narrowStage),
+                     "a center-line horizontal split is refused when it would leave either child below 120pt")
         // 100pt tall stage: a top/bottom split would leave 47pt rows.
         let short = CGRect(x: 0, y: 0, width: 1000, height: 100)
         XCTAssertNil(SplitLayout.dropTarget(at: CGPoint(x: 248, y: 2), source: s, root: narrow, in: short))

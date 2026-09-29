@@ -168,7 +168,7 @@ final class SplitWorkspaceViewTests: XCTestCase {
         XCTAssertEqual(dropped?.2, .top)
         XCTAssertTrue(stage.dropZone.isHidden)
 
-        // A Tab dragged from the bar replaces the pane under the center core; the active Tab cannot drop on itself.
+        // A Tab dragged onto the pane midline splits it to the pointer's side; the active Tab cannot drop on itself.
         let activeTab = UUID(), otherTab = UUID()
         stage.activeTabID = activeTab
         var droppedTab: (UUID, SessionID?, SplitDropZoneView.Edge)?
@@ -176,10 +176,12 @@ final class SplitWorkspaceViewTests: XCTestCase {
         let tab = FakeDraggingInfo(location: stage.convert(CGPoint(x: 750, y: 300), to: nil), strings: [.string: otherTab.uuidString])
         defer { tab.pasteboard.releaseGlobally() }
         XCTAssertEqual(stage.draggingUpdated(tab), .move)
+        XCTAssertEqual(stage.dropZone.edge, .left)
+        XCTAssertEqual(stage.dropZone.frame.width, 328, accuracy: 0.5, "a midline drop highlights only the newly split pane")
         XCTAssertTrue(stage.performDragOperation(tab))
         XCTAssertEqual(droppedTab?.0, otherTab)
         XCTAssertEqual(droppedTab?.1, b)
-        XCTAssertEqual(droppedTab?.2, .center)
+        XCTAssertEqual(droppedTab?.2, .left)
         let selfTab = FakeDraggingInfo(location: stage.convert(CGPoint(x: 750, y: 300), to: nil), strings: [.string: activeTab.uuidString])
         defer { selfTab.pasteboard.releaseGlobally() }
         XCTAssertEqual(stage.draggingUpdated(selfTab), [])

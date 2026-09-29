@@ -10,7 +10,7 @@ public enum SplitLayout {
     public static let minimumPaneWidth: CGFloat = 120
     public static let minimumPaneHeight: CGFloat = 60
     static let hysteresis: CGFloat = 3
-    /// A drop whose nearest normalized edge is at least this far away replaces the pane instead of splitting it.
+    /// Drops this far from every edge belong to the central region, which splits horizontally by the pane midline.
     static let centerCore: CGFloat = 0.25
 
     public struct Pane: Equatable, Sendable {
@@ -41,7 +41,7 @@ public enum SplitLayout {
         /// Nil on an empty stage: the source becomes the whole layout.
         public let target: SessionID?
         public let edge: WorkspaceDropZone
-        /// The source's slot in the candidate layout (the target pane itself for `center`).
+        /// The source's slot in the candidate layout (the whole stage when there is no target).
         public let previewFrame: CGRect
     }
 
@@ -116,9 +116,8 @@ public enum SplitLayout {
         return ratio == divider.ratio ? nil : ratio
     }
 
-    /// All pane counts use the same five zones: the central 50% by 50% replaces;
-    /// otherwise the nearest normalized edge splits (ties: left, right, top, bottom).
-    /// Reject a candidate if any resulting pane is below 120×60 points.
+    /// The central 50% by 50% splits left or right at the pane midline; elsewhere the nearest normalized edge splits
+    /// (ties: left, right, top, bottom). Reject a candidate if any resulting pane is below 120×60 points.
     public static func dropTarget(at point: CGPoint, source: SessionID, root: WorkspaceLayoutNode?, in bounds: CGRect, previous: DropTarget? = nil) -> DropTarget? {
         guard bounds.contains(point) else { return nil }
         guard let root else { return DropTarget(target: nil, edge: .center, previewFrame: bounds) }
@@ -126,7 +125,8 @@ public enum SplitLayout {
         guard let pane = layout.panes.first(where: { $0.frame.contains(point) }), pane.sessionID != source else { return nil }
         let rect = pane.frame
         let previousEdge = previous?.target == pane.sessionID ? previous?.edge : nil
-        let edge = nearestEdge(u: (point.x - rect.minX) / rect.width, v: (point.y - rect.minY) / rect.height, in: rect.size, previous: previousEdge)
+        let nearest = nearestEdge(u: (point.x - rect.minX) / rect.width, v: (point.y - rect.minY) / rect.height, in: rect.size, previous: previousEdge)
+        let edge = nearest == .center ? (point.x < rect.midX ? WorkspaceDropZone.left : .right) : nearest
         guard let candidate = root.dropping(source, onto: pane.sessionID, edge: edge) else { return nil }
         let projected = project(candidate, in: bounds)
         guard projected.panes.count == candidate.leafIDs.count,
