@@ -4,7 +4,7 @@ import CorralUI
 @preconcurrency import SwiftTerm
 
 @MainActor
-final class CorralNativeTerminalView: TerminalView {
+final class CorralNativeTerminalView: TerminalView, NSTextContent {
     static let defaultForegroundColor = NSColor(srgbRed: 213.0 / 255, green: 220.0 / 255, blue: 230.0 / 255, alpha: 1)
     static let defaultBackgroundColor = NSColor(srgbRed: 16.0 / 255, green: 17.0 / 255, blue: 21.0 / 255, alpha: 1)
     static let lightForegroundColor = NSColor(srgbRed: 58.0 / 255, green: 56.0 / 255, blue: 53.0 / 255, alpha: 1)
@@ -12,6 +12,10 @@ final class CorralNativeTerminalView: TerminalView {
 
     private let pasteboard: NSPasteboard
     private var displayFilter = CorralTerminalFilter()
+    nonisolated var contentType: NSTextContentType? {
+        get { nil }
+        set {}
+    }
     private var inputEnabled = true
     var onFocus: (() -> Void)?
     var onDiscardedAutomaticReply: ((Int) -> Void)?

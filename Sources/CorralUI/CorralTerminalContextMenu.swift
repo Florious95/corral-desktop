@@ -1,7 +1,7 @@
 import AppKit
 
 @MainActor
-public final class CorralTerminalContextMenu: NSMenu {
+public final class CorralTerminalContextMenu: NSMenu, NSMenuDelegate {
     @MainActor
     public struct WorkspaceActions {
         public let onAdapt: () -> Void
@@ -33,6 +33,7 @@ public final class CorralTerminalContextMenu: NSMenu {
         selectAll = onSelectAll
         self.workspaceActions = workspaceActions
         super.init(title: "Terminal")
+        delegate = self
         autoenablesItems = false
         if workspaceActions != nil {
             addItem("适应当前窗口", action: #selector(adaptCurrentWindow))
@@ -48,6 +49,28 @@ public final class CorralTerminalContextMenu: NSMenu {
     }
 
     public required init(coder: NSCoder) { fatalError("CorralTerminalContextMenu is created programmatically") }
+
+    public func menuNeedsUpdate(_ menu: NSMenu) { removeAutoFillItems(from: menu) }
+    public func menuWillOpen(_ menu: NSMenu) { removeAutoFillItems(from: menu) }
+
+    private func removeAutoFillItems(from menu: NSMenu) {
+        for index in menu.items.indices.reversed() {
+            let item = menu.items[index]
+            let hasAutoFillTitle = Self.isAutoFillTitle(item.title)
+                || item.submenu.map { Self.isAutoFillTitle($0.title) } == true
+            if hasAutoFillTitle {
+                menu.removeItem(at: index)
+            } else if let submenu = item.submenu {
+                removeAutoFillItems(from: submenu)
+            }
+        }
+    }
+
+    private static func isAutoFillTitle(_ title: String) -> Bool {
+        title.localizedCaseInsensitiveContains("autofill")
+            || title.localizedCaseInsensitiveContains("auto fill")
+            || title.localizedCaseInsensitiveContains("自动填充")
+    }
 
     private func addItem(_ title: String, action: Selector) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
