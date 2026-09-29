@@ -5,6 +5,7 @@ public final class CorralAnchoredCardPanel: NSPanel {
     public static let cardWidth: CGFloat = 300
     public static let windowLeftInset: CGFloat = 10
     public static let anchorGap: CGFloat = 15
+    public private(set) var lastDismissedAt: TimeInterval?
 
     public init(contentViewController: NSViewController, anchoredTo sourceView: NSView) {
         contentViewController.loadViewIfNeeded()
@@ -36,6 +37,7 @@ public final class CorralAnchoredCardPanel: NSPanel {
 
     public override func resignKey() {
         super.resignKey()
+        lastDismissedAt = ProcessInfo.processInfo.systemUptime
         orderOut(nil)
     }
 

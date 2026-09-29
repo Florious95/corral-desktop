@@ -1211,10 +1211,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func presentDevicesPopover() {
-        if devicesCardPanel?.isVisible == true {
-            devicesCardPanel?.orderOut(nil)
-            devicesCardPanel = nil
-            return
+        if let panel = devicesCardPanel {
+            if panel.isVisible {
+                panel.orderOut(nil)
+                devicesCardPanel = nil
+                return
+            }
+            if let lastDismissedAt = panel.lastDismissedAt,
+               ProcessInfo.processInfo.systemUptime - lastDismissedAt < 0.3 {
+                return
+            }
         }
         let controller = DevicesPopoverViewController(repository: deviceRepository)
         controller.onDevicesChanged = { [weak self] devices in

@@ -43,7 +43,7 @@ let package = Package(
         ),
         .testTarget(name: "CorralServicesTests", dependencies: ["CorralServices", "CorralContracts"]),
         .testTarget(name: "CorralMetalTerminalTests", dependencies: ["CorralMetalTerminal", "CorralContracts", "CorralProtocol"]),
-        .testTarget(name: "CorralUITests", dependencies: ["CorralUI", "CorralContracts", "CorralMetalTerminal"]),
+        .testTarget(name: "CorralUITests", dependencies: ["CorralApp", "CorralUI", "CorralContracts", "CorralMetalTerminal"]),
         .testTarget(
             name: "CorralRegressionTests",
             dependencies: ["CorralContracts", "CorralServices", "CorralUI", "CorralMetalTerminal"]
