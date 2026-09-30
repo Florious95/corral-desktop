@@ -159,7 +159,16 @@ final class Issue16MultiTabReflowSyncTests: XCTestCase {
             }
             return b1 && b2
         }
-        XCTAssertTrue(tabBResizeSent, "Tab B activation must explicitly send new PTY resize control frames for both pane grids")
+        let allCommandsAfterSwitch = await link.commands()
+        let commandsAfterSwitch = allCommandsAfterSwitch.dropFirst(min(commandsBeforeTabBSwitch.count, allCommandsAfterSwitch.count))
+        let tabBPane1ResizeSent = commandsAfterSwitch.contains { command in
+            if case .resize(reference: references[2], size: currentBGrid) = command { true } else { false }
+        }
+        let tabBPane2ResizeSent = commandsAfterSwitch.contains { command in
+            if case .resize(reference: references[3], size: currentB2Grid) = command { true } else { false }
+        }
+        XCTAssertTrue(tabBResizeSent && tabBPane1ResizeSent, "Tab B pane 1 must receive a post-switch PTY resize frame for its current grid")
+        XCTAssertTrue(tabBPane2ResizeSent, "Tab B pane 2 must receive an explicit post-switch PTY resize frame even when its grid is unchanged")
         await coordinator.stop()
     }
 
