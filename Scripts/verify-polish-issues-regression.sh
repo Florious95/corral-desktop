@@ -23,6 +23,7 @@ LABELS=(
   "PR 3 — drag split midline projection"
   "PR 4 — suppress autofill xpc and context menu"
   "PR 5 — equal width tabs and long title truncation"
+  "PR 6 — compact terminal trailing margin"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -43,6 +44,7 @@ FILTERS=(
   "DragSplitMidlineProjectionTests/testMidlineLeftAndRightHoverProjectHalfPaneAndSplitTowardPointerSide"
   "AutoFillSubprocessSuppressionTests/testTerminalTextInputClientDeclaresNoAutofillContentType"
   "Issue17TabEqualWidthTests/testShortAndLongTitlesKeepTabItemsTheSameWidth"
+  "Issue18TerminalTrailingMarginTests/testSplitPaneGridsKeepTrailingMarginsAsTightAsTheirFivePointLeadingInset"
 )
 
 TOTAL=${#FILTERS[@]}
