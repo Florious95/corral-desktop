@@ -21,6 +21,20 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
     var onDiscardedAutomaticReply: ((Int) -> Void)?
     var workspaceContextMenuActions: (() -> CorralTerminalContextMenu.WorkspaceActions?)?
 
+    private var terminalScroller: NSScroller? { subviews.compactMap { $0 as? NSScroller }.first }
+    private var terminalScrollerWidth: CGFloat { NSScroller.scrollerWidth(for: .regular, scrollerStyle: scrollerStyle) }
+
+    private var terminalCellMetrics: (width: CGFloat, height: CGFloat)? {
+        let terminal = getTerminal()
+        guard terminal.cols > 0, terminal.rows > 0 else { return nil }
+        let reservedWidth = terminalScroller?.isHidden == true ? 0 : terminalScrollerWidth
+        let optimalSize = getOptimalFrameSize()
+        return (
+            max(1, (optimalSize.width - reservedWidth) / CGFloat(terminal.cols)),
+            max(1, optimalSize.height / CGFloat(terminal.rows))
+        )
+    }
+
     override init(frame: CGRect) {
         pasteboard = .general
         super.init(frame: frame)
@@ -60,10 +74,79 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         let resolved = family.split(separator: ",").lazy.compactMap { candidate in
             NSFont(name: String(candidate).trimmingCharacters(in: CharacterSet(charactersIn: " \"'\t")), size: pointSize)
         }.first ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
-        if font != resolved { font = resolved }
+        if font != resolved {
+            let previousGrid = (terminal.cols, terminal.rows)
+            let delegate = terminalDelegate
+            let scroller = terminalScroller
+            let wasHidden = scroller?.isHidden ?? false
+            scroller?.isHidden = true
+            terminalDelegate = nil
+            font = resolved
+            scroller?.isHidden = wasHidden
+            terminalDelegate = delegate
+            fitTerminalGrid(to: frame.size)
+            notifyGridChange(from: previousGrid, delegate: delegate)
+        }
     }
 
     private func installDarkColors() { applyTerminalTheme(isDark: true) }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        guard terminal != nil else { super.setFrameSize(newSize); return }
+        let previousGrid = (terminal.cols, terminal.rows)
+        let delegate = terminalDelegate
+        let scroller = terminalScroller
+        let wasHidden = scroller?.isHidden ?? false
+        let exactColumnFit = terminalCellMetrics.map { metrics in
+            let columns = floor(newSize.width / metrics.width)
+            return newSize.width - columns * metrics.width <= CGFloat.ulpOfOne * newSize.width
+        } ?? false
+
+        scroller?.isHidden = true
+        if exactColumnFit { terminalDelegate = nil }
+        super.setFrameSize(newSize)
+        scroller?.isHidden = wasHidden
+        terminalDelegate = delegate
+        if exactColumnFit {
+            fitTerminalGrid(to: newSize)
+            notifyGridChange(from: previousGrid, delegate: delegate)
+        } else {
+            updateScrollerWidth(for: newSize)
+        }
+    }
+
+    private func fitTerminalGrid(to size: NSSize) {
+        guard size.width > 0, size.height > 0, let metrics = terminalCellMetrics else { return }
+        let fullColumns = max(1, Int((size.width / metrics.width).rounded(.down)))
+        let remainder = size.width - CGFloat(fullColumns) * metrics.width
+        let columns = remainder <= CGFloat.ulpOfOne * size.width ? max(1, fullColumns - 1) : fullColumns
+        let rows = max(1, Int((size.height / metrics.height).rounded(.down)))
+        let trailingGutter = max(0, size.width - CGFloat(columns) * metrics.width)
+
+        if terminal.cols != columns || terminal.rows != rows {
+            selection.active = false
+            let delegate = terminalDelegate
+            terminalDelegate = nil
+            getTerminal().resize(cols: columns, rows: rows)
+            terminalDelegate = delegate
+        }
+        updateScrollerWidth(for: size, gutter: trailingGutter)
+        needsDisplay = true
+    }
+
+    private func updateScrollerWidth(for size: NSSize, gutter explicitGutter: CGFloat? = nil) {
+        guard let scroller = terminalScroller else { return }
+        let gutter = explicitGutter ?? terminalCellMetrics.map {
+            max(0, size.width - CGFloat(terminal.cols) * $0.width)
+        } ?? 0
+        scroller.constraints.first(where: { $0.firstAttribute == .width })?.constant = gutter
+    }
+
+    private func notifyGridChange(from previousGrid: (Int, Int), delegate: TerminalViewDelegate?) {
+        let terminal = getTerminal()
+        guard terminal.cols != previousGrid.0 || terminal.rows != previousGrid.1 else { return }
+        delegate?.sizeChanged(source: self, newCols: terminal.cols, newRows: terminal.rows)
+    }
 
     func applyTerminalTheme(isDark: Bool) {
         installColors(isDark ? CorralTerminalPalette.darkANSI16 : CorralTerminalPalette.lightANSI16)
@@ -150,7 +233,17 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         layer?.contentsScale = window.backingScaleFactor
         // SwiftTerm snaps cell metrics in its font setter using the current window scale.
         let currentFont = font
+        let previousGrid = (terminal.cols, terminal.rows)
+        let delegate = terminalDelegate
+        let scroller = terminalScroller
+        let wasHidden = scroller?.isHidden ?? false
+        scroller?.isHidden = true
+        terminalDelegate = nil
         font = currentFont
+        scroller?.isHidden = wasHidden
+        terminalDelegate = delegate
+        fitTerminalGrid(to: frame.size)
+        notifyGridChange(from: previousGrid, delegate: delegate)
         needsDisplay = true
     }
 
