@@ -324,6 +324,21 @@ public final class CorralTabBarView: NSView {
     }
 
     public override func mouseExited(with event: NSEvent) {
+        guard let window else {
+            isMouseInsideTabBar = false
+            guard lockedTabWidth != nil else { return }
+            lockedTabWidth = nil
+            updateTabWidths(animated: true)
+            return
+        }
+        let eventLocation = convert(event.locationInWindow, from: nil)
+        let pointerLocation = event.window === window
+            ? eventLocation
+            : convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard !bounds.contains(pointerLocation) else {
+            isMouseInsideTabBar = true
+            return
+        }
         isMouseInsideTabBar = false
         guard lockedTabWidth != nil else { return }
         lockedTabWidth = nil
@@ -369,6 +384,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     fileprivate static let maximumRegularWidth: CGFloat = 160
     fileprivate static let pinnedWidth: CGFloat = 32
     private var widthConstraint: NSLayoutConstraint!
+    private var minimumWidthConstraint: NSLayoutConstraint!
     var tab: CorralTab
     private weak var owner: CorralTabBarView?
     private let status = CorralStatusIndicatorView()
@@ -383,6 +399,8 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     private var compactTitleTrailingConstraint: NSLayoutConstraint?
     private var closeTrailingConstraint: NSLayoutConstraint?
     private var isCompact = false
+    private var isMinimal = false
+    private var pendingExpansionWidth: CGFloat?
     private var selected: Bool
     private var hovered = false
     private var editField: CorralInlineRenameField?
@@ -397,6 +415,8 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
+        layer?.masksToBounds = true
+        setContentCompressionResistancePriority(.required, for: .horizontal)
         status.fillsIdle = true
         status.status = tab.status
         status.translatesAutoresizingMaskIntoConstraints = false
@@ -438,8 +458,10 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         let showsCloseButton = !tab.isPinned
         title.isHidden = tab.isPinned
         if showsCloseButton { addSubview(closeButton) }
-        widthConstraint = widthAnchor.constraint(equalToConstant: tab.isPinned ? Self.pinnedWidth : Self.maximumRegularWidth)
-        widthConstraint.isActive = true
+        let initialWidth = tab.isPinned ? Self.pinnedWidth : Self.maximumRegularWidth
+        widthConstraint = widthAnchor.constraint(equalToConstant: initialWidth)
+        minimumWidthConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: tab.isPinned ? Self.pinnedWidth : Self.minimumRegularWidth)
+        NSLayoutConstraint.activate([widthConstraint, minimumWidthConstraint])
         heightAnchor.constraint(equalToConstant: 26).isActive = true
         NSLayoutConstraint.activate([
             status.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -484,29 +506,48 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         registerForDraggedTypes([.string])
     }
     func setWidth(_ width: CGFloat, animated: Bool) {
-        setCompactMode(!tab.isPinned && width < 96)
+        let compact = !tab.isPinned && width < 96
+        let minimal = !tab.isPinned && width < 60
+        if let pendingExpansionWidth, abs(pendingExpansionWidth - width) <= 0.25 {
+            // Keep compact contents clipped/hidden until the width animation finishes.
+        } else if animated, isCompact, !compact {
+            pendingExpansionWidth = width
+        } else {
+            pendingExpansionWidth = nil
+            setCompactMode(compact, minimal: minimal)
+        }
         guard abs(widthConstraint.constant - width) > 0.25 else { return }
         if animated {
-            NSAnimationContext.runAnimationGroup { context in
+            NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.2
                 context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
                 context.allowsImplicitAnimation = true
                 widthConstraint.animator().constant = width
-            }
+            }, completionHandler: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, let pending = self.pendingExpansionWidth,
+                          abs(pending - width) <= 0.25 else { return }
+                    self.pendingExpansionWidth = nil
+                    self.setCompactMode(compact, minimal: minimal)
+                    self.layoutSubtreeIfNeeded()
+                }
+            })
         } else {
             widthConstraint.constant = width
         }
     }
 
-    private func setCompactMode(_ compact: Bool) {
-        guard !tab.isPinned, isCompact != compact,
+    private func setCompactMode(_ compact: Bool, minimal: Bool) {
+        guard !tab.isPinned, isCompact != compact || isMinimal != minimal,
               let providerLeading = regularProviderLeadingConstraint,
               let titleLeading = titleLeadingConstraint,
               let compactTitleLeading = compactTitleLeadingConstraint,
               let titleTrailing = titleTrailingConstraint,
               let compactTitleTrailing = compactTitleTrailingConstraint else { return }
         isCompact = compact
+        isMinimal = minimal
         providerIconView?.isHidden = compact
+        title.isHidden = minimal
         statusLeadingConstraint?.constant = compact ? 3 : 8
         closeTrailingConstraint?.constant = compact ? -4 : -6
         if compact {
