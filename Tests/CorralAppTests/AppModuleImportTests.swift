@@ -2108,6 +2108,48 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testRapidScrollbarThumbJumpsAcrossLargeScrollbackStayResponsive() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { window.close(); Task { await coordinator.stop() } }
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        terminal.scrollerStyle = .legacy
+        let historyLines = 8_192
+        terminal.getTerminal().changeHistorySize(historyLines)
+        let history = (0..<historyLines).map { index in
+            String(format: "%05d %@", index, String(repeating: "x", count: 72))
+        }.joined(separator: "\r\n")
+        terminal.replaceSnapshot(Data(history.utf8))
+        window.displayIfNeeded()
+
+        XCTAssertTrue(terminal.canScroll, "The fixture must contain thousands of scrollback rows")
+        let scroller = try XCTUnwrap(terminal.subviews.compactMap { $0 as? NSScroller }.first)
+        XCTAssertTrue(scroller.isEnabled)
+        let historyRowCount = terminal.getTerminal().displayBuffer.lines.count
+        let inputCountBefore = await link.inputProgress().completed
+        let jumps = 512
+        var maxJumpNanoseconds: UInt64 = 0
+        let stressStarted = DispatchTime.now().uptimeNanoseconds
+        for index in 0..<jumps {
+            let position = index.isMultiple(of: 2) ? 0.0 : 1.0
+            scroller.doubleValue = position
+            let jumpStarted = DispatchTime.now().uptimeNanoseconds
+            terminal.scroll(toPosition: scroller.doubleValue)
+            window.displayIfNeeded()
+            maxJumpNanoseconds = max(maxJumpNanoseconds, DispatchTime.now().uptimeNanoseconds - jumpStarted)
+        }
+        let totalMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - stressStarted) / 1_000_000
+        let maxJumpMilliseconds = Double(maxJumpNanoseconds) / 1_000_000
+        let inputCountAfter = await link.inputProgress().completed
+        print("SCROLLBAR_STRESS historyRows=\(historyRowCount) jumps=\(jumps) maxJumpMs=\(maxJumpMilliseconds) totalMs=\(totalMilliseconds) localPosition=\(terminal.scrollPosition) PTYWrites=\(inputCountAfter - inputCountBefore)")
+
+        XCTAssertEqual(terminal.scrollPosition, 1, accuracy: 0.001, "The final thumb jump must land at the history tail")
+        XCTAssertEqual(inputCountAfter, inputCountBefore, "Local scrollbar dragging must not enqueue PTY input")
+        XCTAssertLessThan(maxJumpMilliseconds, 100, "A large scrollbar jump blocked the main thread for \(maxJumpMilliseconds)ms")
+        XCTAssertLessThan(totalMilliseconds, 5_000, "Rapid scrollbar movement monopolized the UI thread for \(totalMilliseconds)ms")
+        await coordinator.stop()
+    }
+
     func testInteractionLargeUnicodePasteFitsEveryWireEnvelopeWithoutLoss() async throws {
         let (coordinator, link, refs) = try await interactionFixture()
         let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
