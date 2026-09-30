@@ -134,7 +134,10 @@ final class NativeWorkspaceTests: XCTestCase {
         let rect = workspace.tabBar.convert(item.bounds, from: item)
         XCTAssertGreaterThan(rect.minX, 0)
         XCTAssertLessThanOrEqual(rect.maxX, workspace.tabBar.createButton.frame.minX)
-        XCTAssertGreaterThan(item.visibleRect.width, 100)
+        XCTAssertEqual(item.frame.width, 44, accuracy: 0.5,
+                       "Overflow Tabs should adapt to the 44pt minimum")
+        XCTAssertEqual(item.visibleRect.width, 44, accuracy: 0.5,
+                       "The selected 44pt overflow Tab should be fully visible")
     }
 
     func testTabPressDoesNotSwitchUntilRelease() throws {
@@ -160,20 +163,26 @@ final class NativeWorkspaceTests: XCTestCase {
         let workspace = CorralWorkspaceView(tabs: [first, second])
         let controller = CorralWindowController(workspaceView: workspace)
         let window = try XCTUnwrap(controller.window)
-        window.orderBack(nil)
+        window.makeKeyAndOrderFront(nil)
         defer { window.close() }
         window.contentView?.layoutSubtreeIfNeeded()
         let item = try XCTUnwrap(descendants(of: workspace.tabBar).first { $0.accessibilityLabel() == "Second" && $0.accessibilityIdentifier() == "corral.tab" })
-        let center = CGPoint(x: item.bounds.midX, y: item.bounds.midY)
-        for finalPoint in [CGPoint(x: item.bounds.maxX + 12, y: center.y), center] {
-            for (index, type) in [NSEvent.EventType.leftMouseDown, .leftMouseUp].enumerated() {
-                let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: item.convert(index == 0 ? center : finalPoint, to: nil),
-                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                    context: nil, eventNumber: index, clickCount: 1, pressure: index == 1 ? 0 : 1))
-                window.sendEvent(event)
-                if index == 0 || finalPoint != center { XCTAssertEqual(workspace.activeTabID, first.id) }
-            }
+        let itemSuperview = try XCTUnwrap(item.superview)
+        let center = item.convert(CGPoint(x: item.frame.midX, y: item.frame.midY), from: itemSuperview)
+        let outside = item.convert(CGPoint(x: item.frame.maxX + 12, y: item.frame.midY), from: itemSuperview)
+        var eventNumber = 0
+        func send(_ type: NSEvent.EventType, at point: CGPoint) throws {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: item.convert(point, to: nil),
+                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: eventNumber, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+            eventNumber += 1
+            if type == .leftMouseDown { item.mouseDown(with: event) } else { item.mouseUp(with: event) }
         }
+        try send(.leftMouseDown, at: center)
+        try send(.leftMouseUp, at: outside)
+        XCTAssertEqual(workspace.activeTabID, first.id, "Releasing outside the Tab must not select it")
+        try send(.leftMouseDown, at: center)
+        try send(.leftMouseUp, at: center)
         XCTAssertEqual(workspace.activeTabID, second.id)
     }
 
@@ -553,15 +562,15 @@ final class NativeWorkspaceTests: XCTestCase {
         for item in items {
             let frame = bar.convert(item.bounds, from: item)
             XCTAssertEqual(frame.height, 26, accuracy: 0.1)
-            XCTAssertGreaterThanOrEqual(frame.width, 144 - 0.1)
-            XCTAssertLessThanOrEqual(frame.width, 260 + 0.1)
+            XCTAssertGreaterThanOrEqual(frame.width, 44 - 0.5)
+            XCTAssertLessThanOrEqual(frame.width, 160 + 0.5)
             XCTAssertEqual(frame.midY, 19, accuracy: 0.1, "Pills share the 38px header centerline with the sidebar toggle")
             XCTAssertEqual(item.layer?.cornerRadius, 6)
         }
         XCTAssertEqual(bar.convert(items[0].bounds, from: items[0]).minX, 9, accuracy: 0.1)
         let capsule = try XCTUnwrap(bar.activeCapsuleFrame)
-        XCTAssertGreaterThanOrEqual(capsule.size.width, 144 - 0.1)
-        XCTAssertLessThanOrEqual(capsule.size.width, 260 + 0.1)
+        XCTAssertGreaterThanOrEqual(capsule.size.width, 44 - 0.5)
+        XCTAssertLessThanOrEqual(capsule.size.width, 160 + 0.5)
         XCTAssertEqual(capsule.size.height, 26, accuracy: 0.1)
         let plus = bar.convert(bar.createButton.bounds, from: bar.createButton)
         XCTAssertEqual(plus.minX, bar.convert(items[1].bounds, from: items[1]).maxX + 9, accuracy: 0.5)
@@ -574,8 +583,8 @@ final class NativeWorkspaceTests: XCTestCase {
         for index in 0..<30 { workspace.addTab(CorralTab(title: "Overflow \(index)"), select: false) }
         workspace.layoutSubtreeIfNeeded(); workspace.tabBar.layoutSubtreeIfNeeded()
         let crowded = descendants(of: bar).filter { String(describing: type(of: $0)) == "CorralTabItemView" }
-        XCTAssertTrue(crowded.allSatisfy { $0.frame.width >= 144 - 0.1 && $0.frame.width <= 260 + 0.1 })
-        XCTAssertLessThanOrEqual(bar.convert(bar.createButton.bounds, from: bar.createButton).maxX, bar.bounds.maxX - 10 + 0.1)
+        XCTAssertTrue(crowded.allSatisfy { $0.frame.width >= 44 - 0.5 && $0.frame.width <= 160 + 0.5 })
+        XCTAssertLessThanOrEqual(bar.convert(bar.createButton.bounds, from: bar.createButton).maxX, bar.bounds.maxX - 8 + 0.5)
     }
 
     func testSidebarHasSpacesAndAgentsAndExactAgentContextMenu() throws {
@@ -797,13 +806,11 @@ final class NativeWorkspaceTests: XCTestCase {
         }
 
         let pinnedItem = try item(title: pinned.title)
-        let pinnedLabel = try titleLabel(in: pinnedItem)
-        XCTAssertFalse(pinnedLabel.isHidden)
-        XCTAssertEqual(pinnedLabel.stringValue, "全自动编排leader")
-        XCTAssertGreaterThan(pinnedLabel.frame.width, 0)
-        XCTAssertEqual(pinnedLabel.cell?.lineBreakMode, .byTruncatingTail)
-        XCTAssertGreaterThanOrEqual(pinnedItem.frame.width, 144)
-        XCTAssertLessThanOrEqual(pinnedItem.frame.width, 260)
+        let pinnedLabel = descendants(of: pinnedItem).compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "corral.tab.title"
+        }
+        XCTAssertTrue(pinnedLabel?.isHidden ?? true, "Pinned Tabs are icon-only and must not display their long title")
+        XCTAssertEqual(pinnedItem.frame.width, 32, accuracy: 0.5)
         XCTAssertTrue(descendants(of: pinnedItem).contains { $0 is CorralProviderIconView })
         XCTAssertFalse(descendants(of: pinnedItem).contains { $0.accessibilityIdentifier() == "corral.tab.close" })
 

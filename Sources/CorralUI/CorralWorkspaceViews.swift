@@ -67,6 +67,9 @@ public final class CorralTabBarView: NSView {
     private let expandSidebarButton = NSButton(title: "▤", target: nil, action: nil)
     private let dragRegion = CorralWindowDragRegion()
     private var itemsLeadingConstraint: NSLayoutConstraint!
+    private var isMouseInsideTabBar = false
+    private var trackingArea: NSTrackingArea?
+    private var lockedTabWidth: CGFloat?
     public private(set) var activeCapsuleFrame: NSRect?
     public private(set) var isSidebarCollapsed = false
     public private(set) var sidebarToggleButton = NSButton(title: "▤", target: nil, action: nil)
@@ -79,7 +82,7 @@ public final class CorralTabBarView: NSView {
         layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         itemsStack.orientation = .horizontal
         itemsStack.alignment = .centerY
-        itemsStack.spacing = 4
+        itemsStack.spacing = 2
         itemsStack.translatesAutoresizingMaskIntoConstraints = true
         activeCapsule.wantsLayer = true
         activeCapsule.layer?.cornerRadius = 6
@@ -146,7 +149,7 @@ public final class CorralTabBarView: NSView {
             expandSidebarButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), expandSidebarButton.centerYAnchor.constraint(equalTo: centerYAnchor), expandSidebarButton.widthAnchor.constraint(equalToConstant: 28), expandSidebarButton.heightAnchor.constraint(equalToConstant: 26),
             itemsLeadingConstraint, tabsLane.centerYAnchor.constraint(equalTo: centerYAnchor), tabsLane.heightAnchor.constraint(equalToConstant: 28), laneHugsTabs,
             createButton.leadingAnchor.constraint(equalTo: tabsLane.trailingAnchor, constant: 8), createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            createButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            createButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
             dragRegion.leadingAnchor.constraint(equalTo: createButton.trailingAnchor, constant: 8), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor), bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor), bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor), bottomBorder.heightAnchor.constraint(equalToConstant: 1)
         ])
@@ -162,6 +165,9 @@ public final class CorralTabBarView: NSView {
         self.tabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
         let selectionChanged = self.selectedTabID != selectedTabID
         self.selectedTabID = selectedTabID
+        let regularCount = self.tabs.filter { !$0.isPinned }.count
+        let didUnlock = regularCount <= 1 && lockedTabWidth != nil
+        if didUnlock { lockedTabWidth = nil }
         var updated: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
         var ordered: [CorralTabItemView] = []
         for tab in self.tabs {
@@ -183,7 +189,10 @@ public final class CorralTabBarView: NSView {
             needsLayout = true
         }
         let existing = itemsStack.arrangedSubviews
-        guard existing.count != ordered.count || zip(existing, ordered).contains(where: { $0 !== $1 }) else { return }
+        guard existing.count != ordered.count || zip(existing, ordered).contains(where: { $0 !== $1 }) else {
+            if didUnlock { updateTabWidths(animated: true) }
+            return
+        }
         for view in existing where !ordered.contains(where: { $0 === view }) {
             itemsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
@@ -195,13 +204,50 @@ public final class CorralTabBarView: NSView {
             // Keep accessibility/subview traversal in the same order as the lane.
             itemsStack.addSubview(view, positioned: .above, relativeTo: index == 0 ? activeCapsule : ordered[index - 1])
         }
-        itemsStack.setFrameSize(NSSize(width: itemsStack.fittingSize.width, height: 28))
+        updateTabWidths(animated: lockedTabWidth == nil)
         itemsStack.needsLayout = true
         needsLayout = true
     }
 
+    private func updateTabWidths(animated: Bool) {
+        let items = itemsStack.arrangedSubviews.compactMap { $0 as? CorralTabItemView }
+        guard !items.isEmpty else { itemsStack.setFrameSize(NSSize(width: 0, height: 28)); return }
+        let regularItems = items.filter { !$0.tab.isPinned }
+        let pinnedCount = items.count - regularItems.count
+        let fixedChromeWidth = itemsLeadingConstraint.constant + 8 + 26 + 8
+        let availableForItems = max(0, bounds.width - fixedChromeWidth)
+        let gaps = CGFloat(max(0, items.count - 1)) * itemsStack.spacing
+        let regularBudget = availableForItems - CGFloat(pinnedCount) * CorralTabItemView.pinnedWidth - gaps
+        let naturalWidth = regularItems.isEmpty ? CorralTabItemView.maximumRegularWidth : regularBudget / CGFloat(regularItems.count)
+        let adaptiveWidth = min(CorralTabItemView.maximumRegularWidth, max(CorralTabItemView.minimumRegularWidth, naturalWidth))
+        let requestedWidth = lockedTabWidth.map {
+            min(CorralTabItemView.maximumRegularWidth, max(CorralTabItemView.minimumRegularWidth, $0))
+        } ?? adaptiveWidth
+        let backingScale = max(window?.backingScaleFactor ?? 1, 1)
+        let regularWidth = floor(requestedWidth * backingScale) / backingScale
+
+        for item in items {
+            item.setWidth(item.tab.isPinned ? CorralTabItemView.pinnedWidth : regularWidth, animated: animated && lockedTabWidth == nil)
+        }
+        let documentSize = NSSize(width: itemsStack.fittingSize.width, height: 28)
+        if abs(itemsStack.frame.width - documentSize.width) > 0.25 {
+            if animated {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                    context.allowsImplicitAnimation = true
+                    itemsStack.animator().setFrameSize(documentSize)
+                }
+            } else {
+                itemsStack.setFrameSize(documentSize)
+            }
+        }
+        itemsStack.needsLayout = true
+    }
+
     public override func layout() {
         super.layout()
+        updateTabWidths(animated: false)
         itemsStack.layoutSubtreeIfNeeded()
         if revealSelectedTab, let item = itemsStack.arrangedSubviews.first(where: { ($0 as? CorralTabItemView)?.tab.id == selectedTabID }) {
             item.scrollToVisible(item.bounds)
@@ -265,8 +311,40 @@ public final class CorralTabBarView: NSView {
         (itemsStack.arrangedSubviews.first { ($0 as? CorralTabItemView)?.tab.id == tabID } as? CorralTabItemView)?.beginRename()
     }
 
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    public override func mouseEntered(with event: NSEvent) {
+        isMouseInsideTabBar = true
+    }
+
+    public override func mouseExited(with event: NSEvent) {
+        isMouseInsideTabBar = false
+        guard lockedTabWidth != nil else { return }
+        lockedTabWidth = nil
+        updateTabWidths(animated: true)
+    }
+
     fileprivate func select(_ id: UUID) { onSelectTab?(id) }
     fileprivate func close(_ id: UUID) { onCloseTab?(id) }
+    fileprivate func closeFromButton(_ id: UUID, currentWidth: CGFloat) {
+        if tabs.filter({ !$0.isPinned }).count > 1, tabs.first(where: { $0.id == id })?.isPinned == false {
+            // A close-button activation proves the pointer is in the tab bar even if
+            // AppKit has not delivered the tracking-area enter event yet.
+            isMouseInsideTabBar = true
+            let width = lockedTabWidth ?? currentWidth
+            if width > 0 {
+                lockedTabWidth = width
+                updateTabWidths(animated: false)
+            }
+        }
+        onCloseTab?(id)
+    }
     fileprivate func commitRename(_ id: UUID, _ title: String) { onRenameTab?(id, title) }
     fileprivate func performContextAction(_ id: UUID, _ action: String) { onContextAction?(id, action) }
     @objc private func toggleSidebar() { onToggleSidebar?() }
@@ -287,12 +365,24 @@ public final class CorralTabBarView: NSView {
 
 @MainActor
 private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSource {
-    private static let standardWidth: CGFloat = 192
+    fileprivate static let minimumRegularWidth: CGFloat = 44
+    fileprivate static let maximumRegularWidth: CGFloat = 160
+    fileprivate static let pinnedWidth: CGFloat = 32
+    private var widthConstraint: NSLayoutConstraint!
     var tab: CorralTab
     private weak var owner: CorralTabBarView?
     private let status = CorralStatusIndicatorView()
     private let title = NSTextField(labelWithString: "")
     private let closeButton = NSButton(title: "", target: nil, action: nil)
+    private var providerIconView: NSImageView?
+    private var statusLeadingConstraint: NSLayoutConstraint?
+    private var regularProviderLeadingConstraint: NSLayoutConstraint?
+    private var titleLeadingConstraint: NSLayoutConstraint?
+    private var compactTitleLeadingConstraint: NSLayoutConstraint?
+    private var titleTrailingConstraint: NSLayoutConstraint?
+    private var compactTitleTrailingConstraint: NSLayoutConstraint?
+    private var closeTrailingConstraint: NSLayoutConstraint?
+    private var isCompact = false
     private var selected: Bool
     private var hovered = false
     private var editField: CorralInlineRenameField?
@@ -335,6 +425,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
             ])
         }
         addSubview(providerIcon)
+        providerIconView = providerIcon
         closeButton.image = CorralLegacyIcon.image(.close, size: 10, tint: CorralAestheticTokens.textMuted)
         closeButton.imagePosition = .imageOnly
         closeButton.isBordered = false
@@ -345,30 +436,43 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         closeButton.action = #selector(closeTab)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         let showsCloseButton = !tab.isPinned
+        title.isHidden = tab.isPinned
         if showsCloseButton { addSubview(closeButton) }
-        widthAnchor.constraint(equalToConstant: Self.standardWidth).isActive = true
+        widthConstraint = widthAnchor.constraint(equalToConstant: tab.isPinned ? Self.pinnedWidth : Self.maximumRegularWidth)
+        widthConstraint.isActive = true
         heightAnchor.constraint(equalToConstant: 26).isActive = true
         NSLayoutConstraint.activate([
-            status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             status.centerYAnchor.constraint(equalTo: centerYAnchor),
             status.widthAnchor.constraint(equalToConstant: 6),
             status.heightAnchor.constraint(equalToConstant: 6),
             title.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
-        NSLayoutConstraint.activate([
-            providerIcon.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 6),
-            providerIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            title.leadingAnchor.constraint(equalTo: providerIcon.trailingAnchor, constant: 5)
-        ])
-        if showsCloseButton {
+        let statusLeading = status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: tab.isPinned ? 3 : 8)
+        statusLeadingConstraint = statusLeading
+        let providerLeading = providerIcon.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: tab.isPinned ? 3 : 6)
+        regularProviderLeadingConstraint = providerLeading
+        providerIcon.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+        if tab.isPinned {
+            NSLayoutConstraint.activate([statusLeading, providerLeading])
+        } else {
+            let titleLeading = title.leadingAnchor.constraint(equalTo: providerIcon.trailingAnchor, constant: 5)
+            let compactTitleLeading = title.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 3)
+            let titleTrailing = title.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6)
+            let compactTitleTrailing = title.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -3)
+            let closeTrailing = closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6)
+            titleLeadingConstraint = titleLeading
+            compactTitleLeadingConstraint = compactTitleLeading
+            titleTrailingConstraint = titleTrailing
+            compactTitleTrailingConstraint = compactTitleTrailing
+            closeTrailingConstraint = closeTrailing
             NSLayoutConstraint.activate([
-                title.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
-                closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+                statusLeading, providerLeading, titleLeading, titleTrailing, closeTrailing,
                 closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
                 closeButton.widthAnchor.constraint(equalToConstant: 18),
                 closeButton.heightAnchor.constraint(equalToConstant: 18)
             ])
-        } else {
+        }
+        if !showsCloseButton {
             title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
         }
         toolTip = tab.title
@@ -379,6 +483,41 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         updateSelectionAppearance()
         registerForDraggedTypes([.string])
     }
+    func setWidth(_ width: CGFloat, animated: Bool) {
+        setCompactMode(!tab.isPinned && width < 96)
+        guard abs(widthConstraint.constant - width) > 0.25 else { return }
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                context.allowsImplicitAnimation = true
+                widthConstraint.animator().constant = width
+            }
+        } else {
+            widthConstraint.constant = width
+        }
+    }
+
+    private func setCompactMode(_ compact: Bool) {
+        guard !tab.isPinned, isCompact != compact,
+              let providerLeading = regularProviderLeadingConstraint,
+              let titleLeading = titleLeadingConstraint,
+              let compactTitleLeading = compactTitleLeadingConstraint,
+              let titleTrailing = titleTrailingConstraint,
+              let compactTitleTrailing = compactTitleTrailingConstraint else { return }
+        isCompact = compact
+        providerIconView?.isHidden = compact
+        statusLeadingConstraint?.constant = compact ? 3 : 8
+        closeTrailingConstraint?.constant = compact ? -4 : -6
+        if compact {
+            NSLayoutConstraint.deactivate([providerLeading, titleLeading, titleTrailing])
+            NSLayoutConstraint.activate([compactTitleLeading, compactTitleTrailing])
+        } else {
+            NSLayoutConstraint.deactivate([compactTitleLeading, compactTitleTrailing])
+            NSLayoutConstraint.activate([providerLeading, titleLeading, titleTrailing])
+        }
+    }
+
     func setSelected(_ selected: Bool) {
         guard self.selected != selected else { return }
         self.selected = selected
@@ -472,7 +611,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     }
     @objc private func contextAction(_ item: NSMenuItem) { owner?.performContextAction(tab.id, item.representedObject as? String ?? "") }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
-    @objc private func closeTab() { owner?.close(tab.id) }
+    @objc private func closeTab() { owner?.closeFromButton(tab.id, currentWidth: bounds.width) }
     @objc private func renameFromMenu() { beginRename() }
     @objc private func togglePin() { owner?.performContextAction(tab.id, "pin") }
     func beginRename() {
