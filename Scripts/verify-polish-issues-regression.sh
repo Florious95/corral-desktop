@@ -24,6 +24,7 @@ LABELS=(
   "PR 4 — suppress autofill xpc and context menu"
   "PR 5 — equal width tabs and long title truncation"
   "PR 6 — compact terminal trailing margin"
+  "PR 7 — adaptive tab shrinking and continuous close lock"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -45,6 +46,7 @@ FILTERS=(
   "AutoFillSubprocessSuppressionTests/testTerminalTextInputClientDeclaresNoAutofillContentType"
   "Issue17TabEqualWidthTests/testShortAndLongTitlesKeepTabItemsTheSameWidth"
   "Issue18TerminalTrailingMarginTests/testSplitPaneGridsKeepTrailingMarginsAsTightAsTheirFivePointLeadingInset"
+  "Issue19TabBarAdaptiveCloseLockTests/testClosingWhilePointerIsInsideLocksWidthsUntilMouseExit"
 )
 
 TOTAL=${#FILTERS[@]}
