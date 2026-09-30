@@ -287,6 +287,7 @@ public final class CorralTabBarView: NSView {
 
 @MainActor
 private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSource {
+    private static let standardWidth: CGFloat = 192
     var tab: CorralTab
     private weak var owner: CorralTabBarView?
     private let status = CorralStatusIndicatorView()
@@ -310,6 +311,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         status.status = tab.status
         status.translatesAutoresizingMaskIntoConstraints = false
         title.stringValue = tab.title
+        title.toolTip = tab.title
         title.font = .systemFont(ofSize: 12)
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -344,15 +346,8 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         let showsCloseButton = !tab.isPinned
         if showsCloseButton { addSubview(closeButton) }
-        let textWidth = ceil((tab.title as NSString).size(withAttributes: [.font: title.font!]).width)
-        let fixedChromeWidth: CGFloat = 8 + 6 + 6 + 20 + (showsCloseButton ? 36 : 8)
-        let width = min(260, max(144, textWidth + fixedChromeWidth))
-        widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
-        widthAnchor.constraint(greaterThanOrEqualToConstant: 144).isActive = true
+        widthAnchor.constraint(equalToConstant: Self.standardWidth).isActive = true
         heightAnchor.constraint(equalToConstant: 26).isActive = true
-        let preferredWidth = widthAnchor.constraint(equalToConstant: width)
-        preferredWidth.priority = NSLayoutConstraint.Priority(480)
-        preferredWidth.isActive = true
         NSLayoutConstraint.activate([
             status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             status.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -496,7 +491,16 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         field.finish(commit: true)
     }
     private func finishRename(_ value: String) { if !value.isEmpty { tab.title = value; owner?.commitRename(tab.id, value) }; removeEditor() }
-    private func removeEditor() { editField?.removeFromSuperview(); editField = nil; title.stringValue = tab.title; title.isHidden = false }
+    private func removeEditor() {
+        editField?.removeFromSuperview()
+        editField = nil
+        title.stringValue = tab.title
+        title.toolTip = tab.title
+        title.setAccessibilityLabel(tab.title)
+        toolTip = tab.title
+        setAccessibilityLabel(tab.title)
+        title.isHidden = false
+    }
 }
 
 public enum CorralSidebarSpaceKind: String, Sendable { case allSpaces, favorites, workspace }
