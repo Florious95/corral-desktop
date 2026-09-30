@@ -25,6 +25,7 @@ LABELS=(
   "PR 5 — equal width tabs and long title truncation"
   "PR 6 — compact terminal trailing margin"
   "PR 7 — adaptive tab shrinking and continuous close lock"
+  "PR 8 — tab close robust lock and subview non-overlap"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -47,6 +48,7 @@ FILTERS=(
   "Issue17TabEqualWidthTests/testShortAndLongTitlesKeepTabItemsTheSameWidth"
   "Issue18TerminalTrailingMarginTests/testSplitPaneGridsKeepTrailingMarginsAsTightAsTheirFivePointLeadingInset"
   "Issue19TabBarAdaptiveCloseLockTests/testClosingWhilePointerIsInsideLocksWidthsUntilMouseExit"
+  "Issue19TabCloseRobustnessTests/testInsideMouseExitedAfterCloseMustNotUnlockWidths"
 )
 
 TOTAL=${#FILTERS[@]}
