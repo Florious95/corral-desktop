@@ -2108,6 +2108,40 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testHoveredVisibleTerminalForwardsMouseWheelWithoutFirstResponder() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { window.close(); Task { await coordinator.stop() } }
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        try await link.emit(.frame(.snapshot(reference: refs[0], ansi: Data("\u{1b}[?1000h\u{1b}[?1006hWHEEL_READY".utf8))))
+        let ready = await waitUntil { self.terminalText(coordinator, reference: refs[0]).contains("WHEEL_READY") }
+        XCTAssertTrue(ready)
+
+        window.contentView?.layoutSubtreeIfNeeded()
+        let content = try XCTUnwrap(window.contentView)
+        let point = CGPoint(x: terminal.bounds.midX, y: terminal.bounds.midY)
+        XCTAssertTrue(content.hitTest(terminal.convert(point, to: content)) === terminal,
+                      "The target terminal must be visible and receive pointer hit-testing")
+        let otherView = coordinator.workspaceView.sidebar.agentsTable
+        XCTAssertTrue(window.makeFirstResponder(otherView))
+        XCTAssertTrue(window.firstResponder === otherView)
+        XCTAssertFalse(window.firstResponder === terminal)
+
+        let location = terminal.convert(point, to: nil)
+        terminal.scrollWheel(with: ScrollBurstEvent(window: window, location: location, delta: 1))
+        let forwarded = await waitUntil(timeout: .seconds(1)) {
+            await link.commands().contains { command in
+                guard case let .input(request) = command,
+                      request.reference == refs[0],
+                      case let .bytes(bytes) = request.payload else { return false }
+                return String(decoding: bytes, as: UTF8.self).contains("\u{1b}[<64;")
+            }
+        }
+        print("UNFOCUSED_WHEEL firstResponder=\(type(of: window.firstResponder!)) forwarded=\(forwarded)")
+        XCTAssertTrue(forwarded, "A scroll-wheel SGR report from a visible hovered terminal must reach its PTY even when another view owns first responder")
+        await coordinator.stop()
+    }
+
     func testRapidScrollbarThumbJumpsAcrossLargeScrollbackStayResponsive() async throws {
         let (coordinator, link, refs) = try await interactionFixture()
         let window = try XCTUnwrap(coordinator.windowController.window)

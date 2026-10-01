@@ -1904,12 +1904,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        let isScrollWheelEvent = Self.isPointerScrollEvent(for: source) || Self.isMouseWheelReport(data)
         guard !noResizeMode, !data.isEmpty, let connection,
               let key = terminalRegistry.key(for: source), key.deviceID == connection.deviceID,
               let runtime = sessions[key], connected,
               runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden,
-              source.window?.firstResponder === source else { return }
+              isScrollWheelEvent || source.window?.firstResponder === source else { return }
         let bytes = Data(data)
         guard pendingInputBytes + bytes.count <= ProtocolV1.maximumInputBytes else {
             lastConnectionError = "Terminal input queue is full."
@@ -1947,6 +1948,32 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         pendingInputBytes += bytes.count
         scheduleInputDrain()
+    }
+
+    private static func isPointerScrollEvent(for source: TerminalView) -> Bool {
+        guard let event = NSApp.currentEvent, event.type == .scrollWheel,
+              let window = source.window, event.window === window,
+              let contentView = window.contentView else { return false }
+        let location = contentView.convert(event.locationInWindow, from: nil)
+        var hit = contentView.hitTest(location)
+        while let view = hit {
+            if view === source { return true }
+            hit = view.superview
+        }
+        return false
+    }
+
+    private static func isMouseWheelReport(_ data: ArraySlice<UInt8>) -> Bool {
+        let bytes = Array(data)
+        if bytes.count >= 4, bytes[0] == 0x1b, bytes[1] == 0x5b, bytes[2] == 0x4d {
+            return (96...124).contains(Int(bytes[3]))
+        }
+        guard bytes.count >= 5, bytes[0] == 0x1b, bytes[1] == 0x5b, bytes[2] == 0x3c else { return false }
+        var end = 3
+        while end < bytes.count, (0x30...0x39).contains(bytes[end]) { end += 1 }
+        guard end > 3, end < bytes.count, bytes[end] == 0x3b,
+              let button = Int(String(decoding: bytes[3..<end], as: UTF8.self)) else { return false }
+        return (button & 0x40) != 0
     }
 
     private static func isScrollWheelInput(_ data: ArraySlice<UInt8>) -> Bool {
