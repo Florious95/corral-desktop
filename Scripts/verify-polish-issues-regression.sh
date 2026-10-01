@@ -26,6 +26,7 @@ LABELS=(
   "PR 6 — compact terminal trailing margin"
   "PR 7 — adaptive tab shrinking and continuous close lock"
   "PR 8 — tab close robust lock and subview non-overlap"
+  "PR 9 — hovered terminal scroll wheel forwarding"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -49,6 +50,7 @@ FILTERS=(
   "Issue18TerminalTrailingMarginTests/testSplitPaneGridsKeepTrailingMarginsAsTightAsTheirFivePointLeadingInset"
   "Issue19TabBarAdaptiveCloseLockTests/testClosingWhilePointerIsInsideLocksWidthsUntilMouseExit"
   "Issue19TabCloseRobustnessTests/testInsideMouseExitedAfterCloseMustNotUnlockWidths"
+  "CorralApplicationCoordinatorTests/testHoveredVisibleTerminalForwardsMouseWheelWithoutFirstResponder"
 )
 
 TOTAL=${#FILTERS[@]}
