@@ -33,6 +33,7 @@ LABELS=(
   "PR 13 — show close button and hover background on inactive tab hover"
   "PR 14 — enable inline double-click rename with enter/blur commit"
   "PR 15 — support tab drag and drop reordering with transient layout"
+  "PR 16 — align terminal 256-color palette to standard xterm cube"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -63,6 +64,7 @@ FILTERS=(
   "Issue23TabInactiveHoverTests/testUnselectedTabCloseAndHoverBackgroundFollowMouseEnteredAndExited"
   "Issue22TabInlineRenameTests/testOffscreenTitleDoubleClickOpensInlineEditorAndEnterCommits"
   "Issue24TabDragReorderTests/testTabDragPreviewsWithoutReorderingModelThenCommitsOnceAfterDrop"
+  "Issue25TerminalPaletteXtermTests/testNativeTerminalUsesStandardXtermColorAtIndex174"
 )
 
 TOTAL=${#FILTERS[@]}
