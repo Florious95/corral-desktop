@@ -12,7 +12,11 @@ private final class CorralDialogOverlayView: NSVisualEffectView {
         wantsLayer = true; layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
     }
     required init?(coder: NSCoder) { nil }
-    override func mouseDown(with event: NSEvent) { onOutsideClick?() }
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard event.window !== window || !subviews.contains(where: { $0.frame.contains(point) }) else { return }
+        onOutsideClick?()
+    }
 }
 
 public struct CorralAgentLauncher: Equatable, Sendable {
