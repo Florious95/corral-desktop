@@ -31,6 +31,7 @@ LABELS=(
   "PR 11 — eliminate initial activation input lag and wheel backlog"
   "PR 12 — aggregate split-pane working status to tab indicator"
   "PR 13 — show close button and hover background on inactive tab hover"
+  "PR 14 — enable inline double-click rename with enter/blur commit"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -59,6 +60,7 @@ FILTERS=(
   "CorralApplicationCoordinatorTests/testIssue26FirstFiveSecondsAfterActivatingLargeBackgroundScrollbackStayResponsive"
   "CorralApplicationCoordinatorTests/testIssue27SplitSessionWorkingStatusAggregatesOnTabWithoutRebuildingItem"
   "Issue23TabInactiveHoverTests/testUnselectedTabCloseAndHoverBackgroundFollowMouseEnteredAndExited"
+  "Issue22TabInlineRenameTests/testOffscreenTitleDoubleClickOpensInlineEditorAndEnterCommits"
 )
 
 TOTAL=${#FILTERS[@]}
