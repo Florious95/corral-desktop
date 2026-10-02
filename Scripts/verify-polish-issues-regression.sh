@@ -37,6 +37,7 @@ LABELS=(
   "PR 18 — block window drag on tabs and enable true tab reorder drag"
   "PR 19 — refine inline rename field styling and eliminate overflowing focus border"
   "PR 20 — prevent unexpected dismissal when clicking non-interactive panel areas"
+  "PR 21 — refine NewAgentDialog layout, compact whitespace, and fix provider icon clipping"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -71,6 +72,7 @@ FILTERS=(
   "Issue335TabDragWindowMoveBlockTests/testTabDragIsOwnedByTabBarAndCannotMoveWindow"
   "Issue336TabRenameStylingTests/testOffscreenDoubleClickEditorHasMinimalBorderAndFitsTabCapsule"
   "Issue338SettingsClickInsideDismissTests/testBlankClickInsideSettingsKeepsItOpen"
+  "Issue337NewAgentDialogLayoutTests/testOffscreenNewAgentDialogIsCompactWithUnclippedProviderIcons"
 )
 
 TOTAL=${#FILTERS[@]}
