@@ -28,6 +28,7 @@ LABELS=(
   "PR 8 — tab close robust lock and subview non-overlap"
   "PR 9 — hovered terminal scroll wheel forwarding"
   "PR 10 — working sidebar session context menu"
+  "PR 11 — eliminate initial activation input lag and wheel backlog"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -53,6 +54,7 @@ FILTERS=(
   "Issue19TabCloseRobustnessTests/testInsideMouseExitedAfterCloseMustNotUnlockWidths"
   "CorralApplicationCoordinatorTests/testHoveredVisibleTerminalForwardsMouseWheelWithoutFirstResponder"
   "Issue20SidebarContextMenuTests/testRightClickSessionRowShowsOnlyFavoriteAndRemoteCloseActions"
+  "CorralApplicationCoordinatorTests/testIssue26FirstFiveSecondsAfterActivatingLargeBackgroundScrollbackStayResponsive"
 )
 
 TOTAL=${#FILTERS[@]}
