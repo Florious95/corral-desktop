@@ -876,12 +876,20 @@ final class CorralSidebarSectionHeader: NSView {
 @MainActor
 final class CorralAgentTableView: NSTableView {
     var sessionIDForRow: ((Int) -> SessionID?)?
+    var contextMenuForRow: ((Int) -> NSMenu?)?
     var onAgentClick: ((SessionID, SessionOpenGesture) -> Void)?
     private var pressedSessionID: SessionID?
     private var pressedGesture: SessionOpenGesture = .singleClick
     private var pressEvent: NSEvent?
     private var didDrag = false
     private var dragging = false
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        guard row >= 0, let menu = contextMenuForRow?(row) else { return nil }
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        return menu
+    }
 
     override func mouseDown(with event: NSEvent) {
         let row = self.row(at: convert(event.locationInWindow, from: nil))
@@ -1043,11 +1051,6 @@ private final class SidebarTableData: NSObject, NSTableViewDataSource, NSTableVi
         item.setString(sessionID.rawValue, forType: CorralWorkspaceStageView.sessionPasteboardType)
         return item
     }
-    func tableView(_ tableView: NSTableView, menuFor event: NSEvent, row: Int) -> NSMenu? {
-        if kind == .spaces, spaces.indices.contains(row), !spaces[row].isVirtual { return sidebar?.spaceContextMenu(for: spaces[row].id) }
-        guard kind == .agents, agents.indices.contains(row) else { return nil }
-        return sidebar?.agentContextMenu(for: agents[row].id)
-    }
 }
 
 @MainActor
@@ -1171,8 +1174,7 @@ public final class CorralSidebarView: NSView {
         guard let agent = agents.first(where: { $0.id == id }) else { return nil }
         let controller = SessionContextMenuBuilder.makeMenu(for: agent.id, isFavorite: agent.isFavorite,
             onFavorite: { [weak self] id, value in self?.onToggleFavorite?(id, value) },
-            onClose: { [weak self] id in self?.onCloseAgent?(id) },
-            onRename: { [weak self] id in self?.onRenameAgent?(id) })
+            onClose: { [weak self] id in self?.onCloseAgent?(id) })
         contextMenuControllers[id] = controller
         return controller.menu
     }
@@ -1383,6 +1385,10 @@ public final class CorralSidebarView: NSView {
             agentTable.sessionIDForRow = { [weak data] row in
                 guard let data, data.agents.indices.contains(row) else { return nil }
                 return data.agents[row].sessionID
+            }
+            agentTable.contextMenuForRow = { [weak data] row in
+                guard let data, data.agents.indices.contains(row) else { return nil }
+                return data.sidebar?.agentContextMenu(for: data.agents[row].id)
             }
             agentTable.onAgentClick = { [weak data] sessionID, gesture in data?.agentClicked(sessionID: sessionID, gesture: gesture) }
         }
