@@ -1235,17 +1235,19 @@ extension TerminalView {
                 builder?.append(text: " ", attributes: currentAttributes, cellUTF16Lengths: [1])
                 previousPlaceholder = placeholder
                 previousPlaceholderAttribute = attr
-            } else if !blinkHidden && ((bidiLayout != nil && TerminalBidi.needsCellIsolation(character))
-                                      || (renderCodePoint >= 0xE000 && renderCodePoint <= 0xF8FF)) {
-                // Isolate BiDi/combining cells to preserve column anchoring.
-                // Resolve private-use glyphs explicitly: CTLine can ignore a
-                // system UI font's custom cascade for those characters.
+            } else if !blinkHidden && bidiLayout != nil && TerminalBidi.needsCellIsolation(character) {
+                // In BiDi rows, Arabic-script cells and cells holding combining
+                // sequences or emoji are isolated into their own column-anchored
+                // segment so that font-side ligation or extra mark glyphs cannot
+                // shift the columns of the cells that follow them.
                 flushPending()
                 if let finished = builder?.buildIfNeeded() {
                     segments.append(finished)
                 }
                 builder = ViewLineSegmentBuilder(column: visualCol, columnWidth: width)
-                // Resolve once per (font, character), using the shared fallback cache.
+                // Resolve the fallback font here, once per (font, character):
+                // otherwise every one of these single-cell CTLines re-runs the
+                // font cascade to discover the same Arabic-capable font.
                 var isolatedAttributes = currentAttributes
                 let baseFont = (currentAttributes[.font] as? TTFont) ?? fontSet.normal
                 isolatedAttributes[.font] = resolvedFont(for: character, base: baseFont)
