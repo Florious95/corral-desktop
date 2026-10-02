@@ -60,6 +60,8 @@ public final class CorralTabBarView: NSView {
         let pinned: Bool
     }
     private var renderedItems: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
+    // Visual order only; the canonical tabs remain unchanged until the drop callback.
+    private var dragPreview: (tabID: UUID, destination: Int)?
     /// Keep every Tab reachable without letting its document widen the window.
     private let tabsLane = NSScrollView()
     private var revealSelectedTab = false
@@ -167,6 +169,10 @@ public final class CorralTabBarView: NSView {
 
     public func setTabs(_ tabs: [CorralTab], selectedTabID: UUID?) {
         self.tabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
+        if let preview = dragPreview, !self.tabs.contains(where: { $0.id == preview.tabID }) {
+            renderedItems[preview.tabID]?.view.alphaValue = 1
+            dragPreview = nil
+        }
         let selectionChanged = self.selectedTabID != selectedTabID
         self.selectedTabID = selectedTabID
         let regularCount = self.tabs.filter { !$0.isPinned }.count
@@ -187,6 +193,14 @@ public final class CorralTabBarView: NSView {
             ordered.append(item)
         }
         renderedItems = updated
+        if let preview = dragPreview, let source = ordered.firstIndex(where: { $0.tab.id == preview.tabID }) {
+            let item = ordered.remove(at: source)
+            let pinnedCount = ordered.filter { $0.tab.isPinned }.count
+            let lower = item.tab.isPinned ? 0 : pinnedCount
+            let upper = item.tab.isPinned ? pinnedCount : ordered.count
+            ordered.insert(item, at: min(max(preview.destination, lower), upper))
+            item.alphaValue = 0.5
+        }
         if selectionChanged {
             revealSelectedTab = true
             capsuleSelectionAnimationPending = true
@@ -375,15 +389,58 @@ public final class CorralTabBarView: NSView {
     @objc private func toggleSidebar() { onToggleSidebar?() }
     @objc private func createTab() { onCreateTab?() }
 
-    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .move }
-    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    private func dragDestination(_ sender: NSDraggingInfo) -> (tabID: UUID, source: Int, destination: Int)? {
         guard let value = sender.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: value),
-              let sourceIndex = tabs.firstIndex(where: { $0.id == id }) else { return false }
+              let source = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        let tab = tabs[source]
+        // The moved source must not become its own midpoint target on the final drop.
+        let remaining = tabs.filter { $0.id != id }
         let x = itemsStack.convert(sender.draggingLocation, from: nil).x
-        let target = itemsStack.arrangedSubviews.compactMap { $0 as? CorralTabItemView }.first { x < $0.frame.midX }
-        let targetIndex = target.flatMap { item in tabs.firstIndex(where: { $0.id == item.tab.id }) } ?? tabs.count
-        let adjusted = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
-        onReorderTabs?(id, max(0, adjusted))
+        let target = remaining.firstIndex { x < (renderedItems[$0.id]?.view.frame.midX ?? .infinity) } ?? remaining.count
+        let pinnedCount = remaining.filter(\.isPinned).count
+        let lower = tab.isPinned ? 0 : pinnedCount
+        let upper = tab.isPinned ? pinnedCount : remaining.count
+        return (id, source, min(max(target, lower), upper))
+    }
+
+    fileprivate func previewTabDrag(_ id: UUID, to destination: Int) {
+        guard dragPreview?.tabID != id || dragPreview?.destination != destination else { return }
+        if let previous = dragPreview { renderedItems[previous.tabID]?.view.alphaValue = 1 }
+        dragPreview = (id, destination)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.allowsImplicitAnimation = true
+            setTabs(tabs, selectedTabID: selectedTabID)
+            layoutSubtreeIfNeeded()
+        }
+    }
+
+    fileprivate func cancelTabDragPreview() {
+        guard let preview = dragPreview else { return }
+        dragPreview = nil
+        renderedItems[preview.tabID]?.view.alphaValue = 1
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.allowsImplicitAnimation = true
+            setTabs(tabs, selectedTabID: selectedTabID)
+            layoutSubtreeIfNeeded()
+        }
+    }
+
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let target = dragDestination(sender) else { cancelTabDragPreview(); return [] }
+        previewTabDrag(target.tabID, to: target.destination)
+        return .move
+    }
+    public override func draggingExited(_ sender: NSDraggingInfo?) { cancelTabDragPreview() }
+    public override func concludeDragOperation(_ sender: NSDraggingInfo?) { cancelTabDragPreview() }
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let target = dragDestination(sender) else { cancelTabDragPreview(); return false }
+        previewTabDrag(target.tabID, to: target.destination)
+        dragPreview = nil
+        renderedItems[target.tabID]?.view.alphaValue = 1
+        if target.source != target.destination { onReorderTabs?(target.tabID, target.destination) }
         return true
     }
 }
@@ -639,6 +696,9 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         image.unlockFocus()
         let item = NSDraggingItem(pasteboardWriter: writer)
         item.setDraggingFrame(bounds, contents: image)
+        if let owner, let source = owner.tabs.firstIndex(where: { $0.id == tab.id }) {
+            owner.previewTabDrag(tab.id, to: source)
+        }
         beginDraggingSession(with: [item], event: event, source: self)
     }
     override func mouseUp(with event: NSEvent) {
@@ -693,6 +753,11 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     }
     @objc private func contextAction(_ item: NSMenuItem) { owner?.performContextAction(tab.id, item.representedObject as? String ?? "") }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        owner?.cancelTabDragPreview()
+        dragStart = nil
+        didStartDrag = false
+    }
     @objc private func closeTab() { owner?.closeFromButton(tab.id, currentWidth: bounds.width) }
     @objc private func renameFromMenu() { beginRename() }
     @objc private func togglePin() { owner?.performContextAction(tab.id, "pin") }
