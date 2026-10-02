@@ -648,6 +648,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func applyWorkspaceState(_ state: CorralWorkspaceState) async {
         guard state.isValid else { return }
         let activeTabChanged = state.activeTabID != workspaceState.activeTabID
+        let visibleSessionChanged = state.visibleSessionID != workspaceState.visibleSessionID
         let windowSize = workspaceView.bounds.size
         let needsWindowAdaptation = activeTabChanged && lastActivatedWindowSizes[state.activeTabID].map { $0 != windowSize } == true
         let tabIDs = Set(state.tabs.map(\.id))
@@ -697,7 +698,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid) }
             }
         }
-        focusVisibleTerminal()
+        focusVisibleTerminal(force: activeTabChanged || visibleSessionChanged)
     }
 
     private func ensureTerminalView(for key: SessionKey) -> CorralNativeTerminalView? {
@@ -788,7 +789,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         applyTerminalStageAppearance()
     }
 
-    private func focusVisibleTerminal() {
+    private func focusVisibleTerminal(force: Bool = false) {
+        guard force || !workspaceView.tabBar.hasActiveTitleEditor else { return }
         guard let sessionID = workspaceState.visibleSessionID,
               let key = sessionKey(for: sessionID),
               let view = terminalRegistry.view(for: key), !view.isHidden else {

@@ -41,6 +41,10 @@ public final class CorralTab: Identifiable {
 public final class CorralTabBarView: NSView {
     public private(set) var tabs: [CorralTab] = []
     public private(set) var selectedTabID: UUID?
+    public var hasActiveTitleEditor: Bool {
+        guard let selectedTabID else { return false }
+        return renderedItems[selectedTabID]?.view.isEditingTitle == true
+    }
     public var onSelectTab: ((UUID) -> Void)?
     public var onCreateTab: (() -> Void)?
     public var onCloseTab: ((UUID) -> Void)?
@@ -66,6 +70,7 @@ public final class CorralTabBarView: NSView {
     private let expandSidebarButton = NSButton(title: "▤", target: nil, action: nil)
     private let dragRegion = CorralWindowDragRegion()
     private var itemsLeadingConstraint: NSLayoutConstraint!
+    private var laneHugsTabs: NSLayoutConstraint!
     private var isMouseInsideTabBar = false
     private var trackingArea: NSTrackingArea?
     private var lockedTabWidth: CGFloat?
@@ -141,7 +146,7 @@ public final class CorralTabBarView: NSView {
         trafficLightsSpacer.isHidden = true
         dragRegion.translatesAutoresizingMaskIntoConstraints = false
         itemsLeadingConstraint = tabsLane.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.expandedTabsLeading)
-        let laneHugsTabs = tabsLane.widthAnchor.constraint(equalTo: itemsStack.widthAnchor, constant: 2)
+        laneHugsTabs = tabsLane.widthAnchor.constraint(equalToConstant: 2)
         laneHugsTabs.priority = NSLayoutConstraint.Priority(490)
         NSLayoutConstraint.activate([
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
@@ -210,7 +215,11 @@ public final class CorralTabBarView: NSView {
 
     private func updateTabWidths(animated: Bool) {
         let items = itemsStack.arrangedSubviews.compactMap { $0 as? CorralTabItemView }
-        guard !items.isEmpty else { itemsStack.setFrameSize(NSSize(width: 0, height: 28)); return }
+        guard !items.isEmpty else {
+            laneHugsTabs.constant = 2
+            itemsStack.setFrameSize(NSSize(width: 0, height: 28))
+            return
+        }
         let regularItems = items.filter { !$0.tab.isPinned }
         let pinnedCount = items.count - regularItems.count
         let fixedChromeWidth = itemsLeadingConstraint.constant + 8 + 26 + 8
@@ -229,6 +238,8 @@ public final class CorralTabBarView: NSView {
             item.setWidth(item.tab.isPinned ? CorralTabItemView.pinnedWidth : regularWidth, animated: animated && lockedTabWidth == nil)
         }
         let documentSize = NSSize(width: itemsStack.fittingSize.width, height: 28)
+        // Do not let a stale document frame collapse the lane under the drag region.
+        laneHugsTabs.constant = documentSize.width + 2
         if abs(itemsStack.frame.width - documentSize.width) > 0.25 {
             if animated {
                 NSAnimationContext.runAnimationGroup { context in
@@ -403,6 +414,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     private var selected: Bool
     private var hovered = false
     private var editField: CorralInlineRenameField?
+    var isEditingTitle: Bool { editField != nil }
     private var dragStart: NSPoint?
     private var pressTime: TimeInterval = 0
     private var didStartDrag = false
@@ -600,8 +612,15 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { CorralAccessibilityMenuActions.actions(for: makeContextMenu()) }
 
     required init?(coder: NSCoder) { nil }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        if let editField, hit === editField || hit.isDescendant(of: editField) { return hit }
+        if closeButton.alphaValue > 0, hit === closeButton || hit.isDescendant(of: closeButton) { return hit }
+        return self
+    }
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 { beginRename(); return }
+        if event.clickCount == 2 { dragStart = nil; beginRename(); return }
         dragStart = convert(event.locationInWindow, from: nil)
         pressTime = event.timestamp
         didStartDrag = false
@@ -678,6 +697,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     @objc private func renameFromMenu() { beginRename() }
     @objc private func togglePin() { owner?.performContextAction(tab.id, "pin") }
     func beginRename() {
+        guard editField == nil else { return }
         let field = CorralInlineRenameField(string: tab.title)
         field.beginEditing()
         field.isBezeled = false; field.drawsBackground = true; field.backgroundColor = CorralAestheticTokens.surface1
@@ -686,22 +706,40 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         field.onCancel = { [weak self] in self?.removeEditor() }
         field.frame = title.frame.insetBy(dx: -4, dy: -3)
         addSubview(field); title.isHidden = true; editField = field
-        window?.makeFirstResponder(field); field.selectText(nil)
+        field.selectText(nil)
+    }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard let field = editField, control === field else { return false }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            guard CorralInlineRenameField.shouldCommitReturn(hasMarkedText: textView.hasMarkedText()) else { return false }
+            field.finish(commit: true)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            field.finish(commit: false)
+            return true
+        }
+        return false
     }
     func controlTextDidEndEditing(_ notification: Notification) {
         guard let field = editField, (field.currentEditor() as? NSTextView)?.hasMarkedText() != true else { return }
         field.finish(commit: true)
     }
-    private func finishRename(_ value: String) { if !value.isEmpty { tab.title = value; owner?.commitRename(tab.id, value) }; removeEditor() }
+    private func finishRename(_ value: String) {
+        if !value.isEmpty { tab.title = value }
+        removeEditor()
+        if !value.isEmpty { owner?.commitRename(tab.id, value) }
+    }
     private func removeEditor() {
-        editField?.removeFromSuperview()
+        let field = editField
         editField = nil
+        if let field { field.window?.endEditing(for: field); field.removeFromSuperview() }
         title.stringValue = tab.title
         title.toolTip = tab.title
         title.setAccessibilityLabel(tab.title)
         toolTip = tab.title
         setAccessibilityLabel(tab.title)
-        title.isHidden = false
+        title.isHidden = tab.isPinned || isMinimal
     }
 }
 
