@@ -149,6 +149,7 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
     }
 
     func applyTerminalTheme(isDark: Bool) {
+        getTerminal().ansi256PaletteStrategy = .xterm
         installColors(isDark ? CorralTerminalPalette.darkANSI16 : CorralTerminalPalette.lightANSI16)
         setTerminalColors(
             foreground: isDark ? Self.defaultForegroundColor : Self.lightForegroundColor,
