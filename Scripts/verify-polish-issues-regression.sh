@@ -34,6 +34,7 @@ LABELS=(
   "PR 14 — enable inline double-click rename with enter/blur commit"
   "PR 15 — support tab drag and drop reordering with transient layout"
   "PR 16 — align terminal 256-color palette to standard xterm cube"
+  "PR 18 — block window drag on tabs and enable true tab reorder drag"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -65,6 +66,7 @@ FILTERS=(
   "Issue22TabInlineRenameTests/testOffscreenTitleDoubleClickOpensInlineEditorAndEnterCommits"
   "Issue24TabDragReorderTests/testTabDragPreviewsWithoutReorderingModelThenCommitsOnceAfterDrop"
   "Issue25TerminalPaletteXtermTests/testNativeTerminalUsesStandardXtermColorAtIndex174"
+  "Issue335TabDragWindowMoveBlockTests/testTabDragIsOwnedByTabBarAndCannotMoveWindow"
 )
 
 TOTAL=${#FILTERS[@]}
