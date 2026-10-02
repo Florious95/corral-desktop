@@ -391,12 +391,15 @@ public final class CorralTabBarView: NSView {
     @objc private func createTab() { onCreateTab?() }
 
     private func dragDestination(_ sender: NSDraggingInfo) -> (tabID: UUID, source: Int, destination: Int)? {
-        guard let value = sender.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: value),
-              let source = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        guard let value = sender.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: value) else { return nil }
+        return dragDestination(at: sender.draggingLocation, tabID: id)
+    }
+    func dragDestination(at point: NSPoint, tabID id: UUID) -> (tabID: UUID, source: Int, destination: Int)? {
+        guard let source = tabs.firstIndex(where: { $0.id == id }) else { return nil }
         let tab = tabs[source]
         // The moved source must not become its own midpoint target on the final drop.
         let remaining = tabs.filter { $0.id != id }
-        let x = itemsStack.convert(sender.draggingLocation, from: nil).x
+        let x = itemsStack.convert(point, from: nil).x
         let target = remaining.firstIndex { x < (renderedItems[$0.id]?.view.frame.midX ?? .infinity) } ?? remaining.count
         let pinnedCount = remaining.filter(\.isPinned).count
         let lower = tab.isPinned ? 0 : pinnedCount
@@ -430,14 +433,20 @@ public final class CorralTabBarView: NSView {
 
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
     public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let target = dragDestination(sender) else { cancelTabDragPreview(); return [] }
+        updateTabDragPreview(dragDestination(sender))
+    }
+    func updateTabDragPreview(_ target: (tabID: UUID, source: Int, destination: Int)?) -> NSDragOperation {
+        guard let target else { cancelTabDragPreview(); return [] }
         previewTabDrag(target.tabID, to: target.destination)
         return .move
     }
     public override func draggingExited(_ sender: NSDraggingInfo?) { cancelTabDragPreview() }
     public override func concludeDragOperation(_ sender: NSDraggingInfo?) { cancelTabDragPreview() }
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let target = dragDestination(sender) else { cancelTabDragPreview(); return false }
+        commitTabDrag(dragDestination(sender))
+    }
+    func commitTabDrag(_ target: (tabID: UUID, source: Int, destination: Int)?) -> Bool {
+        guard let target else { cancelTabDragPreview(); return false }
         previewTabDrag(target.tabID, to: target.destination)
         dragPreview = nil
         renderedItems[target.tabID]?.view.alphaValue = 1

@@ -2,6 +2,8 @@ import AppKit
 import XCTest
 @testable import CorralUI
 
+/// Exercises the real tab controls and reorder pipeline after the system drag payload is parsed.
+/// Pasteboard IPC and OS drag sessions require a separate integration runner.
 @MainActor
 final class Issue24TabDragReorderTests: XCTestCase {
     func testTabDragPreviewsWithoutReorderingModelThenCommitsOnceAfterDrop() throws {
@@ -11,17 +13,9 @@ final class Issue24TabDragReorderTests: XCTestCase {
         let tabC = CorralTab(title: "Tab C")
         let workspace = CorralWorkspaceView(tabs: [tabA, tabB, tabC])
         workspace.frame = NSRect(x: 0, y: 0, width: 1400, height: 860)
-        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 1400, height: 860),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = workspace
-        window.orderBack(nil)
-        defer { window.close() }
         workspace.layoutSubtreeIfNeeded()
         workspace.tabBar.layoutSubtreeIfNeeded()
-        XCTAssertLessThan(window.frame.minX, -1_000)
-        XCTAssertLessThan(window.frame.minY, -1_000)
-        XCTAssertFalse(window.isKeyWindow)
+        XCTAssertNil(workspace.window, "The fixture must not depend on a WindowServer window")
 
         let bar = workspace.tabBar
         let source = try tabItem("Tab A", in: bar)
@@ -38,10 +32,7 @@ final class Issue24TabDragReorderTests: XCTestCase {
             originalReorder?(id, index)
         }
         let initialOrder = [tabA.id, tabB.id, tabC.id]
-        let drag = Issue24DraggingInfo(location: dropPoint, session: tabA.id.uuidString)
-        defer { drag.pasteboard.releaseGlobally() }
-
-        XCTAssertEqual(bar.draggingEntered(drag), .move)
+        XCTAssertEqual(bar.updateTabDragPreview(bar.dragDestination(at: dropPoint, tabID: tabA.id)), .move)
         XCTAssertEqual(bar.tabs.map(\.id), initialOrder, "Previewing a drag must not commit the tabs model")
         XCTAssertEqual(workspace.tabs.map(\.id), initialOrder, "Coordinator-facing workspace order must remain unchanged until release")
         XCTAssertEqual(reorderCommits, 0, "Coordinator reordering must not run while the drag is in flight")
@@ -50,7 +41,7 @@ final class Issue24TabDragReorderTests: XCTestCase {
         XCTAssertTrue(previewCenters[0] < previewCenters[1] && previewCenters[1] < previewCenters[2],
                       "Crossing Tab B's midpoint should visually make room for Tab A on its right")
 
-        XCTAssertTrue(bar.performDragOperation(drag), "Dropping Tab A to the right of Tab B must be accepted")
+        XCTAssertTrue(bar.commitTabDrag(bar.dragDestination(at: dropPoint, tabID: tabA.id)), "Dropping Tab A to the right of Tab B must be accepted")
         XCTAssertEqual(bar.tabs.map(\.id), [tabB.id, tabA.id, tabC.id])
         XCTAssertEqual(workspace.tabs.map(\.id), [tabB.id, tabA.id, tabC.id], "The final order must be persisted by the workspace")
         XCTAssertEqual(reorderCommits, 1, "The final order is committed exactly once at drop")
@@ -65,34 +56,4 @@ final class Issue24TabDragReorderTests: XCTestCase {
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
-}
-
-@MainActor
-private final class Issue24DraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
-    let pasteboard = NSPasteboard(name: NSPasteboard.Name("corral-issue24-\(UUID().uuidString)"))
-    let draggingLocation: NSPoint
-
-    init(location: NSPoint, session: String) {
-        draggingLocation = location
-        super.init()
-        pasteboard.clearContents()
-        let item = NSPasteboardItem()
-        item.setString(session, forType: .string)
-        pasteboard.writeObjects([item])
-    }
-
-    var draggingDestinationWindow: NSWindow? { nil }
-    var draggingSourceOperationMask: NSDragOperation { .move }
-    var draggedImageLocation: NSPoint { draggingLocation }
-    var draggedImage: NSImage? { nil }
-    var draggingPasteboard: NSPasteboard { pasteboard }
-    var draggingSource: Any? { nil }
-    var draggingSequenceNumber: Int { 1 }
-    func slideDraggedImage(to screenPoint: NSPoint) {}
-    var draggingFormation: NSDraggingFormation = .default
-    var animatesToDestination = false
-    var numberOfValidItemsForDrop = 1
-    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
-    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
-    func resetSpringLoading() {}
 }
