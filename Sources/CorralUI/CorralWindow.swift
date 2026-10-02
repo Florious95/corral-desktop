@@ -40,6 +40,11 @@ public final class CorralWindow: NSWindow {
         super.setFrame(Self.frameRespectingMinimumSize(frameRect), display: flag, animate: animateFlag)
     }
 
+    public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        // Prevent headless/lockscreen virtual display boundaries from shrinking the window below minimum or requested size.
+        Self.frameRespectingMinimumSize(frameRect)
+    }
+
     private static func frameRespectingMinimumSize(_ frame: NSRect) -> NSRect {
         var frame = frame.standardized
         frame.size.width = max(frame.size.width, minimumContentSize.width)
