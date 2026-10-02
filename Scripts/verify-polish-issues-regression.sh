@@ -29,6 +29,7 @@ LABELS=(
   "PR 9 — hovered terminal scroll wheel forwarding"
   "PR 10 — working sidebar session context menu"
   "PR 11 — eliminate initial activation input lag and wheel backlog"
+  "PR 12 — aggregate split-pane working status to tab indicator"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -55,6 +56,7 @@ FILTERS=(
   "CorralApplicationCoordinatorTests/testHoveredVisibleTerminalForwardsMouseWheelWithoutFirstResponder"
   "Issue20SidebarContextMenuTests/testRightClickSessionRowShowsOnlyFavoriteAndRemoteCloseActions"
   "CorralApplicationCoordinatorTests/testIssue26FirstFiveSecondsAfterActivatingLargeBackgroundScrollbackStayResponsive"
+  "CorralApplicationCoordinatorTests/testIssue27SplitSessionWorkingStatusAggregatesOnTabWithoutRebuildingItem"
 )
 
 TOTAL=${#FILTERS[@]}
