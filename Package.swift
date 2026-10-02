@@ -33,7 +33,8 @@ let package = Package(
                 "CorralMetalTerminal",
                 "CorralUI",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
-            ]
+            ],
+            resources: [.copy("Resources/Fonts")]
         ),
         .testTarget(name: "CorralContractsTests", dependencies: ["CorralContracts"]),
         .testTarget(
