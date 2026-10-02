@@ -27,6 +27,7 @@ LABELS=(
   "PR 7 — adaptive tab shrinking and continuous close lock"
   "PR 8 — tab close robust lock and subview non-overlap"
   "PR 9 — hovered terminal scroll wheel forwarding"
+  "PR 10 — working sidebar session context menu"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -51,6 +52,7 @@ FILTERS=(
   "Issue19TabBarAdaptiveCloseLockTests/testClosingWhilePointerIsInsideLocksWidthsUntilMouseExit"
   "Issue19TabCloseRobustnessTests/testInsideMouseExitedAfterCloseMustNotUnlockWidths"
   "CorralApplicationCoordinatorTests/testHoveredVisibleTerminalForwardsMouseWheelWithoutFirstResponder"
+  "Issue20SidebarContextMenuTests/testRightClickSessionRowShowsOnlyFavoriteAndRemoteCloseActions"
 )
 
 TOTAL=${#FILTERS[@]}
