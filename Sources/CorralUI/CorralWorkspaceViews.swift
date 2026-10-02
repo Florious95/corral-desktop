@@ -767,11 +767,12 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         guard editField == nil else { return }
         let field = CorralInlineRenameField(string: tab.title)
         field.beginEditing()
-        field.isBezeled = false; field.drawsBackground = true; field.backgroundColor = CorralAestheticTokens.surface1
+        field.focusRingType = .none
+        field.isBezeled = false; field.isBordered = false; field.drawsBackground = false
         field.textColor = CorralAestheticTokens.text; field.font = .systemFont(ofSize: 12); field.delegate = self
         field.onCommit = { [weak self] text in self?.finishRename(text) }
         field.onCancel = { [weak self] in self?.removeEditor() }
-        field.frame = title.frame.insetBy(dx: -4, dy: -3)
+        field.frame = NSRect(x: title.frame.minX, y: bounds.midY - 9, width: title.frame.width, height: 18)
         addSubview(field); title.isHidden = true; editField = field
         field.selectText(nil)
     }
