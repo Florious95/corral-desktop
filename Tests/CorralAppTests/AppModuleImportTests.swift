@@ -2030,6 +2030,159 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testIssue26FirstFiveSecondsAfterActivatingLargeBackgroundScrollbackStayResponsive() async throws {
+        let (coordinator, link, refs) = try await interactionFixture(sessionCount: 3)
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        let hostTabID = coordinator.workspaceState.activeTabID
+        let targetSessionID = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == refs[1].rawValue }?.sessionID)
+        let sidebar = coordinator.workspaceView.sidebar
+        let targetRow = try XCTUnwrap(sidebar.agents.firstIndex { $0.sessionID == targetSessionID })
+        let targetRowRect = sidebar.agentsTable.rect(ofRow: targetRow)
+        try interactionClick(sidebar.agentsTable, at: CGPoint(x: targetRowRect.midX, y: targetRowRect.midY), count: 2)
+
+        let targetTabCreated = await waitUntil {
+            coordinator.workspaceState.tabs.contains { $0.sessionIDs == [targetSessionID] }
+        }
+        XCTAssertTrue(targetTabCreated)
+        let targetTab = try XCTUnwrap(coordinator.workspaceState.tabs.first { $0.sessionIDs == [targetSessionID] })
+        let targetTabID = targetTab.id
+        let targetSubscribed = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[1].rawValue) }
+        XCTAssertTrue(targetSubscribed)
+        try await link.emit(.frame(.snapshot(reference: refs[1], ansi: Data("\u{1b}[?1000h\u{1b}[?1006hISSUE26-READY\r\n".utf8))))
+        let targetReady = await waitUntil { self.terminalText(coordinator, reference: refs[1]).contains("ISSUE26-READY") }
+        XCTAssertTrue(targetReady)
+
+        let splitKey = SessionKey(deviceID: try XCTUnwrap(coordinator.activeTerminalSessionKey).deviceID, reference: refs[2])
+        await coordinator.splitWorkspacePane(splitKey, target: targetSessionID, edge: .right)
+        let splitReady = await waitUntil {
+            coordinator.workspaceState.visibleRoot?.leafIDs.contains(targetSessionID) == true
+                && coordinator.workspaceState.visibleRoot?.leafIDs.count == 2
+        }
+        XCTAssertTrue(splitReady)
+        await coordinator.focusWorkspacePane(targetSessionID)
+        let splitTarget = try XCTUnwrap(coordinator.terminalView(for: refs[1]))
+        let initialGrid = GridSize(rows: splitTarget.getTerminal().rows, columns: splitTarget.getTerminal().cols)
+        await coordinator.selectWorkspaceTab(id: try XCTUnwrap(hostTabID))
+        let hidden = await waitUntil { splitTarget.isHidden && window.firstResponder !== splitTarget }
+        XCTAssertTrue(hidden)
+
+        splitTarget.getTerminal().changeHistorySize(100_000)
+        let line = String(repeating: "issue26-wide-log-", count: 16)
+        let history = (0..<8_192).map { String(format: "%05d %@", $0, line) }.joined(separator: "\r\n") + "\r\n"
+        let historyBytes = Data(history.utf8)
+        try await link.emit(.frame(.delta(reference: refs[1], ansi: historyBytes)))
+        let historyLoaded = await waitUntil(timeout: .seconds(12)) {
+            splitTarget.getTerminal().displayBuffer.lines.count >= 8_192
+        }
+        XCTAssertTrue(historyLoaded, "The hidden PTY stream must leave real SwiftTerm scrollback before activation")
+        XCTAssertTrue(splitTarget.canScroll)
+        let historyRows = splitTarget.getTerminal().displayBuffer.lines.count
+        let gridWhileHidden = GridSize(rows: splitTarget.getTerminal().rows, columns: splitTarget.getTerminal().cols)
+        window.setContentSize(NSSize(width: 520, height: 520))
+        window.contentView?.layoutSubtreeIfNeeded()
+        coordinator.workspaceView.layoutSubtreeIfNeeded()
+        coordinator.workspaceView.stageContainer.layoutSubtreeIfNeeded()
+        let gridAfterWindowResize = GridSize(rows: splitTarget.getTerminal().rows, columns: splitTarget.getTerminal().cols)
+        print("ISSUE26_HIDDEN_LAYOUT before=\(gridWhileHidden) afterWindowResize=\(gridAfterWindowResize)")
+
+        let liveTargetTitle = try XCTUnwrap(coordinator.workspaceView.tabs.first { $0.id == targetTabID }?.title)
+        let tabItem = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).first {
+            $0.accessibilityIdentifier() == "corral.tab"
+                && $0.accessibilityLabel() == liveTargetTitle
+        }, "Missing tab item for \(liveTargetTitle); visible labels=\(descendants(of: coordinator.workspaceView.tabBar).map { $0.accessibilityLabel() })")
+        let tabClickPoint = CGPoint(x: tabItem.bounds.midX, y: 3)
+        let content = try XCTUnwrap(window.contentView)
+        let pointInContent = tabItem.convert(NSPoint(x: tabClickPoint.x, y: tabClickPoint.y), to: content)
+        XCTAssertTrue(content.hitTest(pointInContent) === tabItem, "The activation click must physically hit the inactive target Tab control")
+
+        let inputStream = AsyncStream<Issue26PendingInput>.makeStream(bufferingPolicy: .unbounded)
+        let latencySamples = Issue26LatencySamples()
+        let inputDispatch = Task { @MainActor in
+            for await pending in inputStream.stream {
+                while ProcessInfo.processInfo.systemUptime - pending.generatedAt < 8
+                    && (coordinator.workspaceState.activeTabID != targetTabID || splitTarget.isHidden || window.firstResponder !== splitTarget) {
+                    try? await Task.sleep(for: .milliseconds(1))
+                }
+                guard coordinator.workspaceState.activeTabID == targetTabID,
+                      !splitTarget.isHidden, window.firstResponder === splitTarget else {
+                    latencySamples.record(pending, milliseconds: .infinity)
+                    continue
+                }
+                switch pending.kind {
+                case .keyboard:
+                    if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                        timestamp: pending.generatedAt, windowNumber: window.windowNumber, context: nil,
+                        characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7) {
+                        window.sendEvent(event)
+                    }
+                case .wheel:
+                    let point = CGPoint(x: splitTarget.bounds.midX, y: splitTarget.bounds.midY)
+                    let location = splitTarget.convert(point, to: nil)
+                    splitTarget.scrollWheel(with: ScrollBurstEvent(window: window, location: location, delta: 1))
+                }
+                latencySamples.record(pending, milliseconds: (ProcessInfo.processInfo.systemUptime - pending.generatedAt) * 1_000)
+            }
+            latencySamples.markFinished()
+        }
+        let inputProducer = Task.detached {
+            for index in 0..<350 {
+                inputStream.continuation.yield(Issue26PendingInput(
+                    kind: index.isMultiple(of: 2) ? .keyboard : .wheel,
+                    generatedAt: ProcessInfo.processInfo.systemUptime
+                ))
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            inputStream.continuation.finish()
+        }
+        defer {
+            inputProducer.cancel()
+            inputStream.continuation.finish()
+            inputDispatch.cancel()
+            window.close()
+            Task { await coordinator.stop() }
+        }
+
+        let activationStarted = ProcessInfo.processInfo.systemUptime
+        XCTAssertTrue(tabItem.accessibilityPerformPress(), "The real Tab control must accept its activation action")
+        let activated = await waitUntil(timeout: .seconds(8)) {
+            coordinator.workspaceState.activeTabID == targetTabID
+                && !splitTarget.isHidden && window.firstResponder === splitTarget
+        }
+        let activationMilliseconds = (ProcessInfo.processInfo.systemUptime - activationStarted) * 1_000
+        XCTAssertTrue(activated, "The real tab click must focus the long-idle session pane")
+        let activatedGrid = GridSize(rows: splitTarget.getTerminal().rows, columns: splitTarget.getTerminal().cols)
+        let activationCompletedAt = ProcessInfo.processInfo.systemUptime
+        print("ISSUE26_ACTIVATION historyBytes=\(historyBytes.count) historyRows=\(historyRows) gridBefore=\(initialGrid) gridAfter=\(activatedGrid) activationMs=\(activationMilliseconds)")
+
+        await inputProducer.value
+        let drained = await waitUntil(timeout: .seconds(8)) { latencySamples.isFinished }
+        XCTAssertTrue(drained, "The generated input stream must fully drain after activation")
+        let samples = latencySamples.samples
+        let firstFiveSeconds = samples.filter { $0.generatedAt >= activationCompletedAt && $0.generatedAt < activationCompletedAt + 5 }
+        let activationQueue = samples.filter { $0.generatedAt < activationCompletedAt }
+        let eventLatencies = firstFiveSeconds.map(\.milliseconds).sorted()
+        let maxLatency = eventLatencies.last ?? .infinity
+        let p95Latency = eventLatencies.isEmpty ? .infinity : eventLatencies[min(eventLatencies.count - 1, Int(Double(eventLatencies.count - 1) * 0.95))]
+        let keyLatencies = firstFiveSeconds.filter { $0.kind == .keyboard }.map(\.milliseconds)
+        let wheelLatencies = firstFiveSeconds.filter { $0.kind == .wheel }.map(\.milliseconds)
+        let activationQueueMax = activationQueue.map(\.milliseconds).max() ?? 0
+        print("ISSUE26_INPUT_WINDOW duration=5s events=\(firstFiveSeconds.count) activationQueued=\(activationQueue.count) activationQueueMaxMs=\(activationQueueMax) keyMaxMs=\(keyLatencies.max() ?? .infinity) wheelMaxMs=\(wheelLatencies.max() ?? .infinity) p95Ms=\(p95Latency) maxMs=\(maxLatency)")
+        XCTAssertGreaterThanOrEqual(firstFiveSeconds.count, 200, "The first five seconds after activation must dispatch the injected keyboard/wheel stream")
+        XCTAssertLessThanOrEqual(activationMilliseconds, 50, "Tab activation plus initial reflow blocked the UI for \(activationMilliseconds)ms")
+        XCTAssertLessThanOrEqual(activationQueueMax, 50, "Events queued during activation had a long-tail delay of \(activationQueueMax)ms")
+        XCTAssertLessThanOrEqual(maxLatency, 50, "The first five seconds after activation had an input dispatch long tail of \(maxLatency)ms")
+        XCTAssertLessThanOrEqual(keyLatencies.max() ?? .infinity, 50, "Keyboard dispatch exceeded the 50ms interaction budget")
+        XCTAssertLessThanOrEqual(wheelLatencies.max() ?? .infinity, 50, "Wheel dispatch exceeded the 50ms interaction budget")
+
+        let targetInputText = await link.commands().compactMap { command -> String? in
+            guard case let .input(request) = command, request.reference == refs[1], case let .bytes(bytes) = request.payload else { return nil }
+            return String(decoding: bytes, as: UTF8.self)
+        }.joined()
+        XCTAssertTrue(targetInputText.contains("x"), "Generated keyboard events must reach the activated pane's SessionLink input path")
+        XCTAssertTrue(targetInputText.contains("\u{1b}[<64;") || targetInputText.contains("\u{1b}[<65;"),
+                      "Generated wheel events must reach the activated pane's SessionLink input path")
+    }
+
     func testInteractionFirstClickInOtherPaneAlsoSendsSGRMouseReport() async throws {
         let (coordinator, link, refs) = try await interactionFixture()
         let window = try XCTUnwrap(coordinator.windowController.window)
@@ -2593,6 +2746,29 @@ private final class ScrollBurstEvent: NSEvent {
     override var deltaY: CGFloat { amount }
     override var scrollingDeltaY: CGFloat { amount }
     override var hasPreciseScrollingDeltas: Bool { false }
+}
+
+private enum Issue26InputKind: Sendable { case keyboard, wheel }
+
+private struct Issue26PendingInput: Sendable {
+    let kind: Issue26InputKind
+    let generatedAt: TimeInterval
+}
+
+@MainActor
+private final class Issue26LatencySamples {
+    struct Sample {
+        let kind: Issue26InputKind
+        let generatedAt: TimeInterval
+        let milliseconds: Double
+    }
+
+    private(set) var samples: [Sample] = []
+    private(set) var isFinished = false
+    func record(_ input: Issue26PendingInput, milliseconds: Double) {
+        samples.append(Sample(kind: input.kind, generatedAt: input.generatedAt, milliseconds: milliseconds))
+    }
+    func markFinished() { isFinished = true }
 }
 
 private actor RecordingEventStream: SessionEventStream {

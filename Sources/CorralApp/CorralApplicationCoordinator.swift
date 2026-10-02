@@ -107,6 +107,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private let noResizeMode: Bool
     private var sidebarDeviceIDs: [DeviceID: UUID] = [:]
     private var activeWorkspaceTabID: UUID
+    private var lastActivatedWindowSizes: [UUID: NSSize] = [:]
     private var connection: AuthenticatedConnection?
     private var activeConnectionConfiguration: ConnectionConfiguration?
     private var eventStreamTask: Task<Void, Never>?
@@ -646,6 +647,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func applyWorkspaceState(_ state: CorralWorkspaceState) async {
         guard state.isValid else { return }
         let activeTabChanged = state.activeTabID != workspaceState.activeTabID
+        let windowSize = workspaceView.bounds.size
+        let needsWindowAdaptation = activeTabChanged && lastActivatedWindowSizes[state.activeTabID].map { $0 != windowSize } == true
+        let tabIDs = Set(state.tabs.map(\.id))
+        lastActivatedWindowSizes = lastActivatedWindowSizes.filter { tabIDs.contains($0.key) }
+        lastActivatedWindowSizes[state.activeTabID] = windowSize
         workspaceState = state
         activeWorkspaceTabID = state.activeTabID
         let oldTabs = Dictionary(uniqueKeysWithValues: workspaceView.tabs.map { ($0.id, $0) })
@@ -682,7 +688,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         scheduleSubscriptionUpdate()
         updateSidebar(devices: cachedDevices)
         updateWorkspaceTitle(count: sessionCount)
-        if activeTabChanged { reflowAndResizeVisibleSessions(visibleSessionKeys()) }
+        if needsWindowAdaptation { reflowAndResizeVisibleSessions(visibleSessionKeys()) }
+        else if activeTabChanged { reflowCurrentWindow() }
+        // A prewarmed view can become visible without another size callback.
+        for key in visibleSessionKeys() {
+            if let grid = sessions[key]?.desiredGrid {
+                Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid) }
+            }
+        }
         focusVisibleTerminal()
     }
 
@@ -755,9 +768,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 forcedResizeSessionKeys.remove(key)
                 continue
             }
-            // Re-enter SwiftTerm's size delegate even when layout did not change the grid. The marked callback
-            // bypasses requestedGrid de-duplication exactly once and sends the current measured PTY dimensions.
-            view.resize(cols: view.terminal.cols, rows: view.terminal.rows)
+            // Explicit adaptation resends the measured grid without resetting terminal modes.
+            sizeChanged(source: view, newCols: view.terminal.cols, newRows: view.terminal.rows)
         }
     }
 
@@ -769,7 +781,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         terminalStageView.update(
             root: layoutPreview ?? workspaceState.visibleRoot,
             focusedSessionID: workspaceState.visibleSessionID,
-            views: views
+            views: views,
+            backgroundRoots: workspaceState.tabs.compactMap(\.root)
         )
         applyTerminalStageAppearance()
     }

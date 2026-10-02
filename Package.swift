@@ -13,7 +13,7 @@ let package = Package(
         .executable(name: "CorralApp", targets: ["CorralApp"])
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0")
+        .package(path: "Packages/SwiftTerm")
     ],
     targets: [
         .target(name: "CorralContracts"),
