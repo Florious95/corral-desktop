@@ -36,6 +36,7 @@ LABELS=(
   "PR 16 — align terminal 256-color palette to standard xterm cube"
   "PR 18 — block window drag on tabs and enable true tab reorder drag"
   "PR 19 — refine inline rename field styling and eliminate overflowing focus border"
+  "PR 20 — prevent unexpected dismissal when clicking non-interactive panel areas"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -69,6 +70,7 @@ FILTERS=(
   "Issue25TerminalPaletteXtermTests/testNativeTerminalUsesStandardXtermColorAtIndex174"
   "Issue335TabDragWindowMoveBlockTests/testTabDragIsOwnedByTabBarAndCannotMoveWindow"
   "Issue336TabRenameStylingTests/testOffscreenDoubleClickEditorHasMinimalBorderAndFitsTabCapsule"
+  "Issue338SettingsClickInsideDismissTests/testBlankClickInsideSettingsKeepsItOpen"
 )
 
 TOTAL=${#FILTERS[@]}
