@@ -313,7 +313,7 @@ public final class CorralTabBarView: NSView {
     public override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
     }
@@ -445,6 +445,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         }
         addSubview(providerIcon)
         providerIconView = providerIcon
+        closeButton.wantsLayer = true
         closeButton.image = CorralLegacyIcon.image(.close, size: 10, tint: CorralAestheticTokens.textMuted)
         closeButton.imagePosition = .imageOnly
         closeButton.isBordered = false
@@ -568,13 +569,30 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         self.selected = selected
         updateSelectionAppearance()
     }
-    private func updateSelectionAppearance() {
+    private func updateSelectionAppearance(animated: Bool = false) {
         let pinnedSelection = selected && tab.isPinned
-        layer?.backgroundColor = (pinnedSelection ? CorralAestheticTokens.tabActiveBackground : (!selected && hovered ? CorralAestheticTokens.hover : NSColor.clear)).cgColor
+        let background = (pinnedSelection ? CorralAestheticTokens.tabActiveBackground : (!selected && hovered ? CorralAestheticTokens.hover : NSColor.clear)).cgColor
+        let closeAlpha: CGFloat = selected || hovered ? 0.7 : 0
+        if animated {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = closeButton.layer?.presentation()?.opacity ?? Float(closeButton.alphaValue)
+            fade.toValue = closeAlpha
+            fade.duration = 0.15
+            closeButton.layer?.add(fade, forKey: "hoverOpacity")
+            let tint = CABasicAnimation(keyPath: "backgroundColor")
+            tint.fromValue = layer?.presentation()?.backgroundColor ?? layer?.backgroundColor
+            tint.toValue = background
+            tint.duration = 0.15
+            layer?.add(tint, forKey: "hoverBackground")
+        } else {
+            closeButton.layer?.removeAnimation(forKey: "hoverOpacity")
+            layer?.removeAnimation(forKey: "hoverBackground")
+        }
+        layer?.backgroundColor = background
         layer?.borderColor = (pinnedSelection ? CorralAestheticTokens.tabActiveBorder : NSColor.clear).cgColor
         layer?.borderWidth = pinnedSelection ? 1 : 0
         title.textColor = selected || hovered ? CorralAestheticTokens.text : CorralAestheticTokens.textSecondary
-        closeButton.alphaValue = selected || hovered ? 0.7 : 0
+        closeButton.alphaValue = closeAlpha
         setAccessibilitySelected(selected)
     }
     override func accessibilityPerformPress() -> Bool { owner?.select(tab.id); return true }
@@ -613,15 +631,15 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
     }
     override func mouseEntered(with event: NSEvent) {
         hovered = true
-        updateSelectionAppearance()
+        updateSelectionAppearance(animated: true)
     }
     override func mouseExited(with event: NSEvent) {
         hovered = false
-        updateSelectionAppearance()
+        updateSelectionAppearance(animated: true)
     }
     override func rightMouseDown(with event: NSEvent) { NSMenu.popUpContextMenu(makeContextMenu(), with: event, for: self) }
     private func makeContextMenu() -> NSMenu {
