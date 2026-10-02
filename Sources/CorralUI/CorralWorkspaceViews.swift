@@ -53,7 +53,6 @@ public final class CorralTabBarView: NSView {
     private struct ItemAppearance: Equatable {
         let title: String
         let provider: String?
-        let status: CorralStatusIndicatorView.Status
         let pinned: Bool
     }
     private var renderedItems: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
@@ -171,12 +170,12 @@ public final class CorralTabBarView: NSView {
         var updated: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
         var ordered: [CorralTabItemView] = []
         for tab in self.tabs {
-            let appearance = ItemAppearance(title: tab.title, provider: tab.provider, status: tab.status,
-                                            pinned: tab.isPinned)
+            let appearance = ItemAppearance(title: tab.title, provider: tab.provider, pinned: tab.isPinned)
             let item: CorralTabItemView
             if let existing = renderedItems[tab.id], existing.appearance == appearance {
                 item = existing.view
                 item.tab = tab
+                item.updateStatus()
                 item.setSelected(tab.id == selectedTabID)
             } else { item = CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self) }
             updated[tab.id] = (appearance, item)
@@ -557,6 +556,11 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
             NSLayoutConstraint.deactivate([compactTitleLeading, compactTitleTrailing])
             NSLayoutConstraint.activate([providerLeading, titleLeading, titleTrailing])
         }
+    }
+
+    func updateStatus() {
+        guard status.status != tab.status else { return }
+        status.status = tab.status
     }
 
     func setSelected(_ selected: Bool) {

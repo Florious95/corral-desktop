@@ -726,14 +726,15 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(badgeInFirstAgentRow(multiSidebar)?.toolTip, longName)
     }
 
-    func testWorkingIndicatorIsStaticAndUsesLegacyStateColors() {
+    func testWorkingIndicatorPulsesAndUsesLegacyStateColors() {
         let indicator = CorralStatusIndicatorView(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
         indicator.status = .working
-        XCTAssertEqual(indicator.layer?.animationKeys()?.count ?? 0, 0)
+        XCTAssertTrue(indicator.layer?.animationKeys()?.contains("workingPulse") == true)
         XCTAssertEqual(indicator.layer?.shadowColor, CorralAestheticTokens.success.cgColor)
         XCTAssertEqual(indicator.layer?.shadowOpacity, 0.45)
         indicator.status = .blocked
         XCTAssertEqual(indicator.layer?.shadowColor, CorralAestheticTokens.warning.cgColor)
+        XCTAssertFalse(indicator.layer?.animationKeys()?.contains("workingPulse") == true)
         indicator.status = .idle
         XCTAssertEqual(indicator.layer?.shadowOpacity, 0)
     }

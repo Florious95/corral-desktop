@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import CorralContracts
 
 public enum CorralThemeMode: String, CaseIterable, Sendable {
@@ -166,6 +167,13 @@ public final class CorralStatusIndicatorView: NSView {
             layer?.shadowColor = CorralAestheticTokens.success.cgColor
             layer?.shadowOpacity = 0.45
             layer?.shadowRadius = 5
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1
+            pulse.toValue = 0.35
+            pulse.duration = 1
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            layer?.add(pulse, forKey: "workingPulse")
         case .blocked:
             layer?.shadowColor = CorralAestheticTokens.warning.cgColor
             layer?.shadowOpacity = 0.45

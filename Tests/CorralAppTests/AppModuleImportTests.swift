@@ -1532,6 +1532,83 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         window.close()
     }
 
+    func testIssue27SplitSessionWorkingStatusAggregatesOnTabWithoutRebuildingItem() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { window.close() }
+        let idleRecords = refs.map { reference in
+            WireSessionRecord(reference: reference, name: reference.rawValue, workingDirectory: "/fixture",
+                              state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        }
+        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 2, changedSessions: idleRecords))))
+        let idleApplied = await waitUntil {
+            refs.allSatisfy { reference in
+                coordinator.workspaceView.sidebar.agents.first { $0.name == reference.rawValue }?.status == .idle
+            } && coordinator.workspaceView.tabs.first?.status == .idle
+        }
+        XCTAssertTrue(idleApplied, "Both sessions must start idle before the secondary starts working")
+
+        let tabID = coordinator.workspaceState.activeTabID
+        let primaryID = try XCTUnwrap(coordinator.workspaceState.visibleSessionID)
+        let secondaryKey = SessionKey(deviceID: try XCTUnwrap(coordinator.activeTerminalSessionKey).deviceID, reference: refs[1])
+        await coordinator.splitWorkspacePane(secondaryKey, target: primaryID, edge: .right)
+        await coordinator.focusWorkspacePane(primaryID)
+        let splitReady = await waitUntil {
+            coordinator.workspaceState.activeTabID == tabID
+                && coordinator.workspaceState.activeTab?.sessionIDs.count == 2
+                && coordinator.workspaceState.activeTab?.activeSessionID == primaryID
+        }
+        XCTAssertTrue(splitReady, "The Tab must contain both split sessions while the primary remains focused")
+
+        let tab = try XCTUnwrap(coordinator.workspaceView.tabs.first { $0.id == tabID })
+        let tabItem = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).first {
+            $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == tab.title
+        })
+        let indicator = try XCTUnwrap(descendants(of: tabItem).compactMap { $0 as? CorralStatusIndicatorView }.first)
+        XCTAssertEqual(tab.status, .idle)
+        XCTAssertEqual(indicator.status, .idle)
+
+        let secondaryID = try XCTUnwrap(coordinator.workspaceView.sidebar.agents.first { $0.name == refs[1].rawValue }?.sessionID)
+        let workingRecord = WireSessionRecord(reference: refs[1], name: refs[1].rawValue, workingDirectory: "/fixture",
+                                              state: .working, rows: 24, columns: 80, provider: "codex", activity: "working", health: "normal")
+        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 3, changedSessions: [workingRecord]))))
+        let deltaApplied = await waitUntil {
+            coordinator.workspaceView.sidebar.agents.first { $0.sessionID == primaryID }?.status == .idle
+                && coordinator.workspaceView.sidebar.agents.first { $0.sessionID == secondaryID }?.status == .working
+                && coordinator.workspaceState.activeTab?.activeSessionID == primaryID
+        }
+        XCTAssertTrue(deltaApplied, "The secondary session's working status must reach the workspace projection")
+
+        let workingTab = try XCTUnwrap(coordinator.workspaceView.tabs.first { $0.id == tabID })
+        let workingItem = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).first {
+            $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == workingTab.title
+        })
+        let workingIndicator = try XCTUnwrap(descendants(of: workingItem).compactMap { $0 as? CorralStatusIndicatorView }.first)
+        XCTAssertEqual(workingTab.status, .working, "Any working split leaf must mark the Tab as working even when its primary is idle")
+        XCTAssertEqual(workingIndicator.status, .working, "The TabItem lamp must immediately reflect the aggregate working state")
+        XCTAssertTrue(workingIndicator.layer?.animationKeys()?.contains("workingPulse") == true,
+                      "The working lamp must pulse")
+        XCTAssertTrue(tabItem === workingItem, "A status change must update the existing TabItemView in place")
+        XCTAssertTrue(indicator === workingIndicator, "The existing TabItem status lamp must be updated in place")
+
+        let idleSecondary = WireSessionRecord(reference: refs[1], name: refs[1].rawValue, workingDirectory: "/fixture",
+                                              state: .idle, rows: 24, columns: 80, provider: "codex", activity: "idle", health: "normal")
+        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 4, changedSessions: [idleSecondary]))))
+        let allIdle = await waitUntil {
+            coordinator.workspaceView.sidebar.agents.first { $0.sessionID == secondaryID }?.status == .idle
+                && coordinator.workspaceView.tabs.first { $0.id == tabID }?.status == .idle
+                && indicator.status == .idle
+                && indicator.layer?.animationKeys()?.contains("workingPulse") != true
+        }
+        XCTAssertTrue(allIdle, "A Tab returns to idle only after every split session is idle")
+        let idleItem = try XCTUnwrap(descendants(of: coordinator.workspaceView.tabBar).first {
+            $0.accessibilityIdentifier() == "corral.tab" && $0.accessibilityLabel() == workingTab.title
+        })
+        XCTAssertTrue(tabItem === idleItem, "Working-to-idle status changes must also preserve the TabItemView")
+
+        await coordinator.stop()
+    }
+
     func testGoldenFramesDriveThreeSwiftTermPanesAndInputRouting() async throws {
         let fixture = try GoldenFrameFixture.load()
         let codec = ProtocolV1Codec()

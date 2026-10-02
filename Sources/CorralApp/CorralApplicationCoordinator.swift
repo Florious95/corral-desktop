@@ -55,6 +55,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private struct TabPresentation {
         let title: String
         let descriptor: SessionDescriptor?
+        let status: CorralStatusIndicatorView.Status
     }
 
     private struct RuntimeSession {
@@ -662,14 +663,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 id: stateTab.id,
                 title: presentation.title,
                 contentView: TerminalTabPlaceholderView(),
-                status: statusIndicator(for: descriptor),
+                status: presentation.status,
                 isPinned: stateTab.pinned,
                 isCustomTitle: stateTab.isCustomTitle,
                 isBlankWorkspace: stateTab.isBlank,
                 provider: descriptor?.provider
             )
             tab.title = presentation.title
-            tab.status = statusIndicator(for: descriptor)
+            tab.status = presentation.status
             tab.provider = descriptor?.provider
             tab.isPinned = stateTab.pinned
             tab.isCustomTitle = stateTab.isCustomTitle
@@ -2183,7 +2184,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
               let tab = workspaceView.tabs.first(where: { $0.id == stateTab.id }) else { return }
         let presentation = tabPresentation(for: stateTab, in: workspaceState)
         tab.title = presentation.title
-        tab.status = statusIndicator(for: presentation.descriptor)
+        tab.status = presentation.status
         tab.provider = presentation.descriptor?.provider
         tab.isPinned = stateTab.pinned
         tab.isCustomTitle = stateTab.isCustomTitle
@@ -2201,7 +2202,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             ?? nonEmpty(savedIdentity?.name)
             ?? directoryTitle(descriptor?.workingDirectory ?? savedIdentity?.workingDirectory)
             ?? "Terminal"
-        return TabPresentation(title: title, descriptor: descriptor)
+        let isWorking = tab.sessionIDs.contains { sessionID in
+            let leaf = sessionKey(for: sessionID).flatMap { sessions[$0]?.descriptor }
+            return statusIndicator(for: leaf) == .working
+        }
+        return TabPresentation(title: title, descriptor: descriptor,
+                               status: isWorking ? .working : statusIndicator(for: descriptor))
     }
 
     private func nonEmpty(_ value: String?) -> String? {
