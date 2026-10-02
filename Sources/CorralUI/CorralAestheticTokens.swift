@@ -173,6 +173,8 @@ public final class CorralStatusIndicatorView: NSView {
             pulse.duration = 1
             pulse.autoreverses = true
             pulse.repeatCount = .infinity
+            // The status transition above owns removal, including when Core Animation commits offscreen.
+            pulse.isRemovedOnCompletion = false
             layer?.add(pulse, forKey: "workingPulse")
         case .blocked:
             layer?.shadowColor = CorralAestheticTokens.warning.cgColor
