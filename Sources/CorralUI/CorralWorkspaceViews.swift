@@ -1582,7 +1582,10 @@ public final class CorralWorkspaceStageView: NSView {
     @objc private func createAgent() { onCreateAgent?() }
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
     public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dropTarget = resolveDropTarget(sender)
+        updateDropPreview(resolveDropTarget(sender))
+    }
+    func updateDropPreview(_ target: SplitLayout.DropTarget?) -> NSDragOperation {
+        dropTarget = target
         guard let dropTarget else { dropZone.isHidden = true; return [] }
         dropZone.edge = dropTarget.edge
         dropZone.frame = convert(dropTarget.previewFrame, from: splitView)
@@ -1615,7 +1618,10 @@ public final class CorralWorkspaceStageView: NSView {
         } else {
             return nil
         }
-        return SplitLayout.dropTarget(at: splitView.convert(sender.draggingLocation, from: nil), source: source, root: splitView.root, in: splitView.bounds, previous: dropTarget)
+        return resolveDropTarget(at: sender.draggingLocation, source: source)
+    }
+    func resolveDropTarget(at point: NSPoint, source: SessionID) -> SplitLayout.DropTarget? {
+        SplitLayout.dropTarget(at: splitView.convert(point, from: nil), source: source, root: splitView.root, in: splitView.bounds, previous: dropTarget)
     }
     private func endDropPreview() { dropZone.isHidden = true; dropTarget = nil }
 }
