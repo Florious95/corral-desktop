@@ -82,7 +82,7 @@ final class Issue15DevicesPopoverToggleTests: XCTestCase {
                 windowNumber: window.windowNumber, context: nil,
                 eventNumber: 0, clickCount: 1, pressure: 1
             ))
-            NSApplication.shared.sendEvent(event)
+            window.sendEvent(event)
         }
     }
 
