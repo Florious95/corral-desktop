@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import CorralMetalTerminal
 import CorralUI
 @preconcurrency import SwiftTerm
@@ -9,6 +10,23 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
     static let defaultBackgroundColor = NSColor(srgbRed: 16.0 / 255, green: 17.0 / 255, blue: 21.0 / 255, alpha: 1)
     static let lightForegroundColor = NSColor(srgbRed: 58.0 / 255, green: 56.0 / 255, blue: 53.0 / 255, alpha: 1)
     static let lightBackgroundColor = NSColor(srgbRed: 251.0 / 255, green: 250.0 / 255, blue: 248.0 / 255, alpha: 1)
+
+    /// U+F418 (Pi's footer branch icon), registered for this process only; its outline is centred on monospace digits.
+    private static let symbolFontDescriptor: NSFontDescriptor? = {
+        // App bundles must use their own asset, not SwiftPM's build-path fallback.
+        let bundle = Bundle.main.bundleURL.pathExtension == "app" ? Bundle.main : Bundle.module
+        guard let url = bundle.url(forResource: "CorralTerminalSymbols", withExtension: "ttf", subdirectory: "Fonts"),
+              CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) else { return nil }
+        return NSFontDescriptor(fontAttributes: [.name: "CorralTerminalGitBranchSymbols-Regular"])
+    }()
+
+    private static func withSymbolFallback(_ font: NSFont) -> NSFont {
+        guard let symbolFontDescriptor else { return font }
+        let cascade = font.fontDescriptor.object(forKey: .cascadeList) as? [NSFontDescriptor]
+            ?? CTFontCopyDefaultCascadeListForLanguages(font as CTFont, nil) as? [NSFontDescriptor] ?? []
+        let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontCascadeListAttribute: [symbolFontDescriptor] + cascade] as CFDictionary)
+        return CTFontCreateCopyWithAttributes(font as CTFont, font.pointSize, nil, descriptor) as NSFont
+    }
 
     private let pasteboard: NSPasteboard
     private var displayFilter = CorralTerminalFilter()
@@ -71,9 +89,10 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
 
     func setTerminalFont(family: String, size: Int) {
         let pointSize = CGFloat(size)
-        let resolved = family.split(separator: ",").lazy.compactMap { candidate in
+        let preferred = family.split(separator: ",").lazy.compactMap { candidate in
             NSFont(name: String(candidate).trimmingCharacters(in: CharacterSet(charactersIn: " \"'\t")), size: pointSize)
         }.first ?? NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        let resolved = Self.withSymbolFallback(preferred)
         if font != resolved {
             let previousGrid = (terminal.cols, terminal.rows)
             let delegate = terminalDelegate
@@ -89,7 +108,10 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         }
     }
 
-    private func installDarkColors() { applyTerminalTheme(isDark: true) }
+    private func installDarkColors() {
+        font = Self.withSymbolFallback(font)
+        applyTerminalTheme(isDark: true)
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         guard terminal != nil else { super.setFrameSize(newSize); return }

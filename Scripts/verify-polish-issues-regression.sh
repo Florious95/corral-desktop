@@ -37,6 +37,7 @@ LABELS=(
   "PR 19 — refine inline rename field styling and eliminate overflowing focus border"
   "PR 20 — prevent unexpected dismissal when clicking non-interactive panel areas"
   "PR 21 — refine NewAgentDialog layout, compact whitespace, and fix provider icon clipping"
+  "Issue #328 — U+F418 branch glyph renders and centres on the footer digits"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -71,6 +72,7 @@ FILTERS=(
   "Issue336TabRenameStylingTests/testOffscreenDoubleClickEditorHasMinimalBorderAndFitsTabCapsule"
   "Issue338SettingsClickInsideDismissTests/testBlankClickInsideSettingsKeepsItOpen"
   "Issue337NewAgentDialogLayoutTests/testOffscreenNewAgentDialogIsCompactWithUnclippedProviderIcons"
+  "Issue328GitBranchGlyphAlignmentTests"
 )
 
 TOTAL=${#FILTERS[@]}
