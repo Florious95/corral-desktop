@@ -53,6 +53,14 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         )
     }
 
+    func bottomAlignedFrame(in viewport: CGRect) -> CGRect {
+        guard let metrics = terminalCellMetrics, viewport.height >= metrics.height else { return viewport }
+        let remainder = viewport.height.truncatingRemainder(dividingBy: metrics.height)
+        // The stage is flipped: move the complete rows down, leaving the fractional row above them.
+        return CGRect(x: viewport.minX, y: viewport.minY + remainder,
+                      width: viewport.width, height: viewport.height - remainder)
+    }
+
     override init(frame: CGRect) {
         pasteboard = .general
         super.init(frame: frame)
@@ -104,6 +112,7 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
             scroller?.isHidden = wasHidden
             terminalDelegate = delegate
             fitTerminalGrid(to: frame.size)
+            superview?.needsLayout = true
             notifyGridChange(from: previousGrid, delegate: delegate)
         }
     }
@@ -266,6 +275,7 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         scroller?.isHidden = wasHidden
         terminalDelegate = delegate
         fitTerminalGrid(to: frame.size)
+        superview?.needsLayout = true
         notifyGridChange(from: previousGrid, delegate: delegate)
         needsDisplay = true
     }

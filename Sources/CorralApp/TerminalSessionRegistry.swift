@@ -94,8 +94,10 @@ final class NativeTerminalStageView: NSView {
             let backgroundPanes = Array(SplitLayout.project(root, in: bounds).panes.prefix(maximumVisiblePanes))
             let inset = backgroundPanes.count > 1 ? CorralMVPWorkspaceView.terminalViewportLeadingInset : 0
             for pane in backgroundPanes {
-                backgroundFrames[pane.sessionID] = CGRect(x: pane.frame.minX + inset, y: pane.frame.minY,
-                                                         width: max(0, pane.frame.width - inset), height: pane.frame.height)
+                guard let view = views[pane.sessionID] else { continue }
+                backgroundFrames[pane.sessionID] = view.bottomAlignedFrame(in: CGRect(
+                    x: pane.frame.minX + inset, y: pane.frame.minY,
+                    width: max(0, pane.frame.width - inset), height: pane.frame.height))
             }
         }
         for (id, view) in views {
@@ -109,12 +111,12 @@ final class NativeTerminalStageView: NSView {
             }
             pendingBackgroundFrames.removeValue(forKey: id)
             let leadingInset = panes.count > 1 ? CorralMVPWorkspaceView.terminalViewportLeadingInset : 0
-            view.frame = CGRect(
+            view.frame = view.bottomAlignedFrame(in: CGRect(
                 x: pane.frame.minX + leadingInset,
                 y: pane.frame.minY,
                 width: max(0, pane.frame.width - leadingInset),
                 height: pane.frame.height
-            )
+            ))
             view.isHidden = false
             view.setInputEnabled(id == focusedSessionID)
         }
