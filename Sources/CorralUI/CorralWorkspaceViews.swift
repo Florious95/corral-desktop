@@ -62,6 +62,8 @@ public final class CorralTabBarView: NSView {
     private var renderedItems: [UUID: (appearance: ItemAppearance, view: CorralTabItemView)] = [:]
     // Visual order only; the canonical tabs remain unchanged until the drop callback.
     private var dragPreview: (tabID: UUID, destination: Int)?
+    // The source item keeps the mouse; the lifted card is a replica and the source item is the open slot.
+    private var tabDrag: (tabID: UUID, grabOffset: CGFloat, card: NSView)?
     /// Keep every Tab reachable without letting its document widen the window.
     private let tabsLane = NSScrollView()
     private var revealSelectedTab = false
@@ -70,7 +72,6 @@ public final class CorralTabBarView: NSView {
     private let activeCapsule = NSView()
     private let trafficLightsSpacer = NSView()
     private let expandSidebarButton = NSButton(title: "▤", target: nil, action: nil)
-    private let dragRegion = CorralWindowDragRegion()
     private var itemsLeadingConstraint: NSLayoutConstraint!
     private var laneHugsTabs: NSLayoutConstraint!
     private var isMouseInsideTabBar = false
@@ -114,7 +115,6 @@ public final class CorralTabBarView: NSView {
         bottomBorder.wantsLayer = true
         bottomBorder.layer?.backgroundColor = CorralAestheticTokens.borderSubtle.cgColor
         bottomBorder.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dragRegion)
         addSubview(trafficLightsSpacer)
         addSubview(expandSidebarButton)
         addSubview(tabsLane)
@@ -146,7 +146,6 @@ public final class CorralTabBarView: NSView {
         NSLayoutConstraint.activate([createButton.widthAnchor.constraint(equalToConstant: 26), createButton.heightAnchor.constraint(equalToConstant: 26)])
 
         trafficLightsSpacer.isHidden = true
-        dragRegion.translatesAutoresizingMaskIntoConstraints = false
         itemsLeadingConstraint = tabsLane.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.expandedTabsLeading)
         laneHugsTabs = tabsLane.widthAnchor.constraint(equalToConstant: 2)
         laneHugsTabs.priority = NSLayoutConstraint.Priority(490)
@@ -155,20 +154,33 @@ public final class CorralTabBarView: NSView {
             expandSidebarButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 88), expandSidebarButton.centerYAnchor.constraint(equalTo: centerYAnchor), expandSidebarButton.widthAnchor.constraint(equalToConstant: 28), expandSidebarButton.heightAnchor.constraint(equalToConstant: 26),
             itemsLeadingConstraint, tabsLane.centerYAnchor.constraint(equalTo: centerYAnchor), tabsLane.heightAnchor.constraint(equalToConstant: 28), laneHugsTabs,
             createButton.leadingAnchor.constraint(equalTo: tabsLane.trailingAnchor, constant: 8), createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            createButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
-            dragRegion.leadingAnchor.constraint(equalTo: createButton.trailingAnchor, constant: 8), dragRegion.trailingAnchor.constraint(equalTo: trailingAnchor), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
+            createButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8 - Self.minimumWindowDragWidth),
             bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor), bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor), bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor), bottomBorder.heightAnchor.constraint(equalToConstant: 1)
         ])
-        registerForDraggedTypes([.string])
     }
 
     public required init?(coder: NSCoder) { fatalError("CorralTabBarView is created programmatically") }
     /// `.tb-session-header` padding-left 8px + `.tb-tabs-scroll` padding 1px; collapsed adds the 80px lights lane and 28px toggle.
     static let expandedTabsLeading: CGFloat = 8
     static let collapsedTabsLeading: CGFloat = 124
+    /// Blank chrome right of + stays a roomy window-move handle even when Tabs fill the lane.
+    static let minimumWindowDragWidth: CGFloat = 40
+
+    /// Tabs and controls own their clicks; every other point of the bar moves the window.
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return hit is NSControl || hit is CorralTabItemView ? hit : self
+    }
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true } // like a native titlebar, an inactive window moves too
+    public override func mouseDown(with event: NSEvent) { window?.moveFromTitleChrome(with: event) }
+    public override func scrollWheel(with event: NSEvent) { tabsLane.scrollWheel(with: event) }
 
     public func setTabs(_ tabs: [CorralTab], selectedTabID: UUID?) {
         self.tabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
+        if let drag = tabDrag, !self.tabs.contains(where: { $0.id == drag.tabID }) {
+            drag.card.removeFromSuperview()
+            tabDrag = nil
+        }
         if let preview = dragPreview, !self.tabs.contains(where: { $0.id == preview.tabID }) {
             renderedItems[preview.tabID]?.view.alphaValue = 1
             dragPreview = nil
@@ -183,13 +195,17 @@ public final class CorralTabBarView: NSView {
         for tab in self.tabs {
             let appearance = ItemAppearance(title: tab.title, provider: tab.provider, pinned: tab.isPinned)
             let item: CorralTabItemView
-            if let existing = renderedItems[tab.id], existing.appearance == appearance {
+            // A held Tab must keep its view (it owns the mouse); a changed appearance is rebuilt after the drop.
+            if let existing = renderedItems[tab.id], existing.appearance == appearance || tabDrag?.tabID == tab.id {
                 item = existing.view
                 item.tab = tab
                 item.updateStatus()
                 item.setSelected(tab.id == selectedTabID)
-            } else { item = CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self) }
-            updated[tab.id] = (appearance, item)
+                updated[tab.id] = (existing.appearance, item)
+            } else {
+                item = CorralTabItemView(tab: tab, selected: tab.id == selectedTabID, owner: self)
+                updated[tab.id] = (appearance, item)
+            }
             ordered.append(item)
         }
         renderedItems = updated
@@ -199,7 +215,7 @@ public final class CorralTabBarView: NSView {
             let lower = item.tab.isPinned ? 0 : pinnedCount
             let upper = item.tab.isPinned ? pinnedCount : ordered.count
             ordered.insert(item, at: min(max(preview.destination, lower), upper))
-            item.alphaValue = 0.5
+            item.alphaValue = 0
         }
         if selectionChanged {
             revealSelectedTab = true
@@ -236,7 +252,7 @@ public final class CorralTabBarView: NSView {
         }
         let regularItems = items.filter { !$0.tab.isPinned }
         let pinnedCount = items.count - regularItems.count
-        let fixedChromeWidth = itemsLeadingConstraint.constant + 8 + 26 + 8
+        let fixedChromeWidth = itemsLeadingConstraint.constant + 8 + 26 + 8 + Self.minimumWindowDragWidth
         let availableForItems = max(0, bounds.width - fixedChromeWidth)
         let gaps = CGFloat(max(0, items.count - 1)) * itemsStack.spacing
         let regularBudget = availableForItems - CGFloat(pinnedCount) * CorralTabItemView.pinnedWidth - gaps
@@ -277,7 +293,9 @@ public final class CorralTabBarView: NSView {
             item.scrollToVisible(item.bounds)
             revealSelectedTab = false
         }
-        guard let selectedTabID, let item = itemsStack.arrangedSubviews.compactMap({ $0 as? CorralTabItemView }).first(where: { $0.tab.id == selectedTabID }), !item.tab.isPinned else {
+        // The lifted card carries the selected look; an empty capsule at its slot would read as a second Tab.
+        guard let selectedTabID, tabDrag?.tabID != selectedTabID,
+              let item = itemsStack.arrangedSubviews.compactMap({ $0 as? CorralTabItemView }).first(where: { $0.tab.id == selectedTabID }), !item.tab.isPinned else {
             activeCapsule.isHidden = true
             activeCapsuleFrame = nil
             capsuleSelectionAnimationPending = false
@@ -389,26 +407,69 @@ public final class CorralTabBarView: NSView {
     @objc private func toggleSidebar() { onToggleSidebar?() }
     @objc private func createTab() { onCreateTab?() }
 
-    private func dragDestination(_ sender: NSDraggingInfo) -> (tabID: UUID, source: Int, destination: Int)? {
-        guard let value = sender.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: value) else { return nil }
-        return dragDestination(at: sender.draggingLocation, tabID: id)
-    }
-    func dragDestination(at point: NSPoint, tabID id: UUID) -> (tabID: UUID, source: Int, destination: Int)? {
-        guard let source = tabs.firstIndex(where: { $0.id == id }) else { return nil }
-        let tab = tabs[source]
-        // The moved source must not become its own midpoint target on the final drop.
-        let remaining = tabs.filter { $0.id != id }
-        let x = itemsStack.convert(point, from: nil).x
-        let target = remaining.firstIndex { x < (renderedItems[$0.id]?.view.frame.midX ?? .infinity) } ?? remaining.count
-        let pinnedCount = remaining.filter(\.isPinned).count
-        let lower = tab.isPinned ? 0 : pinnedCount
-        let upper = tab.isPinned ? pinnedCount : remaining.count
-        return (id, source, min(max(target, lower), upper))
+    fileprivate func beginTabDrag(_ item: CorralTabItemView, from start: NSPoint) {
+        guard tabDrag == nil, let source = tabs.firstIndex(where: { $0.id == item.tab.id }) else { return }
+        let frame = convert(item.bounds, from: item)
+        let card = CorralTabDragCard(tab: item.tab, size: frame.size, owner: self)
+        card.frame = frame
+        addSubview(card, positioned: .above, relativeTo: tabsLane)
+        tabDrag = (item.tab.id, convert(start, from: nil).x - frame.minX, card)
+        needsLayout = true // hide the selection capsule under the lifted card
+        previewTabDrag(item.tab.id, to: source)
     }
 
-    fileprivate func previewTabDrag(_ id: UUID, to destination: Int) {
+    fileprivate func moveTabDrag(to point: NSPoint) {
+        guard let drag = tabDrag else { return }
+        var frame = drag.card.frame
+        frame.origin.x = min(max(convert(point, from: nil).x - drag.grabOffset, tabsLane.frame.minX), tabsLane.frame.maxX - frame.width)
+        drag.card.frame = frame
+        if let destination = dragDestination(tabID: drag.tabID, cardMinX: itemsStack.convert(frame.origin, from: self).x) {
+            previewTabDrag(drag.tabID, to: destination)
+        }
+    }
+
+    fileprivate func endTabDrag() {
+        guard let drag = tabDrag else { return }
+        tabDrag = nil
+        let source = tabs.firstIndex { $0.id == drag.tabID }
+        let destination = dragPreview?.destination
+        dragPreview = nil
+        let slot = renderedItems[drag.tabID]?.view
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            if let slot { drag.card.animator().frame = convert(slot.bounds, from: slot) }
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                drag.card.removeFromSuperview()
+                slot?.alphaValue = 1
+                guard let self else { return }
+                self.setTabs(self.tabs, selectedTabID: self.selectedTabID)
+                self.needsLayout = true
+            }
+        })
+        if let source, let destination, source != destination { onReorderTabs?(drag.tabID, destination) }
+    }
+
+    /// The insertion index whose slot start is nearest the card, so a neighbour gives way once the card covers half of it.
+    private func dragDestination(tabID: UUID, cardMinX: CGFloat) -> Int? {
+        guard let moving = tabs.first(where: { $0.id == tabID }) else { return nil }
+        let remaining = tabs.filter { $0.id != tabID }
+        let pinnedCount = remaining.filter(\.isPinned).count
+        let allowed = moving.isPinned ? 0...pinnedCount : pinnedCount...remaining.count
+        var slotStart = itemsStack.edgeInsets.left
+        var best: (index: Int, distance: CGFloat)?
+        for index in 0...remaining.count {
+            if allowed.contains(index), best.map({ abs(slotStart - cardMinX) < $0.distance }) ?? true {
+                best = (index, abs(slotStart - cardMinX))
+            }
+            if index < remaining.count { slotStart += (renderedItems[remaining[index].id]?.view.frame.width ?? 0) + itemsStack.spacing }
+        }
+        return best?.index
+    }
+
+    private func previewTabDrag(_ id: UUID, to destination: Int) {
         guard dragPreview?.tabID != id || dragPreview?.destination != destination else { return }
-        if let previous = dragPreview { renderedItems[previous.tabID]?.view.alphaValue = 1 }
         dragPreview = (id, destination)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
@@ -417,45 +478,36 @@ public final class CorralTabBarView: NSView {
             layoutSubtreeIfNeeded()
         }
     }
+}
 
-    fileprivate func cancelTabDragPreview() {
-        guard let preview = dragPreview else { return }
-        dragPreview = nil
-        renderedItems[preview.tabID]?.view.alphaValue = 1
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            context.allowsImplicitAnimation = true
-            setTabs(tabs, selectedTabID: selectedTabID)
-            layoutSubtreeIfNeeded()
-        }
+/// The lifted Tab: a translucent, non-interactive replica that follows the pointer.
+@MainActor
+private final class CorralTabDragCard: NSView {
+    init(tab: CorralTab, size: NSSize, owner: CorralTabBarView) {
+        super.init(frame: NSRect(origin: .zero, size: size))
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.backgroundColor = CorralAestheticTokens.tabActiveBackground.cgColor
+        layer?.borderColor = CorralAestheticTokens.tabActiveBorder.cgColor
+        layer?.borderWidth = 1
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.18
+        layer?.shadowRadius = 4
+        layer?.shadowOffset = NSSize(width: 0, height: -1)
+        alphaValue = 0.5
+        let replica = CorralTabItemView(tab: tab, selected: true, owner: owner)
+        replica.setWidth(size.width, animated: false)
+        replica.frame = bounds
+        replica.setAccessibilityElement(false)
+        addSubview(replica)
+        setAccessibilityIdentifier("corral.tab.dragCard")
     }
-
-    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
-    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateTabDragPreview(dragDestination(sender))
-    }
-    func updateTabDragPreview(_ target: (tabID: UUID, source: Int, destination: Int)?) -> NSDragOperation {
-        guard let target else { cancelTabDragPreview(); return [] }
-        previewTabDrag(target.tabID, to: target.destination)
-        return .move
-    }
-    public override func draggingExited(_ sender: NSDraggingInfo?) { cancelTabDragPreview() }
-    public override func concludeDragOperation(_ sender: NSDraggingInfo?) { cancelTabDragPreview() }
-    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        commitTabDrag(dragDestination(sender))
-    }
-    func commitTabDrag(_ target: (tabID: UUID, source: Int, destination: Int)?) -> Bool {
-        guard let target else { cancelTabDragPreview(); return false }
-        previewTabDrag(target.tabID, to: target.destination)
-        dragPreview = nil
-        renderedItems[target.tabID]?.view.alphaValue = 1
-        if target.source != target.destination { onReorderTabs?(target.tabID, target.destination) }
-        return true
-    }
+    required init?(coder: NSCoder) { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 @MainActor
-private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSource {
+private final class CorralTabItemView: NSView, NSTextFieldDelegate {
     fileprivate static let minimumRegularWidth: CGFloat = 44
     fileprivate static let maximumRegularWidth: CGFloat = 160
     fileprivate static let pinnedWidth: CGFloat = 32
@@ -482,8 +534,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
     private var editField: CorralInlineRenameField?
     var isEditingTitle: Bool { editField != nil }
     private var dragStart: NSPoint?
-    private var pressTime: TimeInterval = 0
-    private var didStartDrag = false
+    private var isDragging = false
 
     init(tab: CorralTab, selected: Bool, owner: CorralTabBarView) {
         self.tab = tab
@@ -581,7 +632,6 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         setAccessibilityLabel(tab.title)
         setAccessibilityIdentifier("corral.tab")
         updateSelectionAppearance()
-        registerForDraggedTypes([.string])
     }
     func setWidth(_ width: CGFloat, animated: Bool) {
         let compact = !tab.isPinned && width < 96
@@ -686,34 +736,26 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         return self
     }
     override func mouseDown(with event: NSEvent) {
+        isDragging = false
         if event.clickCount == 2 { dragStart = nil; beginRename(); return }
-        dragStart = convert(event.locationInWindow, from: nil)
-        pressTime = event.timestamp
-        didStartDrag = false
+        dragStart = event.locationInWindow
     }
-    override func mouseDragged(with event: NSEvent) {
-        guard !didStartDrag, let dragStart else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        guard event.timestamp - pressTime >= 0.18,
-              hypot(point.x - dragStart.x, point.y - dragStart.y) > 6 else { return }
-        didStartDrag = true
-        let writer = NSPasteboardItem()
-        writer.setString(tab.id.uuidString, forType: .string)
-        let image = NSImage(size: bounds.size)
-        image.lockFocus()
-        (tab.title as NSString).draw(at: NSPoint(x: 6, y: 6), withAttributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: CorralAestheticTokens.text])
-        image.unlockFocus()
-        let item = NSDraggingItem(pasteboardWriter: writer)
-        item.setDraggingFrame(bounds, contents: image)
-        if let owner, let source = owner.tabs.firstIndex(where: { $0.id == tab.id }) {
-            owner.previewTabDrag(tab.id, to: source)
+    override func mouseDragged(with event: NSEvent) { trackDrag(to: event.locationInWindow) }
+    /// More than 4pt from the press is a drag; no hold delay, so quick and coalesced drags still reorder.
+    private func trackDrag(to point: NSPoint) {
+        guard let dragStart else { return }
+        if !isDragging {
+            guard hypot(point.x - dragStart.x, point.y - dragStart.y) > 4 else { return }
+            isDragging = true
+            owner?.beginTabDrag(self, from: dragStart)
         }
-        beginDraggingSession(with: [item], event: event, source: self)
+        owner?.moveTabDrag(to: point)
     }
     override func mouseUp(with event: NSEvent) {
-        defer { dragStart = nil }
-        guard dragStart != nil, !didStartDrag,
-              bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        defer { dragStart = nil; isDragging = false }
+        trackDrag(to: event.locationInWindow) // a release can carry movement no drag event reported
+        if isDragging { owner?.endTabDrag(); return }
+        guard dragStart != nil, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         owner?.select(tab.id)
     }
     override func updateTrackingAreas() {
@@ -761,12 +803,6 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSo
         return item
     }
     @objc private func contextAction(_ item: NSMenuItem) { owner?.performContextAction(tab.id, item.representedObject as? String ?? "") }
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
-    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        owner?.cancelTabDragPreview()
-        dragStart = nil
-        didStartDrag = false
-    }
     @objc private func closeTab() { owner?.closeFromButton(tab.id, currentWidth: bounds.width) }
     @objc private func renameFromMenu() { beginRename() }
     @objc private func togglePin() { owner?.performContextAction(tab.id, "pin") }
@@ -1638,24 +1674,29 @@ public final class CorralSidebarTitleBarView: NSView {
     public var onToggleSidebar: (() -> Void)?
     private let trafficLightsSpacer = NSView()
     public let collapseButton = NSButton(title: "▤", target: nil, action: nil)
-    private let dragRegion = CorralWindowDragRegion()
     private let bottomBorder = NSView()
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect); wantsLayer = true; layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor
         trafficLightsSpacer.translatesAutoresizingMaskIntoConstraints = false
         bottomBorder.wantsLayer = true; bottomBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor; bottomBorder.translatesAutoresizingMaskIntoConstraints = false
-        dragRegion.translatesAutoresizingMaskIntoConstraints = false; addSubview(dragRegion); addSubview(trafficLightsSpacer); addSubview(collapseButton); addSubview(bottomBorder)
+        addSubview(trafficLightsSpacer); addSubview(collapseButton); addSubview(bottomBorder)
         collapseButton.image = CorralLegacyIcon.image(.sidebar, size: 16)
         collapseButton.title = ""; collapseButton.imagePosition = .imageOnly; collapseButton.imageScaling = .scaleProportionallyDown; collapseButton.isBordered = false; collapseButton.contentTintColor = CorralAestheticTokens.icon; collapseButton.translatesAutoresizingMaskIntoConstraints = false
         collapseButton.target = self; collapseButton.action = #selector(toggle); collapseButton.toolTip = "隐藏侧边栏"; collapseButton.setAccessibilityLabel("隐藏侧边栏"); collapseButton.setAccessibilityIdentifier("corral.sidebar.toggle")
         NSLayoutConstraint.activate([
             trafficLightsSpacer.leadingAnchor.constraint(equalTo: leadingAnchor), trafficLightsSpacer.topAnchor.constraint(equalTo: topAnchor), trafficLightsSpacer.bottomAnchor.constraint(equalTo: bottomAnchor), trafficLightsSpacer.widthAnchor.constraint(equalToConstant: 80),
             collapseButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9), collapseButton.centerYAnchor.constraint(equalTo: centerYAnchor), collapseButton.widthAnchor.constraint(equalToConstant: 28), collapseButton.heightAnchor.constraint(equalToConstant: 27),
-            dragRegion.leadingAnchor.constraint(equalTo: trafficLightsSpacer.trailingAnchor), dragRegion.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8), dragRegion.topAnchor.constraint(equalTo: topAnchor), dragRegion.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor), bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor), bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor), bottomBorder.heightAnchor.constraint(equalToConstant: 1)
         ])
     }
     public required init?(coder: NSCoder) { fatalError("CorralSidebarTitleBarView is created programmatically") }
+    /// Everything except the collapse control moves the window.
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return hit is NSControl ? hit : self
+    }
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true } // like a native titlebar, an inactive window moves too
+    public override func mouseDown(with event: NSEvent) { window?.moveFromTitleChrome(with: event) }
     public func refreshTheme() { layer?.backgroundColor = CorralAestheticTokens.surface0.cgColor; bottomBorder.layer?.backgroundColor = CorralAestheticTokens.border.cgColor; collapseButton.contentTintColor = CorralAestheticTokens.icon }
     @objc private func toggle() { onToggleSidebar?() }
 }

@@ -51,7 +51,8 @@ final class Issue19TabCloseRobustnessTests: XCTestCase {
         _ = NSApplication.shared
         for (count, expectedRange) in [(20, 44.0...44.0), (9, 59.0...60.0)] {
             let tabs = makeTabs(count, provider: "codex")
-            let bar = CorralTabBarView(frame: NSRect(x: 0, y: 0, width: 600, height: 38))
+            // The lane budget excludes the reserved window-drag area right of +.
+            let bar = CorralTabBarView(frame: NSRect(x: 0, y: 0, width: 600 + CorralTabBarView.minimumWindowDragWidth, height: 38))
             bar.setTabs(tabs, selectedTabID: tabs[0].id)
             bar.layoutSubtreeIfNeeded()
             let items = tabItems(in: bar)
