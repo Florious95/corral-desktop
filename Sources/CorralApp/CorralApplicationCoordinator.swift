@@ -752,9 +752,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func adaptTerminalWindow(for key: SessionKey) {
-        guard let runtime = sessions[key],
+        guard let runtime = sessions[key], let view = terminalRegistry.view(for: key),
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
         reflowAndResizeVisibleSessions([key])
+        view.getTerminal().updateFullScreen()
+        view.needsDisplay = true
     }
 
     private func reflowAndResizeVisibleSessions(_ keys: [SessionKey]) {
