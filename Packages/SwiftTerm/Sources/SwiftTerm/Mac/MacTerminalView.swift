@@ -162,10 +162,17 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
         
         public init(font baseFont: NSFont, fontSize: CGFloat? = nil) {
+            func styledFont(_ traits: NSFontTraitMask) -> NSFont {
+                let styled = NSFontManager.shared.convert(baseFont, toHaveTrait: traits)
+                // AppKit drops custom cascades when converting system UI fonts.
+                guard let cascade = baseFont.fontDescriptor.object(forKey: .cascadeList) else { return styled }
+                let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontCascadeListAttribute: cascade] as CFDictionary)
+                return CTFontCreateCopyWithAttributes(styled as CTFont, styled.pointSize, nil, descriptor) as NSFont
+            }
             self.normal = baseFont
-            self.bold = NSFontManager.shared.convert(baseFont, toHaveTrait: [.boldFontMask])
-            self.italic = NSFontManager.shared.convert(baseFont, toHaveTrait: [.italicFontMask])
-            self.boldItalic = NSFontManager.shared.convert(baseFont, toHaveTrait: [.italicFontMask, .boldFontMask])
+            self.bold = styledFont([.boldFontMask])
+            self.italic = styledFont([.italicFontMask])
+            self.boldItalic = styledFont([.italicFontMask, .boldFontMask])
         }
 
         // Expected by the shared rendering code
