@@ -36,9 +36,10 @@ LABELS=(
   "PR 16 — align terminal 256-color palette to standard xterm cube"
   "PR 19 — refine inline rename field styling and eliminate overflowing focus border"
   "PR 20 — prevent unexpected dismissal when clicking non-interactive panel areas"
-  "PR 21 — refine NewAgentDialog layout, compact whitespace, and fix provider icon clipping"
   "Issue #328 — U+F418 branch glyph renders and centres on the footer digits"
   "Issue #339/#340 — fit to window makes the PTY program re-lay out (real SIGWINCH)"
+  "Golden dialogs — Close Agent compact card, muted warning, solid danger button"
+  "Golden dialogs — New Agent legacy 4-column card with CSS rhythm"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -72,9 +73,10 @@ FILTERS=(
   "Issue25TerminalPaletteXtermTests/testNativeTerminalUsesStandardXtermColorAtIndex174"
   "Issue336TabRenameStylingTests/testOffscreenDoubleClickEditorHasMinimalBorderAndFitsTabCapsule"
   "Issue338SettingsClickInsideDismissTests/testBlankClickInsideSettingsKeepsItOpen"
-  "Issue337NewAgentDialogLayoutTests/testOffscreenNewAgentDialogIsCompactWithUnclippedProviderIcons"
   "Issue328GitBranchGlyphAlignmentTests"
   "Issue11ContextMenuActionsTests/test(AdaptCurrentWindowStepsThePTYAwayAndBack|TabMenuAdaptCurrentWindow)"
+  "GoldenDialogBaselineTests/testCloseAgentIsACompactCardWithMutedWarningAndSolidDangerButton"
+  "GoldenDialogBaselineTests/testNewAgentIsTheLegacyFourColumnCardWithCSSRhythm"
 )
 
 TOTAL=${#FILTERS[@]}

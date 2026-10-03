@@ -1695,15 +1695,16 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.availableAgentLaunchers.count, 4)
 
         coordinator.showNewAgentDialog()
-        let newAgentSheet = try XCTUnwrap(window.attachedSheet as? NSPanel)
-        XCTAssertEqual(newAgentSheet.identifier?.rawValue, "corral.newagent.window")
-        let newAgentDialog = try XCTUnwrap(newAgentSheet.contentViewController as? NewAgentDialogViewController)
+        XCTAssertNil(window.attachedSheet, "New Agent is the legacy in-window card, not a titled sheet")
+        let createButton = try XCTUnwrap(descendants(of: try XCTUnwrap(window.contentView)).compactMap { $0 as? NSButton }.first { $0.title == "创建" })
+        let newAgentDialog = try XCTUnwrap(createButton.target as? NewAgentDialogViewController)
+        XCTAssertTrue(newAgentDialog.presentedWindow === window)
         XCTAssertEqual(newAgentDialog.launchers, launchers.map {
             CorralAgentLauncher(provider: $0.provider, displayName: $0.displayName, supportsBypass: $0.supportsBypass)
         })
         newAgentDialog.cancelButton?.performClick(nil)
-        let newAgentSheetDismissed = await waitUntil { window.attachedSheet == nil }
-        XCTAssertTrue(newAgentSheetDismissed)
+        let newAgentDialogDismissed = await waitUntil { newAgentDialog.view.window == nil }
+        XCTAssertTrue(newAgentDialogDismissed)
 
         let listing = SessionListing(
             requestID: 1,
