@@ -25,6 +25,10 @@ public final class CorralWindow: NSWindow {
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         titlebarSeparatorStyle = .none
+        // The Tab lane sits under the transparent titlebar. AppKit only carves NSControl frames out of
+        // the WindowServer drag region there (not views returning mouseDownCanMoveWindow == false), so a
+        // movable titlebar would move the window from any Tab. Blank title chrome moves it explicitly instead.
+        isMovable = false
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         backgroundColor = CorralAestheticTokens.surface0
@@ -149,14 +153,13 @@ public final class CorralWindowController: NSWindowController, NSWindowDelegate 
     }
 }
 
-@MainActor
-final class CorralWindowDragRegion: NSView {
-    override func mouseDown(with event: NSEvent) {
-        guard let window else { return }
-        if event.clickCount == 2, let controller = window.windowController as? CorralWindowController {
+extension NSWindow {
+    /// Blank title-bar chrome moves the window; `performDrag` works although CorralWindow is not titlebar-movable.
+    func moveFromTitleChrome(with event: NSEvent) {
+        if event.clickCount == 2, let controller = windowController as? CorralWindowController {
             controller.toggleZoom()
         } else {
-            window.performDrag(with: event)
+            performDrag(with: event)
         }
     }
 }

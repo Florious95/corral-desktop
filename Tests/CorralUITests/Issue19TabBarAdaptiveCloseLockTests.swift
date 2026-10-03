@@ -19,7 +19,8 @@ final class Issue19TabBarAdaptiveCloseLockTests: XCTestCase {
 
     func testSixTabsShrinkEquallyToFitWithoutHorizontalOverflow() throws {
         _ = NSApplication.shared
-        let bar = makeBar(tabs: makeTabs(6), width: 600)
+        // The lane budget excludes the reserved window-drag area right of +.
+        let bar = makeBar(tabs: makeTabs(6), width: 600 + CorralTabBarView.minimumWindowDragWidth)
         let widths = tabItems(in: bar).map(\.frame.width)
         let lane = try XCTUnwrap(descendants(of: bar).compactMap { $0 as? NSScrollView }.first)
         let documentWidth = try XCTUnwrap(lane.documentView).frame.width
@@ -35,7 +36,7 @@ final class Issue19TabBarAdaptiveCloseLockTests: XCTestCase {
     func testClosingWhilePointerIsInsideLocksWidthsUntilMouseExit() throws {
         _ = NSApplication.shared
         let tabs = makeTabs(6)
-        let bar = makeBar(tabs: tabs, width: 600, selectedTabID: tabs[1].id)
+        let bar = makeBar(tabs: tabs, width: 600 + CorralTabBarView.minimumWindowDragWidth, selectedTabID: tabs[1].id)
         let beforeWidths = tabItems(in: bar).map(\.frame.width)
         let lockedWidth = try XCTUnwrap(beforeWidths.first)
         XCTAssertTrue(beforeWidths.allSatisfy { abs($0 - lockedWidth) < 1 },
