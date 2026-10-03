@@ -35,6 +35,23 @@ python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-deskto
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/corral-desktop --case window-resize --no-resize
 ```
 
+The terminal footer-gap red gate uses the same packaged app, private daemon,
+real PTYs, and exact WindowServer capture. It samples the normal resize matrix
+plus the 911pt stage case (`1400x949` window), measures the last visible ink
+bottom against each pane's physical container bottom, and records both
+immediate and settled captures:
+
+```sh
+python3 TestSupport/NativeAcceptance/measure_terminal_footer_gap.py \
+  --legacy-root /path/to/corral-desktop
+```
+
+The command exits 1 and writes `RED_BASELINE` when an anchored terminal has at
+least 14.5pt of physical blank space. `--record-only` keeps the evidence while
+returning zero. The run directory contains `footer-gap-measurements.json`,
+matching PNGs, and the candidate identity; unanchored transition captures are
+reported separately and are not treated as layout slack.
+
 The ten-session cases check each preview, permanent Tab and reverse return by
 screenshot OCR and fresh input echo or advancing output; a stale snapshot
 cannot satisfy the live-stream assertion. Departed previews must release their subscriptions; permanent
