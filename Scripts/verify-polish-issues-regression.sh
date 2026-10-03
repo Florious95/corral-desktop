@@ -38,6 +38,7 @@ LABELS=(
   "PR 20 — prevent unexpected dismissal when clicking non-interactive panel areas"
   "PR 21 — refine NewAgentDialog layout, compact whitespace, and fix provider icon clipping"
   "Issue #328 — U+F418 branch glyph renders and centres on the footer digits"
+  "Issue #339/#340 — fit to window makes the PTY program re-lay out (real SIGWINCH)"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -73,6 +74,7 @@ FILTERS=(
   "Issue338SettingsClickInsideDismissTests/testBlankClickInsideSettingsKeepsItOpen"
   "Issue337NewAgentDialogLayoutTests/testOffscreenNewAgentDialogIsCompactWithUnclippedProviderIcons"
   "Issue328GitBranchGlyphAlignmentTests"
+  "Issue11ContextMenuActionsTests/test(AdaptCurrentWindowStepsThePTYAwayAndBack|TabMenuAdaptCurrentWindow)"
 )
 
 TOTAL=${#FILTERS[@]}
