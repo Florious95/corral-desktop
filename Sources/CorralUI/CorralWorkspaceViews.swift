@@ -39,7 +39,6 @@ public final class CorralTab: Identifiable {
 
 @MainActor
 public final class CorralTabBarView: NSView {
-    public override var mouseDownCanMoveWindow: Bool { false }
     public private(set) var tabs: [CorralTab] = []
     public private(set) var selectedTabID: UUID?
     public var hasActiveTitleEditor: Bool {
@@ -457,7 +456,6 @@ public final class CorralTabBarView: NSView {
 
 @MainActor
 private final class CorralTabItemView: NSView, NSTextFieldDelegate, NSDraggingSource {
-    override var mouseDownCanMoveWindow: Bool { false }
     fileprivate static let minimumRegularWidth: CGFloat = 44
     fileprivate static let maximumRegularWidth: CGFloat = 160
     fileprivate static let pinnedWidth: CGFloat = 32
