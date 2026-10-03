@@ -191,47 +191,38 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         super.init()
     }
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 420, height: 360)); view = root
-        var y = addHeader(to: root, title: "新建 Agent", subtitle: "在「\(spaceName)」中创建", top: 16)
-        _ = addLabel("任务名称", to: root, y: y); y += 18
+        let root = rootView(size: NSSize(width: 420, height: 488)); view = root
+        var y = addHeader(to: root, title: "新建 Agent", subtitle: "在「\(spaceName)」中创建")
+        _ = addLabel("任务名称", to: root, y: y); y += 20
         nameField.placeholderString = "任务名称"; nameField.font = .systemFont(ofSize: 12); nameField.textColor = CorralAestheticTokens.text; nameField.backgroundColor = CorralAestheticTokens.surface0; nameField.isBezeled = true; nameField.bezelStyle = .roundedBezel; nameField.delegate = self; nameField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(nameField)
-        NSLayoutConstraint.activate([nameField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), nameField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), nameField.topAnchor.constraint(equalTo: root.topAnchor, constant: y), nameField.heightAnchor.constraint(equalToConstant: 28)])
-        y += 44
-        _ = addLabel("选择 Agent", to: root, y: y); y += 18
+        NSLayoutConstraint.activate([nameField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), nameField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), nameField.topAnchor.constraint(equalTo: root.topAnchor, constant: y), nameField.heightAnchor.constraint(equalToConstant: 32)])
+        y += 49
+        _ = addLabel("选择 Agent", to: root, y: y); y += 21
         launcherStack.orientation = .vertical; launcherStack.alignment = .width; launcherStack.distribution = .fillEqually; launcherStack.spacing = 8; launcherStack.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(launcherStack)
-        for start in stride(from: 0, to: launchers.count, by: 3) {
+        for start in stride(from: 0, to: launchers.count, by: 4) {
             let row = NSStackView(); row.orientation = .horizontal; row.alignment = .centerY; row.distribution = .fillEqually; row.spacing = 8
-            for launcher in launchers[start..<min(start + 3, launchers.count)] {
+            for launcher in launchers[start..<min(start + 4, launchers.count)] {
                 let button = NSButton(title: launcher.displayName, target: self, action: #selector(selectLauncher(_:)))
-                button.identifier = NSUserInterfaceItemIdentifier(launcher.provider); button.setButtonType(.pushOnPushOff); button.isBordered = false
-                button.wantsLayer = true; button.layer?.cornerRadius = 8; button.layer?.borderWidth = 1
-                button.font = .systemFont(ofSize: 11, weight: .medium)
+                button.identifier = NSUserInterfaceItemIdentifier(launcher.provider); button.setButtonType(.pushOnPushOff); button.bezelStyle = .rounded
                 button.image = CorralProviderIconView(provider: launcher.provider, size: 18, active: true).image
-                button.image?.size = NSSize(width: 18, height: 18)
-                button.imagePosition = .imageLeading; button.imageHugsTitle = true; button.imageScaling = .scaleNone; button.tag = launcher.supportsBypass ? 1 : 0
-                button.toolTip = launcher.displayName; button.heightAnchor.constraint(equalToConstant: 38).isActive = true
+                button.imagePosition = .imageAbove; button.imageScaling = .scaleProportionallyDown; button.tag = launcher.supportsBypass ? 1 : 0
+                button.toolTip = launcher.displayName; button.heightAnchor.constraint(equalToConstant: 62).isActive = true
                 row.addArrangedSubview(button); launcherButtons.append(button)
             }
-            for _ in row.arrangedSubviews.count..<3 { row.addArrangedSubview(NSView()) }
+            for _ in row.arrangedSubviews.count..<4 { row.addArrangedSubview(NSView()) }
             launcherStack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: launcherStack.widthAnchor).isActive = true
         }
-        let rows = max(1, (launchers.count + 2) / 3)
-        let launcherHeight = CGFloat(rows * 38 + (rows - 1) * 8)
-        NSLayoutConstraint.activate([launcherStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), launcherStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), launcherStack.topAnchor.constraint(equalTo: root.topAnchor, constant: y), launcherStack.heightAnchor.constraint(equalToConstant: launcherHeight)])
-        y += launcherHeight + 16
+        let rows = max(1, (launchers.count + 3) / 4)
+        NSLayoutConstraint.activate([launcherStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), launcherStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), launcherStack.topAnchor.constraint(equalTo: root.topAnchor, constant: y), launcherStack.heightAnchor.constraint(equalToConstant: CGFloat(rows * 62 + (rows - 1) * 8))])
+        y += CGFloat(rows * 62 + (rows - 1) * 8 + 20)
         let bypassLabel = NSTextField(labelWithString: "Bypass permissions"); bypassLabel.font = .systemFont(ofSize: 12, weight: .medium); bypassLabel.textColor = CorralAestheticTokens.text; bypassLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(bypassLabel)
         let description = NSTextField(labelWithString: "允许 Agent 不经确认执行 shell 命令"); description.font = .systemFont(ofSize: 10); description.textColor = CorralAestheticTokens.textMuted; description.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(description)
         bypassSwitch.target = self; bypassSwitch.action = #selector(toggleBypass); bypassSwitch.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(bypassSwitch)
         NSLayoutConstraint.activate([bypassLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), bypassLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: y), description.leadingAnchor.constraint(equalTo: bypassLabel.leadingAnchor), description.topAnchor.constraint(equalTo: bypassLabel.bottomAnchor, constant: 4), bypassSwitch.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), bypassSwitch.centerYAnchor.constraint(equalTo: bypassLabel.centerYAnchor)])
-        y += 36
+        y += 52
         errorLabel.textColor = CorralAestheticTokens.danger; errorLabel.font = .systemFont(ofSize: 10); errorLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(errorLabel); errorLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: y).isActive = true; errorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true
         let buttons = addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(create), primaryTitle: "创建")
-        buttons.cancel.isBordered = false; buttons.cancel.font = .systemFont(ofSize: 13, weight: .semibold); buttons.cancel.contentTintColor = CorralAestheticTokens.text
-        buttons.cancel.wantsLayer = true; buttons.cancel.layer?.backgroundColor = CorralAestheticTokens.fillSubtle.cgColor; buttons.cancel.layer?.cornerRadius = 8
-        NSLayoutConstraint.activate([buttons.cancel.heightAnchor.constraint(equalToConstant: 32), buttons.primary.heightAnchor.constraint(equalToConstant: 32)])
         cancelButton = buttons.cancel; createButton = buttons.primary
-        root.setFrameSize(NSSize(width: 420, height: y + 80))
         updateControls()
     }
     public var isCreateEnabled: Bool { validationMessage == nil && !nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedLauncher != nil && !isLoading }
@@ -254,13 +245,7 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
     private func updateControls() {
         guard isViewLoaded else { return }
         bypassSwitch.isEnabled = !isLoading && selectedLauncher?.supportsBypass == true
-        for button in launcherButtons {
-            button.isEnabled = !isLoading; button.state = button.identifier?.rawValue == selectedProvider ? .on : .off
-            let selected = button.state == .on
-            button.contentTintColor = selected ? CorralAestheticTokens.choiceSelectedForeground : CorralAestheticTokens.text
-            button.layer?.backgroundColor = (selected ? CorralAestheticTokens.choiceSelectedBackground : CorralAestheticTokens.surface0).cgColor
-            button.layer?.borderColor = (selected ? CorralAestheticTokens.choiceSelectedBorder : CorralAestheticTokens.borderSubtle).cgColor
-        }
+        for button in launcherButtons { button.isEnabled = !isLoading; button.state = button.identifier?.rawValue == selectedProvider ? .on : .off }
         nameField.isEnabled = !isLoading
         cancelButton?.isEnabled = !isLoading
         createButton?.isEnabled = isCreateEnabled
