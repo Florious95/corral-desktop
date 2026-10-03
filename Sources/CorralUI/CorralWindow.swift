@@ -25,6 +25,9 @@ public final class CorralWindow: NSWindow {
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         titlebarSeparatorStyle = .none
+        // The full-size tab lane overlaps the native titlebar. Disable its
+        // server-side drag; blank chrome opts in explicitly via performDrag.
+        isMovable = false
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         backgroundColor = CorralAestheticTokens.surface0
