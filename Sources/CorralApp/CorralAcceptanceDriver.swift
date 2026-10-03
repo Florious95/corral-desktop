@@ -213,7 +213,21 @@ final class CorralAcceptanceDriver {
             var preferences = coordinator.userPreferences
             if let family = command["font"] as? String { preferences.fontFamily = family }
             if let size = command["size"] as? Int { preferences.fontSize = size }
+            if let theme = command["theme"] as? String { preferences.theme = ThemePreference(rawValue: theme) ?? preferences.theme }
             try await coordinator.updateUserPreferences(preferences)
+        case "new-agent-dialog": coordinator.showNewAgentDialog()
+        case "close-agent-dialog":
+            // The sidebar row's real "关闭 agent-cli" menu item, as a right-click would offer it.
+            guard let session = command["session"] as? String,
+                  let agent = workspace.sidebar.agents.first(where: { $0.sessionID?.rawValue == session }),
+                  let menu = workspace.sidebar.agentContextMenu(for: agent.id),
+                  let item = menu.items.first(where: { $0.title == "关闭 agent-cli" }), let action = item.action,
+                  NSApp.sendAction(action, to: item.target, from: item) else { throw Failure.missingView }
+        case "dialog-button":
+            // A button of the presented dialog, by title or identifier (e.g. "取消", a provider tile, the bypass switch).
+            guard let name = command["button"] as? String, let content = window.contentView,
+                  let button = descendants(content).compactMap({ $0 as? NSButton }).first(where: { $0.title == name || $0.identifier?.rawValue == name }) else { throw Failure.missingView }
+            button.performClick(nil)
         case "quit":
             await coordinator.stop()
             NSApp.terminate(nil)

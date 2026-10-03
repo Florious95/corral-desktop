@@ -4,12 +4,14 @@ import CoreImage.CIFilterBuiltins
 import CorralContracts
 
 @MainActor
-private final class CorralDialogOverlayView: NSVisualEffectView {
+private final class CorralDialogOverlayView: NSView {
     var onOutsideClick: (() -> Void)?
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .hudWindow; blendingMode = .withinWindow; state = .active
-        wantsLayer = true; layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        // `.chr-scrim`: a tinted veil over a light 3pt blur, so the workspace stays recognisable behind the card.
+        wantsLayer = true; layerUsesCoreImageFilters = true
+        layer?.backgroundColor = CorralAestheticTokens.scrim.cgColor; layer?.masksToBounds = true
+        layer?.backgroundFilters = [CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])].compactMap { $0 }
     }
     required init?(coder: NSCoder) { nil }
     override func mouseDown(with event: NSEvent) {
@@ -52,6 +54,7 @@ open class CorralDialogViewController: NSViewController {
     private var overlayView: CorralDialogOverlayView?
     private weak var previousFirstResponder: NSResponder?
     private var eventMonitor: Any?
+    private var sizesToContent = false
     open var canDismissWithEscape: Bool { true }
     open var initialFirstResponder: NSView? { focusableControls(in: view).first }
 
@@ -67,7 +70,8 @@ open class CorralDialogViewController: NSViewController {
         overlay.onOutsideClick = { [weak self] in guard let self, self.canDismissWithEscape else { return }; self.handleEscape() }
         overlay.addSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([view.centerXAnchor.constraint(equalTo: overlay.centerXAnchor), view.centerYAnchor.constraint(equalTo: overlay.centerYAnchor), view.widthAnchor.constraint(equalToConstant: view.frame.width), view.heightAnchor.constraint(equalToConstant: view.frame.height)])
+        NSLayoutConstraint.activate([view.centerXAnchor.constraint(equalTo: overlay.centerXAnchor), view.centerYAnchor.constraint(equalTo: overlay.centerYAnchor), view.widthAnchor.constraint(equalToConstant: view.frame.width)])
+        if !sizesToContent { view.heightAnchor.constraint(equalToConstant: view.frame.height).isActive = true }
         container.addSubview(overlay)
         NSLayoutConstraint.activate([overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor), overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor), overlay.topAnchor.constraint(equalTo: container.topAnchor), overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor)])
         overlayView = overlay; presentedWindow = window; window.makeFirstResponder(initialFirstResponder)
@@ -112,10 +116,30 @@ open class CorralDialogViewController: NSViewController {
         previousFirstResponder = nil; presentedWindow = nil
     }
 
-    public func rootView(size: NSSize) -> NSView {
-        let root = NSView(frame: NSRect(origin: .zero, size: size))
-        root.wantsLayer = true; root.layer?.backgroundColor = CorralAestheticTokens.surface1.cgColor; root.layer?.cornerRadius = 14
-        return root
+    public func rootView(size: NSSize) -> NSView { CorralDialogCardView(frame: NSRect(origin: .zero, size: size)) }
+
+    /// `.chr-dialog` block flow: rows separated by their CSS bottom margins inside 20pt padding.
+    /// The 420pt card hugs its rows, so it grows with a validation message instead of reserving a void.
+    public func cardLayout(_ rows: [(view: NSView, marginBottom: CGFloat)]) -> NSView {
+        let card = rootView(size: NSSize(width: 420, height: 0))
+        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 0
+        stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20); stack.translatesAutoresizingMaskIntoConstraints = false
+        for row in rows {
+            stack.addArrangedSubview(row.view); stack.setCustomSpacing(row.marginBottom, after: row.view)
+            row.view.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        }
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: card.leadingAnchor), stack.trailingAnchor.constraint(equalTo: card.trailingAnchor), stack.topAnchor.constraint(equalTo: card.topAnchor), stack.bottomAnchor.constraint(equalTo: card.bottomAnchor), stack.widthAnchor.constraint(equalToConstant: 420)])
+        card.setFrameSize(NSSize(width: 420, height: stack.fittingSize.height))
+        sizesToContent = true
+        return card
+    }
+
+    /// `.chr-actions`: right-aligned buttons with an 8pt gap.
+    public func actionsRow(_ buttons: [NSButton]) -> NSView {
+        let row = NSStackView(); row.orientation = .horizontal; row.spacing = 8
+        buttons.forEach { row.addView($0, in: .trailing) }
+        return row
     }
 
     public func addHeader(to root: NSView, title: String, subtitle: String? = nil, top: CGFloat = 26) -> CGFloat {
@@ -159,24 +183,254 @@ open class CorralDialogViewController: NSViewController {
     public func dismiss() { closeDialog() }
 }
 
+// MARK: - Legacy `.chr-*` / `.nad-*` dialog primitives (chrome.css §4.3 / §4.4)
+
+/// WebKit lays `-apple-system`/PingFang text out on 1.4em `normal` line boxes with the baseline 1.06em down.
+/// TextKit puts a fixed-height line's baseline ceil(descender) above its bottom, so lift the glyphs by the difference.
+@MainActor
+func chrText(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor, lineHeight: CGFloat = 1.4, alignment: NSTextAlignment = .natural) -> NSAttributedString {
+    let font = NSFont.systemFont(ofSize: size, weight: weight)
+    let line = size * lineHeight
+    let style = NSMutableParagraphStyle(); style.minimumLineHeight = line; style.maximumLineHeight = line; style.alignment = alignment
+    let cssBaseline = (line - 1.4 * size) / 2 + 1.06 * size
+    return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: style, .baselineOffset: line - ceil(-font.descender) - cssBaseline])
+}
+
+/// A `chrText` label laid out on whole CSS line boxes; NSTextField alone rounds each label up to 0.5pt.
+@MainActor
+final class CorralDialogLabel: NSTextField {
+    var lineHeight: CGFloat = 0
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        if lineHeight > 0 { size.height = max(1, (size.height / lineHeight).rounded()) * lineHeight }
+        return size
+    }
+}
+
+@MainActor
+func chrLabel(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor, lineHeight: CGFloat = 1.4) -> NSTextField {
+    let label = CorralDialogLabel(wrappingLabelWithString: "")
+    label.attributedStringValue = chrText(text, size: size, weight: weight, color: color, lineHeight: lineHeight)
+    label.lineHeight = size * lineHeight; label.isSelectable = false; label.preferredMaxLayoutWidth = 380
+    return label
+}
+
+/// `.chr-dialog` shell: 14pt glass card with the `--shadow-dialog` ring and soft drop shadow.
+@MainActor
+final class CorralDialogCardView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let dark = CorralAestheticTokens.isDark
+        wantsLayer = true
+        layer?.backgroundColor = CorralAestheticTokens.dialogBackground.cgColor; layer?.cornerRadius = 14
+        layer?.borderWidth = dark ? 1 : 0.5; layer?.borderColor = CorralAestheticTokens.dialogRing.cgColor
+        let drop = NSShadow(); drop.shadowColor = NSColor.black.withAlphaComponent(dark ? 0.44 : 0.3)
+        // CSS blur radii are twice the Gaussian spread AppKit takes (`0 24px 70px` / `0 24px 64px`).
+        drop.shadowOffset = NSSize(width: 0, height: -24); drop.shadowBlurRadius = dark ? 32 : 35
+        shadow = drop
+    }
+    required init?(coder: NSCoder) { nil }
+}
+
+/// `.chr-btn` (borderless, hover fill), `.chr-btn-primary` and `.cad-danger`: 8pt radius around a 7pt-padded 13pt line.
+@MainActor
+final class CorralDialogButton: NSButton {
+    enum Kind { case plain, primary, danger }
+    let kind: Kind
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init(title: String, kind: Kind, target: AnyObject?, action: Selector?) {
+        self.kind = kind
+        super.init(frame: .zero)
+        self.title = title; self.target = target; self.action = action
+        isBordered = false
+        translatesAutoresizingMaskIntoConstraints = false
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    override var isEnabled: Bool { didSet { alphaValue = isEnabled ? 1 : 0.5; hovering = hovering && isEnabled } }
+    override var intrinsicContentSize: NSSize {
+        let width = ceil(chrText(title, size: 13, weight: .semibold, color: .black).size().width)
+        return NSSize(width: width + (kind == .plain ? 28 : 32), height: 32.2)
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = isEnabled }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill() }
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let pressed = isHighlighted && isEnabled
+        let (fill, ink): (NSColor, NSColor) = switch kind {
+        case .plain: (hovering || pressed ? CorralAestheticTokens.hover : .clear, CorralAestheticTokens.iconStrong)
+        case .primary: (pressed ? CorralAestheticTokens.actionPrimaryPressed : hovering ? CorralAestheticTokens.actionPrimaryHover : CorralAestheticTokens.actionPrimaryBackground, CorralAestheticTokens.actionPrimaryForeground)
+        case .danger: (hovering || pressed ? CorralAestheticTokens.dangerFillHover : CorralAestheticTokens.dangerFill, .white)
+        }
+        fill.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        let line = NSRect(x: 0, y: (bounds.height - 18.2) / 2, width: bounds.width, height: 18.2)
+        chrText(title, size: 13, weight: .semibold, color: ink, alignment: .center).draw(with: line, options: [.usesLineFragmentOrigin])
+    }
+}
+
+/// `.chr-input` text: borderless; the surrounding `CorralDialogInputBox` draws its frame and focus ring.
+@MainActor
+public final class CorralDialogTextField: NSTextField {
+    var onFocusChange: ((Bool) -> Void)?
+    public override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+    public override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification); onFocusChange?(false)
+    }
+}
+
+/// `.chr-input` frame: 8pt radius, 1pt border and a 3pt focus ring drawn outside its alignment rect.
+@MainActor
+final class CorralDialogInputBox: NSView {
+    private static let ring: CGFloat = 3
+    private var focused = false { didSet { needsDisplay = true } }
+
+    init(field: CorralDialogTextField, placeholder: String) {
+        super.init(frame: .zero)
+        field.isBordered = false; field.isBezeled = false; field.drawsBackground = false; field.focusRingType = .none
+        field.font = .systemFont(ofSize: 13); field.textColor = CorralAestheticTokens.text
+        field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: CorralAestheticTokens.textFaint])
+        field.usesSingleLineMode = true; field.cell?.isScrollable = true; field.cell?.wraps = false
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.onFocusChange = { [weak self] in self?.focused = $0 }
+        addSubview(field)
+        // 1pt border + 10pt padding, less the field cell's own 2pt text inset.
+        NSLayoutConstraint.activate([heightAnchor.constraint(equalToConstant: 36.2), field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9), field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9), field.centerYAnchor.constraint(equalTo: centerYAnchor)])
+    }
+    required init?(coder: NSCoder) { nil }
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: Self.ring, left: Self.ring, bottom: Self.ring, right: Self.ring) }
+    override func draw(_ dirtyRect: NSRect) {
+        let box = bounds.insetBy(dx: Self.ring, dy: Self.ring)
+        if focused { CorralAestheticTokens.inputFocusRing.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 8 + Self.ring, yRadius: 8 + Self.ring).fill() }
+        CorralAestheticTokens.fieldBackground.setFill(); NSBezierPath(roundedRect: box, xRadius: 8, yRadius: 8).fill()
+        let border = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 7.5, yRadius: 7.5); border.lineWidth = 1
+        (focused ? CorralAestheticTokens.inputFocus : CorralAestheticTokens.inputBorder).setStroke(); border.stroke()
+    }
+}
+
+/// `.nad-tile`: a 9pt-radius provider card (20pt icon over its 10.5pt name) with the tile ring drawn outside the box.
+@MainActor
+final class CorralProviderTileButton: NSButton {
+    static let ring: CGFloat = 1.5
+    override class var cellClass: AnyClass? { get { CorralProviderTileCell.self } set {} }
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init(launcher: CorralAgentLauncher, target: AnyObject, action: Selector) {
+        super.init(frame: .zero)
+        title = launcher.displayName; toolTip = launcher.displayName; identifier = NSUserInterfaceItemIdentifier(launcher.provider)
+        image = CorralProviderIconView(provider: launcher.provider, size: 20, active: true).image
+        setButtonType(.pushOnPushOff); isBordered = false; tag = launcher.supportsBypass ? 1 : 0
+        self.target = target; self.action = action
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 58.7).isActive = true
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: Self.ring, left: Self.ring, bottom: Self.ring, right: Self.ring) }
+    override var state: NSControl.StateValue { didSet { needsDisplay = true } }
+    override var isEnabled: Bool { didSet { alphaValue = isEnabled ? 1 : 0.5; hovering = hovering && isEnabled } }
+    override func mouseEntered(with event: NSEvent) { hovering = isEnabled }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds.insetBy(dx: Self.ring, dy: Self.ring), xRadius: 9, yRadius: 9).fill() }
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let box = bounds.insetBy(dx: Self.ring, dy: Self.ring)
+        let selected = state == .on
+        (selected ? CorralAestheticTokens.hover : hovering ? CorralAestheticTokens.hoverTile : .clear).setFill()
+        NSBezierPath(roundedRect: box, xRadius: 9, yRadius: 9).fill()
+        // `--ring-tile` / `--ring-tile-sel` are box-shadow spreads: they sit outside the 9pt box.
+        let width: CGFloat = selected ? 1.5 : 0.5
+        let ring = NSBezierPath(roundedRect: box.insetBy(dx: -width / 2, dy: -width / 2), xRadius: 9 + width / 2, yRadius: 9 + width / 2)
+        ring.lineWidth = width; (selected ? CorralAestheticTokens.ringTileSelected : CorralAestheticTokens.ringTile).setStroke(); ring.stroke()
+        if let image, let cell { icon(image).draw(in: cell.imageRect(forBounds: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
+        let name = NSMutableAttributedString(attributedString: chrText(title, size: 10.5, color: CorralAestheticTokens.iconStrong, alignment: .center))
+        if let style = (name.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle {
+            style.lineBreakMode = .byTruncatingTail; name.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: name.length))
+        }
+        name.draw(with: cell?.titleRect(forBounds: bounds) ?? .zero, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+
+    /// Monochrome marks keep their black artwork in light mode; dark mode mirrors `invert(.88) brightness(1.1)`.
+    private func icon(_ image: NSImage) -> NSImage {
+        guard image.isTemplate, CorralAestheticTokens.isDark else { return image }
+        return NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect); CorralAestheticTokens.color(0xF7F7F7).set(); rect.fill(using: .sourceAtop); return true
+        }
+    }
+}
+
+/// `.nad-tile` geometry: 10pt top padding, 20pt icon, 6pt gap, then a 1.4em name line inside 4pt side padding.
+@MainActor
+private final class CorralProviderTileCell: NSButtonCell {
+    override func imageRect(forBounds rect: NSRect) -> NSRect {
+        let box = rect.insetBy(dx: CorralProviderTileButton.ring, dy: CorralProviderTileButton.ring)
+        return NSRect(x: box.midX - 10, y: box.minY + 10, width: 20, height: 20)
+    }
+    override func titleRect(forBounds rect: NSRect) -> NSRect {
+        let box = rect.insetBy(dx: CorralProviderTileButton.ring + 4, dy: CorralProviderTileButton.ring)
+        return NSRect(x: box.minX, y: box.minY + 36, width: box.width, height: 10.5 * 1.4)
+    }
+}
+
+/// `.nad-switch`: 38×23 pill (`--toggle-off` / `--brand`) with a 19pt white knob.
+@MainActor
+public final class CorralDialogSwitch: NSButton {
+    public init() {
+        super.init(frame: .zero)
+        setButtonType(.toggle); isBordered = false; title = ""
+        setAccessibilityRole(.checkBox); setAccessibilitySubrole(.switch)
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+    public required init?(coder: NSCoder) { nil }
+    public override var intrinsicContentSize: NSSize { NSSize(width: 38, height: 23) }
+    public override var state: NSControl.StateValue { didSet { needsDisplay = true } }
+    public override var isEnabled: Bool { didSet { alphaValue = isEnabled ? 1 : 0.5 } }
+    public override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill() }
+    public override var focusRingMaskBounds: NSRect { bounds }
+    public override func draw(_ dirtyRect: NSRect) {
+        let on = state == .on
+        (on ? CorralAestheticTokens.brand : CorralAestheticTokens.toggleOff).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        NSGraphicsContext.saveGraphicsState()
+        let knobShadow = NSShadow(); knobShadow.shadowColor = NSColor.black.withAlphaComponent(CorralAestheticTokens.isDark ? 0.36 : 0.25)
+        knobShadow.shadowOffset = NSSize(width: 0, height: -1); knobShadow.shadowBlurRadius = 3; knobShadow.set()
+        NSColor.white.setFill(); NSBezierPath(ovalIn: NSRect(x: on ? 17 : 2, y: 2, width: 19, height: 19)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 @MainActor
 public final class NewAgentDialogViewController: CorralDialogViewController, NSTextFieldDelegate {
     public required init?(coder: NSCoder) { nil }
     public override var initialFirstResponder: NSView? { nameField }
     public let spaceName: String
     public let launchers: [CorralAgentLauncher]
-    public let nameField = NSTextField()
-    public let bypassSwitch = NSSwitch()
+    public let nameField = CorralDialogTextField()
+    public let bypassSwitch = CorralDialogSwitch()
     public private(set) var selectedProvider: String?
     public private(set) var validationMessage: String?
     public override var canDismissWithEscape: Bool { !isLoading }
     public var isLoading = false { didSet { updateControls() } }
     public var onCreate: ((CorralNewAgentRequest) -> Void)?
     public var onCancel: (() -> Void)?
-    private let errorLabel = NSTextField(labelWithString: "")
     public private(set) weak var cancelButton: NSButton?
     public private(set) weak var createButton: NSButton?
-    private let launcherStack = NSStackView()
+    private let errorLabel = chrLabel("", size: 11, color: CorralAestheticTokens.danger)
+    private let loadingLabel = chrLabel("\u{00A0}", size: 11.5, color: CorralAestheticTokens.textSecondary)
+    private lazy var nameBox = CorralDialogInputBox(field: nameField, placeholder: "任务名称")
+    private let bypassRow = NSView()
+    private weak var cardStack: NSStackView?
     private var launcherButtons: [NSButton] = []
 
     public init(spaceName: String, launchers: [CorralAgentLauncher] = [], onCreate: ((CorralNewAgentRequest) -> Void)? = nil, onCancel: (() -> Void)? = nil) {
@@ -190,41 +444,65 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
         self.spaceName = spaceName; self.launchers = advertised; self.onCreate = onCreate; self.onCancel = onCancel; selectedProvider = advertised.first?.provider
         super.init()
     }
+
+    // Mirrors `NewAgentDialog.jsx`: title, task name, 4-column provider grid, bypass card, reserved status line, actions.
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 420, height: 488)); view = root
-        var y = addHeader(to: root, title: "新建 Agent", subtitle: "在「\(spaceName)」中创建")
-        _ = addLabel("任务名称", to: root, y: y); y += 20
-        nameField.placeholderString = "任务名称"; nameField.font = .systemFont(ofSize: 12); nameField.textColor = CorralAestheticTokens.text; nameField.backgroundColor = CorralAestheticTokens.surface0; nameField.isBezeled = true; nameField.bezelStyle = .roundedBezel; nameField.delegate = self; nameField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(nameField)
-        NSLayoutConstraint.activate([nameField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), nameField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), nameField.topAnchor.constraint(equalTo: root.topAnchor, constant: y), nameField.heightAnchor.constraint(equalToConstant: 32)])
-        y += 49
-        _ = addLabel("选择 Agent", to: root, y: y); y += 21
-        launcherStack.orientation = .vertical; launcherStack.alignment = .width; launcherStack.distribution = .fillEqually; launcherStack.spacing = 8; launcherStack.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(launcherStack)
-        for start in stride(from: 0, to: launchers.count, by: 4) {
-            let row = NSStackView(); row.orientation = .horizontal; row.alignment = .centerY; row.distribution = .fillEqually; row.spacing = 8
-            for launcher in launchers[start..<min(start + 4, launchers.count)] {
-                let button = NSButton(title: launcher.displayName, target: self, action: #selector(selectLauncher(_:)))
-                button.identifier = NSUserInterfaceItemIdentifier(launcher.provider); button.setButtonType(.pushOnPushOff); button.bezelStyle = .rounded
-                button.image = CorralProviderIconView(provider: launcher.provider, size: 18, active: true).image
-                button.imagePosition = .imageAbove; button.imageScaling = .scaleProportionallyDown; button.tag = launcher.supportsBypass ? 1 : 0
-                button.toolTip = launcher.displayName; button.heightAnchor.constraint(equalToConstant: 62).isActive = true
-                row.addArrangedSubview(button); launcherButtons.append(button)
-            }
-            for _ in row.arrangedSubviews.count..<4 { row.addArrangedSubview(NSView()) }
-            launcherStack.addArrangedSubview(row)
-        }
-        let rows = max(1, (launchers.count + 3) / 4)
-        NSLayoutConstraint.activate([launcherStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), launcherStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), launcherStack.topAnchor.constraint(equalTo: root.topAnchor, constant: y), launcherStack.heightAnchor.constraint(equalToConstant: CGFloat(rows * 62 + (rows - 1) * 8))])
-        y += CGFloat(rows * 62 + (rows - 1) * 8 + 20)
-        let bypassLabel = NSTextField(labelWithString: "Bypass permissions"); bypassLabel.font = .systemFont(ofSize: 12, weight: .medium); bypassLabel.textColor = CorralAestheticTokens.text; bypassLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(bypassLabel)
-        let description = NSTextField(labelWithString: "允许 Agent 不经确认执行 shell 命令"); description.font = .systemFont(ofSize: 10); description.textColor = CorralAestheticTokens.textMuted; description.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(description)
-        bypassSwitch.target = self; bypassSwitch.action = #selector(toggleBypass); bypassSwitch.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(bypassSwitch)
-        NSLayoutConstraint.activate([bypassLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), bypassLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: y), description.leadingAnchor.constraint(equalTo: bypassLabel.leadingAnchor), description.topAnchor.constraint(equalTo: bypassLabel.bottomAnchor, constant: 4), bypassSwitch.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), bypassSwitch.centerYAnchor.constraint(equalTo: bypassLabel.centerYAnchor)])
-        y += 52
-        errorLabel.textColor = CorralAestheticTokens.danger; errorLabel.font = .systemFont(ofSize: 10); errorLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(errorLabel); errorLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: y).isActive = true; errorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true
-        let buttons = addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(create), primaryTitle: "创建")
-        cancelButton = buttons.cancel; createButton = buttons.primary
+        nameField.delegate = self
+        let cancel = CorralDialogButton(title: "取消", kind: .plain, target: self, action: #selector(cancel))
+        let create = CorralDialogButton(title: "创建", kind: .primary, target: self, action: #selector(create)); create.keyEquivalent = "\r"
+        cancelButton = cancel; createButton = create
+        errorLabel.isHidden = true
+        view = cardLayout([
+            (chrLabel("新建 Agent", size: 15, weight: .bold, color: CorralAestheticTokens.text), 2),
+            (chrLabel("在「\(spaceName)」中创建", size: 12, color: CorralAestheticTokens.textMuted), 14),
+            (chrLabel("任务名称", size: 11.5, weight: .semibold, color: CorralAestheticTokens.textMuted), 6),
+            (nameBox, 14),
+            (errorLabel, 12),
+            (chrLabel("选择 Agent", size: 11.5, weight: .semibold, color: CorralAestheticTokens.textMuted), 8),
+            (launcherGrid(), 14),
+            (bypassCard(), 16),
+            (loadingLabel, 12),
+            (actionsRow([cancel, create]), 0)
+        ])
+        cardStack = view.subviews.first as? NSStackView
         updateControls()
     }
+
+    /// `.nad-grid`: four equal columns with 8pt gaps; extra launchers wrap onto further rows.
+    private func launcherGrid() -> NSView {
+        let grid = NSStackView(); grid.orientation = .vertical; grid.alignment = .leading; grid.spacing = 8
+        for start in stride(from: 0, to: launchers.count, by: 4) {
+            let row = NSStackView(); row.orientation = .horizontal; row.distribution = .fillEqually; row.spacing = 8
+            for launcher in launchers[start..<min(start + 4, launchers.count)] {
+                let tile = CorralProviderTileButton(launcher: launcher, target: self, action: #selector(selectLauncher(_:)))
+                row.addArrangedSubview(tile); launcherButtons.append(tile)
+            }
+            for _ in row.arrangedSubviews.count..<4 { row.addArrangedSubview(NSView()) }
+            grid.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+        }
+        return grid
+    }
+
+    /// `.nad-bypass`: 9pt-radius `--fill-subtle` card; dimmed when the selected launcher cannot bypass.
+    private func bypassCard() -> NSView {
+        bypassRow.wantsLayer = true; bypassRow.layer?.backgroundColor = CorralAestheticTokens.fillSubtle.cgColor; bypassRow.layer?.cornerRadius = 9
+        let title = chrLabel("Bypass permissions", size: 12.5, weight: .semibold, color: CorralAestheticTokens.warnText)
+        let detail = chrLabel("允许 Agent 不经确认执行 shell 命令", size: 11, color: CorralAestheticTokens.textMuted)
+        bypassSwitch.target = self; bypassSwitch.action = #selector(toggleBypass); bypassSwitch.setAccessibilityLabel("Bypass permissions")
+        bypassSwitch.identifier = NSUserInterfaceItemIdentifier("corral.newagent.bypass")
+        for view in [title, detail, bypassSwitch] as [NSView] { view.translatesAutoresizingMaskIntoConstraints = false; bypassRow.addSubview(view) }
+        NSLayoutConstraint.activate([
+            title.topAnchor.constraint(equalTo: bypassRow.topAnchor, constant: 10), title.leadingAnchor.constraint(equalTo: bypassRow.leadingAnchor, constant: 12),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: bypassSwitch.leadingAnchor, constant: -10),
+            detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 1), detail.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: bypassSwitch.leadingAnchor, constant: -10),
+            detail.bottomAnchor.constraint(equalTo: bypassRow.bottomAnchor, constant: -10),
+            bypassSwitch.trailingAnchor.constraint(equalTo: bypassRow.trailingAnchor, constant: -12), bypassSwitch.centerYAnchor.constraint(equalTo: bypassRow.centerYAnchor)
+        ])
+        return bypassRow
+    }
+
     public var isCreateEnabled: Bool { validationMessage == nil && !nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedLauncher != nil && !isLoading }
     public func submit() {
         validateName(); guard isCreateEnabled, let launcher = selectedLauncher else { return }
@@ -240,19 +518,27 @@ public final class NewAgentDialogViewController: CorralDialogViewController, NST
     private func validateName() {
         let name = nameField.stringValue
         validationMessage = name.unicodeScalars.count > 64 ? "名称不能超过 64 个字符" : name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) ? "名称不能包含控制字符" : nil
-        errorLabel.stringValue = validationMessage ?? ""
+        guard isViewLoaded else { return }
+        // `.nad-error` pulls up 10pt into the input's 14pt margin.
+        errorLabel.attributedStringValue = chrText(validationMessage ?? "", size: 11, color: CorralAestheticTokens.danger)
+        errorLabel.isHidden = validationMessage == nil
+        cardStack?.setCustomSpacing(validationMessage == nil ? 14 : 4, after: nameBox)
     }
     private func updateControls() {
         guard isViewLoaded else { return }
-        bypassSwitch.isEnabled = !isLoading && selectedLauncher?.supportsBypass == true
-        for button in launcherButtons { button.isEnabled = !isLoading; button.state = button.identifier?.rawValue == selectedProvider ? .on : .off }
+        let bypassSupported = selectedLauncher?.supportsBypass == true
+        bypassSwitch.isEnabled = !isLoading && bypassSupported
+        bypassRow.alphaValue = bypassSupported ? 1 : 0.5
+        for button in launcherButtons {
+            button.isEnabled = !isLoading; button.state = button.identifier?.rawValue == selectedProvider ? .on : .off
+            button.setAccessibilitySelected(button.state == .on)
+        }
         nameField.isEnabled = !isLoading
         cancelButton?.isEnabled = !isLoading
         createButton?.isEnabled = isCreateEnabled
         createButton?.title = isLoading ? "创建中…" : "创建"
-        if let createButton { stylePrimary(createButton) }
+        loadingLabel.attributedStringValue = chrText(isLoading ? "正在创建 Agent…" : "\u{00A0}", size: 11.5, color: CorralAestheticTokens.textSecondary)
     }
-    private func providerSymbol(_ provider: String) -> String { switch provider.lowercased() { case "claude": "sparkle"; case "codex": "chevron.left.forwardslash.chevron.right"; case "pi": "p.circle"; default: "terminal" } }
 }
 
 @MainActor
@@ -645,20 +931,23 @@ public final class CloseAgentDialogViewController: CorralDialogViewController {
     public required init?(coder: NSCoder) { nil }
     public let agentName: String
     public override var canDismissWithEscape: Bool { !isLoading }
-    public var isLoading = false { didSet { confirmButton.isEnabled = !isLoading; cancelButton?.isEnabled = !isLoading } }
+    public var isLoading = false {
+        didSet { confirmButton.isEnabled = !isLoading; confirmButton.title = isLoading ? "关闭中…" : "关闭 Agent"; cancelButton?.isEnabled = !isLoading }
+    }
     public var onConfirm: (() -> Void)?
     public var onCancel: (() -> Void)?
-    private let confirmButton = NSButton(title: "关闭 Agent", target: nil, action: nil)
+    private lazy var confirmButton = CorralDialogButton(title: "关闭 Agent", kind: .danger, target: self, action: #selector(confirm))
     private weak var cancelButton: NSButton?
     public init(agentName: String, onConfirm: (() -> Void)? = nil, onCancel: (() -> Void)? = nil) { self.agentName = agentName; self.onConfirm = onConfirm; self.onCancel = onCancel; super.init() }
+    // Mirrors `CloseAgentDialog.jsx`; the subtitle's 14pt margin collapses with the warning's 2pt top margin.
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 400, height: 210)); view = root
-        _ = addHeader(to: root, title: "关闭 Agent", subtitle: "确定要关闭「\(agentName)」吗？")
-        let message = NSTextField(labelWithString: "这会终止当前 Agent 会话，未保存的工作可能会丢失。"); message.font = .systemFont(ofSize: 11); message.textColor = CorralAestheticTokens.danger; message.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(message)
-        NSLayoutConstraint.activate([message.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), message.topAnchor.constraint(equalTo: root.topAnchor, constant: 98)])
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancelAction)); cancel.bezelStyle = .rounded; cancel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(cancel); cancelButton = cancel
-        confirmButton.target = self; confirmButton.action = #selector(confirm); confirmButton.bezelStyle = .rounded; confirmButton.translatesAutoresizingMaskIntoConstraints = false; stylePrimary(confirmButton); confirmButton.wantsLayer = true; confirmButton.layer?.backgroundColor = CorralAestheticTokens.danger.cgColor; confirmButton.contentTintColor = .white; root.addSubview(confirmButton)
-        NSLayoutConstraint.activate([cancel.trailingAnchor.constraint(equalTo: confirmButton.leadingAnchor, constant: -8), cancel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20), confirmButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), confirmButton.bottomAnchor.constraint(equalTo: cancel.bottomAnchor), confirmButton.widthAnchor.constraint(equalToConstant: 96)])
+        let cancel = CorralDialogButton(title: "取消", kind: .plain, target: self, action: #selector(cancelAction)); cancelButton = cancel
+        view = cardLayout([
+            (chrLabel("关闭 Agent", size: 15, weight: .bold, color: CorralAestheticTokens.text), 2),
+            (chrLabel("确定要关闭「\(agentName)」吗？", size: 12, color: CorralAestheticTokens.textMuted), 14),
+            (chrLabel("这会终止当前 Agent 会话，未保存的工作可能会丢失。", size: 12, color: CorralAestheticTokens.textSecondary, lineHeight: 1.45), 18),
+            (actionsRow([cancel, confirmButton]), 0)
+        ])
     }
     public override func handleEscape() { guard !isLoading else { return }; onCancel?(); dismiss() }
     @objc private func cancelAction() { guard !isLoading else { return }; onCancel?(); dismiss() }

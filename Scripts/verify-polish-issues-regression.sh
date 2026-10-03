@@ -38,6 +38,8 @@ LABELS=(
   "PR 20 — prevent unexpected dismissal when clicking non-interactive panel areas"
   "Issue #328 — U+F418 branch glyph renders and centres on the footer digits"
   "Issue #339/#340 — fit to window makes the PTY program re-lay out (real SIGWINCH)"
+  "Golden dialogs — Close Agent compact card, muted warning, solid danger button"
+  "Golden dialogs — New Agent legacy 4-column card with CSS rhythm"
 )
 FILTERS=(
   "Issue1TerminalContextMenuTests/testRightClickMenuContainsWorkspaceAndTerminalActions"
@@ -73,6 +75,8 @@ FILTERS=(
   "Issue338SettingsClickInsideDismissTests/testBlankClickInsideSettingsKeepsItOpen"
   "Issue328GitBranchGlyphAlignmentTests"
   "Issue11ContextMenuActionsTests/test(AdaptCurrentWindowStepsThePTYAwayAndBack|TabMenuAdaptCurrentWindow)"
+  "GoldenDialogBaselineTests/testCloseAgentIsACompactCardWithMutedWarningAndSolidDangerButton"
+  "GoldenDialogBaselineTests/testNewAgentIsTheLegacyFourColumnCardWithCSSRhythm"
 )
 
 TOTAL=${#FILTERS[@]}

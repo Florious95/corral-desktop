@@ -24,16 +24,6 @@ public struct CorralApplicationTelemetry: Codable, Equatable, Sendable {
 }
 
 @MainActor
-private final class NewAgentSheetDelegate: NSObject, NSWindowDelegate {
-    var onClose: (() -> Void)?
-
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        onClose?()
-        return false
-    }
-}
-
-@MainActor
 public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDelegate {
     public let windowController: CorralWindowController
     public let workspaceView: CorralWorkspaceView
@@ -134,8 +124,6 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var activeDialog: CorralDialogViewController?
     private var settingsDialog: SettingsDialogViewController?
     private var newAgentDialog: NewAgentDialogViewController?
-    private var newAgentSheet: NSPanel?
-    private var newAgentSheetDelegate: NewAgentSheetDelegate?
     private var addDeviceDialog: AddDeviceDialogViewController?
     private var isAddingDevice = false
     private var closingSessionKeys = Set<SessionKey>()
@@ -327,7 +315,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         onAgentCreated = { [weak self] key in
             guard let self else { return }
-            self.dismissNewAgentSheet(returnCode: .OK)
+            self.dismissNewAgentDialog()
             self.showToast("Agent 已创建：\(self.sessions[key]?.descriptor.name ?? key.reference.rawValue)", kind: .success)
         }
         onAgentCreationFailed = { [weak self] message in
@@ -962,12 +950,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     public func showNewAgentDialog() {
-        if let newAgentSheet {
-            newAgentSheet.makeKeyAndOrderFront(nil)
-            return
-        }
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
+        guard newAgentDialog == nil else { return }
         presentNewAgentDialog(for: selectedSidebarSpaceID)
     }
 
@@ -1007,51 +992,19 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 }
             }
         }, onCancel: { [weak self] in
-            self?.dismissNewAgentSheet(returnCode: .cancel)
+            self?.dismissNewAgentDialog()
         })
-        dialog.loadViewIfNeeded()
-        guard let parent = windowController.window else { return }
-        let sheet = NSPanel(
-            contentRect: dialog.view.bounds,
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        sheet.title = "新建 Agent"
-        sheet.identifier = NSUserInterfaceItemIdentifier("corral.newagent.window")
-        sheet.isReleasedWhenClosed = false
-        sheet.contentViewController = dialog
-        let sheetDelegate = NewAgentSheetDelegate()
-        sheetDelegate.onClose = { [weak self] in
-            guard self?.newAgentDialog?.canDismissWithEscape == true else { return }
-            self?.dismissNewAgentSheet(returnCode: .cancel)
-        }
-        sheet.delegate = sheetDelegate
+        // Legacy `.chr-scrim` + centred `.chr-dialog`, like every other workspace dialog; not a titled sheet.
         newAgentDialog = dialog
-        newAgentSheet = sheet
-        newAgentSheetDelegate = sheetDelegate
         activeDialog = dialog
-        parent.beginSheet(sheet) { [weak self, weak dialog] _ in
-            guard let self, self.newAgentDialog === dialog else { return }
-            self.newAgentDialog = nil
-            self.newAgentSheet = nil
-            self.newAgentSheetDelegate = nil
-            if self.activeDialog === dialog { self.activeDialog = nil }
-        }
-        sheet.makeFirstResponder(dialog.nameField)
+        dialog.present(over: windowController.window)
     }
 
-    private func dismissNewAgentSheet(returnCode: NSApplication.ModalResponse) {
-        let dialog = newAgentDialog
-        if let sheet = newAgentSheet {
-            if let parent = sheet.sheetParent { parent.endSheet(sheet, returnCode: returnCode) }
-            else { sheet.orderOut(nil) }
-        }
+    private func dismissNewAgentDialog() {
+        guard let dialog = newAgentDialog else { return }
+        dialog.dismiss()
         newAgentDialog = nil
-        newAgentSheet = nil
-        newAgentSheetDelegate?.onClose = nil
-        newAgentSheetDelegate = nil
-        if let dialog, activeDialog === dialog { activeDialog = nil }
+        if activeDialog === dialog { activeDialog = nil }
     }
 
     private func presentAddDeviceDialog() {

@@ -9,7 +9,7 @@ public enum CorralThemeMode: String, CaseIterable, Sendable {
 @MainActor
 public enum CorralAestheticTokens {
     public static var themeMode: CorralThemeMode = .dark
-    private static var isDark: Bool {
+    public static var isDark: Bool {
         switch themeMode {
         case .dark: true
         case .light: false
@@ -56,6 +56,24 @@ public enum CorralAestheticTokens {
     public static var successDeep: NSColor { palette(0x72BE93, 0x3F7A4C) }
     public static var warning: NSColor { palette(0xD8B57B, 0xF0B429) }
     public static var danger: NSColor { palette(0xF08A93, 0xC42B1C) }
+    // `.chr-scrim` / `.chr-dialog` / `.nad-*` tokens (legacy chrome.css §4.3/§4.4).
+    public static var scrim: NSColor { isDark ? NSColor.black.withAlphaComponent(0.40) : NSColor(srgbRed: 40 / 255, green: 35 / 255, blue: 25 / 255, alpha: 0.28) }
+    public static var dialogRing: NSColor { isDark ? border : NSColor.black.withAlphaComponent(0.18) }
+    public static var textFaint: NSColor { palette(0x9DAABB, 0xB0ACA3) }
+    public static var iconStrong: NSColor { palette(0xE5E7EB, 0x5D5A54) }
+    public static var hoverTile: NSColor { isDark ? NSColor.white.withAlphaComponent(0.06) : NSColor.black.withAlphaComponent(0.05) }
+    public static var ringTile: NSColor { isDark ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.08) }
+    public static var ringTileSelected: NSColor { palette(0x8FAADC, 0x3A3835) }
+    public static var inputFocus: NSColor { palette(0x8FAADC, 0xB8A273) }
+    public static var inputFocusRing: NSColor { isDark ? color(0x8FAADC).withAlphaComponent(0.22) : color(0xB8A273).withAlphaComponent(0.25) }
+    public static var warnText: NSColor { palette(0xD8B57B, 0xA4542E) }
+    public static var brand: NSColor { palette(0xD69A80, 0xD97757) }
+    public static var toggleOff: NSColor { isDark ? color(0x414D5D) : NSColor.black.withAlphaComponent(0.15) }
+    public static var actionPrimaryHover: NSColor { palette(0xA5BBE5, 0x201E1D) }
+    public static var actionPrimaryPressed: NSColor { palette(0x7896CE, 0x000000) }
+    /// `.cad-danger` fill. Dark keeps a solid red under white text instead of the pink `--danger` text tone.
+    public static var dangerFill: NSColor { palette(0xC93B2B, 0xC42B1C) }
+    public static var dangerFillHover: NSColor { palette(0xB23426, 0xA72317) }
     public static var idleDot: NSColor { palette(0x8291A5, 0xB8B4AB) }
     public static var unknownDot: NSColor { palette(0x8291A5, 0x201E1D) }
     public static var remoteBadgeBackground: NSColor { isDark ? warning.withAlphaComponent(0.15) : color(0xF1E8D8) }
