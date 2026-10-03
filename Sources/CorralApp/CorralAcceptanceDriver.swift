@@ -141,6 +141,17 @@ final class CorralAcceptanceDriver {
             let items = descendants(workspace.tabBar).filter { $0.accessibilityIdentifier() == "corral.tab" }
             guard items.indices.contains(index), let button = descendants(items[index]).first(where: { $0.accessibilityIdentifier() == "corral.tab.close" }) as? NSButton else { throw Failure.missingView }
             button.performClick(nil)
+        case "adapt":
+            // The real "适应当前窗口" item from the menu a right-click on this Pane opens.
+            let view = try terminal(command)
+            guard let window = view.window,
+                  let event = NSEvent.mouseEvent(with: .rightMouseDown, location: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil),
+                                                 modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1),
+                  let menu = view.menu(for: event), // items only weakly reference their menu target
+                  let item = menu.items.first(where: { $0.title == "适应当前窗口" }), let action = item.action,
+                  NSApp.sendAction(action, to: item.target, from: item) else { throw Failure.missingView }
+            withExtendedLifetime(menu) {}
         case "terminal-click":
             let view = try terminal(command)
             try click(view, point: CGPoint(x: command["x"] as? CGFloat ?? 60, y: command["y"] as? CGFloat ?? 80))

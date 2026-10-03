@@ -121,6 +121,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var layoutPreview: WorkspaceLayoutNode?
     /// The next SwiftTerm size callback for this view must reach the PTY even at an unchanged grid.
     private var forcedResizeSessionKeys = Set<SessionKey>()
+    /// Explicit "适应当前窗口": the PTY must really change size so its program re-lays out (SIGWINCH).
+    private var relayoutSessionKeys = Set<SessionKey>()
     private var sessionUIIDs: [SessionID: UUID] = [:]
     private var sessionUIIDsByIdentity: [WorkspaceSessionIdentity: UUID] = [:]
     private var selectedSidebarSpaceID = CorralSidebarSpace.allSpacesID
@@ -754,6 +756,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func adaptTerminalWindow(for key: SessionKey) {
         guard let runtime = sessions[key],
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
+        relayoutSessionKeys.insert(key)
         reflowAndResizeVisibleSessions([key])
     }
 
@@ -768,6 +771,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             guard let view = terminalRegistry.view(for: key), !view.isHidden,
                   view.terminal.cols > 0, view.terminal.rows > 0 else {
                 forcedResizeSessionKeys.remove(key)
+                relayoutSessionKeys.remove(key)
                 continue
             }
             // Explicit adaptation resends the measured grid without resetting terminal modes.
@@ -1101,6 +1105,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             do { await applyWorkspaceState(try await workspaceStore.resetTabTitle(id)) }
             catch { showToast("标签标题重置失败：\(error)", kind: .error) }
             updateSidebar(devices: cachedDevices)
+        case "reflow":
+            if id != workspaceState.activeTabID { await selectWorkspaceTab(id: id) }
+            let keys = visibleSessionKeys()
+            relayoutSessionKeys.formUnion(keys)
+            reflowAndResizeVisibleSessions(keys)
         case "splitRight": await splitWorkspaceTab(id, edge: .right)
         case "splitDown": await splitWorkspaceTab(id, edge: .bottom)
         default: break
@@ -1880,7 +1889,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         Set(workspaceState.tabs.flatMap(\.sessionIDs) + (workspaceState.previewUID.map { [$0] } ?? []))
     }
 
-    private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize, force: Bool = false) async {
+    private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize, force: Bool = false, relayout: Bool = false) async {
         guard !noResizeMode, layoutPreview == nil,
               let connection, key.deviceID == connection.deviceID,
               var runtime = sessions[key], runtime.subscribed,
@@ -1891,6 +1900,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         runtime.desiredGrid = grid
         sessions[key] = runtime
         do {
+            if relayout {
+                // A same-size resize never reaches the program: the server skips it and the kernel raises SIGWINCH
+                // only on a real change. Step one column away first so the PTY settles on `grid` with a fresh layout.
+                let nudge = GridSize(rows: grid.rows, columns: grid.columns > 2 ? grid.columns - 1 : grid.columns + 1)
+                _ = try await sessionLink.send(.resize(reference: key.reference, size: nudge))
+            }
             let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
             guard self.connection == connection else { return }
             guard receipt.socketWritten else {
@@ -1907,6 +1922,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         guard let key = terminalRegistry.key(for: source) else { return }
         let force = forcedResizeSessionKeys.remove(key) != nil
+        let relayout = relayoutSessionKeys.remove(key) != nil
         guard !noResizeMode,
               newCols > 0, newRows > 0,
               newCols <= Int(UInt16.max), newRows <= Int(UInt16.max),
@@ -1916,7 +1932,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         runtime.desiredGrid = grid
         sessions[key] = runtime
         guard runtime.subscribed, layoutPreview == nil else { return }
-        Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid, force: force) }
+        Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid, force: force, relayout: relayout) }
     }
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {

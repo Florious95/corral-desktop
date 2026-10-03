@@ -97,7 +97,9 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
         await fixture.coordinator.stop()
     }
 
-    func testAdaptCurrentWindowForcesPTYResizeWithoutGeometryChange() async throws {
+    /// A same-size resize never reaches the PTY (the server skips it and the kernel only raises SIGWINCH on a
+    /// real change), so the TUI keeps a stale layout. Fit must step one column away and back (#339/#340).
+    func testAdaptCurrentWindowStepsThePTYAwayAndBackSoTheTUIRelayouts() async throws {
         let fixture = try await makeSplitFixture()
         defer {
             fixture.coordinator.windowController.window?.close()
@@ -114,15 +116,44 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
         XCTAssertEqual(subscribedGrid, gridBefore, "The fixture must start with the PTY grid matching its current viewport")
         try await Task.sleep(for: .milliseconds(150))
         let resizeCountBeforeAction = await fixture.link.resizeCommands(for: reference).count
+        let otherCountBeforeAction = await fixture.link.resizeCommands(for: fixture.references[0]).count
 
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(adaptItem.action), to: adaptItem.target, from: adaptItem))
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(terminal.frame, frameBefore, "Fitting an already-sized terminal must not perturb its frame")
         XCTAssertEqual(GridSize(rows: terminal.terminal.rows, columns: terminal.terminal.cols), gridBefore)
-        let resizesAfterAction = await fixture.link.resizeCommands(for: reference)
-        XCTAssertGreaterThan(resizesAfterAction.count, resizeCountBeforeAction,
-                             "Fit must force a PTY resize even when the desired grid equals the last subscribed grid")
-        XCTAssertEqual(resizesAfterAction.last, gridBefore)
+        let sent = Array(await fixture.link.resizeCommands(for: reference).dropFirst(resizeCountBeforeAction))
+        XCTAssertEqual(sent, [GridSize(rows: gridBefore.rows, columns: gridBefore.columns - 1), gridBefore],
+                       "Fit must make the PTY really change size and settle back on the viewport grid")
+        let otherCount = await fixture.link.resizeCommands(for: fixture.references[0]).count
+        XCTAssertEqual(otherCount, otherCountBeforeAction, "Only the Pane whose menu was used is nudged")
+        await fixture.coordinator.stop()
+    }
+
+    func testTabMenuAdaptCurrentWindowRelayoutsEveryVisiblePane() async throws {
+        let fixture = try await makeSplitFixture()
+        defer {
+            fixture.coordinator.windowController.window?.close()
+            Task { await fixture.coordinator.stop() }
+            try? FileManager.default.removeItem(at: fixture.temporaryDirectory)
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        var before: [Int] = []
+        var grids: [GridSize] = []
+        for reference in fixture.references {
+            before.append(await fixture.link.resizeCommands(for: reference).count)
+            let view = try XCTUnwrap(fixture.coordinator.terminalView(for: reference))
+            grids.append(GridSize(rows: view.terminal.rows, columns: view.terminal.cols))
+        }
+        let tabID = try XCTUnwrap(fixture.coordinator.workspaceState.activeTab?.id)
+
+        fixture.coordinator.workspaceView.tabBar.onContextAction?(tabID, "reflow")
+        try await Task.sleep(for: .milliseconds(200))
+        for (index, reference) in fixture.references.enumerated() {
+            let sent = Array(await fixture.link.resizeCommands(for: reference).dropFirst(before[index]))
+            XCTAssertEqual(sent, [GridSize(rows: grids[index].rows, columns: grids[index].columns - 1), grids[index]],
+                           "The Tab menu fit must relayout Pane \(index) too")
+        }
         await fixture.coordinator.stop()
     }
 
