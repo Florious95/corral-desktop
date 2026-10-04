@@ -295,6 +295,22 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         return super.performKeyEquivalent(with: event)
     }
 
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.control, .command, .option])
+        let isCKey = event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c"
+        if modifiers == .control, isCKey, selection.active, selection.hasSelectionRange {
+            copy(self)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func copy(_ sender: Any) {
+        let text = selection.getSelectedText()
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
     override func interpretKeyEvents(_ eventArray: [NSEvent]) {
         guard eventArray.contains(where: Self.isCommandVPaste) else {
             super.interpretKeyEvents(eventArray)
