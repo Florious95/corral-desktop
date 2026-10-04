@@ -42,7 +42,7 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
     private var terminalScroller: NSScroller? { subviews.compactMap { $0 as? NSScroller }.first }
     private var terminalScrollerWidth: CGFloat { NSScroller.scrollerWidth(for: .regular, scrollerStyle: scrollerStyle) }
 
-    private var terminalCellMetrics: (width: CGFloat, height: CGFloat)? {
+    var terminalCellMetrics: (width: CGFloat, height: CGFloat)? {
         let terminal = getTerminal()
         guard terminal.cols > 0, terminal.rows > 0 else { return nil }
         let reservedWidth = terminalScroller?.isHidden == true ? 0 : terminalScrollerWidth

@@ -21,6 +21,23 @@ public struct CorralApplicationTelemetry: Codable, Equatable, Sendable {
     public let visiblePaneCount: Int
     public let nonEmptyLineCount: Int
     public let discardedAutoReplyByteCount: Int
+    public let pointerMotion: PointerMotionStatistics
+}
+
+/// Mouse-tracking TUIs (Pi runs with 1003 any-event + SGR) receive one report per pointer move.
+public struct PointerMotionStatistics: Codable, Equatable, Sendable {
+    /// Motion reports the terminals produced.
+    public var produced = 0
+    /// Motion input messages written to the socket.
+    public var sent = 0
+    /// Reports replaced by a newer position before they were sent.
+    public var superseded = 0
+    /// Reports identical to the previous one for the same session.
+    public var duplicates = 0
+    /// Longest send-to-input_ack turnaround of one motion message: the server-side input backlog.
+    public var maximumAckMilliseconds = 0.0
+    /// Deepest ordered input queue observed.
+    public var maximumQueuedInputs = 0
 }
 
 @MainActor
@@ -164,6 +181,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let connection: AuthenticatedConnection
         let bytes: Data
         let isScrollWheel: Bool
+        var isPointerMotion = false
     }
     private struct BufferedScrollWheelInput {
         let session: SessionKey
@@ -175,6 +193,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var scrollWheelFlushTask: Task<Void, Never>?
     private var pendingInputBytes = 0
     private var drainingInput = false
+    /// Pointer motion is a position, not a stream. At most one motion message waits for the
+    /// server's input_ack; newer positions replace the one held here, so a fast drag cannot
+    /// queue stale positions that the PTY would replay after the hand stops.
+    private var pendingPointerMotion: PendingInput?
+    private var lastPointerMotion: (session: SessionKey, bytes: Data)?
+    private enum PointerMotionGate { case queued, sent(UInt32, ContinuousClock.Instant) }
+    private var pointerMotionGate: PointerMotionGate?
+    private var pointerMotionGateGeneration = 0
+    private var highestAcknowledgedInputSequence: UInt32 = 0
+    public private(set) var pointerMotionStatistics = PointerMotionStatistics()
     // Keep the legacy dark terminal until a preference or system appearance change is applied.
     private var hasAppliedTerminalThemePreference = false
 
@@ -910,7 +938,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             terminalViewCount: terminalRegistry.count,
             visiblePaneCount: terminalStageView.visibleSessionIDs.count,
             nonEmptyLineCount: Self.nonEmptyLineCount(in: visibleViews),
-            discardedAutoReplyByteCount: discardedAutoReplyByteCount
+            discardedAutoReplyByteCount: discardedAutoReplyByteCount,
+            pointerMotion: pointerMotionStatistics
         )
     }
 
@@ -1461,6 +1490,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             subscribedSessionIDs = []
             pendingInput.removeAll()
             pendingInputBytes = 0
+            pendingPointerMotion = nil
+            lastPointerMotion = nil
+            pointerMotionGate = nil
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
             updateSidebar(devices: cachedDevices)
@@ -1584,6 +1616,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 await writeTelemetry()
             case let .inputAck(sequence, ok, reason):
                 lastInputAcknowledgement = (sequence, ok)
+                acknowledgeInput(sequence)
                 if !ok { lastConnectionError = "input_ack failed: \(reason?.rawValue ?? "unknown")" }
                 await writeTelemetry()
             case .level2Frame, .level2Heartbeat, .overlayFrame, .paneModeChanged:
@@ -1902,6 +1935,24 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
             return
         }
+        if Self.isPointerMotionReport(data) {
+            pointerMotionStatistics.produced += 1
+            if let last = lastPointerMotion, last.session == key, last.bytes == bytes {
+                pointerMotionStatistics.duplicates += 1
+                return
+            }
+            lastPointerMotion = (key, bytes)
+            if let held = pendingPointerMotion {
+                if held.session == key, held.connection == connection { pointerMotionStatistics.superseded += 1 }
+                else { releasePendingPointerMotion() }
+            }
+            pendingPointerMotion = PendingInput(session: key, connection: connection, bytes: bytes,
+                                                isScrollWheel: false, isPointerMotion: true)
+            pumpPointerMotion()
+            return
+        }
+        // Presses, releases, wheel and keys are ordering barriers: the newest position goes first.
+        releasePendingPointerMotion()
         if Self.isScrollWheelInput(data) {
             let canMerge = pendingScrollWheelInput.last.map {
                 $0.session == key && $0.connection == connection && $0.bytes.count + bytes.count <= 32 * 1024
@@ -1935,6 +1986,39 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         scheduleInputDrain()
     }
 
+    private func releasePendingPointerMotion() {
+        guard let motion = pendingPointerMotion else { return }
+        pendingPointerMotion = nil
+        pendingInput.append(motion)
+        pendingInputBytes += motion.bytes.count
+        scheduleInputDrain()
+    }
+
+    private func pumpPointerMotion() {
+        guard pointerMotionGate == nil, pendingPointerMotion != nil else { return }
+        pointerMotionGate = .queued
+        pointerMotionGateGeneration += 1
+        let generation = pointerMotionGateGeneration
+        releasePendingPointerMotion()
+        // A missing ack (dropped connection, older server) must not strand the newest position.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, self.pointerMotionGateGeneration == generation, self.pointerMotionGate != nil else { return }
+            self.pointerMotionGate = nil
+            self.pumpPointerMotion()
+        }
+    }
+
+    private func acknowledgeInput(_ sequence: UInt32) {
+        highestAcknowledgedInputSequence = max(highestAcknowledgedInputSequence, sequence)
+        guard case let .sent(motionSequence, sentAt) = pointerMotionGate, sequence >= motionSequence else { return }
+        let elapsed = ContinuousClock.now - sentAt
+        let milliseconds = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
+        pointerMotionStatistics.maximumAckMilliseconds = max(pointerMotionStatistics.maximumAckMilliseconds, milliseconds)
+        pointerMotionGate = nil
+        pumpPointerMotion()
+    }
+
     private static func isPointerScrollEvent(for source: TerminalView) -> Bool {
         guard let event = NSApp.currentEvent, event.type == .scrollWheel,
               let window = source.window, event.window === window,
@@ -1959,6 +2043,20 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard end > 3, end < bytes.count, bytes[end] == 0x3b,
               let button = Int(String(decoding: bytes[3..<end], as: UTF8.self)) else { return false }
         return (button & 0x40) != 0
+    }
+
+    /// A pointer position report with the motion bit (SGR, urxvt or X10); never a press, release or wheel.
+    private static func isPointerMotionReport(_ data: ArraySlice<UInt8>) -> Bool {
+        let bytes = Array(data)
+        guard bytes.count >= 6, bytes[0] == 0x1b, bytes[1] == 0x5b else { return false }
+        if bytes[2] == 0x4d { return bytes.count == 6 && (64...95).contains(Int(bytes[3])) }
+        let sgr = bytes[2] == 0x3c
+        guard bytes[bytes.count - 1] == 0x4d else { return false }
+        let fields = bytes[(sgr ? 3 : 2)..<(bytes.count - 1)].split(separator: 0x3b, omittingEmptySubsequences: false)
+        guard fields.count == 3, fields.allSatisfy({ !$0.isEmpty && $0.allSatisfy { (0x30...0x39).contains($0) } }),
+              let code = Int(String(decoding: fields[0], as: UTF8.self)) else { return false }
+        let button = sgr ? code : code - 32
+        return button & 32 != 0 && button & 64 == 0
     }
 
     private static func isScrollWheelInput(_ data: ArraySlice<UInt8>) -> Bool {
@@ -2010,9 +2108,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             if input.connection == connection, connected,
                let runtime = sessions[input.session], retainedSessionIDs.contains(runtime.descriptor.id),
                !runtime.subscribed || runtime.subscriptionPending { return }
+            pointerMotionStatistics.maximumQueuedInputs = max(pointerMotionStatistics.maximumQueuedInputs, pendingInput.count)
             pendingInput.removeFirst()
             pendingInputBytes -= input.bytes.count
             guard input.connection == connection, sessions[input.session]?.subscribed == true else {
+                if input.isPointerMotion { pointerMotionGate = nil; continue }
                 lastConnectionError = "Input cancelled because the session connection changed."
                 showToast("会话连接已变化，待发送输入已取消", kind: .warning)
                 continue
@@ -2032,6 +2132,20 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 catch {
                     lastConnectionError = String(describing: error)
                     showToast("终端输入发送失败：\(error)", kind: .error)
+                }
+            } else if input.isPointerMotion {
+                let sentAt = ContinuousClock.now
+                do {
+                    let sequence = try await inputRouter.routeBytes(input.bytes, to: input.session)
+                    pointerMotionStatistics.sent += 1
+                    if case .queued = pointerMotionGate {
+                        // The ack can overtake this resumption; then the gate is already clear.
+                        if highestAcknowledgedInputSequence >= sequence { pointerMotionGate = nil; pumpPointerMotion() }
+                        else { pointerMotionGate = .sent(sequence, sentAt) }
+                    }
+                } catch {
+                    pointerMotionGate = nil
+                    lastConnectionError = String(describing: error)
                 }
             } else {
                 do { _ = try await inputRouter.routeBytes(input.bytes, to: input.session) }

@@ -162,9 +162,13 @@ final class CorralAcceptanceDriver {
             let view = try terminal(command)
             guard let seconds = command["seconds"] as? Double, let rate = command["rate"] as? Double,
                   seconds > 0, rate > 0, let path = command["path"] as? [Double], path.count == 4 else { throw Failure.invalidCommand }
+            // `column` pins x to one terminal cell (negative counts from the right), never the scroller gutter.
+            let columnX = (command["column"] as? Int).flatMap { column in
+                view.terminalCellMetrics.map { (CGFloat(column < 0 ? view.terminal.cols + column : column) + 0.5) * $0.width }
+            }
             func point(_ progress: Double) -> CGPoint {
                 let x = path[0] + (path[2] - path[0]) * progress, y = path[1] + (path[3] - path[1]) * progress
-                return view.convert(CGPoint(x: view.bounds.width * x, y: view.bounds.height * (1 - y)), to: nil)
+                return view.convert(CGPoint(x: columnX ?? view.bounds.width * x, y: view.bounds.height * (1 - y)), to: nil)
             }
             func send(_ type: NSEvent.EventType, _ location: CGPoint) throws {
                 guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
@@ -172,14 +176,21 @@ final class CorralAcceptanceDriver {
                     eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { throw Failure.invalidCommand }
                 window.sendEvent(event)
             }
+            // `cycles` sweeps start -> end -> start that many times (a full-amplitude scrollbar shake).
+            let cycles = command["cycles"] as? Double ?? 0
+            func progress(_ t: Double) -> Double {
+                guard cycles > 0 else { return t }
+                let phase = (t * cycles).truncatingRemainder(dividingBy: 1)
+                return phase < 0.5 ? phase * 2 : 2 - phase * 2
+            }
             let count = Int(seconds * rate)
             let started = Date().timeIntervalSince1970
             try send(.leftMouseDown, point(0))
             for index in 1...count {
                 try await Task.sleep(for: .seconds(1 / rate))
-                try send(.leftMouseDragged, point(Double(index) / Double(count)))
+                try send(.leftMouseDragged, point(progress(Double(index) / Double(count))))
             }
-            try send(.leftMouseUp, point(1))
+            try send(.leftMouseUp, point(progress(1)))
             lastDrag = ["events": count, "startedWall": started, "releasedWall": Date().timeIntervalSince1970]
         case "scroll":
             let view = try terminal(command)

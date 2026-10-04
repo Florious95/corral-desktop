@@ -32,13 +32,16 @@ def wait_for(fn, timeout=20):
 
 
 class Run:
-    def __init__(self, legacy, case='parity', no_resize=False, server_binary=None):
+    def __init__(self, legacy, case='parity', no_resize=False, server_binary=None, pi_session=None):
         self.legacy = legacy
         self.case = case
         self.no_resize = no_resize
         self.server_binary = server_binary
         self.suffixes = 'ABCDEFGHIJ' if case.startswith('many-sessions') else 'ABCD'
         if case == 'session-liveness': self.suffixes = [f'S{i:02}' for i in range(50)]
+        # A real Pi TUI (offline, no extensions) on a private copy of a long session.
+        self.pi_session = pi_session
+        if case == 'pi-scrollbar-drag': self.suffixes = 'ABCDP'
         self.directory = Path(tempfile.mkdtemp(prefix='corral-native-acceptance-', dir='/tmp')).resolve()
         self.nonce = secrets.token_hex(4).upper()
         self.processes = []
@@ -86,6 +89,14 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         subprocess.run(['clang', '-D_DARWIN_C_SOURCE', '-Os', str(HERE / 'terminal-fixture.c'), '-o', str(agent)], check=True)
         for suffix in self.suffixes:
             session = f'ACCEPT-{suffix}-{self.nonce}'
+            if suffix == 'P':
+                transcript = self.directory / 'pi-session.jsonl'
+                transcript.write_bytes(self.pi_session.read_bytes())
+                self.tmux('new-session', '-d', '-s', session, '-x', '110', '-y', '32', '-c', str(self.directory),
+                          '/opt/homebrew/bin/pi', '--offline', '--no-extensions', '--no-skills', '--no-prompt-templates',
+                          '--no-context-files', '--session', str(transcript), '--session-dir', str(self.directory / 'pi-sessions'))
+                self.tmux('set-option', '-t', session, 'status', 'off')
+                continue
             self.tmux('new-session', '-d', '-s', session, '-x', '110', '-y', '32', '-c', str(self.directory),
                       str(agent), suffix, self.nonce, str(self.directory / f'input-{suffix}.bin'),
                       ('empty' if suffix == 'F' else 'busy') if self.case == 'many-sessions-stress'
@@ -537,6 +548,50 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         assert summary['releaseTailMilliseconds'] <= 500, ('RED: input kept replaying after the hand stopped', summary)
         print('PASS mouse drag: latest position delivered, PTY quiet within 500 ms of release', flush=True)
 
+    def run_pi_scrollbar_drag(self, seconds=10, rate=120, cycles=5):
+        """User benchmark: shake a long Pi transcript's scrollbar at full amplitude for 10 s."""
+        self.command('sidebar', session=self.session_id('P'), count=2)
+        def pi_pane():
+            pane = next((p for p in self.command('state')['panes'] if p['ref'] == self.refs['P'] and not p['hidden']), None)
+            return pane if pane and pane['mouseMode'] != 'off' else None
+        if not wait_for(pi_pane, 30)['focused']: self.command('terminal-click', ref=self.refs['P'], x=60, y=200)
+        assert pi_pane()['focused']
+        time.sleep(4)
+        wire_before = len(self.wire())
+        # Pi shows its auto-hiding scrollbar on scroll activity; grab it right away in the last column.
+        self.command('scroll', ref=self.refs['P'], delta=40, precise=True)
+        drag = self.command('terminal-drag', ref=self.refs['P'], seconds=seconds, rate=rate, cycles=cycles,
+                            column=-1, path=[1, .03, 1, .78])['lastDrag']
+        ref = self.refs['P']
+        def settled():
+            events = self.wire()[wire_before:]
+            acks = [e['at'] for e in events if e.get('type') == 'input_ack']
+            return events if acks and time.time() * 1000 - acks[-1] > 3000 else None
+        events = wait_for(settled, 240)
+        released = drag['releasedWall'] * 1000
+        inputs = [e for e in events if e.get('direction') == 'client-to-daemon' and e.get('type') == 'input']
+        acks = [e['at'] for e in events if e.get('type') == 'input_ack']
+        frames = [e['at'] for e in events if e.get('binary') and e.get('ref') == ref and e.get('kind') == 2]
+        # The visible motion ends at the first 1.5 s pause; a later lone repaint (scrollbar auto-hide) is not motion.
+        render_tail, previous = 0, released
+        for at in frames:
+            if at <= released: continue
+            if at - previous > 1500: break
+            render_tail, previous = at - released, at
+        histogram = [sum(1 for at in frames if released + i * 1000 < at <= released + (i + 1) * 1000) for i in range(40)]
+        summary = {'dragEvents': drag['events'], 'dragSeconds': round(drag['releasedWall'] - drag['startedWall'], 2),
+                   'inputMessages': len(inputs), 'framesDuringDrag': sum(1 for at in frames if at <= released),
+                   'injectionTailMilliseconds': round(acks[-1] - released, 1),
+                   'renderTailMilliseconds': round(render_tail, 1), 'framesPerSecondAfterRelease': histogram}
+        (self.directory / 'pi-session.jsonl').unlink()
+        self.receipts.append({'piScrollbarDrag': summary})
+        (self.directory / 'pi-scrollbar-drag.json').write_text(json.dumps(summary, indent=2))
+        print('PI_SCROLLBAR_DRAG', json.dumps(summary), flush=True)
+        assert summary['framesDuringDrag'] > 20, 'the drag must actually move the Pi transcript'
+        assert summary['injectionTailMilliseconds'] <= 500, ('RED: stale drag input kept reaching Pi', summary)
+        assert summary['renderTailMilliseconds'] <= 2000, ('RED: Pi kept moving after the hand stopped', summary)
+        print('PASS Pi scrollbar: input and transcript stop with the hand', flush=True)
+
     def run_window_resize(self):
         state = self.sidebar('A')
         width, height = state['stageSize']
@@ -631,6 +686,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                 except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=3)
         if self.socket.exists():
             self.tmux('kill-server')
+        (self.directory / 'pi-session.jsonl').unlink(missing_ok=True)
         (self.directory / 'identity.json').write_text(json.dumps(getattr(self, 'identity', {}), indent=2))
         (self.directory / 'commands.json').write_text(json.dumps(self.receipts, ensure_ascii=False, indent=2))
 
@@ -639,11 +695,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--legacy-root', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
-    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog'], default='parity')
+    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog','pi-scrollbar-drag'], default='parity')
     parser.add_argument('--no-resize', action='store_true')
     parser.add_argument('--server-binary', type=Path)
+    parser.add_argument('--pi-session', type=Path, help='Pi transcript copied privately for pi-scrollbar-drag')
     args = parser.parse_args()
-    run = Run(args.legacy_root, args.case, args.no_resize, args.server_binary)
+    assert args.case != 'pi-scrollbar-drag' or args.pi_session, '--pi-session is required'
+    run = Run(args.legacy_root, args.case, args.no_resize, args.server_binary, args.pi_session)
     try:
         run.start()
         if args.smoke: print('CAPTURE', run.capture('initial', run.state), flush=True)
@@ -651,6 +709,7 @@ def main():
         elif args.case.startswith('many-sessions'): run.run_many_sessions()
         elif args.case == 'window-resize': run.run_window_resize()
         elif args.case == 'mouse-drag-backlog': run.run_mouse_drag_backlog()
+        elif args.case == 'pi-scrollbar-drag': run.run_pi_scrollbar_drag()
         else: run.run_suite()
     except Exception:
         (run.directory/'failure.txt').write_text(traceback.format_exc())
