@@ -17,6 +17,7 @@ final class CorralAcceptanceDriver {
     private var lastKeyDispatchTime: TimeInterval = 0
     private var lastMouseDownDispatchUptime: TimeInterval = 0
     private var switchSamples: [[String: Any]] = []
+    private var lastDrag: [String: Any] = [:]
 
     static func directory(environment: [String: String]) throws -> URL? {
         guard let path = environment["CORRAL_NATIVE_ACCEPTANCE_DIRECTORY"] else { return nil }
@@ -155,6 +156,31 @@ final class CorralAcceptanceDriver {
         case "terminal-click":
             let view = try terminal(command)
             try click(view, point: CGPoint(x: command["x"] as? CGFloat ?? 60, y: command["y"] as? CGFloat ?? 80))
+        case "terminal-drag":
+            // A held-button drag paced like a real pointer: one event per tick, delivered as it is
+            // produced, so the app's own event, input and network work competes the way it does live.
+            let view = try terminal(command)
+            guard let seconds = command["seconds"] as? Double, let rate = command["rate"] as? Double,
+                  seconds > 0, rate > 0, let path = command["path"] as? [Double], path.count == 4 else { throw Failure.invalidCommand }
+            func point(_ progress: Double) -> CGPoint {
+                let x = path[0] + (path[2] - path[0]) * progress, y = path[1] + (path[3] - path[1]) * progress
+                return view.convert(CGPoint(x: view.bounds.width * x, y: view.bounds.height * (1 - y)), to: nil)
+            }
+            func send(_ type: NSEvent.EventType, _ location: CGPoint) throws {
+                guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { throw Failure.invalidCommand }
+                window.sendEvent(event)
+            }
+            let count = Int(seconds * rate)
+            let started = Date().timeIntervalSince1970
+            try send(.leftMouseDown, point(0))
+            for index in 1...count {
+                try await Task.sleep(for: .seconds(1 / rate))
+                try send(.leftMouseDragged, point(Double(index) / Double(count)))
+            }
+            try send(.leftMouseUp, point(1))
+            lastDrag = ["events": count, "startedWall": started, "releasedWall": Date().timeIntervalSince1970]
         case "scroll":
             let view = try terminal(command)
             // NSEvent has no public scroll constructor without CGEvent. Exercise
@@ -304,6 +330,7 @@ final class CorralAcceptanceDriver {
             "connected": coordinator.connected, "lastError": coordinator.lastConnectionError ?? "",
             "lastKeyDispatchTime": lastKeyDispatchTime,
             "switchSamples": switchSamples,
+            "lastDrag": lastDrag,
             "inputAckSequence": coordinator.lastInputAcknowledgement?.sequence ?? 0,
             "inputAckSucceeded": coordinator.lastInputAcknowledgement?.succeeded ?? false,
             "workspace": try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)),

@@ -500,6 +500,43 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
             'deliveryDeadlineSeconds': 3, 'nativeSendDeadlineMs': 100}, indent=2))
         self.write_case_summary()
 
+    def run_mouse_drag_backlog(self, seconds=5, rate=120):
+        """Pi's TUI mode: a held drag becomes SGR motion reports. Hand stops -> PTY stops."""
+        self.visible('A')
+        state = self.command('terminal-click', ref=self.refs['A'])
+        assert self.view(state, 'A')['focused']
+        path = self.directory / 'input-A.bin'
+        self.command('key', text='MOUSE-ANY', code=0)
+        wait_for(lambda: b'MOUSE-ANY' in path.read_bytes())
+        wait_for(lambda: self.view(self.command('state'), 'A')['mouseMode'] == 'anyEvent')
+        time.sleep(1)
+        before = len(path.read_bytes())
+        wire_before = len(self.wire())
+        drag = self.command('terminal-drag', ref=self.refs['A'], seconds=seconds, rate=rate,
+                            path=[.05, .1, .9, .85])['lastDrag']
+        timing_path = path.with_suffix('.bin.timing.jsonl')
+        def settled():
+            entries = [json.loads(line) for line in timing_path.read_text().splitlines()]
+            last = max((e['at'] for e in entries if e['offset'] + e['length'] > before), default=0)
+            return last if last and time.time() - last > 3 else None
+        last_receipt = wait_for(settled, 180)
+        reports = re.findall(rb'\x1b\[<(\d+);(\d+);(\d+)([Mm])', path.read_bytes()[before:])
+        motions = [r for r in reports if int(r[0]) & 32 and not int(r[0]) & 64]
+        assert reports and reports[0][3] == b'M' and not int(reports[0][0]) & 32, 'the press must arrive first'
+        assert reports[-1][3] == b'm', 'the release must arrive last'
+        inputs = [e for e in self.wire()[wire_before:] if e.get('direction') == 'client-to-daemon' and e.get('type') == 'input']
+        summary = {'dragEvents': drag['events'], 'dragSeconds': drag['releasedWall'] - drag['startedWall'],
+                   'motionReportsAtPTY': len(motions), 'inputMessages': len(inputs),
+                   'releaseTailMilliseconds': round((last_receipt - drag['releasedWall']) * 1000, 1),
+                   'finalMotionCell': [int(v) for v in motions[-1][1:3]] if motions else None,
+                   'releaseCell': [int(v) for v in reports[-1][1:3]]}
+        self.receipts.append({'mouseDragBacklog': summary})
+        (self.directory / 'mouse-drag-backlog.json').write_text(json.dumps(summary, indent=2))
+        print('MOUSE_DRAG_BACKLOG', json.dumps(summary), flush=True)
+        assert summary['finalMotionCell'] == summary['releaseCell'], 'the latest pointer position must reach the PTY'
+        assert summary['releaseTailMilliseconds'] <= 500, ('RED: input kept replaying after the hand stopped', summary)
+        print('PASS mouse drag: latest position delivered, PTY quiet within 500 ms of release', flush=True)
+
     def run_window_resize(self):
         state = self.sidebar('A')
         width, height = state['stageSize']
@@ -602,7 +639,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--legacy-root', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
-    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness'], default='parity')
+    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog'], default='parity')
     parser.add_argument('--no-resize', action='store_true')
     parser.add_argument('--server-binary', type=Path)
     args = parser.parse_args()
@@ -613,6 +650,7 @@ def main():
         elif args.case == 'session-liveness': run.run_session_liveness()
         elif args.case.startswith('many-sessions'): run.run_many_sessions()
         elif args.case == 'window-resize': run.run_window_resize()
+        elif args.case == 'mouse-drag-backlog': run.run_mouse_drag_backlog()
         else: run.run_suite()
     except Exception:
         (run.directory/'failure.txt').write_text(traceback.format_exc())

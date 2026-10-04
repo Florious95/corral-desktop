@@ -61,6 +61,8 @@ int main(int argc, char **argv) {
         // Test-controlled mode toggle travels through the same PTY input as every key.
         if (memmem(buffer, (size_t)count, "MOUSE-ON", 8)) printf("\033[?1000h\033[?1006h");
         if (memmem(buffer, (size_t)count, "MOUSE-OFF", 9)) printf("\033[?1000l\033[?1006l");
+        // The mode Pi runs in: alternate screen, any-event motion tracking, SGR reports.
+        if (memmem(buffer, (size_t)count, "MOUSE-ANY", 9)) printf("\033[?1049h\033[?1003h\033[?1006h");
         printf("\r\n%s/%s ECHO-%s:", argv[1], argv[2], argv[1]);
         for (ssize_t i = 0; i < count; i++) printf("%02x", buffer[i]);
         printf("\r\n");
