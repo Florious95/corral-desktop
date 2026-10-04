@@ -60,11 +60,6 @@ final class NativeTerminalClipboardAndSelectionTests: XCTestCase {
     }
 
     func testMouseDragSelectsTerminalTextAndCmdCCopiesToPasteboard() throws {
-        let systemPasteboard = NSPasteboard.general
-        let savedPasteboard = PasteboardSnapshot(systemPasteboard)
-        defer { savedPasteboard.restore(to: systemPasteboard) }
-        systemPasteboard.clearContents()
-
         let pasteboard = isolatedPasteboard()
         defer { pasteboard.releaseGlobally() }
         let (view, window, _) = makeTerminal(pasteboard: pasteboard)
@@ -93,7 +88,70 @@ final class NativeTerminalClipboardAndSelectionTests: XCTestCase {
         let commandC = keyEvent("c", keyCode: 8, windowNumber: window.windowNumber)
         let handled = view.performKeyEquivalent(with: commandC)
         XCTAssertTrue(handled, "The terminal must handle Command+C without relying on a main-menu Edit item")
-        XCTAssertEqual(systemPasteboard.string(forType: .string), selectedText, "Command+C must copy the active terminal selection")
+        XCTAssertEqual(pasteboard.string(forType: .string), selectedText, "Command+C must copy the active terminal selection")
+    }
+
+    func testIssue342FirstDragExtendsFromMouseDownWithoutAutomaticCopy() throws {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("unchanged clipboard", forType: .string)
+        let (view, window, capture) = makeTerminal(pasteboard: pasteboard)
+        defer { closeAndDrain(window) }
+        view.feed(byteArray: Array("COPY_TARGET rest".utf8)[...])
+        let cell = try XCTUnwrap(view.cellDimension)
+        let start = CGPoint(x: cell.width * 0.5, y: view.bounds.height - cell.height * 0.5)
+        let end = CGPoint(x: cell.width * 11.5, y: start.y)
+
+        view.mouseDown(with: mouseEvent(.leftMouseDown, at: start, in: view, window: window, timestamp: 1))
+        view.mouseDragged(with: mouseEvent(.leftMouseDragged, at: end, in: view, window: window, timestamp: 1.01))
+
+        XCTAssertEqual(view.selection.start, Position(col: 0, row: 0), "The first drag must retain the press anchor")
+        XCTAssertEqual(view.selection.end, Position(col: 11, row: 0), "The first drag must reach the current pointer immediately")
+        XCTAssertEqual(view.selection.getSelectedText(), "COPY_TARGET")
+        XCTAssertTrue(view.needsDisplay, "Selection changes must request a redraw")
+        view.mouseUp(with: mouseEvent(.leftMouseUp, at: end, in: view, window: window, timestamp: 1.02))
+        XCTAssertEqual(pasteboard.string(forType: .string), "unchanged clipboard", "Releasing a selection must not automatically copy")
+        XCTAssertTrue(capture.payloads.isEmpty)
+    }
+
+    func testIssue342ControlCCopiesSelectionWithoutSendingInterrupt() {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        let (view, window, capture) = makeTerminal(pasteboard: pasteboard)
+        defer { closeAndDrain(window) }
+        view.feed(byteArray: Array("COPY_TARGET rest".utf8)[...])
+        view.selection.setSelection(start: Position(col: 0, row: 0), end: Position(col: 11, row: 0))
+        XCTAssertEqual(view.selection.getSelectedText(), "COPY_TARGET")
+
+        window.sendEvent(keyEvent("c", keyCode: 8, windowNumber: window.windowNumber, modifiers: .control))
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "COPY_TARGET", "Control+C must explicitly copy the selected text")
+        XCTAssertTrue(view.selection.active, "Copy must not clear the selection")
+        XCTAssertTrue(capture.payloads.isEmpty, "Copying a selection must not interrupt the remote program")
+
+        view.getTerminal().feed(text: "\u{1b}[>1u")
+        window.sendEvent(keyEvent("c", keyCode: 8, windowNumber: window.windowNumber, modifiers: .control))
+        XCTAssertEqual(pasteboard.string(forType: .string), "COPY_TARGET")
+        XCTAssertTrue(view.selection.active)
+        XCTAssertTrue(capture.payloads.isEmpty, "Selection copy must also bypass Kitty keyboard encoding")
+    }
+
+    func testIssue342ControlCWithoutSelectionStillInterrupts() {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("unchanged clipboard", forType: .string)
+        let (view, window, capture) = makeTerminal(pasteboard: pasteboard)
+        defer { closeAndDrain(window) }
+
+        window.sendEvent(keyEvent("c", keyCode: 8, windowNumber: window.windowNumber, modifiers: .control))
+
+        XCTAssertEqual(capture.payloads, [Data([0x03])])
+        XCTAssertEqual(pasteboard.string(forType: .string), "unchanged clipboard")
+
+        view.getTerminal().feed(text: "\u{1b}[>1u")
+        window.sendEvent(keyEvent("c", keyCode: 8, windowNumber: window.windowNumber, modifiers: .control))
+        XCTAssertEqual(capture.payloads, [Data([0x03]), Data("\u{1b}[99;5u".utf8)], "Without a selection, keep the negotiated Kitty protocol")
+        XCTAssertEqual(pasteboard.string(forType: .string), "unchanged clipboard")
     }
 
     private func assertImagePasteReachedFile(
@@ -130,21 +188,20 @@ final class NativeTerminalClipboardAndSelectionTests: XCTestCase {
         let view = CorralNativeTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400), pasteboard: pasteboard)
         let capture = ClipboardInputCapture()
         view.terminalDelegate = capture
-        let window = CorralWindow(contentRect: view.frame)
+        let window = CorralWindow(contentRect: NSRect(x: -10000, y: -10000, width: view.frame.width, height: view.frame.height))
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentView = view
-        window.orderBack(nil)
         _ = window.makeFirstResponder(view)
         window.contentView?.layoutSubtreeIfNeeded()
         return (view, window, capture)
     }
 
-    private func keyEvent(_ character: String, keyCode: UInt16, windowNumber: Int) -> NSEvent {
+    private func keyEvent(_ character: String, keyCode: UInt16, windowNumber: Int, modifiers: NSEvent.ModifierFlags = .command) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: .command,
+            modifierFlags: modifiers,
             timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: windowNumber,
             context: nil,
@@ -210,24 +267,4 @@ private final class ClipboardInputCapture: NSObject, @preconcurrency TerminalVie
     func send(source: TerminalView, data: ArraySlice<UInt8>) { payloads.append(Data(data)) }
     func scrolled(source: TerminalView, position: Double) {}
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
-}
-
-private struct PasteboardSnapshot {
-    private let items: [[(NSPasteboard.PasteboardType, Data)]]
-
-    init(_ pasteboard: NSPasteboard) {
-        items = (pasteboard.pasteboardItems ?? []).map { item in
-            item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
-        }.filter { !$0.isEmpty }
-    }
-
-    func restore(to pasteboard: NSPasteboard) {
-        pasteboard.clearContents()
-        let restoredItems = items.map { representations in
-            let item = NSPasteboardItem()
-            for (type, data) in representations { item.setData(data, forType: type) }
-            return item
-        }
-        if !restoredItems.isEmpty { pasteboard.writeObjects(restoredItems) }
-    }
 }

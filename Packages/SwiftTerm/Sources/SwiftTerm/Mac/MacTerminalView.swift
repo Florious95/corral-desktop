@@ -1571,7 +1571,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     // doCommand/noop: - but more research needs to take place to figure out the priority
     // of those keys.
     //
-    public override func keyDown(with event: NSEvent) {
+    open override func keyDown(with event: NSEvent) {
         selection.active = false
         let eventFlags = event.modifierFlags
 
@@ -2875,6 +2875,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     private var pointerPressSnapshot = SemanticPromptPointerSnapshot(
         selectionWasActive: false, didDrag: false, clickCount: 0,
         pressWasSemanticEligible: false)
+    private var selectionPressPosition: Position?
     private var pendingSemanticClick: DispatchWorkItem?
     var semanticClickCoalescingDelay: TimeInterval = NSEvent.doubleClickInterval
     /// Number of times a semantic-prompt click deferral was scheduled. Used by
@@ -2886,6 +2887,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         pendingSemanticClick?.cancel()
         pendingSemanticClick = nil
         didSelectionDrag = false
+        selectionPressPosition = nil
         pointerPressSnapshot = SemanticPromptPointerSnapshot(
             selectionWasActive: selection.active,
             didDrag: false,
@@ -2898,6 +2900,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         pointerPressSnapshot.pressWasSemanticEligible = true
 
         let hit = calculateMouseHit(with: event).grid
+        selectionPressPosition = Position(col: hit.col, row: hit.row)
 
         switch event.clickCount {
         case 1:
@@ -2933,6 +2936,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     open override func mouseUp(with event: NSEvent) {
         defer {
             didSelectionDrag = false
+            selectionPressPosition = nil
             pointerPressSnapshot.pressWasSemanticEligible = false
         }
         stopSelectionAutoScrollTimer()
@@ -3013,12 +3017,11 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             }
         }
                 
-        if selection.active {
-            selection.dragExtend(bufferPosition: Position(col: hit.col, row: hit.row))
-        } else {
-            selection.setSoftStart(bufferPosition: Position(col: hit.col, row: hit.row))
+        if !selection.active {
+            selection.setSoftStart(bufferPosition: selectionPressPosition ?? Position(col: hit.col, row: hit.row))
             selection.startSelection()
         }
+        selection.dragExtend(bufferPosition: Position(col: hit.col, row: hit.row))
         didSelectionDrag = true
         lastSelectionDragPoint = convert(event.locationInWindow, from: nil)
         autoScrollDelta = 0
