@@ -92,8 +92,18 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
             if suffix == 'P':
                 transcript = self.directory / 'pi-session.jsonl'
                 transcript.write_bytes(self.pi_session.read_bytes())
+                # Pi's fullscreen copy-on-select defaults to the HOST clipboard.
+                # Isolate its config as well as Corral's pasteboard: a TUI selection
+                # must never run pbcopy or load the operator's resources/credentials.
+                pi_config = self.directory / 'pi-config'
+                pi_config.mkdir(mode=0o700)
+                (pi_config / 'settings.json').write_text(json.dumps({
+                    'fullscreenCopyOnSelect': False, 'tuiMode': 'fullscreen',
+                    'defaultProjectTrust': 'never', 'cacheWarming': 'off',
+                    'enableInstallTelemetry': False, 'enableAnalytics': False}))
                 self.tmux('new-session', '-d', '-s', session, '-x', '110', '-y', '32', '-c', str(self.directory),
-                          '/opt/homebrew/bin/pi', '--offline', '--no-extensions', '--no-skills', '--no-prompt-templates',
+                          '/usr/bin/env', 'PI_CODING_AGENT_DIR=' + str(pi_config), 'PI_TELEMETRY=0',
+                          'PI_SKIP_VERSION_CHECK=1', '/opt/homebrew/bin/pi', '--offline', '--no-extensions', '--no-skills', '--no-prompt-templates',
                           '--no-context-files', '--session', str(transcript), '--session-dir', str(self.directory / 'pi-sessions'))
                 self.tmux('set-option', '-t', session, 'status', 'off')
                 continue
@@ -151,7 +161,9 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                          'runnerSHA256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                          'server': server_identity, 'daemonPort': port, 'clientPort': proxy_port, 'tmuxSocket': str(self.socket), 'refs': self.refs,
                          'origin': 'appkit-synthetic', 'systemHID': 'NOT-RUN', 'nativeOSDragTracking': 'NOT-RUN',
-                         'case': self.case, 'noResize': self.no_resize}
+                         'case': self.case, 'noResize': self.no_resize,
+                         'piIsolatedConfig': str(self.directory / 'pi-config') if self.pi_session else None,
+                         'piCopyOnSelect': False if self.pi_session else None}
         print(f'RUN_DIR={self.directory}', flush=True)
         wait_for(lambda: self.command('state').get('connected'), 25)
         self.state = wait_for(lambda: self.ready_state(), 25)

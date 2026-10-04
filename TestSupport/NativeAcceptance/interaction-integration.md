@@ -29,7 +29,7 @@ python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/desktop --pi-
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/desktop --case session-liveness
 ```
 
-The Pi run is offline, without extensions/skills/context files, on a private copy deleted by cleanup. Do not commit transcripts or capture unrelated windows.
+The Pi run is offline, without extensions/skills/context files, on a private copy deleted by cleanup. It has a private `PI_CODING_AGENT_DIR` with `fullscreenCopyOnSelect: false` (Pi defaults to writing the host clipboard on release), disabled telemetry/cache warming and untrusted project resources. Corral's private NSPasteboard alone does not isolate a remote/local Pi process's clipboard side effects. Do not commit transcripts or capture unrelated windows.
 
 `selection-run.py` samples only the candidate WindowServer window's body ROI throughout a 1200-event full-range drag and after release. It checks actual inverse-video selection spans against the SGR press/release cell coordinates, final motion before release, visible changing pixels, and the next selection gesture. It records ACK tail and a **sampled pixel-settling upper bound** separately. Screenshot interval/overhead is reported; neither ANSI delta arrival nor a repaint request counts as a screen presentation receipt. The <=500ms gates are post-release, not permission for the reported 27-second replay after a ten-second gesture.
 
