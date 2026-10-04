@@ -3,9 +3,11 @@
 No system input. ACK/ANSI timing and WindowServer timing are separate receipts.
 """
 import argparse
+import base64
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import threading
 import time
@@ -100,6 +102,21 @@ def verify(run, scrollbar=False):
     assert stable_sample, 'no post-release settled pixel sample'
     pixel_tail_upper_ms = max(0, (stable_sample['completed'] - released) * 1000)
     events = run.wire()[wire_before:]
+    reports = []
+    for event in events:
+        if event.get('type') == 'input' and event.get('direction') == 'client-to-daemon':
+            encoded = event.get('payload', {}).get('bytes')
+            if encoded:
+                reports.extend((int(b), int(x), int(y), final.decode()) for b, x, y, final in
+                               re.findall(rb'\x1b\[<(\d+);(\d+);(\d+)([Mm])', base64.b64decode(encoded)))
+    assert reports and reports[0][0] & 32 == 0 and reports[0][3] == 'M'
+    assert reports[-1][3] == 'm', 'Release must be the final event'
+    motions = [r for r in reports if r[0] & 32 and not r[0] & 64]
+    assert motions and motions[-1][1:3] == reports[-1][1:3], 'The final position must precede release'
+    if not scrollbar:
+        first = next(r for r in after_ranges if r[0] == reports[0][2] - 1)
+        last = next(r for r in after_ranges if r[0] == reports[-1][2] - 1)
+        assert first[1] == reports[0][1] - 1 and last[2] == reports[-1][1], ('selection anchor/focus drift', first, last, reports[0], reports[-1])
     acks = [e['at'] for e in events if e.get('type') == 'input_ack']
     assert acks
     ack_tail_ms = max(0, acks[-1] - released * 1000)
@@ -110,6 +127,8 @@ def verify(run, scrollbar=False):
                'ackTailMilliseconds': ack_tail_ms, 'pixelTailUpperBoundMilliseconds': pixel_tail_upper_ms,
                'pixelSamples': len(samples), 'uniqueFrames': len({s['sha256'] for s in samples}),
                'selectedRows': selected_rows, 'inverseRanges': after_ranges,
+               'pressCell': reports[0][1:3], 'releaseCell': reports[-1][1:3],
+               'lastMotionCell': motions[-1][1:3],
                'samplerMaximumIntervalMilliseconds': max((b['completed']-a['completed'])*1000 for a,b in zip(samples,samples[1:]))}
     (run.directory / 'selection-pixels.json').write_text(json.dumps(samples, indent=2))
     (run.directory / 'pi-pointer-pixels.json').write_text(json.dumps(summary, indent=2))
