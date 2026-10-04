@@ -93,7 +93,10 @@ for i in "${!FILTERS[@]}"; do
   started=$SECONDS
   printf '[%d/%d] RUN  %s\n' "$number" "$TOTAL" "${LABELS[$i]}"
 
-  if swift test --package-path "$ROOT" --filter "${FILTERS[$i]}" >"$log" 2>&1; then
+  # Match package-app.sh: DEBUG entrypoints with optimized app and dependencies.
+  # In particular, the 50ms input/reflow gate must measure the code we deliver,
+  # not SwiftPM's unshipped -Onone AppKit host. Assertions remain unchanged.
+  if swift test --package-path "$ROOT" -Xswiftc -O --filter "${FILTERS[$i]}" >"$log" 2>&1; then
     passed_line="$(grep -E 'Test Case .* passed \(' "$log" | tail -n 1 || true)"
     if [[ -z "$passed_line" ]]; then
       printf '[%d/%d] FAIL no matching XCTest reported as passed; failing closed.\n' "$number" "$TOTAL"
