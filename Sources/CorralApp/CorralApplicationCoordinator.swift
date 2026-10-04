@@ -84,8 +84,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         /// The phone's grid as the catalog last reported a change to it. Until then the desktop keeps
         /// its current grid: a catalog that has not yet caught up must not be mistaken for the phone's.
         var remoteGrid: GridSize?
-        /// The catalog has reported `requestedGrid` since it was sent.
-        var catalogConfirmedRequest = false
+        /// Last catalog grid at a desktop request, advanced when that request is observed.
+        /// A different grid may be the phone's even if the desktop grid was never echoed.
+        var catalogBaselineGrid: GridSize?
     }
 
     private struct ConnectionConfiguration {
@@ -1606,11 +1607,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 let key = SessionKey(deviceID: envelope.origin.deviceID, reference: reference)
                 if var runtime = sessions[key] {
                     if hasMobile, !runtime.hasMobile {
-                        // A phone just took the PTY. Trust the catalog only if it has moved off the grid this
-                        // desktop asked for; otherwise keep the current grid until the next catalog change.
+                        // Catalog and presence travel independently. A changed catalog can arrive first;
+                        // requiring an echo of our own request would pin the wrong grid forever.
                         let local = terminalRegistry.view(for: key).map { GridSize(rows: $0.terminal.rows, columns: $0.terminal.cols) }
-                        runtime.remoteGrid = runtime.catalogConfirmedRequest && runtime.descriptor.size != runtime.requestedGrid
-                            ? runtime.descriptor.size : (local ?? runtime.descriptor.size)
+                        let advanced = runtime.catalogBaselineGrid.map { $0 != runtime.descriptor.size } ?? false
+                        runtime.remoteGrid = advanced ? runtime.descriptor.size : (local ?? runtime.descriptor.size)
                     }
                     if hasMobile, !runtime.hasMobile { runtime.requestedGrid = nil } // the PTY is no longer at our request
                     if !hasMobile { runtime.remoteGrid = nil }
@@ -1753,11 +1754,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 runtime.requestedGrid = nil
                 runtime.hasMobile = false
                 runtime.remoteGrid = nil
-                runtime.catalogConfirmedRequest = false
+                runtime.catalogBaselineGrid = nil
                 runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             }
             if runtime.hasMobile, descriptor.size != runtime.descriptor.size { runtime.remoteGrid = descriptor.size }
-            if descriptor.size == runtime.requestedGrid { runtime.catalogConfirmedRequest = true }
+            if descriptor.size == runtime.requestedGrid { runtime.catalogBaselineGrid = descriptor.size }
             runtime.descriptor = descriptor
             runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             sessions[key] = runtime
@@ -1835,16 +1836,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 sessions[key]?.subscriptionPending = true
                 sessions[key]?.awaitingSnapshot = true
                 let initialGrid = noResizeMode ? runtime.descriptor.size : (runtime.desiredGrid ?? runtime.descriptor.size)
+                sessions[key]?.catalogBaselineGrid = runtime.descriptor.size
                 startSubscriptionSnapshotTimeout(for: key, connection: connection)
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: initialGrid))
                 guard self.connection == connection,
                       sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch else { continue }
                 sessions[key]?.subscriptionPending = false
                 sessions[key]?.subscribed = receipt.socketWritten
-                if receipt.socketWritten {
+                if receipt.socketWritten, sessions[key]?.followsRemoteGrid == false {
                     sessions[key]?.requestedGrid = initialGrid
-                    let confirmed = sessions[key]?.descriptor.size == initialGrid
-                    sessions[key]?.catalogConfirmedRequest = confirmed
+                    if sessions[key]?.descriptor.size == initialGrid { sessions[key]?.catalogBaselineGrid = initialGrid }
                 }
                 if terminalRegistry.view(for: key) !== subscribingView {
                     if receipt.socketWritten { pendingUnsubscriptions.insert(key) }
@@ -1938,7 +1939,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let previous = runtime.requestedGrid
         runtime.requestedGrid = grid
         runtime.desiredGrid = grid
-        runtime.catalogConfirmedRequest = false
+        runtime.catalogBaselineGrid = runtime.descriptor.size
         sessions[key] = runtime
         do {
             if relayout {

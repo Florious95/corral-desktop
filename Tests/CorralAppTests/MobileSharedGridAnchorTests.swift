@@ -111,6 +111,14 @@ final class MobileSharedGridAnchorTests: XCTestCase {
     /// reported this desktop's grid, it still shows an older one; adopting it in between pops the phone's
     /// footer rows below the cursor. The desktop keeps its grid until the catalog reports the phone's.
     func testPhoneArrivalKeepsTheDesktopGridUntilTheCatalogReportsThePhone() async throws {
+        try await assertPhoneCatalogOrdering(catalogFirst: false)
+    }
+
+    func testPhoneCatalogBeforePresenceDoesNotRequireAnEchoOfTheDesktopRequest() async throws {
+        try await assertPhoneCatalogOrdering(catalogFirst: true)
+    }
+
+    private func assertPhoneCatalogOrdering(catalogFirst: Bool) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("corral-anchor-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -151,13 +159,17 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         // The phone attaches: its 46x44 redraw reaches the desktop before presence, and the catalog still lags.
         let redraw = (1...44).map { "\u{1b}[\($0);1H\u{1b}[2K\($0 > 41 ? "FOOTER-\($0)" : "ROW-\($0)")" }.joined() + "\u{1b}[41;1H"
         try await link.emit(.frame(.delta(reference: reference, ansi: Data(redraw.utf8))))
+        if catalogFirst {
+            try await link.emit(.control(.listDelta(SessionListDelta(sequence: 2, changedSessions: [record(phone)]))))
+        }
         try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: true, mobileCount: 1, desktopCount: 1)))
         _ = await waitUntil { view.pinnedGrid != nil }
         view.superview?.layoutSubtreeIfNeeded()
-        XCTAssertEqual(GridSize(rows: view.terminal.rows, columns: view.terminal.cols), desktop,
-                       "a lagging catalog grid must not be adopted as the phone's")
-
-        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 2, changedSessions: [record(phone)]))))
+        if !catalogFirst {
+            XCTAssertEqual(GridSize(rows: view.terminal.rows, columns: view.terminal.cols), desktop,
+                           "a lagging catalog grid must not be adopted as the phone's")
+            try await link.emit(.control(.listDelta(SessionListDelta(sequence: 2, changedSessions: [record(phone)]))))
+        }
         let adopted = await waitUntil { view.terminal.rows == phone.rows && view.terminal.cols == phone.columns }
         XCTAssertTrue(adopted)
         let bottom = (41..<44).map { view.getTerminal().getLine(row: $0)?.translateToString(trimRight: true) ?? "" }
