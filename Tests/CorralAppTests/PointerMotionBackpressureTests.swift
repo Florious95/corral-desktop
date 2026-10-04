@@ -73,7 +73,11 @@ final class PointerMotionBackpressureTests: XCTestCase {
         }
         view.mouseUp(with: event(.leftMouseUp, 1))
         let released = ContinuousClock.now
-        let drained = await waitUntil(timeout: .seconds(20)) { await server.isIdle() }
+        let drained = await waitUntil(timeout: .seconds(20)) {
+            let reports = await server.processedReports()
+            let idle = await server.isIdle()
+            return idle && reports.last.flatMap(SGRReport.init)?.isRelease == true
+        }
         XCTAssertTrue(drained)
         let processed = await server.processedReports()
         let lastProcessed = await server.lastProcessedAt()
@@ -89,6 +93,44 @@ final class PointerMotionBackpressureTests: XCTestCase {
         let statistics = coordinator.pointerMotionStatistics
         XCTAssertGreaterThan(statistics.superseded, 0)
         XCTAssertEqual(statistics.sent, motions.count)
+
+        // A new selection/scrollbar gesture can end at the same cell as the previous one.
+        let beforeNextGesture = await server.processedReports().count
+        view.mouseDown(with: event(.leftMouseDown, 0))
+        view.mouseDragged(with: event(.leftMouseDragged, 1))
+        view.mouseUp(with: event(.leftMouseUp, 1))
+        _ = await waitUntil(timeout: .seconds(1)) {
+            let reports = await server.processedReports()
+            return reports.count >= beforeNextGesture + 3 && reports.last.flatMap(SGRReport.init)?.isRelease == true
+        }
+        let nextGesture = await server.processedReports().dropFirst(beforeNextGesture).compactMap(SGRReport.init)
+        XCTAssertEqual(nextGesture.count, 3, "Deduplication must not cross a press/release barrier")
+        XCTAssertEqual(nextGesture.filter(\.isMotion).count, 1)
+
+        // Literal pasted/typed ESC bytes are not physical pointer motion.
+        let literal = Data("\u{1b}[<32;7;7M".utf8)
+        let beforeLiteral = await server.processedReports().count
+        for _ in 0..<3 { view.send(data: Array(literal)[...]) }
+        _ = await waitUntil(timeout: .seconds(1)) { await server.processedReports().count >= beforeLiteral + 3 }
+        let literals = await server.processedReports().dropFirst(beforeLiteral)
+        XCTAssertEqual(Array(literals), [literal, literal, literal], "No text may be deduplicated by guessing its escape syntax")
+
+        // A slow server must not turn the 250ms safety timer into a new fixed-rate producer.
+        await server.setProcessingDelay(.milliseconds(500))
+        view.mouseDown(with: event(.leftMouseDown, 0))
+        for index in 1...120 {
+            view.mouseDragged(with: event(.leftMouseDragged, Double(index) / 120))
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let maximumOutstanding = await server.maximumOutstandingInputs()
+        XCTAssertLessThanOrEqual(maximumOutstanding, 2, "Only the press and one motion may be awaiting slow server consumption")
+        view.mouseUp(with: event(.leftMouseUp, 1))
+        let slowDrained = await waitUntil(timeout: .seconds(5)) {
+            let reports = await server.processedReports()
+            let idle = await server.isIdle()
+            return idle && reports.last.flatMap(SGRReport.init)?.isRelease == true
+        }
+        XCTAssertTrue(slowDrained)
         await coordinator.stop()
     }
 
@@ -125,13 +167,16 @@ private struct SGRReport {
 /// Acknowledges each input only after a fixed serial processing time, like Core's read loop.
 private actor SlowInputSessionLink: SessionLinkProtocol {
     private let stream = MotionEventStream()
-    private let perInput: Duration
+    private var perInput: Duration
     private var authenticated: AuthenticatedConnection?
     private var ordinal: UInt64 = 0
     private var serverFreeAt = ContinuousClock.now
     private var processed: [Data] = []
     private var processedAt: ContinuousClock.Instant?
     private var outstanding = 0
+    private var maximumOutstanding = 0
+    func setProcessingDelay(_ delay: Duration) { perInput = delay; maximumOutstanding = outstanding }
+    func maximumOutstandingInputs() -> Int { maximumOutstanding }
 
     init(perInput: Duration) { self.perInput = perInput }
 
@@ -152,6 +197,7 @@ private actor SlowInputSessionLink: SessionLinkProtocol {
             let due = max(ContinuousClock.now, serverFreeAt) + perInput
             serverFreeAt = due
             outstanding += 1
+            maximumOutstanding = max(maximumOutstanding, outstanding)
             Task { await self.process(bytes, sequence: request.sequence, at: due) }
         default: break
         }

@@ -65,7 +65,10 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
     /// A PTY grid another device (a phone) owns. The desktop keeps it exactly instead of fitting
     /// its pane, so the remote layout is never reflowed into wrapped, misaligned rows.
     var pinnedGrid: GridSize? {
-        didSet { if pinnedGrid != oldValue { superview?.needsLayout = true } }
+        didSet {
+            automaticallyResizesTerminal = pinnedGrid == nil
+            if pinnedGrid != oldValue { superview?.needsLayout = true }
+        }
     }
     /// The pane a pinned grid overflows, in the stage's coordinates; nothing outside it is shown or hit.
     private var overflowClip: CGRect?
@@ -163,6 +166,11 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
 
     override func setFrameSize(_ newSize: NSSize) {
         guard terminal != nil else { super.setFrameSize(newSize); return }
+        if pinnedGrid != nil {
+            super.setFrameSize(newSize)
+            fitTerminalGrid(to: newSize)
+            return
+        }
         let previousGrid = (terminal.cols, terminal.rows)
         let delegate = terminalDelegate
         let scroller = terminalScroller
@@ -386,11 +394,18 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         needsDisplay = true
     }
 
+    private(set) var isSendingEngineReport = false
+
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
-        guard SwiftTermVTReplyFilter.isMouseReport(data) || !SwiftTermVTReplyFilter.isAutomaticResponse(data) else {
+        let isMouseReport = SwiftTermVTReplyFilter.isMouseReport(data)
+        guard isMouseReport || !SwiftTermVTReplyFilter.isAutomaticResponse(data) else {
             onDiscardedAutomaticReply?(data.count)
             return
         }
+        // User text/paste bypasses this engine callback. Literal ESC text must
+        // never be classified as a physical position and deduplicated.
+        isSendingEngineReport = true
+        defer { isSendingEngineReport = false }
         terminalDelegate?.send(source: self, data: data)
     }
 

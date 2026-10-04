@@ -351,6 +351,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// consumed by `setupOptions` when the view creates its terminal
     var startupOptions: TerminalOptions = TerminalOptions.default
 
+    /// Mirrors can retain an authoritative grid while font/frame pixels change.
+    public var automaticallyResizesTerminal = true
+
     /// The font to use to render the terminal
     public var font: NSFont {
         get {

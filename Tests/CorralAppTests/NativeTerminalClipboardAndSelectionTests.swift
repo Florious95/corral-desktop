@@ -114,6 +114,42 @@ final class NativeTerminalClipboardAndSelectionTests: XCTestCase {
         XCTAssertTrue(capture.payloads.isEmpty)
     }
 
+    func testShiftBypassKeepsNativeSelectionImmediateWhileSGRTrackingIsEnabled() async throws {
+        let pasteboard = isolatedPasteboard()
+        defer { pasteboard.releaseGlobally() }
+        let (view, window, capture) = makeTerminal(pasteboard: pasteboard)
+        defer { closeAndDrain(window) }
+        view.feed(byteArray: Array("COPY_TARGET rest\r\nSECOND LINE\r\nTHIRD LINE\u{1b}[?1003h\u{1b}[?1006h".utf8)[...])
+        let cell = try XCTUnwrap(view.cellDimension)
+        func event(_ type: NSEvent.EventType, col: Int, row: Int) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: view.convert(CGPoint(x: (CGFloat(col) + 0.5) * cell.width,
+                y: view.bounds.height - (CGFloat(row) + 0.5) * cell.height), to: nil), modifierFlags: .shift,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
+        }
+        view.mouseDown(with: event(.leftMouseDown, col: 0, row: 0))
+        var maximumHandlerMs = 0.0
+        for index in 0..<360 {
+            let col = 1 + index % 10, row = (index / 120) % 3
+            let started = ProcessInfo.processInfo.systemUptime
+            view.mouseDragged(with: event(.leftMouseDragged, col: col, row: row))
+            maximumHandlerMs = max(maximumHandlerMs, (ProcessInfo.processInfo.systemUptime - started) * 1000)
+            XCTAssertEqual(view.selection.start, Position(col: 0, row: 0))
+            XCTAssertEqual(view.selection.end, Position(col: col, row: row), "Local selection must reach this event immediately, not wait for ACK")
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        view.mouseDragged(with: event(.leftMouseDragged, col: 11, row: 0))
+        view.mouseUp(with: event(.leftMouseUp, col: 11, row: 0))
+        XCTAssertEqual(view.selection.getSelectedText(), "COPY_TARGET")
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(view.selection.getSelectedText(), "COPY_TARGET", "Release stops auto-scroll/selection movement")
+        view.copy(view)
+        XCTAssertEqual(pasteboard.string(forType: .string), "COPY_TARGET")
+        XCTAssertTrue(capture.payloads.isEmpty, "Shift-bypassed native selection must not leak SGR input to Pi")
+        XCTAssertLessThan(maximumHandlerMs, 50)
+        print("NATIVE_SELECTION events=360 maxHandlerMs=\(maximumHandlerMs) immediateEndpoint=true tail=none boundary=AppKit-handler")
+    }
+
     func testIssue342ControlCCopiesSelectionWithoutSendingInterrupt() {
         let pasteboard = isolatedPasteboard()
         defer { pasteboard.releaseGlobally() }

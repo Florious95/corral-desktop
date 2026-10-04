@@ -11,4 +11,6 @@ Local Issue 26 changes are confined to:
 
 Reflow preserves the existing cursor/viewport calculations and scrollback capacity. Image, semantic-mark, hard-continuation and non-single-render paragraphs retain upstream's eager path. All access remains on the terminal's owning thread; this is not concurrent parsing or dropped scrollback. Later width changes, search and full-buffer inspection may still visit all retained history.
 
+Integrated shared-grid hardening adds `automaticallyResizesTerminal` to the macOS TerminalView and guards automatic frame/font-derived resizes in `AppleTerminalView.swift`. Corral disables it only while a phone owns the pinned PTY grid; explicit grid changes remain supported. This prevents a font change from temporarily shrinking Pi's alternate screen with the old pixel frame and irreversibly losing its bottom rows. Default behavior and local selection/display cadence are unchanged.
+
 The unmodified upstream test package also has five `MetalRendererStatusTests` failures locating `Apple/Metal/Shaders.metal` in this checkout environment. Do not treat those tests as passing or alter their assertions to hide the failure.

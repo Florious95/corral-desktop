@@ -319,7 +319,14 @@ final class CorralAcceptanceDriver {
             // Hidden Tabs are checked when selected. Reading every hidden cell
             // on every probe would make the observer itself a UI workload.
             let rows = view.isHidden ? [] : (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }
+            let inverseRanges: [[Int]] = view.isHidden ? [] : (0..<terminal.rows).compactMap { row in
+                guard let line = terminal.getLine(row: row) else { return nil }
+                let columns = (0..<terminal.cols).filter { line[$0].attribute.style.contains(.inverse) }
+                guard let first = columns.first, let last = columns.last else { return nil }
+                return [row, first, last + 1]
+            }
             panes.append([
+                "inverseRanges": inverseRanges, "nativeSelection": view.isHidden ? "" : view.selection.getSelectedText(),
                 "hidden": view.isHidden, "focused": window.firstResponder === view,
                 "hitTestMatches": window.contentView?.hitTest(view.convert(CGPoint(x: 60, y: 80), to: window.contentView)) === view,
                 "ref": coordinator.terminalKey(for: view)?.reference.rawValue ?? "",

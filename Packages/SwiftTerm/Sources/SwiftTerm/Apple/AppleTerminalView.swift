@@ -298,7 +298,12 @@ extension TerminalView {
     {
         resetCaches()
         self.cellDimension = computeFontDimensions ()
-        if (frame.width > 0) && (frame.height > 0) {
+        #if os(macOS)
+        let resizeGrid = automaticallyResizesTerminal
+        #else
+        let resizeGrid = true
+        #endif
+        if resizeGrid && (frame.width > 0) && (frame.height > 0) {
             // Use getEffectiveWidth so the scroller's reserved width is taken
             // into account, matching processSizeChange(). Computing columns from
             // the raw frame width here would over-count by the scroller width,
@@ -384,6 +389,9 @@ extension TerminalView {
     /// Returns true if this changed the number of columns/rows, false otherwise
     @discardableResult
     func processSizeChange (newSize: CGSize) -> Bool {
+        #if os(macOS)
+        guard automaticallyResizesTerminal else { return false }
+        #endif
         if newSize.width == 0 && newSize.height == 0 {
             return false
         }

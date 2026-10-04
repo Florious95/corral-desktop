@@ -130,6 +130,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var eventStreamTask: Task<Void, Never>?
     private var eventStreamClaimed = false
     private var telemetryTask: Task<Void, Never>?
+    private var lastTelemetryWrite: TimeInterval = -.infinity
     private var cachedDevices: [DeviceRecord] = []
     private var spaceIDsByDirectory: [String: UUID] = [:]
     private var directoriesBySpaceID: [UUID: String] = [:]
@@ -429,6 +430,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         devicesCardPanel?.orderOut(nil)
         devicesCardPanel = nil
         terminalRegistry.removeAll()
+        resetPointerMotion()
+        scrollWheelFlushTask?.cancel()
+        scrollWheelFlushTask = nil
+        pendingScrollWheelInput.removeAll()
         pendingInput.removeAll()
         pendingInputBytes = 0
         actionTimeoutTasks.values.forEach { $0.cancel() }
@@ -926,7 +931,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
-    public func flushTelemetry() async { await writeTelemetry() }
+    public func flushTelemetry() async { await writeTelemetry(force: true) }
 
     var activeTerminalSessionKey: SessionKey? { activeSession }
 
@@ -1401,6 +1406,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func connect(configuration: ConnectionConfiguration) async throws {
+        resetPointerMotion()
         listingRequestedEpoch = nil
         listingSequence = 0
         let authenticated = try await sessionLink.connect(
@@ -1504,9 +1510,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             subscribedSessionIDs = []
             pendingInput.removeAll()
             pendingInputBytes = 0
-            pendingPointerMotion = nil
-            lastPointerMotion = nil
-            pointerMotionGate = nil
+            resetPointerMotion()
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
             updateSidebar(devices: cachedDevices)
@@ -1527,6 +1531,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     deviceID: envelope.origin.deviceID,
                     connectionEpoch: epoch
                    ) {
+                    resetPointerMotion()
                     connection = updated
                     listingRequestedEpoch = nil
                     listingSequence = 0
@@ -1535,6 +1540,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 await deviceSessionLifecycle.markConnected(envelope.origin.deviceID)
                 if let connection { await requestListing(for: connection) }
             case .disconnected, .failed:
+                resetPointerMotion()
                 connected = false
                 await deviceSessionLifecycle.markDisconnected()
             case .transportOpen, .authenticating:
@@ -1549,6 +1555,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         case .connectionChanged:
             break
         case let .failed(error):
+            resetPointerMotion()
             connected = false
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
@@ -1746,6 +1753,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 runtime.requestedGrid = nil
                 runtime.hasMobile = false
                 runtime.remoteGrid = nil
+                runtime.catalogConfirmedRequest = false
                 runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             }
             if runtime.hasMobile, descriptor.size != runtime.descriptor.size { runtime.remoteGrid = descriptor.size }
@@ -1939,6 +1947,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 let nudge = GridSize(rows: grid.rows, columns: grid.columns > 2 ? grid.columns - 1 : grid.columns + 1)
                 _ = try await sessionLink.send(.resize(reference: key.reference, size: nudge))
             }
+            guard self.connection == connection, sessions[key]?.followsRemoteGrid == false else { return }
             let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
             guard self.connection == connection else { return }
             guard receipt.socketWritten else {
@@ -1982,7 +1991,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
             return
         }
-        if Self.isPointerMotionReport(data) {
+        if (source as? CorralNativeTerminalView)?.isSendingEngineReport == true,
+           Self.isPointerMotionReport(data) {
             pointerMotionStatistics.produced += 1
             if let last = lastPointerMotion, last.session == key, last.bytes == bytes {
                 pointerMotionStatistics.duplicates += 1
@@ -1999,6 +2009,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             return
         }
         // Presses, releases, wheel and keys are ordering barriers: the newest position goes first.
+        lastPointerMotion = nil
         releasePendingPointerMotion()
         if Self.isScrollWheelInput(data) {
             let canMerge = pendingScrollWheelInput.last.map {
@@ -2036,6 +2047,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func releasePendingPointerMotion() {
         guard let motion = pendingPointerMotion else { return }
         pendingPointerMotion = nil
+        // A motion still waiting behind a slow socket/key barrier has not reached
+        // the server: replace it too, rather than retaining an obsolete position.
+        if let last = pendingInput.last, last.isPointerMotion,
+           last.session == motion.session, last.connection == motion.connection {
+            pendingInput.removeLast()
+            pendingInputBytes -= last.bytes.count
+            pointerMotionStatistics.superseded += 1
+        }
         pendingInput.append(motion)
         pendingInputBytes += motion.bytes.count
         scheduleInputDrain()
@@ -2045,15 +2064,18 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard pointerMotionGate == nil, pendingPointerMotion != nil else { return }
         pointerMotionGate = .queued
         pointerMotionGateGeneration += 1
-        let generation = pointerMotionGateGeneration
         releasePendingPointerMotion()
-        // A missing ack (dropped connection, older server) must not strand the newest position.
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
-            guard let self, self.pointerMotionGateGeneration == generation, self.pointerMotionGate != nil else { return }
-            self.pointerMotionGate = nil
-            self.pumpPointerMotion()
-        }
+        // An elapsed timer is not proof of consumption. Reopening every 250ms
+        // recreates backlog on a slow Core. Required v1 input_ack opens this gate;
+        // key/button barriers still flush the last position without waiting.
+    }
+
+    private func resetPointerMotion() {
+        pendingPointerMotion = nil
+        lastPointerMotion = nil
+        pointerMotionGate = nil
+        pointerMotionGateGeneration += 1
+        highestAcknowledgedInputSequence = 0
     }
 
     private func acknowledgeInput(_ sequence: UInt32) {
@@ -2159,7 +2181,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             pendingInput.removeFirst()
             pendingInputBytes -= input.bytes.count
             guard input.connection == connection, sessions[input.session]?.subscribed == true else {
-                if input.isPointerMotion { pointerMotionGate = nil; continue }
+                if input.isPointerMotion {
+                    if input.connection == connection, case .queued = pointerMotionGate {
+                        pointerMotionGate = nil
+                        pumpPointerMotion()
+                    }
+                    continue
+                }
                 lastConnectionError = "Input cancelled because the session connection changed."
                 showToast("会话连接已变化，待发送输入已取消", kind: .warning)
                 continue
@@ -2181,18 +2209,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     showToast("终端输入发送失败：\(error)", kind: .error)
                 }
             } else if input.isPointerMotion {
+                let generation = pointerMotionGateGeneration
                 let sentAt = ContinuousClock.now
                 do {
                     let sequence = try await inputRouter.routeBytes(input.bytes, to: input.session)
                     pointerMotionStatistics.sent += 1
-                    if case .queued = pointerMotionGate {
+                    if input.connection == connection, generation == pointerMotionGateGeneration,
+                       case .queued = pointerMotionGate {
                         // The ack can overtake this resumption; then the gate is already clear.
                         if highestAcknowledgedInputSequence >= sequence { pointerMotionGate = nil; pumpPointerMotion() }
                         else { pointerMotionGate = .sent(sequence, sentAt) }
                     }
                 } catch {
-                    pointerMotionGate = nil
-                    lastConnectionError = String(describing: error)
+                    if input.connection == connection, generation == pointerMotionGateGeneration {
+                        resetPointerMotion()
+                        lastConnectionError = String(describing: error)
+                    }
                 }
             } else {
                 do { _ = try await inputRouter.routeBytes(input.bytes, to: input.session) }
@@ -2392,8 +2424,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
-    private func writeTelemetry() async {
+    private func writeTelemetry(force: Bool = false) async {
         guard let telemetryURL else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard force || now - lastTelemetryWrite >= 0.5 else { return }
+        lastTelemetryWrite = now
         await telemetryWriter.write(telemetry, to: telemetryURL)
     }
 
