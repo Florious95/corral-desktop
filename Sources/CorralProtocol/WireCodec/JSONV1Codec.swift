@@ -383,7 +383,9 @@ private struct SubscribePayload: Encodable {
     let ref: String
     let rows: UInt16
     let columns: UInt16
-    enum CodingKeys: String, CodingKey { case ref, rows, columns = "cols" }
+    /// Registers this mirror in Core's presence set, which then reports phones on the same session.
+    let clientType = "desktop"
+    enum CodingKeys: String, CodingKey { case ref, rows, columns = "cols", clientType = "client_type" }
 }
 
 private struct InputPayload: Encodable {

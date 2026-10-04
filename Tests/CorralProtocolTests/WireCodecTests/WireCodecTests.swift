@@ -35,6 +35,7 @@ final class WireCodecTests: XCTestCase {
         XCTAssertEqual(payload["ref"] as? String, reference.rawValue)
         XCTAssertEqual(payload["rows"] as? Int, 37)
         XCTAssertEqual(payload["cols"] as? Int, 111)
+        XCTAssertEqual(payload["client_type"] as? String, "desktop", "Core admits only typed mirrors into presence")
     }
 
     func testCapturedBinarySnapshotAndDeltaRoundTripByteForByte() throws {

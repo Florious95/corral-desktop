@@ -95,7 +95,7 @@ final class NativeTerminalStageView: NSView {
             let inset = backgroundPanes.count > 1 ? CorralMVPWorkspaceView.terminalViewportLeadingInset : 0
             for pane in backgroundPanes {
                 guard let view = views[pane.sessionID] else { continue }
-                backgroundFrames[pane.sessionID] = view.bottomAlignedFrame(in: CGRect(
+                backgroundFrames[pane.sessionID] = view.anchoredFrame(in: CGRect(
                     x: pane.frame.minX + inset, y: pane.frame.minY,
                     width: max(0, pane.frame.width - inset), height: pane.frame.height))
             }
@@ -111,7 +111,7 @@ final class NativeTerminalStageView: NSView {
             }
             pendingBackgroundFrames.removeValue(forKey: id)
             let leadingInset = panes.count > 1 ? CorralMVPWorkspaceView.terminalViewportLeadingInset : 0
-            view.frame = view.bottomAlignedFrame(in: CGRect(
+            view.place(in: CGRect(
                 x: pane.frame.minX + leadingInset,
                 y: pane.frame.minY,
                 width: max(0, pane.frame.width - leadingInset),

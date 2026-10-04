@@ -1,5 +1,6 @@
 import AppKit
 import CoreText
+import CorralContracts
 import CorralMetalTerminal
 import CorralUI
 @preconcurrency import SwiftTerm
@@ -59,6 +60,44 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         // The stage is flipped: move the complete rows down, leaving the fractional row above them.
         return CGRect(x: viewport.minX, y: viewport.minY + remainder,
                       width: viewport.width, height: viewport.height - remainder)
+    }
+
+    /// A PTY grid another device (a phone) owns. The desktop keeps it exactly instead of fitting
+    /// its pane, so the remote layout is never reflowed into wrapped, misaligned rows.
+    var pinnedGrid: GridSize? {
+        didSet { if pinnedGrid != oldValue { superview?.needsLayout = true } }
+    }
+    /// The pane a pinned grid overflows, in the stage's coordinates; nothing outside it is shown or hit.
+    private var overflowClip: CGRect?
+
+    /// A pinned grid hangs from the pane's bottom-left corner, where Agent CLIs keep their input and
+    /// status lines. What does not fit is clipped above and to the right, never reflowed.
+    func anchoredFrame(in viewport: CGRect) -> CGRect {
+        guard let grid = pinnedGrid, let metrics = terminalCellMetrics else { return bottomAlignedFrame(in: viewport) }
+        // Half a spare cell keeps every floor()-based fit on exactly `grid.columns`.
+        let size = CGSize(width: (CGFloat(grid.columns) + 0.5) * metrics.width, height: CGFloat(grid.rows) * metrics.height)
+        return CGRect(x: viewport.minX, y: viewport.maxY - size.height, width: size.width, height: size.height)
+    }
+
+    func place(in viewport: CGRect) {
+        frame = anchoredFrame(in: viewport)
+        overflowClip = viewport.contains(frame) ? nil : viewport
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let overflowClip {
+            let mask = layer?.mask ?? CALayer()
+            mask.backgroundColor = NSColor.black.cgColor
+            mask.frame = convert(overflowClip.intersection(frame), from: superview)
+            layer?.mask = mask
+        } else {
+            layer?.mask = nil
+        }
+        CATransaction.commit()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let overflowClip, !overflowClip.contains(point) { return nil }
+        return super.hitTest(point)
     }
 
     override init(frame: CGRect) {
@@ -150,8 +189,9 @@ final class CorralNativeTerminalView: TerminalView, NSTextContent {
         guard size.width > 0, size.height > 0, let metrics = terminalCellMetrics else { return }
         let fullColumns = max(1, Int((size.width / metrics.width).rounded(.down)))
         let remainder = size.width - CGFloat(fullColumns) * metrics.width
-        let columns = remainder <= CGFloat.ulpOfOne * size.width ? max(1, fullColumns - 1) : fullColumns
-        let rows = max(1, Int((size.height / metrics.height).rounded(.down)))
+        var columns = remainder <= CGFloat.ulpOfOne * size.width ? max(1, fullColumns - 1) : fullColumns
+        var rows = max(1, Int((size.height / metrics.height).rounded(.down)))
+        if let pinnedGrid { (columns, rows) = (pinnedGrid.columns, pinnedGrid.rows) }
         let trailingGutter = max(0, size.width - CGFloat(columns) * metrics.width)
 
         if terminal.cols != columns || terminal.rows != rows {

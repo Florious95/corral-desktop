@@ -41,7 +41,7 @@ class Run:
         if case == 'session-liveness': self.suffixes = [f'S{i:02}' for i in range(50)]
         # A real Pi TUI (offline, no extensions) on a private copy of a long session.
         self.pi_session = pi_session
-        if case == 'pi-scrollbar-drag': self.suffixes = 'ABCDP'
+        if case in ('pi-scrollbar-drag', 'mobile-shared-anchor'): self.suffixes = 'ABCDP'
         self.directory = Path(tempfile.mkdtemp(prefix='corral-native-acceptance-', dir='/tmp')).resolve()
         self.nonce = secrets.token_hex(4).upper()
         self.processes = []
@@ -110,6 +110,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
         assert port != 9900
+        self.daemon_port = port
         env = {k: v for k, v in os.environ.items() if k in ('LANG', 'LC_CTYPE', 'LC_ALL', 'TMPDIR')}
         env.update(PATH=str(helper)+':/usr/bin:/bin:/opt/homebrew/bin',
                    AGENTMIRROR_TOKEN=token, AGENTMIRROR_NODEPROBE_BIN=str(runtime / 'nodeprobe'),
@@ -130,6 +131,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                 with socket.create_connection(('127.0.0.1', port), timeout=.1): return True
             except OSError: return False
         wait_for(listening)
+        self.daemon_env = env
         proxy_env = dict(env, CORRAL_WEB_PACKAGE=str(self.legacy / 'package.json'),
                          CORRAL_ACCEPTANCE_RUN=str(self.directory), CORRAL_ACCEPTANCE_DAEMON_PORT=str(port))
         self.start_process(['node', str(HERE / 'wire-proxy.mjs')], proxy_env, 'proxy')
@@ -592,6 +594,94 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         assert summary['renderTailMilliseconds'] <= 2000, ('RED: Pi kept moving after the hand stopped', summary)
         print('PASS Pi scrollbar: input and transcript stop with the hand', flush=True)
 
+    def pane_size(self, suffix):
+        ref = self.refs[suffix].split('\x1f')[-1]
+        sizes = dict((line.split('\t')[0], tuple(map(int, line.split('\t')[1:]))) for line in
+                     self.tmux('list-panes', '-a', '-F', '#{pane_id}\t#{pane_width}\t#{pane_height}').splitlines())
+        return sizes[ref]
+
+    def run_mobile_shared_anchor(self, phone=(46, 44)):
+        """A phone shares Pi: the desktop keeps the phone's PTY grid, hung from the pane's bottom-left."""
+        from PIL import Image
+        self.command('sidebar', session=self.session_id('P'), count=2)
+        def pi_pane(state=None):
+            state = state or self.command('state')
+            pane = next((p for p in state['panes'] if p['ref'] == self.refs['P'] and not p['hidden']), None)
+            return pane if pane and pane['mouseMode'] != 'off' else None
+        wait_for(pi_pane, 30)
+        desktop = pi_pane()
+        wait_for(lambda: self.pane_size('P') == (desktop['cols'], len(desktop['rows'])), 15)
+        wire_before = len(self.wire())
+        mobile_log = self.directory / 'mobile.jsonl'
+        mobile = self.start_process(['node', str(HERE / 'mobile-client.mjs'), str(self.daemon_port), self.refs['P'],
+                                     str(phone[0]), str(phone[1]), str(mobile_log)],
+                                    dict(self.daemon_env, CORRAL_WEB_PACKAGE=str(self.legacy / 'package.json')), 'mobile')
+        wait_for(lambda: self.pane_size('P') == phone, 15)
+        summary = {'phone': phone, 'desktopGridBefore': [desktop['cols'], len(desktop['rows'])], 'checks': []}
+        def check(name, window):
+            self.command('resize-window', width=window[0], height=window[1])
+            time.sleep(3)
+            state = self.command('state')
+            view = pi_pane(state)
+            pane = next(p for p in state['projectionWindow'] if p['id'] == self.session_id('P'))['frame']
+            frame = view['frame']
+            tmux_last = self.tmux('capture-pane', '-p', '-t', self.refs['P'].split('\x1f')[-1]).rstrip('\n').split('\n')[-1].rstrip()
+            shot = self.capture('anchor-' + name, state)
+            result = {'name': name, 'window': window, 'ptyGrid': list(self.pane_size('P')),
+                      'localGrid': [view['cols'], len(view['rows'])], 'viewFrame': frame, 'paneFrame': pane,
+                      'leftAligned': abs(frame[0] - pane[0]) < .5, 'bottomAligned': abs(frame[1] - pane[1]) < .5,
+                      'overflowsTop': frame[1] + frame[3] > pane[1] + pane[3] + .5,
+                      'lastRowMatchesPTY': view['rows'][-1].rstrip() == tmux_last, 'hitTestMatches': view['hitTestMatches'],
+                      'screenshot': shot.name}
+            # The pane's bottom three rows, exactly as WindowServer shows them, must hold the PTY's last line.
+            scale = state['backingScale']
+            top = state['windowFrame'][3] - pane[1]
+            cell = frame[3] / max(1, len(view['rows']))
+            strip = Image.open(shot).crop((round(pane[0] * scale), round((top - 3 * cell) * scale),
+                                           round((pane[0] + pane[2]) * scale), round(top * scale)))
+            strip_path = self.directory / ('anchor-' + name + '-bottom.png')
+            strip.save(strip_path)
+            ocr = json.loads(subprocess.check_output(['swift', str(HERE / 'recognize.swift'), str(strip_path)], text=True))
+            words = [w for w in re.findall(r'[A-Za-z0-9.]{4,}', tmux_last)]
+            result['bottomStripOCR'] = ocr
+            result['bottomStripHasPTYLastLine'] = bool(words) and any(w in ''.join(ocr).replace(' ', '') for w in words)
+            summary['checks'].append(result)
+        check('wide', (1400, 860))
+        check('short', (1000, 420))
+        marker = 'ANCHOR' + self.nonce
+        self.command('key', text=marker, code=0)
+        typed = wait_for(lambda: marker in self.tmux('capture-pane', '-p', '-t', self.refs['P'].split('\x1f')[-1]), 10)
+        summary['typedReachedPTY'] = bool(typed)
+        summary['typedVisibleOnDesktop'] = any(marker in row for row in pi_pane()['rows'])
+        summary['desktopResizesWhilePhonePresent'] = [e['payload'] for e in self.wire()[wire_before:]
+            if e.get('direction') == 'client-to-daemon' and e.get('type') == 'resize']
+        mobile.terminate(); mobile.wait(timeout=5)
+        self.command('resize-window', width=1400, height=860)
+        def taken_over():
+            view = pi_pane()
+            grid = (view['cols'], len(view['rows']))
+            return grid if grid != phone and self.pane_size('P') == grid else None
+        try: summary['takeoverGrid'] = list(wait_for(taken_over, 15))
+        except AssertionError: summary['takeoverGrid'] = None
+        (self.directory / 'pi-session.jsonl').unlink()
+        self.receipts.append({'mobileSharedAnchor': summary})
+        (self.directory / 'mobile-shared-anchor.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+        print('MOBILE_SHARED_ANCHOR', json.dumps({k: v for k, v in summary.items() if k != 'checks'}, ensure_ascii=False), flush=True)
+        for c in summary['checks']:
+            print('ANCHOR_CHECK', json.dumps({k: v for k, v in c.items() if k != 'bottomStripOCR'}), flush=True)
+        failures = [name for name, ok in [
+            ('no desktop resize while the phone is attached', not summary['desktopResizesWhilePhonePresent']),
+            ('phone keeps its PTY grid', all(c['ptyGrid'] == list(phone) for c in summary['checks'])),
+            ('desktop keeps the remote grid locally', all(c['localGrid'] == list(phone) for c in summary['checks'])),
+            ('bottom-left anchored', all(c['leftAligned'] and c['bottomAligned'] for c in summary['checks'])),
+            ('short pane clips the top', summary['checks'][1]['overflowsTop']),
+            ('bottom row is the PTY bottom row', all(c['lastRowMatchesPTY'] for c in summary['checks'])),
+            ('WindowServer bottom strip shows the PTY last line', all(c['bottomStripHasPTYLastLine'] for c in summary['checks'])),
+            ('input still reaches the PTY', summary['typedReachedPTY'] and summary['typedVisibleOnDesktop']),
+            ('desktop takes over after the phone leaves', summary['takeoverGrid'] is not None)] if not ok]
+        assert not failures, ('RED', failures)
+        print('PASS mobile-shared anchor: remote grid kept, bottom-left anchored, top clipped, input live, takeover', flush=True)
+
     def run_window_resize(self):
         state = self.sidebar('A')
         width, height = state['stageSize']
@@ -695,12 +785,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--legacy-root', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
-    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog','pi-scrollbar-drag'], default='parity')
+    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog','pi-scrollbar-drag','mobile-shared-anchor'], default='parity')
     parser.add_argument('--no-resize', action='store_true')
     parser.add_argument('--server-binary', type=Path)
     parser.add_argument('--pi-session', type=Path, help='Pi transcript copied privately for pi-scrollbar-drag')
     args = parser.parse_args()
-    assert args.case != 'pi-scrollbar-drag' or args.pi_session, '--pi-session is required'
+    assert args.case not in ('pi-scrollbar-drag', 'mobile-shared-anchor') or args.pi_session, '--pi-session is required'
     run = Run(args.legacy_root, args.case, args.no_resize, args.server_binary, args.pi_session)
     try:
         run.start()
@@ -710,6 +800,7 @@ def main():
         elif args.case == 'window-resize': run.run_window_resize()
         elif args.case == 'mouse-drag-backlog': run.run_mouse_drag_backlog()
         elif args.case == 'pi-scrollbar-drag': run.run_pi_scrollbar_drag()
+        elif args.case == 'mobile-shared-anchor': run.run_mobile_shared_anchor()
         else: run.run_suite()
     except Exception:
         (run.directory/'failure.txt').write_text(traceback.format_exc())

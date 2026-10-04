@@ -353,7 +353,10 @@ final class CorralAcceptanceDriver {
             "dropVisible": !workspace.stageContainer.dropZone.isHidden,
             "dropFrame": rect(workspace.stageContainer.splitView.convert(workspace.stageContainer.dropZone.frame, from: workspace.stageContainer)),
             "dropZone": workspace.stageContainer.dropTarget?.edge.rawValue ?? "",
-            "projection": workspace.stageContainer.splitView.projection.panes.map { ["id": $0.sessionID.rawValue, "frame": rect($0.frame)] }
+            "projection": workspace.stageContainer.splitView.projection.panes.map { ["id": $0.sessionID.rawValue, "frame": rect($0.frame)] },
+            "projectionWindow": workspace.stageContainer.splitView.projection.panes.map {
+                ["id": $0.sessionID.rawValue, "frame": rect(workspace.stageContainer.splitView.convert($0.frame, to: nil))]
+            }
         ]
     }
 }
