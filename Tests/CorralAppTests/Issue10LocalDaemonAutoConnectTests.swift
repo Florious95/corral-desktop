@@ -65,6 +65,18 @@ final class Issue10LocalDaemonAutoConnectTests: XCTestCase {
     }
 
     func testPersistedLocalDeviceUsesMacOSTokenToAuthenticateAndListSessions() async throws {
+        try await assertKnownLocalTokenConnects(persisted: true, explicitOverride: false)
+    }
+
+    func testFirstLaunchWithDaemonTokenFileDoesNotCacheThroughKeychainBeforeConnecting() async throws {
+        try await assertKnownLocalTokenConnects(persisted: false, explicitOverride: false)
+    }
+
+    func testExplicitTokenBypassesUnavailableStoredCredential() async throws {
+        try await assertKnownLocalTokenConnects(persisted: true, explicitOverride: true)
+    }
+
+    private func assertKnownLocalTokenConnects(persisted: Bool, explicitOverride: Bool) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("corral-issue10-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -90,34 +102,45 @@ final class Issue10LocalDaemonAutoConnectTests: XCTestCase {
             endpoint: LocalDaemonTokenDiscovery.endpoint,
             credential: LocalDaemonTokenDiscovery.credentialHandle
         )
-        try await repository.save(localDevice)
+        if persisted { try await repository.save(localDevice) }
         let initialDevices = try await repository.listDevices()
-        XCTAssertEqual(initialDevices, [localDevice])
+        XCTAssertEqual(initialDevices, persisted ? [localDevice] : [])
         let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: support)
         let preferencesStore = try UserPreferencesStore(applicationSupportDirectory: support)
         let link = Issue10PairingSessionLink()
+        let vault = Issue10UnavailableCredentialVault()
+        var environment = ["HOME": home.path, "CORRAL_NATIVE_BACKGROUND": "1"]
+        if explicitOverride {
+            environment["CORRAL_NATIVE_ENDPOINT"] = LocalDaemonTokenDiscovery.endpoint.url.absoluteString
+            environment["CORRAL_NATIVE_TOKEN"] = "explicit-override-token"
+        }
         let coordinator = CorralApplicationCoordinator(
             deviceRepository: repository,
-            credentialVault: Issue10EmptyCredentialVault(),
+            credentialVault: vault,
             sessionLink: link,
             deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
             workspaceStore: workspaceStore,
             userPreferencesStore: preferencesStore,
             initialWorkspaceState: await workspaceStore.snapshot(),
             initialUserPreferences: await preferencesStore.snapshot(),
-            environment: ["HOME": home.path, "CORRAL_NATIVE_BACKGROUND": "1"]
+            environment: environment
         )
         let window = try XCTUnwrap(coordinator.windowController.window)
         defer { window.close() }
         window.orderBack(nil)
 
-        // The isolated link models auth_ack then listing without dialing production 9900.
+        // The isolated link models auth_ack/listing; Keychain access is an error,
+        // not a mock success. No test traffic is sent to production 9900.
         await coordinator.start()
+        let access = await vault.accessCounts()
+        XCTAssertEqual(access.reads, 0, "A known token must not wait for Keychain/securityd")
+        XCTAssertEqual(access.writes, 0, "The daemon-owned file already persists this token")
         let connection = await link.connectionSnapshot()
         XCTAssertEqual(connection.endpoint, "ws://127.0.0.1:9900/ws", "A zero-config install must select the default local daemon")
         XCTAssertEqual(connection.count, 1, "A zero-config install must initiate the local authenticated connection")
         XCTAssertTrue(connection.authHandshakeCompleted, "The local auth handshake must complete with the persisted token")
-        XCTAssertEqual(connection.credential, localToken, "The discovered macOS token must reach the authenticated link")
+        XCTAssertEqual(connection.credential, explicitOverride ? "explicit-override-token" : localToken,
+                       "The authoritative token must reach the authenticated link without an eager stored-credential read")
         XCTAssertTrue(coordinator.connected, "A successful local handshake must mark the local device online")
         XCTAssertTrue(coordinator.workspaceView.sidebar.devices.contains {
             $0.isOnline && ($0.name.localizedCaseInsensitiveContains("local") || $0.name.contains("本机"))
@@ -234,6 +257,16 @@ private actor Issue10PairingEventStream: SessionEventStream {
             nextWaiter = continuation
         }
     }
+}
+
+private actor Issue10UnavailableCredentialVault: DeviceCredentialVault {
+    enum Unavailable: Error { case keychain }
+    private var reads = 0
+    private var writes = 0
+    func accessCounts() -> (reads: Int, writes: Int) { (reads, writes) }
+    func store(_ secret: String, for handle: CredentialHandle) async throws { writes += 1; throw Unavailable.keychain }
+    func resolve(_ handle: CredentialHandle) async throws -> String? { reads += 1; throw Unavailable.keychain }
+    func delete(_ handle: CredentialHandle) async throws {}
 }
 
 private actor Issue10EmptyCredentialVault: DeviceCredentialVault {

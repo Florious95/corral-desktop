@@ -1439,7 +1439,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             token = LocalDaemonTokenDiscovery.valid(try? await credentialVault.resolve(existing.credential))
         }
         let credential = token == nil ? (existing?.credential ?? LocalDaemonTokenDiscovery.credentialHandle) : LocalDaemonTokenDiscovery.credentialHandle
-        if let token { try await credentialVault.store(token, for: credential) }
+        // The daemon-owned file is already durable; caching it through Keychain
+        // must not hold the first connection hostage to securityd.
+        if let token, token != LocalDaemonTokenDiscovery.fileToken(environment: environment) {
+            try await credentialVault.store(token, for: credential)
+        }
 
         let device = DeviceRecord(
             id: LocalDaemonTokenDiscovery.deviceID,
@@ -1452,41 +1456,38 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func connectionConfiguration(devices: [DeviceRecord], localToken: String? = nil) async throws -> ConnectionConfiguration? {
-        let environmentToken = LocalDaemonTokenDiscovery.valid(environment["CORRAL_NATIVE_TOKEN"])
-            ?? LocalDaemonTokenDiscovery.valid(environment["AGENTMIRROR_TOKEN"])
-            ?? LocalDaemonTokenDiscovery.valid(environment["CORRAL_TOKEN"])
+        let endpoint: ApprovedEndpoint
+        let device: DeviceRecord?
         if let text = environment["CORRAL_NATIVE_ENDPOINT"], !text.isEmpty {
             guard let url = URL(string: text) else { throw EndpointSafetyError.invalidEndpoint }
-            let endpoint = try ApprovedEndpoint(url: url)
-            let existing = devices.first { $0.endpoint == endpoint }
-            let storedToken: String?
-            if let existing { storedToken = try await credentialVault.resolve(existing.credential) }
-            else { storedToken = nil }
-            var token = environmentToken
-                ?? LocalDaemonTokenDiscovery.valid(localToken)
-                ?? LocalDaemonTokenDiscovery.valid(storedToken)
-            if token == nil, endpoint.port == LocalDaemonTokenDiscovery.endpoint.port {
-                token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentialVault)
-            }
-            guard let token else { return nil }
-            return ConnectionConfiguration(
-                endpoint: endpoint,
-                token: token,
-                deviceID: existing?.id ?? DeviceID("corral-native-development-endpoint"),
-                deviceName: existing?.name ?? "Development endpoint"
-            )
+            endpoint = try ApprovedEndpoint(url: url)
+            device = devices.first { $0.endpoint == endpoint }
+        } else {
+            let selected = selectedDeviceIDs.count == 1 ? selectedDeviceIDs.first : nil
+            guard let stored = devices.first(where: { $0.id == selected }) ?? devices.first else { return nil }
+            device = stored
+            endpoint = stored.endpoint
         }
-        let selected = selectedDeviceIDs.count == 1 ? selectedDeviceIDs.first : nil
-        guard let device = devices.first(where: { $0.id == selected }) ?? devices.first else { return nil }
-        let storedToken = try await credentialVault.resolve(device.credential)
-        var token = environmentToken
+        var token = LocalDaemonTokenDiscovery.valid(environment["CORRAL_NATIVE_TOKEN"])
+            ?? LocalDaemonTokenDiscovery.valid(environment["AGENTMIRROR_TOKEN"])
+            ?? LocalDaemonTokenDiscovery.valid(environment["CORRAL_TOKEN"])
             ?? LocalDaemonTokenDiscovery.valid(localToken)
-            ?? LocalDaemonTokenDiscovery.valid(storedToken)
-        if token == nil, device.endpoint.port == LocalDaemonTokenDiscovery.endpoint.port {
+        let isLocalDaemon = endpoint.port == LocalDaemonTokenDiscovery.endpoint.port
+        if token == nil, isLocalDaemon {
+            token = LocalDaemonTokenDiscovery.nonKeychainToken(environment: environment)
+        }
+        // A saved handle is only a fallback, not a prerequisite for a token we
+        // already have. SecItemCopyMatching can block despite interactionNotAllowed.
+        if token == nil, let device {
+            token = LocalDaemonTokenDiscovery.valid(try await credentialVault.resolve(device.credential))
+        }
+        if token == nil, isLocalDaemon, device?.credential != LocalDaemonTokenDiscovery.credentialHandle {
             token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentialVault)
         }
         guard let token else { return nil }
-        return ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id, deviceName: device.name)
+        return ConnectionConfiguration(endpoint: endpoint, token: token,
+            deviceID: device?.id ?? DeviceID("corral-native-development-endpoint"),
+            deviceName: device?.name ?? "Development endpoint")
     }
 
     private func consume(_ stream: any SessionEventStream) async {

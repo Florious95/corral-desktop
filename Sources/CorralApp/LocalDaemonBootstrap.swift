@@ -10,8 +10,18 @@ enum LocalDaemonTokenDiscovery {
     static let credentialHandle = CredentialHandle("local-daemon-token-v1")
 
     static func token(environment: [String: String], credentialVault: any DeviceCredentialVault) async -> String? {
-        if let token = valid(environment["CORRAL_NATIVE_TOKEN"]) { return token }
+        if let token = nonKeychainToken(environment: environment) { return token }
+        return valid(try? await credentialVault.resolve(credentialHandle))
+    }
 
+    /// Known credentials must not wait for securityd (even a no-UI query can block).
+    static func nonKeychainToken(environment: [String: String]) -> String? {
+        valid(environment["CORRAL_NATIVE_TOKEN"])
+            ?? fileToken(environment: environment)
+            ?? valid(environment["AGENTMIRROR_TOKEN"] ?? environment["CORRAL_TOKEN"])
+    }
+
+    static func fileToken(environment: [String: String]) -> String? {
         let home = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 }
             ?? FileManager.default.homeDirectoryForCurrentUser.path
         for relativePath in [
@@ -23,8 +33,7 @@ enum LocalDaemonTokenDiscovery {
             }
         }
 
-        if let token = valid(environment["AGENTMIRROR_TOKEN"] ?? environment["CORRAL_TOKEN"]) { return token }
-        return valid(try? await credentialVault.resolve(credentialHandle))
+        return nil
     }
 
     static func valid(_ value: String?) -> String? {

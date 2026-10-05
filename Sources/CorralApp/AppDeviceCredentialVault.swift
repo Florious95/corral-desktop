@@ -16,7 +16,8 @@ protocol KeychainCredentialStorage: Sendable {
     func delete(_ handle: CredentialHandle) async throws
 }
 
-@MainActor
+// Security's synchronous IPC is allowed to wait for securityd. These nonisolated
+// async methods run on the generic executor, never the AppKit/MainActor executor.
 struct SystemKeychainCredentialStorage: KeychainCredentialStorage {
     private let service = CorralAppIdentity.bundleIdentifier
 
