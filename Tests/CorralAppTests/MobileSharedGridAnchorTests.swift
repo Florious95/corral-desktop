@@ -204,6 +204,7 @@ private actor AnchorRecordingSessionLink: SessionLinkProtocol {
     private var authenticated: AuthenticatedConnection?
     private var ordinal: UInt64 = 0
     private var sent: [ClientCommand] = []
+    private var latestSnapshots: [String: Data] = [:]
 
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
         let connection = try AuthenticatedConnection(linkInstanceID: LinkInstanceID(), deviceID: deviceID, connectionEpoch: ConnectionEpoch(1))
@@ -215,8 +216,9 @@ private actor AnchorRecordingSessionLink: SessionLinkProtocol {
 
     func send(_ command: ClientCommand) async throws -> CommandSendReceipt {
         sent.append(command)
-        if case let .subscribe(reference, _) = command {
-            try await emit(.frame(.snapshot(reference: reference, ansi: Data("PHONE-LAYOUT\r\n".utf8))))
+        if case let .subscribe(reference, size) = command {
+            let ansi = latestSnapshots[reference.rawValue] ?? anchorSnapshot(for: size)
+            try await emit(.frame(.snapshot(reference: reference, ansi: ansi)))
         }
         let requestID: UInt32? = switch command {
         case let .list(id): id
@@ -233,6 +235,14 @@ private actor AnchorRecordingSessionLink: SessionLinkProtocol {
 
     func emit(_ event: SessionEvent) async throws {
         guard let authenticated else { throw SessionLinkFailure.disconnected }
+        if case let .frame(frame) = event {
+            switch frame {
+            case let .snapshot(reference, ansi), let .delta(reference, ansi):
+                latestSnapshots[reference.rawValue] = ansi
+            case .scrollback:
+                break
+            }
+        }
         ordinal += 1
         let origin = SessionEventOrigin(linkInstanceID: authenticated.linkInstanceID, deviceID: authenticated.deviceID,
                                         connectionEpoch: authenticated.connectionEpoch, receiveOrdinal: ReceiveOrdinal(ordinal))
@@ -240,6 +250,17 @@ private actor AnchorRecordingSessionLink: SessionLinkProtocol {
     }
 
     func commands() -> [ClientCommand] { sent }
+}
+
+private func anchorSnapshot(for size: GridSize) -> Data {
+    let rows = max(1, size.rows)
+    let columns = max(1, size.columns)
+    let footerStart = max(1, rows - 2)
+    let body = (1...rows).map { row in
+        let label = row >= footerStart ? "FOOTER-\(row)" : "ROW-\(row)"
+        return "\u{1b}[\(row);1H\u{1b}[2K\(String(label.prefix(columns)))"
+    }.joined()
+    return Data((body + "\u{1b}[\(footerStart);1H").utf8)
 }
 
 private actor AnchorEventStream: SessionEventStream {

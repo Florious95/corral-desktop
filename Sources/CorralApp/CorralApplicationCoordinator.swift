@@ -88,6 +88,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         /// Last catalog grid at a desktop request, advanced when that request is observed.
         /// A different grid may be the phone's even if the desktop grid was never echoed.
         var catalogBaselineGrid: GridSize?
+        /// A post-presence scan is authoritative even if the phone chose the previous catalog grid.
+        var mobileGridRequestID: UInt32?
     }
 
     private struct ConnectionConfiguration {
@@ -1457,6 +1459,20 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
+    private func refreshMobileGrid(for key: SessionKey) async {
+        guard var runtime = sessions[key], runtime.hasMobile, runtime.mobileGridRequestID == nil else { return }
+        do {
+            let requestID = try allocateRequestID()
+            runtime.mobileGridRequestID = requestID
+            sessions[key] = runtime
+            let receipt = try await sessionLink.send(.list(requestID: requestID))
+            guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
+        } catch {
+            sessions[key]?.mobileGridRequestID = nil
+            lastConnectionError = String(describing: error)
+        }
+    }
+
     private func connect(configuration: ConnectionConfiguration) async throws {
         resetPointerMotion()
         listingRequestedEpoch = nil
@@ -1666,12 +1682,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                         runtime.remoteGrid = advanced ? runtime.descriptor.size : (local ?? runtime.descriptor.size)
                     }
                     if hasMobile, !runtime.hasMobile { runtime.requestedGrid = nil } // the PTY is no longer at our request
-                    if !hasMobile { runtime.remoteGrid = nil }
+                    if !hasMobile { runtime.remoteGrid = nil; runtime.mobileGridRequestID = nil }
                     runtime.hasMobile = hasMobile
                     runtime.mobileCount = mobileCount
                     runtime.desktopCount = desktopCount
                     sessions[key] = runtime
                     applyGridOwnership(key)
+                    if hasMobile { await refreshMobileGrid(for: key) }
                 }
                 await writeTelemetry()
             case .error(.unsupportedType, let reason):
@@ -1731,12 +1748,21 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func applyListing(_ listing: SessionListing, origin: SessionEventOrigin) async {
-        guard listing.isValid, listing.sequence > listingSequence else { return }
+        guard listing.isValid else { return }
+        let refreshedKey = sessions.first { $0.value.mobileGridRequestID == listing.requestID }?.key
+        if let refreshedKey { sessions[refreshedKey]?.mobileGridRequestID = nil }
+        // An explicit scan can legitimately retain its sequence when the grid matches the old catalog.
+        guard listing.sequence > listingSequence || (listing.sequence == listingSequence && refreshedKey != nil) else { return }
         listingSequence = listing.sequence
         var order: [SessionKey] = []
         for workspace in listing.workspaces {
             for record in workspace.sessions {
                 let key = upsert(record, deviceID: origin.deviceID, origin: origin)
+                if key == refreshedKey, var runtime = sessions[key], runtime.hasMobile {
+                    runtime.remoteGrid = runtime.descriptor.size
+                    sessions[key] = runtime
+                    applyGridOwnership(key)
+                }
                 if !order.contains(key) { order.append(key) }
             }
         }
@@ -1807,6 +1833,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 runtime.hasMobile = false
                 runtime.remoteGrid = nil
                 runtime.catalogBaselineGrid = nil
+                runtime.mobileGridRequestID = nil
                 runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             }
             if runtime.hasMobile, descriptor.size != runtime.descriptor.size { runtime.remoteGrid = descriptor.size }
@@ -1866,6 +1893,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             sessions[key]?.requestedGrid = nil
             sessions[key]?.hasMobile = false
             sessions[key]?.remoteGrid = nil
+            sessions[key]?.mobileGridRequestID = nil
             if runtime.subscribed || runtime.subscriptionPending {
                 do {
                     let receipt = try await sessionLink.send(.unsubscribe(reference: key.reference))
@@ -1887,7 +1915,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 // Accept an immediate server SNAPSHOT while the WebSocket send receipt is still in flight.
                 sessions[key]?.subscriptionPending = true
                 sessions[key]?.awaitingSnapshot = true
-                let initialGrid = noResizeMode ? runtime.descriptor.size : (runtime.desiredGrid ?? runtime.descriptor.size)
+                let initialGrid = noResizeMode ? runtime.descriptor.size
+                    : runtime.followsRemoteGrid ? (runtime.remoteGrid ?? runtime.descriptor.size)
+                    : (runtime.desiredGrid ?? runtime.descriptor.size)
                 sessions[key]?.catalogBaselineGrid = runtime.descriptor.size
                 startSubscriptionSnapshotTimeout(for: key, connection: connection)
                 let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: initialGrid))
@@ -1978,8 +2008,15 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard let runtime = sessions[key], let view = terminalRegistry.view(for: key) else { return }
         let pinned = runtime.followsRemoteGrid && !noResizeMode ? runtime.remoteGrid ?? runtime.descriptor.size : nil
         guard view.pinnedGrid != pinned else { return }
+        let needsSnapshot = pinned.map { $0 != GridSize(rows: view.terminal.rows, columns: view.terminal.cols) } == true && runtime.subscribed
         view.pinnedGrid = pinned
         terminalStageView.needsLayout = true
+        if needsSnapshot {
+            // New-grid ANSI may have arrived before the catalog and been decoded on the old grid.
+            // Reuse the subscription reconciler to replace it with a snapshot at the phone's size.
+            sessions[key]?.subscribed = false
+            scheduleSubscriptionUpdate()
+        }
     }
 
     private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize, force: Bool = false, relayout: Bool = false) async {
