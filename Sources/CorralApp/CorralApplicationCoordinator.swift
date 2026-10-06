@@ -4,6 +4,7 @@ import CorralProtocol
 import CorralServices
 import CorralUI
 import Foundation
+import Network
 @preconcurrency import SwiftTerm
 
 public protocol DeviceCredentialVault: Sendable {
@@ -1067,7 +1068,57 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func presentPairingDialog() {
-        showToast("移动端配对需要可被手机访问的网络；开发版仅允许本机回环端点", kind: .warning)
+        Task { [weak self] in
+            guard let self else { return }
+            let sourceConnection = self.connection
+            do {
+                let configuration: ConnectionConfiguration
+                if let active = self.activeConnectionConfiguration {
+                    configuration = active
+                } else if let configured = try await self.connectionConfiguration(devices: self.cachedDevices) {
+                    configuration = configured
+                } else {
+                    self.showToast("未找到本机配对 Token，请先配置本机服务凭证", kind: .warning)
+                    return
+                }
+                var endpoint = URLComponents(url: configuration.endpoint.url, resolvingAgainstBaseURL: false)!
+                endpoint.scheme = configuration.endpoint.scheme == "wss" ? "https" : "http"
+                endpoint.path = "/pair/whoami"
+                var request = URLRequest(url: endpoint.url!)
+                request.timeoutInterval = 5
+                let session = URLSession(configuration: .ephemeral, delegate: RejectPairingRedirects(), delegateQueue: nil)
+                defer { session.invalidateAndCancel() }
+                let (data, response) = try await session.data(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+                let identity = try AgentMirrorHTTPCodec().decodeWhoAmIResponse(data)
+                guard identity.hostID.range(of: "^[A-Za-z0-9_-]{8,64}$", options: .regularExpression) != nil else {
+                    throw URLError(.badServerResponse)
+                }
+                var seen = Set<String>()
+                let candidates = identity.addresses.compactMap { address -> String? in
+                    guard let ip = IPv4Address(address), !ip.isLoopback, !ip.isLinkLocal, !ip.isMulticast,
+                          ip != .any, ip != .broadcast else { return nil }
+                    var url = URLComponents(url: configuration.endpoint.url, resolvingAgainstBaseURL: false)!
+                    url.host = address
+                    url.port = Int(identity.port)
+                    guard let value = url.string, seen.insert(value).inserted else { return nil }
+                    return value
+                }
+                if let current = self.activeConnectionConfiguration,
+                   current.endpoint != configuration.endpoint || current.token != configuration.token { return }
+                guard self.activeDialog == nil else { return }
+                let payload = CorralPairingPayload(url: candidates.first ?? "", token: configuration.token,
+                    name: identity.name, candidates: candidates, hostID: identity.hostID, port: identity.port)
+                let dialog = PairingDialogViewController(payload: payload,
+                    onCopied: { [weak self] message in self?.showToast(message, kind: .info) },
+                    onCancel: { [weak self] in self?.activeDialog = nil })
+                self.activeDialog = dialog
+                dialog.present(over: self.windowController.window)
+            } catch {
+                guard self.connection == sourceConnection else { return }
+                self.showToast("无法获取配对信息，请确认本机服务已连接", kind: .warning)
+            }
+        }
     }
 
     private func confirmCloseAgent(id: UUID) {
@@ -2512,6 +2563,14 @@ public struct AppKitDeviceDeletionConfirmer: DeviceDeletionConfirming {
             alert.addButton(withTitle: "Cancel")
             return alert.runModal() == .alertFirstButtonReturn
         }
+    }
+}
+
+private final class RejectPairingRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
 

@@ -856,7 +856,8 @@ public struct CorralPairingPayload: Equatable, Sendable {
     public let name: String?
     public let candidates: [String]
     public let hostID: String?
-    public init(url: String, token: String = "", name: String? = nil, candidates: [String] = [], hostID: String? = nil) { self.url = url; self.token = token; self.name = name; self.candidates = candidates; self.hostID = hostID }
+    public let port: UInt16?
+    public init(url: String, token: String = "", name: String? = nil, candidates: [String] = [], hostID: String? = nil, port: UInt16? = nil) { self.url = url; self.token = token; self.name = name; self.candidates = candidates; self.hostID = hostID; self.port = port }
 }
 
 @MainActor
@@ -877,7 +878,7 @@ public final class PairingDialogViewController: CorralDialogViewController {
     public init(payload: CorralPairingPayload, onCopied: ((String) -> Void)? = nil, onSaveToken: ((String) -> Void)? = nil, onCancel: (() -> Void)? = nil) { self.payload = payload; self.onCopied = onCopied; self.onSaveToken = onSaveToken; self.onCancel = onCancel; super.init() }
     public override func loadView() {
         let root = rootView(size: NSSize(width: 380, height: 570)); view = root
-        _ = addHeader(to: root, title: "配对移动端", subtitle: payload.hostID == nil ? "用手机扫描二维码，即可连接这台 Mac" : "局域网已开启广播，用手机 App 扫码快速连接")
+        _ = addHeader(to: root, title: "配对移动端", subtitle: "用手机扫描二维码，即可连接这台 Mac")
         tokenField.placeholderString = "粘贴 agentmirrord 配对 Token"; tokenField.isBezeled = true; tokenField.bezelStyle = .roundedBezel; tokenField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(tokenField)
         hostField.placeholderString = "192.168.1.23，可用逗号分隔多个地址"; hostField.isBezeled = true; hostField.bezelStyle = .roundedBezel; hostField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(hostField)
         let local = isLoopback(payload.url) && payload.hostID == nil
@@ -899,9 +900,10 @@ public final class PairingDialogViewController: CorralDialogViewController {
         guard !actualToken.isEmpty, !local || !suppliedHosts.isEmpty else { qrImage = nil; imageView.image = nil; pairingText = nil; return }
         let candidates = local ? suppliedHosts.map { reachableURL(host: $0, baseURL: payload.url) } : payload.candidates
         let url = candidates.first ?? payload.url
-        var payloadObject: [String: Any] = ["v": 1, "url": url, "token": actualToken, "candidates": candidates]
+        var payloadObject: [String: Any] = ["v": 1, "url": url, "token": actualToken, "ts_authkey": "", "candidates": candidates]
         if let name = payload.name { payloadObject["name"] = name }
         if let hostID = payload.hostID { payloadObject["host_id"] = hostID }
+        if let port = payload.port { payloadObject["port"] = Int(port) }
         guard let data = try? JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]) else { qrImage = nil; imageView.image = nil; pairingText = nil; return }
         let text = String(data: data, encoding: .utf8) ?? ""
         let filter = CIFilter.qrCodeGenerator(); filter.message = Data(text.utf8); filter.correctionLevel = "M"
