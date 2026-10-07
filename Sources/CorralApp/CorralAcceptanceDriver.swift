@@ -27,7 +27,7 @@ final class CorralAcceptanceDriver {
               environment["CORRAL_NATIVE_BACKGROUND"] == "1",
               let rawEndpoint = environment["CORRAL_NATIVE_ENDPOINT"], let url = URL(string: rawEndpoint),
               let endpoint = try? ApprovedEndpoint(url: url), endpoint.port != 9900,
-              environment["CORRAL_NATIVE_TOKEN"]?.isEmpty == false else { throw Failure.unsafeConfiguration }
+              (environment["CORRAL_NATIVE_TOKEN"]?.isEmpty == false || environment["CORRAL_NATIVE_BOOTSTRAP_RUNTIME"] == "1") else { throw Failure.unsafeConfiguration }
         let attributes = try FileManager.default.attributesOfItem(atPath: directory.path)
         guard attributes[.type] as? FileAttributeType == .typeDirectory,
               (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700,
