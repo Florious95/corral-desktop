@@ -64,11 +64,7 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
     public func save(_ device: DeviceRecord) async throws {
         guard !device.id.rawValue.isEmpty else { throw DeviceRepositoryError.invalidDevice }
         guard !deletingDeviceIDs.contains(device.id) else { throw DeviceRepositoryError.deletionInProgress }
-        let endpoint = try ApprovedEndpoint(
-            scheme: device.endpoint.scheme,
-            host: device.endpoint.host,
-            port: device.endpoint.port
-        )
+        let endpoint = try device.endpoint.revalidated()
         let validated = DeviceRecord(id: device.id, name: device.name, endpoint: endpoint, credential: device.credential)
         var updated = devices
         if let index = updated.firstIndex(where: { $0.id == validated.id }) {
@@ -125,11 +121,7 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
                 continue
             }
             guard !raw.id.isEmpty,
-                  let endpoint = try? ApprovedEndpoint(
-                    scheme: raw.endpoint.scheme,
-                    host: raw.endpoint.host,
-                    port: raw.endpoint.port
-                  ) else {
+                  let endpoint = try? raw.endpoint.revalidated() else {
                 requiresPruning = true
                 continue
             }
@@ -157,21 +149,15 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
 }
 
 private struct PersistedDevice: Codable {
-    struct Endpoint: Codable {
-        let scheme: String
-        let host: String
-        let port: Int
-    }
-
     let id: String
     let name: String
-    let endpoint: Endpoint
+    let endpoint: ApprovedEndpoint
     let credentialHandle: String
 
     init(_ device: DeviceRecord) {
         id = device.id.rawValue
         name = device.name
-        endpoint = Endpoint(scheme: device.endpoint.scheme, host: device.endpoint.host, port: device.endpoint.port)
+        endpoint = device.endpoint
         credentialHandle = device.credential.rawValue
     }
 }

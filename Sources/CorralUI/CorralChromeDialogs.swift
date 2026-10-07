@@ -2,6 +2,8 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CorralContracts
+import UniformTypeIdentifiers
+import Vision
 
 @MainActor
 private final class CorralDialogOverlayView: NSView {
@@ -797,7 +799,14 @@ public struct CorralAddDeviceRequest: Equatable, Sendable {
     public let url: String
     public let token: String
     public let candidates: [String]
-    public init(name: String, url: String, token: String, candidates: [String] = []) { self.name = name; self.url = url; self.token = token; self.candidates = candidates }
+    public let pairingHostID: String?
+    public init(name: String, url: String, token: String, candidates: [String] = [], pairingHostID: String? = nil) { self.name = name; self.url = url; self.token = token; self.candidates = candidates; self.pairingHostID = pairingHostID }
+}
+
+private struct ImportedPairing: Decodable {
+    let v: Int
+    let host_id: String
+    let token: String
 }
 
 @MainActor
@@ -808,6 +817,7 @@ public final class AddDeviceDialogViewController: CorralDialogViewController {
     public let addressField = NSTextField()
     public let tokenField = NSSecureTextField()
     public private(set) var candidates: [String] = []
+    private var pairingHostID: String?
     public private(set) var validationMessage: String?
     public var onSubmit: ((CorralAddDeviceRequest) -> Void)?
     public var onCancel: (() -> Void)?
@@ -821,26 +831,66 @@ public final class AddDeviceDialogViewController: CorralDialogViewController {
         _ = addLabel("配对 Token", to: root, y: 208); tokenField.placeholderString = "粘贴配对 Token"; style(tokenField); place(tokenField, in: root, y: 229)
         let hint = NSTextField(labelWithString: "粘贴配对二维码里的 JSON 可自动填充"); hint.font = .systemFont(ofSize: 10); hint.textColor = CorralAestheticTokens.textMuted; hint.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(hint); hint.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true; hint.topAnchor.constraint(equalTo: tokenField.bottomAnchor, constant: 8).isActive = true
         errorLabel.font = .systemFont(ofSize: 10); errorLabel.textColor = CorralAestheticTokens.danger; errorLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(errorLabel); errorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true; errorLabel.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 6).isActive = true
-        addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(submit), primaryTitle: "添加")
+        let actions = addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(submit), primaryTitle: "添加")
+        let importButton = NSButton(title: "导入二维码", target: self, action: #selector(importQRCode))
+        importButton.bezelStyle = .rounded; importButton.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(importButton)
+        NSLayoutConstraint.activate([importButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), importButton.bottomAnchor.constraint(equalTo: actions.cancel.bottomAnchor)])
         root.registerForDraggedTypes([.string])
     }
     public override func handlePaste(_ text: String) -> Bool { acceptPairingJSON(text) }
     public func acceptPairingJSON(_ text: String) -> Bool {
+        pairingHostID = nil
         guard let data = text.data(using: .utf8), let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-        if let url = payload["url"] as? String { addressField.stringValue = url }
+        var url = payload["url"] as? String ?? ""
+        var importedCandidates = payload["candidates"] as? [String] ?? []
+        if payload["host_id"] != nil {
+            guard let pairing = try? JSONDecoder().decode(ImportedPairing.self, from: data), pairing.v == 1, !pairing.token.isEmpty else { return false }
+            if url.isEmpty { url = importedCandidates.first ?? "" }
+            guard let primary = URL(string: url), let endpoint = try? ApprovedEndpoint(url: primary, pairingHostID: pairing.host_id) else { return false }
+            importedCandidates = ([endpoint.url.absoluteString] + importedCandidates).compactMap { value in
+                guard let url = URL(string: value) else { return nil }
+                return try? ApprovedEndpoint(url: url, pairingHostID: pairing.host_id).url.absoluteString
+            }
+            pairingHostID = pairing.host_id
+            url = endpoint.url.absoluteString
+        }
+        addressField.stringValue = url
         if let token = payload["token"] as? String { tokenField.stringValue = token }
         if let name = payload["name"] as? String { nameField.stringValue = name }
-        candidates = payload["candidates"] as? [String] ?? []
+        candidates = importedCandidates
         validate(); return true
     }
     @objc public func submit() {
         validate(); guard validationMessage == nil else { errorLabel.stringValue = validationMessage ?? ""; return }
         let url = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let defaultName = URL(string: url)?.host ?? url
-        onSubmit?(CorralAddDeviceRequest(name: nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultName : nameField.stringValue, url: url, token: tokenField.stringValue, candidates: candidates))
+        onSubmit?(CorralAddDeviceRequest(name: nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultName : nameField.stringValue, url: url, token: tokenField.stringValue, candidates: candidates, pairingHostID: candidates.contains(url) ? pairingHostID : nil))
     }
     public override func handleEscape() { onCancel?(); dismiss() }
     @objc private func cancel() { onCancel?(); dismiss() }
+    @objc private func importQRCode() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            do {
+                let request = VNDetectBarcodesRequest()
+                request.symbologies = [.qr]
+                try VNImageRequestHandler(url: url, options: [:]).perform([request])
+                let payloads = Set((request.results ?? []).compactMap(\.payloadStringValue))
+                guard payloads.count == 1, let text = payloads.first, acceptPairingJSON(text), pairingHostID != nil else {
+                    throw EndpointSafetyError.invalidEndpoint
+                }
+                submit()
+            } catch {
+                errorLabel.stringValue = "无法导入，请选择有效的 Corral 配对二维码"
+            }
+        }
+        if let window = view.window { panel.beginSheetModal(for: window, completionHandler: completion) }
+        else { panel.begin(completionHandler: completion) }
+    }
     private func validate() {
         let url = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         validationMessage = url.hasPrefix("ws://") || url.hasPrefix("wss://") ? nil : "地址必须以 ws:// 或 wss:// 开头"

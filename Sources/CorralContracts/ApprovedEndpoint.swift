@@ -5,7 +5,7 @@ public enum EndpointSafetyError: Error, Equatable, Sendable {
     case invalidEndpoint
 }
 
-/// A validated WebSocket URL restricted to loopback hosts and the canonical `/ws` path.
+/// A canonical `/ws` endpoint. Remote private IPv4 hosts require explicit QR-pairing authorization.
 public struct ApprovedEndpoint: Codable, Hashable, Sendable {
     public static let developmentPort = 9919
     public static let webSocketPath = "/ws"
@@ -15,13 +15,15 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
     public let host: String
     public let port: Int
     public let path: String
+    public let pairingHostID: String?
     private let validatedURL: URL
 
     public init(
         scheme: String = "ws",
         host: String,
         port: Int,
-        path: String = Self.webSocketPath
+        path: String = Self.webSocketPath,
+        pairingHostID: String? = nil
     ) throws {
         let normalizedScheme = scheme.lowercased()
         let inputHost = host.lowercased()
@@ -41,7 +43,12 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         let canonicalHost = normalizedHost == "localhost" ? "127.0.0.1" : normalizedHost
 
         guard !canonicalHost.isEmpty else { throw EndpointSafetyError.invalidEndpoint }
-        guard Self.allowedHosts.contains(canonicalHost) else {
+        if let pairingHostID {
+            guard pairingHostID.range(of: "^[A-Za-z0-9_-]{8,64}$", options: .regularExpression) != nil else {
+                throw EndpointSafetyError.invalidEndpoint
+            }
+        }
+        guard Self.allowedHosts.contains(canonicalHost) || (pairingHostID != nil && Self.isPairingHost(canonicalHost)) else {
             throw EndpointSafetyError.nonLoopbackEndpointForbidden
         }
         guard normalizedScheme == "ws" || normalizedScheme == "wss",
@@ -61,10 +68,11 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         self.host = canonicalHost
         self.port = port
         self.path = Self.webSocketPath
+        self.pairingHostID = pairingHostID
         self.validatedURL = url
     }
 
-    public init(url: URL) throws {
+    public init(url: URL, pairingHostID: String? = nil) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let host = components.host,
               components.user == nil,
@@ -75,12 +83,24 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         }
         let scheme = components.scheme ?? ""
         let port = components.port ?? (scheme.lowercased() == "wss" ? 443 : 80)
-        try self.init(scheme: scheme, host: host, port: port, path: components.percentEncodedPath)
+        try self.init(scheme: scheme, host: host, port: port, path: components.percentEncodedPath, pairingHostID: pairingHostID)
     }
 
     public var url: URL { validatedURL }
 
-    private enum CodingKeys: String, CodingKey { case scheme, host, port, path }
+    public func revalidated() throws -> Self {
+        try Self(scheme: scheme, host: host, port: port, path: path, pairingHostID: pairingHostID)
+    }
+
+    private static func isPairingHost(_ host: String) -> Bool {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        let bytes = parts.compactMap { UInt8($0) }
+        guard parts.count == 4, bytes.count == 4, zip(parts, bytes).allSatisfy({ String($0.1) == $0.0 }) else { return false }
+        return bytes[0] == 10 || (bytes[0] == 172 && (16...31).contains(bytes[1]))
+            || (bytes[0] == 192 && bytes[1] == 168) || (bytes[0] == 100 && (64...127).contains(bytes[1]))
+    }
+
+    private enum CodingKeys: String, CodingKey { case scheme, host, port, path, pairingHostID }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -88,7 +108,8 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
             scheme: values.decode(String.self, forKey: .scheme),
             host: values.decode(String.self, forKey: .host),
             port: values.decode(Int.self, forKey: .port),
-            path: values.decodeIfPresent(String.self, forKey: .path) ?? ""
+            path: values.decodeIfPresent(String.self, forKey: .path) ?? "",
+            pairingHostID: values.decodeIfPresent(String.self, forKey: .pairingHostID)
         )
     }
 
@@ -98,6 +119,7 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         try values.encode(host, forKey: .host)
         try values.encode(port, forKey: .port)
         try values.encode(path, forKey: .path)
+        try values.encodeIfPresent(pairingHostID, forKey: .pairingHostID)
     }
 }
 
