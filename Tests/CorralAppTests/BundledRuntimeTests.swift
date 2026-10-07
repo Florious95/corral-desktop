@@ -120,7 +120,7 @@ final class BundledRuntimeTests: XCTestCase {
 
     private func fixture(_ directory: URL, version: String) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var files: [String: Data] = ["nodeprobe": Data("probe".utf8), "tmux": Data("tmux".utf8),
+        var files: [String: Data] = ["nodeprobe": Data("probe".utf8),
             "nodeprobe-pi-activity.js": Data("plugin-\(version)".utf8), "nodeprobe-titles.tsv": Data("titles".utf8), "nodeprobe-providers.tsv": Data("providers".utf8)]
         func coordinate(_ name: String) -> [String: Any] { ["sha256": BundledRuntime.hash(files[name]!), "size": files[name]!.count] }
         let capability: [String: Any] = ["platform": "darwin/arm64", "binary": coordinate("nodeprobe"), "pi_extension": coordinate("nodeprobe-pi-activity.js"),
@@ -132,7 +132,7 @@ final class BundledRuntimeTests: XCTestCase {
         let assets = files.mapValues { data in ["sha256": BundledRuntime.hash(data), "size": data.count, "executable": false] as [String: Any] }
         var manifest: [String: Any] = ["formatVersion": 1, "platform": "darwin/arm64", "coreCommit": "test", "coreTree": "test", "windowsCommit": "test"]
         var marked = assets
-        for name in ["agentmirrord", "nodeprobe", "tmux"] { marked[name]?["executable"] = true }
+        for name in ["agentmirrord", "nodeprobe"] { marked[name]?["executable"] = true }
         manifest["files"] = marked
         for (name, data) in files { try data.write(to: directory.appendingPathComponent(name)) }
         try JSONSerialization.data(withJSONObject: manifest, options: .sortedKeys).write(to: directory.appendingPathComponent(BundledRuntime.manifestName))

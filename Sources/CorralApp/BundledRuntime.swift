@@ -68,9 +68,13 @@ actor BundledRuntime {
         let data = try Data(contentsOf: directory.appendingPathComponent(manifestName))
         let manifest = try JSONDecoder().decode(Manifest.self, from: data)
         guard manifest.formatVersion == 1, manifest.platform == "darwin/arm64",
-              Set(["agentmirrord", "nodeprobe", "tmux", "nodeprobe-pi-activity.js", "nodeprobe-titles.tsv", "nodeprobe-providers.tsv", "core-capability.json"]).isSubset(of: Set(manifest.files.keys)),
-              ["agentmirrord", "nodeprobe", "tmux"].allSatisfy({ manifest.files[$0]?.executable == true }) else {
+              Set(["agentmirrord", "nodeprobe", "nodeprobe-pi-activity.js", "nodeprobe-titles.tsv", "nodeprobe-providers.tsv", "core-capability.json"]).isSubset(of: Set(manifest.files.keys)),
+              ["agentmirrord", "nodeprobe"].allSatisfy({ manifest.files[$0]?.executable == true }) else {
             throw Failure.invalidManifest
+        }
+        guard let contents = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) else { throw Failure.invalidManifest }
+        for case let url as URL in contents {
+            guard !["tmux", "lib"].contains(url.lastPathComponent.lowercased()), url.pathExtension.lowercased() != "dylib" else { throw Failure.invalidManifest }
         }
         for (name, expected) in manifest.files {
             let parts = name.split(separator: "/", omittingEmptySubsequences: false)
@@ -207,8 +211,7 @@ actor BundledRuntime {
                 // A GUI/launchd C locale makes tmux replace Unicode and the inventory
                 // unit separator with '_'. WSL's login shell supplied UTF-8 implicitly.
                 "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8",
-                "PATH": installed.path + ":/usr/bin:/bin:/usr/sbin:/sbin:" + home.appendingPathComponent(".local/bin").path + ":/opt/homebrew/bin:/usr/local/bin",
-                "TERMINFO_DIRS": installed.appendingPathComponent("terminfo").path + ":/usr/share/terminfo",
+                "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + home.appendingPathComponent(".local/bin").path + ":" + (ProcessInfo.processInfo.environment["PATH"] ?? ""),
                 "AGENTMIRROR_NODEPROBE_BIN": installed.appendingPathComponent("nodeprobe").path,
                 "NODEPROBE_FIXTURES": installed.appendingPathComponent("nodeprobe-titles.tsv").path,
                 "NODEPROBE_PROVIDERS": installed.appendingPathComponent("nodeprobe-providers.tsv").path,
