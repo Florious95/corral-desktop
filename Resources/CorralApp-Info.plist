@@ -8,6 +8,8 @@
     <string>CorralApp</string>
     <key>CFBundleIdentifier</key>
     <string>com.corral.native.dev</string>
+    <key>CFBundleIconFile</key>
+    <string>Corral.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
