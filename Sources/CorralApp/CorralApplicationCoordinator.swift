@@ -97,6 +97,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let token: String
         let deviceID: DeviceID
         let deviceName: String
+        /// Every route to the host in dial order; empty means `endpoint` is the only one.
+        var routes: [ApprovedEndpoint] = []
+        var dialRoutes: [ApprovedEndpoint] { routes.isEmpty ? [endpoint] : routes }
     }
 
     private struct PendingCreateAgent {
@@ -119,6 +122,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private let deviceRepository: any DeviceRepositoryProtocol
     private let credentialVault: any DeviceCredentialVault
     private let sessionLink: any SessionLinkProtocol
+    private let hostIdentityProbe: HostIdentityProbe
+    /// The route the live connection runs over (Tailscale, LAN or loopback).
+    public private(set) var activeRoute: ApprovedEndpoint?
     private let deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle
     private let inputRouter: SessionLinkInputRouter
     private let environment: [String: String]
@@ -230,12 +236,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         initialWorkspaceState: CorralWorkspaceState,
         initialUserPreferences: UserPreferences,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        maximumVisiblePanes: Int = .max
+        maximumVisiblePanes: Int = .max,
+        hostIdentityProbe: HostIdentityProbe = HostIdentityProbe()
     ) {
         precondition(maximumVisiblePanes > 0)
         self.deviceRepository = deviceRepository
         self.credentialVault = credentialVault
         self.sessionLink = sessionLink
+        self.hostIdentityProbe = hostIdentityProbe
         self.deviceSessionLifecycle = deviceSessionLifecycle
         self.inputRouter = SessionLinkInputRouter(sessionLink: sessionLink)
         self.workspaceStore = workspaceStore
@@ -1084,8 +1092,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     self.showToast("未找到本机配对 Token，请先配置本机服务凭证", kind: .warning)
                     return
                 }
-                var endpoint = URLComponents(url: configuration.endpoint.url, resolvingAgainstBaseURL: false)!
-                endpoint.scheme = configuration.endpoint.scheme == "wss" ? "https" : "http"
+                // Ask the route the live connection actually uses; the paired one may be off this network.
+                let live = self.activeConnectionConfiguration?.deviceID == configuration.deviceID ? self.activeRoute ?? configuration.endpoint : configuration.endpoint
+                var endpoint = URLComponents(url: live.url, resolvingAgainstBaseURL: false)!
+                endpoint.scheme = live.scheme == "wss" ? "https" : "http"
                 endpoint.path = "/pair/whoami"
                 var request = URLRequest(url: endpoint.url!)
                 request.timeoutInterval = 5
@@ -1250,11 +1260,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             guard let url = URL(string: request.url) else { throw EndpointSafetyError.invalidEndpoint }
             let endpoint = try ApprovedEndpoint(url: url, pairingHostID: request.pairingHostID)
             guard !request.token.isEmpty else { throw SessionLinkFailure.protocolViolation("device token is empty") }
-            let existing = cachedDevices.first(where: { $0.endpoint == endpoint })
+            let alternates = request.candidates.compactMap { URL(string: $0).flatMap { try? ApprovedEndpoint(url: $0, pairingHostID: request.pairingHostID) } }
+            // The user pairs a host, not an address: re-pairing one host_id updates its device.
+            let existing = cachedDevices.first { device in
+                if let hostID = endpoint.pairingHostID { return device.endpoint.pairingHostID == hostID }
+                return device.endpoint == endpoint
+            }
             let deviceID = existing?.id ?? DeviceID(UUID().uuidString)
             let handle = CredentialHandle(UUID().uuidString)
             try await credentialVault.store(request.token, for: handle)
-            let device = DeviceRecord(id: deviceID, name: request.name, endpoint: endpoint, credential: handle)
+            let device = DeviceRecord(id: deviceID, name: request.name, endpoint: endpoint, credential: handle, alternateEndpoints: alternates)
             do {
                 try await deviceRepository.save(device)
             } catch {
@@ -1279,7 +1294,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             guard let token = try await credentialVault.resolve(device.credential), !token.isEmpty else {
                 throw SessionLinkFailure.protocolViolation("device credential is unavailable")
             }
-            let configuration = ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id, deviceName: device.name)
+            let configuration = ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id,
+                                                        deviceName: device.name, routes: device.endpoints)
             try await connect(configuration: configuration)
             selectedDeviceIDs = [id]
             updateSidebar(devices: cachedDevices)
@@ -1479,12 +1495,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         listingRequestedEpoch = nil
         listingSequence = 0
         let authenticated = try await sessionLink.connect(
-            to: configuration.endpoint,
+            toAnyOf: configuration.dialRoutes,
             deviceID: configuration.deviceID,
             credential: CredentialHandle(configuration.token)
         )
         connection = authenticated
         activeConnectionConfiguration = configuration
+        activeRoute = await sessionLink.activeEndpoint() ?? configuration.dialRoutes.first
+        Task { [weak self] in await self?.learnRoutes(for: configuration) }
         configuredDeviceID = configuration.deviceID
         configuredDeviceName = configuration.deviceName
         connected = true
@@ -1498,6 +1516,34 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         await requestListing(for: authenticated)
         await writeTelemetry()
+    }
+
+    /// Learns routes the pairing QR could not carry (the daemon prints it before Tailscale is up): whoami on
+    /// the live route lists the host's addresses, and identify must prove each one before it becomes a route.
+    private func learnRoutes(for configuration: ConnectionConfiguration) async {
+        guard let hostID = configuration.endpoint.pairingHostID,
+              let live = activeRoute,
+              let identity = try? await hostIdentityProbe.whoami(at: live), identity.hostID == hostID,
+              let known = cachedDevices.first(where: { $0.id == configuration.deviceID }) else { return }
+        var learned: [ApprovedEndpoint] = []
+        for address in identity.addresses {
+            guard let route = try? ApprovedEndpoint(scheme: live.scheme, host: address, port: Int(identity.port), pairingHostID: hostID),
+                  route.route != .loopback, !known.endpoints.contains(route),
+                  (try? await hostIdentityProbe.verify(route, hostID: hostID, token: configuration.token)) != nil else { continue }
+            learned.append(route)
+        }
+        // Re-read the stored record: a re-pair or rename while identify ran must not be overwritten.
+        guard !learned.isEmpty,
+              let current = try? await deviceRepository.listDevices().first(where: { $0.id == configuration.deviceID }),
+              current.credential == known.credential, current.endpoint.pairingHostID == hostID else { return }
+        let updated = DeviceRecord(id: current.id, name: current.name, endpoint: current.endpoint, credential: current.credential,
+                                   alternateEndpoints: current.alternateEndpoints + learned)
+        do { try await deviceRepository.save(updated) } catch { return }
+        cachedDevices = cachedDevices.map { $0.id == updated.id ? updated : $0 }
+        guard var active = activeConnectionConfiguration, active.deviceID == updated.id else { return }
+        active.routes = updated.endpoints
+        activeConnectionConfiguration = active
+        await sessionLink.updateRoutes(updated.endpoints)
     }
 
     private func prepareLocalDevice(in devices: [DeviceRecord]) async throws -> (devices: [DeviceRecord], token: String?) {
@@ -1538,7 +1584,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         if endpoint.pairingHostID != nil, let device {
             guard let token = LocalDaemonTokenDiscovery.valid(try await credentialVault.resolve(device.credential)) else { return nil }
-            return ConnectionConfiguration(endpoint: endpoint, token: token, deviceID: device.id, deviceName: device.name)
+            return ConnectionConfiguration(endpoint: endpoint, token: token, deviceID: device.id, deviceName: device.name,
+                                           routes: device.endpoint == endpoint ? device.endpoints : [])
         }
         var token = LocalDaemonTokenDiscovery.valid(environment["CORRAL_NATIVE_TOKEN"])
             ?? LocalDaemonTokenDiscovery.valid(environment["AGENTMIRROR_TOKEN"])
@@ -1572,6 +1619,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             await sessionLink.disconnect()
             connection = nil
             connected = false
+            activeRoute = nil
             subscriptionSnapshotTimeout?.cancel()
             for key in sessions.keys {
                 sessions[key]?.subscribed = false
@@ -1611,11 +1659,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     listingSequence = 0
                 }
                 connected = true
+                activeRoute = await sessionLink.activeEndpoint() ?? activeRoute
                 await deviceSessionLifecycle.markConnected(envelope.origin.deviceID)
                 if let connection { await requestListing(for: connection) }
             case .disconnected, .failed:
                 resetPointerMotion()
                 connected = false
+                activeRoute = nil
                 await deviceSessionLifecycle.markDisconnected()
             case .transportOpen, .authenticating:
                 if envelope.origin.connectionEpoch != current.connectionEpoch { connected = false }

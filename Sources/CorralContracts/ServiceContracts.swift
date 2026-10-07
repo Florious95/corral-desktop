@@ -18,17 +18,41 @@ public struct SessionKey: Codable, Hashable, Sendable {
     }
 }
 
+/// A device is a host identity, not an address: `endpoint` is the route it was paired through and
+/// `alternateEndpoints` are further routes (LAN, Tailscale) to the same paired `host_id`.
 public struct DeviceRecord: Codable, Hashable, Sendable, Identifiable {
     public let id: DeviceID
     public var name: String
     public let endpoint: ApprovedEndpoint
     public let credential: CredentialHandle
+    public let alternateEndpoints: [ApprovedEndpoint]
 
-    public init(id: DeviceID, name: String, endpoint: ApprovedEndpoint, credential: CredentialHandle) {
+    /// Alternates must belong to the same paired host. A loopback route to a paired host would
+    /// hand its token to whatever listens locally, so it is never kept.
+    public init(id: DeviceID, name: String, endpoint: ApprovedEndpoint, credential: CredentialHandle, alternateEndpoints: [ApprovedEndpoint] = []) {
         self.id = id
         self.name = name
         self.endpoint = endpoint
         self.credential = credential
+        self.alternateEndpoints = endpoint.pairingHostID == nil ? [] : ApprovedEndpoint.dialOrder(alternateEndpoints).filter {
+            $0.pairingHostID == endpoint.pairingHostID && $0.route != .loopback && $0.url != endpoint.url
+        }
+    }
+
+    /// Every route to this host in dial order (Tailscale > LAN > loopback).
+    public var endpoints: [ApprovedEndpoint] { ApprovedEndpoint.dialOrder([endpoint] + alternateEndpoints) }
+
+    private enum CodingKeys: String, CodingKey { case id, name, endpoint, credential, alternateEndpoints }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            id: values.decode(DeviceID.self, forKey: .id),
+            name: values.decode(String.self, forKey: .name),
+            endpoint: values.decode(ApprovedEndpoint.self, forKey: .endpoint),
+            credential: values.decode(CredentialHandle.self, forKey: .credential),
+            alternateEndpoints: values.decodeIfPresent([ApprovedEndpoint].self, forKey: .alternateEndpoints) ?? []
+        )
     }
 }
 

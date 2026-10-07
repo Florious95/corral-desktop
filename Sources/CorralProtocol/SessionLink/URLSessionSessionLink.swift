@@ -15,8 +15,21 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         var maximumBufferedBytes: UInt64 = 16 * 1_024 * 1_024
         var maximumBufferedControls: UInt32 = 32
         var heartbeatIntervalNanoseconds: UInt64 = 15_000_000_000
+        /// A route that silently stops carrying packets never fails a ping; no pong by then means it is gone.
+        var heartbeatTimeoutNanoseconds: UInt64 = 10_000_000_000
         var initialReconnectDelayNanoseconds: UInt64 = 250_000_000
         var maximumReconnectDelayNanoseconds: UInt64 = 5_000_000_000
+        /// Happy-eyeballs head start of a preferred route before the next one joins the race.
+        var routeStaggerNanoseconds: UInt64 = 1_000_000_000
+        /// A route that has not authenticated by then is abandoned (URLSession would wait 60s).
+        var routeAttemptTimeoutNanoseconds: UInt64 = 8_000_000_000
+        /// Proves a paired route reaches its host (`/pair/identify`, an HMAC under the token that never
+        /// reveals it) before the token goes over WebSocket. Loopback and unpaired routes skip it.
+        var routeVerifier: @Sendable (ApprovedEndpoint, String) async throws -> Void = { route, token in
+            guard let hostID = route.pairingHostID, route.route != .loopback else { return }
+            do { try await HostIdentityProbe().verify(route, hostID: hostID, token: token) }
+            catch HostIdentityError.proofRejected { throw SessionLinkFailure.unauthorized }
+        }
 
         static let live = Configuration()
     }
@@ -45,7 +58,10 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     private var lifecycle: UInt64 = 0
     private var nextAttempt: UInt64 = 0
     private var activeAttempt: UInt64?
-    private var endpoint: ApprovedEndpoint?
+    /// Every route to the connected host, in dial order; empty when no connection is wanted.
+    private var routes: [ApprovedEndpoint] = []
+    private var connectedRoute: ApprovedEndpoint?
+    private var handshakeTask: Task<RouteHandshake, Error>?
     private var deviceID: DeviceID?
     private var credential: CredentialHandle?
     private var socket: (any WebSocketConnection)?
@@ -79,6 +95,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         precondition(configuration.heartbeatIntervalNanoseconds > 0)
         precondition(configuration.initialReconnectDelayNanoseconds > 0)
         precondition(configuration.maximumReconnectDelayNanoseconds >= configuration.initialReconnectDelayNanoseconds)
+        precondition(configuration.routeAttemptTimeoutNanoseconds > 0)
         self.configuration = configuration
         self.codec = codec
         self.transportFactory = transportFactory
@@ -90,7 +107,15 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         deviceID: DeviceID,
         credential: CredentialHandle
     ) async throws -> AuthenticatedConnection {
-        let approved = try endpoint.revalidated()
+        try await connect(toAnyOf: [endpoint], deviceID: deviceID, credential: credential)
+    }
+
+    public func connect(
+        toAnyOf routes: [ApprovedEndpoint],
+        deviceID: DeviceID,
+        credential: CredentialHandle
+    ) async throws -> AuthenticatedConnection {
+        let approved = try Self.approvedRoutes(routes)
         lifecycle &+= 1
         let currentLifecycle = lifecycle
         cancelCurrentTasks()
@@ -99,7 +124,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         socket = nil
         activeAttempt = nil
         subscriptions.removeAll()
-        self.endpoint = approved
+        self.routes = approved
         self.deviceID = deviceID
         self.credential = credential
         if let previousSocket { await previousSocket.close() }
@@ -111,12 +136,32 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         } catch {
             guard currentLifecycle == lifecycle else { throw error }
             let failure = sessionFailure(for: error)
-            self.endpoint = nil
+            self.routes = []
             self.credential = nil
             await setState(.failed(failure))
             await publish(.failed(failure))
             throw error
         }
+    }
+
+    /// Routes of another host are refused: a late update must never pair one device's token with
+    /// another host's addresses.
+    public func updateRoutes(_ routes: [ApprovedEndpoint]) async {
+        guard let hostID = self.routes.first?.pairingHostID, self.routes.allSatisfy({ $0.pairingHostID == hostID }),
+              let approved = try? Self.approvedRoutes(routes), approved.allSatisfy({ $0.pairingHostID == hostID }) else { return }
+        self.routes = approved
+    }
+
+    public func activeEndpoint() async -> ApprovedEndpoint? {
+        guard case .authenticatedReady = state else { return nil }
+        return connectedRoute
+    }
+
+    private static func approvedRoutes(_ routes: [ApprovedEndpoint]) throws -> [ApprovedEndpoint] {
+        var seen = Set<URL>()
+        let approved = try routes.map { try $0.revalidated() }.filter { seen.insert($0.url).inserted }
+        guard !approved.isEmpty else { throw EndpointSafetyError.invalidEndpoint }
+        return approved
     }
 
     public func eventStream() async throws -> any SessionEventStream {
@@ -148,7 +193,8 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         lifecycle &+= 1
         let currentLifecycle = lifecycle
         cancelCurrentTasks()
-        endpoint = nil
+        routes = []
+        connectedRoute = nil
         credential = nil
         activeAttempt = nil
         failQueuedSends(SessionLinkFailure.disconnected)
@@ -164,7 +210,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         lifecycle expectedLifecycle: UInt64,
         restoreSubscriptions: Bool
     ) async throws -> AuthenticatedConnection {
-        guard expectedLifecycle == lifecycle, let endpoint, let credential, let deviceID else {
+        guard expectedLifecycle == lifecycle, !routes.isEmpty, let credential, let deviceID else {
             throw CancellationError()
         }
         guard epoch.rawValue < UInt64.max else {
@@ -175,29 +221,29 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         activeAttempt = attempt
         epoch = ConnectionEpoch(epoch.rawValue + 1)
         let connectionEpoch = epoch
-        let candidate = transportFactory(endpoint.url)
-        socket = candidate
         await setState(.transportOpen(connectionEpoch))
+        await setState(.authenticating(connectionEpoch))
 
+        let race = Task { [routes, codec, transportFactory, configuration] in
+            try await Self.raceRoutes(routes, token: credential.rawValue, codec: codec,
+                                      transportFactory: transportFactory, configuration: configuration)
+        }
+        handshakeTask = race
+        let winner: RouteHandshake
         do {
-            try await candidate.start()
+            winner = try await withTaskCancellationHandler { try await race.value } onCancel: { race.cancel() }
+        } catch {
+            if handshakeTask == race { handshakeTask = nil }
+            if activeAttempt == attempt { activeAttempt = nil }
+            throw error
+        }
+        if handshakeTask == race { handshakeTask = nil }
+        let candidate = winner.socket
+        do {
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
-            await setState(.authenticating(connectionEpoch))
-            let auth = try codec.encodeAuthentication(AuthToken(credential.rawValue))
-            try await candidate.send(.text(auth.utf8String))
-            let response = try await candidate.receive()
-            guard case let .text(text) = response else {
-                throw SessionLinkFailure.protocolViolation("Expected a text authentication acknowledgement")
-            }
-            let control: ControlMessage
-            do { control = try codec.decodeControlMessage(Data(text.utf8)) }
-            catch { throw SessionLinkFailure.protocolViolation("Invalid authentication acknowledgement: \(error)") }
-            guard case let .authAck(ok, _, _) = control else {
-                throw SessionLinkFailure.protocolViolation("Expected auth_ack before other controls")
-            }
-            guard ok else { throw SessionLinkFailure.unauthorized }
-            guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
-            await publish(.control(control))
+            socket = candidate
+            connectedRoute = winner.route
+            await publish(.control(winner.control))
 
             if restoreSubscriptions { try await restoreDesiredSubscriptions(on: candidate) }
             guard expectedLifecycle == lifecycle, activeAttempt == attempt else { throw CancellationError() }
@@ -215,9 +261,147 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             if activeAttempt == attempt {
                 activeAttempt = nil
                 socket = nil
+                connectedRoute = nil
             }
             throw error
         }
+    }
+
+    struct RouteHandshake: Sendable {
+        let route: ApprovedEndpoint
+        let socket: any WebSocketConnection
+        let control: ControlMessage
+    }
+
+    private enum RouteRaceEvent: Sendable {
+        case authenticated(RouteHandshake)
+        case staggerElapsed(launched: Int)
+    }
+
+    /// Happy eyeballs over one host's routes: the preferred route starts alone, the next joins after
+    /// `routeStaggerNanoseconds` or as soon as a running route fails; the first authenticated route wins.
+    private static func raceRoutes(
+        _ routes: [ApprovedEndpoint],
+        token: String,
+        codec: any WireCodecProtocol,
+        transportFactory: @escaping @Sendable (URL) -> any WebSocketConnection,
+        configuration: Configuration
+    ) async throws -> RouteHandshake {
+        try await withThrowingTaskGroup(of: RouteRaceEvent.self) { group in
+            var launched = 0
+            var failures: [Error] = []
+            func launchNext() {
+                let route = routes[launched]
+                launched += 1
+                group.addTask {
+                    .authenticated(try await handshake(route, token: token, codec: codec, transportFactory: transportFactory,
+                                                       verifier: configuration.routeVerifier, timeout: configuration.routeAttemptTimeoutNanoseconds))
+                }
+                guard launched < routes.count else { return }
+                let generation = launched
+                group.addTask {
+                    try await Task.sleep(nanoseconds: configuration.routeStaggerNanoseconds)
+                    return .staggerElapsed(launched: generation)
+                }
+            }
+            /// Every exit cancels the rest and closes any route that authenticated meanwhile.
+            func closeStragglers() async {
+                group.cancelAll()
+                while let late = await group.nextResult() {
+                    if case let .success(.authenticated(extra)) = late { await extra.socket.close() }
+                }
+            }
+            launchNext()
+            while let result = await group.nextResult() {
+                switch result {
+                case let .success(.authenticated(winner)):
+                    await closeStragglers()
+                    return winner
+                case let .success(.staggerElapsed(generation)):
+                    if generation == launched, launched < routes.count { launchNext() }
+                case let .failure(error):
+                    if Task.isCancelled { await closeStragglers(); throw CancellationError() }
+                    failures.append(error)
+                    if launched < routes.count { launchNext() }
+                    else if failures.count >= routes.count { await closeStragglers(); throw preferredFailure(failures) }
+                }
+            }
+            throw Task.isCancelled ? CancellationError() : preferredFailure(failures)
+        }
+    }
+
+    /// A route's rejection speaks for the host only when every route agrees; an unreachable route
+    /// (Wi-Fi gone, Tailscale down) keeps the failure retryable.
+    private static func preferredFailure(_ failures: [Error]) -> Error {
+        func isTerminal(_ error: Error) -> Bool {
+            guard let failure = error as? SessionLinkFailure else { return false }
+            if case .protocolViolation = failure { return true }
+            return failure == .unauthorized
+        }
+        return failures.first { !isTerminal($0) } ?? failures.first ?? SessionLinkFailure.disconnected
+    }
+
+    /// Proof first, then the WebSocket: the token is only ever sent to a route that proved its host.
+    private static func handshake(
+        _ route: ApprovedEndpoint,
+        token: String,
+        codec: any WireCodecProtocol,
+        transportFactory: @escaping @Sendable (URL) -> any WebSocketConnection,
+        verifier: @escaping @Sendable (ApprovedEndpoint, String) async throws -> Void,
+        timeout: UInt64
+    ) async throws -> RouteHandshake {
+        let opened = OpenedSocket()
+        do {
+            let (socket, control) = try await withThrowingTaskGroup(of: (any WebSocketConnection, ControlMessage)?.self) { group in
+                group.addTask {
+                    try await verifier(route, token)
+                    try Task.checkCancellation()
+                    let socket = transportFactory(route.url)
+                    opened.socket = socket
+                    // An uncooperative socket only unblocks when closed.
+                    let control = try await withTaskCancellationHandler {
+                        try await authenticate(on: socket, token: token, codec: codec)
+                    } onCancel: { Task { await socket.close() } }
+                    return (socket, control)
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: timeout)
+                    return nil
+                }
+                defer { group.cancelAll() }
+                guard let first = try await group.next(), let handshake = first else {
+                    throw SessionLinkFailure.transport("Route \(route.host) did not authenticate in time")
+                }
+                return handshake
+            }
+            return RouteHandshake(route: route, socket: socket, control: control)
+        } catch {
+            await opened.socket?.close()
+            throw error
+        }
+    }
+
+    private static func authenticate(
+        on socket: any WebSocketConnection,
+        token: String,
+        codec: any WireCodecProtocol
+    ) async throws -> ControlMessage {
+        try await socket.start()
+        try Task.checkCancellation()
+        let auth = try codec.encodeAuthentication(AuthToken(token))
+        try await socket.send(.text(auth.utf8String))
+        let response = try await socket.receive()
+        guard case let .text(text) = response else {
+            throw SessionLinkFailure.protocolViolation("Expected a text authentication acknowledgement")
+        }
+        let control: ControlMessage
+        do { control = try codec.decodeControlMessage(Data(text.utf8)) }
+        catch { throw SessionLinkFailure.protocolViolation("Invalid authentication acknowledgement: \(error)") }
+        guard case let .authAck(ok, _, _) = control else {
+            throw SessionLinkFailure.protocolViolation("Expected auth_ack before other controls")
+        }
+        guard ok else { throw SessionLinkFailure.unauthorized }
+        return control
     }
 
     private func restoreDesiredSubscriptions(on candidate: any WebSocketConnection) async throws {
@@ -359,10 +543,26 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             do { try await Task.sleep(nanoseconds: configuration.heartbeatIntervalNanoseconds) }
             catch { return }
             guard activeAttempt == attempt else { return }
-            do { try await candidate.ping() }
-            catch {
+            if let error = await Self.ping(candidate, within: configuration.heartbeatTimeoutNanoseconds) {
                 await transportFailed(attempt: attempt, error: error)
                 return
+            }
+        }
+    }
+
+    /// The pong or the deadline, whichever comes first. A ping on a dead route may never complete;
+    /// it is left to unwind when `transportFailed` closes the socket.
+    private static func ping(_ socket: any WebSocketConnection, within timeout: UInt64) async -> Error? {
+        let outcome = PingOutcome()
+        return await withCheckedContinuation { continuation in
+            outcome.continuation = continuation
+            Task {
+                do { try await socket.ping(); outcome.resolve(nil) }
+                catch { outcome.resolve(error) }
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: timeout)
+                outcome.resolve(SessionLinkFailure.transport("Heartbeat timed out"))
             }
         }
     }
@@ -373,6 +573,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         activeAttempt = nil
         let previousSocket = socket
         socket = nil
+        connectedRoute = nil
         receiveTask?.cancel()
         heartbeatTask?.cancel()
         receiveTask = nil
@@ -383,16 +584,16 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         guard expectedLifecycle == lifecycle else { return }
         await setState(.disconnected)
         await publish(.failed(failure))
-        guard endpoint != nil, credential != nil, reconnectTask == nil else { return }
+        guard !routes.isEmpty, credential != nil, reconnectTask == nil else { return }
         reconnectTask = Task { [weak self] in await self?.reconnectLoop(lifecycle: expectedLifecycle) }
     }
 
     private func reconnectLoop(lifecycle expectedLifecycle: UInt64) async {
         var delay = configuration.initialReconnectDelayNanoseconds
-        while !Task.isCancelled, expectedLifecycle == lifecycle, endpoint != nil {
+        while !Task.isCancelled, expectedLifecycle == lifecycle, !routes.isEmpty {
             do { try await Task.sleep(nanoseconds: delay) }
             catch { break }
-            guard expectedLifecycle == lifecycle, endpoint != nil else { break }
+            guard expectedLifecycle == lifecycle, !routes.isEmpty else { break }
             do {
                 _ = try await establishConnection(lifecycle: expectedLifecycle, restoreSubscriptions: true)
                 reconnectTask = nil
@@ -428,7 +629,8 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         guard attempt == 0 || activeAttempt == attempt else { return }
         let expectedLifecycle = lifecycle
         activeAttempt = nil
-        endpoint = nil
+        routes = []
+        connectedRoute = nil
         credential = nil
         receiveTask?.cancel()
         heartbeatTask?.cancel()
@@ -449,7 +651,8 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         guard attempt == 0 || activeAttempt == attempt else { return }
         let expectedLifecycle = lifecycle
         activeAttempt = nil
-        endpoint = nil
+        routes = []
+        connectedRoute = nil
         credential = nil
         receiveTask?.cancel()
         heartbeatTask?.cancel()
@@ -467,6 +670,8 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
     }
 
     private func cancelCurrentTasks() {
+        handshakeTask?.cancel()
+        handshakeTask = nil
         receiveTask?.cancel()
         heartbeatTask?.cancel()
         reconnectTask?.cancel()
@@ -524,7 +729,8 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             cancelCurrentTasks()
             failQueuedSends(error)
             activeAttempt = nil
-            endpoint = nil
+            routes = []
+            connectedRoute = nil
             credential = nil
             state = .failed(.eventBufferOverflow)
             let previous = socket
@@ -545,6 +751,28 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             maximumBufferedEvents: configuration.maximumBufferedEvents,
             maximumBufferedControls: configuration.maximumBufferedControls
         )
+    }
+}
+
+private final class OpenedSocket: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: (any WebSocketConnection)?
+    var socket: (any WebSocketConnection)? {
+        get { lock.withLock { value } }
+        set { lock.withLock { value = newValue } }
+    }
+}
+
+private final class PingOutcome: @unchecked Sendable {
+    private let lock = NSLock()
+    var continuation: CheckedContinuation<Error?, Never>?
+
+    func resolve(_ error: Error?) {
+        let pending: CheckedContinuation<Error?, Never>? = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: error)
     }
 }
 

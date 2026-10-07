@@ -65,7 +65,8 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
         guard !device.id.rawValue.isEmpty else { throw DeviceRepositoryError.invalidDevice }
         guard !deletingDeviceIDs.contains(device.id) else { throw DeviceRepositoryError.deletionInProgress }
         let endpoint = try device.endpoint.revalidated()
-        let validated = DeviceRecord(id: device.id, name: device.name, endpoint: endpoint, credential: device.credential)
+        let validated = DeviceRecord(id: device.id, name: device.name, endpoint: endpoint, credential: device.credential,
+                                     alternateEndpoints: device.alternateEndpoints.compactMap { try? $0.revalidated() })
         var updated = devices
         if let index = updated.firstIndex(where: { $0.id == validated.id }) {
             updated[index] = validated
@@ -81,7 +82,9 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
         guard let existing = devices.first(where: { $0.id == id }) else {
             throw DeviceRepositoryError.invalidDevice
         }
-        try await save(DeviceRecord(id: existing.id, name: name, endpoint: existing.endpoint, credential: existing.credential))
+        var renamed = existing
+        renamed.name = name
+        try await save(renamed)
     }
 
     /// Deletion fails closed unless the injected confirmer has completed both confirmations.
@@ -133,7 +136,8 @@ public actor DeviceRepository: DeviceRepositoryProtocol {
                 id: DeviceID(raw.id),
                 name: raw.name,
                 endpoint: endpoint,
-                credential: CredentialHandle(raw.credentialHandle)
+                credential: CredentialHandle(raw.credentialHandle),
+                alternateEndpoints: raw.alternateEndpoints.compactMap { try? $0.value?.revalidated() }
             ))
         }
         if loaded.count != rows.count { requiresPruning = true }
@@ -153,11 +157,30 @@ private struct PersistedDevice: Codable {
     let name: String
     let endpoint: ApprovedEndpoint
     let credentialHandle: String
+    /// Optional for stores written before host-centric routes; one stale route never prunes the device.
+    let alternateEndpoints: [LenientEndpoint]
 
     init(_ device: DeviceRecord) {
         id = device.id.rawValue
         name = device.name
         endpoint = device.endpoint
         credentialHandle = device.credential.rawValue
+        alternateEndpoints = device.alternateEndpoints.map(LenientEndpoint.init)
     }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        endpoint = try values.decode(ApprovedEndpoint.self, forKey: .endpoint)
+        credentialHandle = try values.decode(String.self, forKey: .credentialHandle)
+        alternateEndpoints = try values.decodeIfPresent([LenientEndpoint].self, forKey: .alternateEndpoints) ?? []
+    }
+}
+
+private struct LenientEndpoint: Codable {
+    let value: ApprovedEndpoint?
+    init(_ value: ApprovedEndpoint) { self.value = value }
+    init(from decoder: Decoder) throws { value = try? ApprovedEndpoint(from: decoder) }
+    func encode(to encoder: Encoder) throws { try value?.encode(to: encoder) }
 }

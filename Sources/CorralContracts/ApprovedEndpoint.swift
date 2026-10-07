@@ -92,10 +92,41 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         try Self(scheme: scheme, host: host, port: port, path: path, pairingHostID: pairingHostID)
     }
 
-    private static func isPairingHost(_ host: String) -> Bool {
+    /// The network channel this endpoint reaches its host through. A host is one identity with several
+    /// routes; the route never identifies the host.
+    public enum Route: Int, Comparable, Sendable {
+        /// Tailscale CGNAT (100.64/10): direct peer-to-peer on the same Wi-Fi and it survives roaming.
+        case tailnet
+        /// RFC 1918 private network.
+        case lan
+        case loopback
+
+        public static func < (lhs: Route, rhs: Route) -> Bool { lhs.rawValue < rhs.rawValue }
+    }
+
+    public var route: Route {
+        guard let bytes = Self.ipv4Octets(host) else { return .loopback }
+        return bytes[0] == 100 && (64...127).contains(bytes[1]) ? .tailnet : bytes[0] == 127 ? .loopback : .lan
+    }
+
+    /// Host-centric dial order: Tailscale, then LAN, then loopback; stable within a route and de-duplicated.
+    public static func dialOrder(_ endpoints: [ApprovedEndpoint]) -> [ApprovedEndpoint] {
+        var seen = Set<URL>()
+        return endpoints.enumerated()
+            .sorted { ($0.element.route, $0.offset) < ($1.element.route, $1.offset) }
+            .map(\.element)
+            .filter { seen.insert($0.url).inserted }
+    }
+
+    private static func ipv4Octets(_ host: String) -> [UInt8]? {
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
         let bytes = parts.compactMap { UInt8($0) }
-        guard parts.count == 4, bytes.count == 4, zip(parts, bytes).allSatisfy({ String($0.1) == $0.0 }) else { return false }
+        guard parts.count == 4, bytes.count == 4, zip(parts, bytes).allSatisfy({ String($0.1) == $0.0 }) else { return nil }
+        return bytes
+    }
+
+    private static func isPairingHost(_ host: String) -> Bool {
+        guard let bytes = ipv4Octets(host) else { return false }
         return bytes[0] == 10 || (bytes[0] == 172 && (16...31).contains(bytes[1]))
             || (bytes[0] == 192 && bytes[1] == 168) || (bytes[0] == 100 && (64...127).contains(bytes[1]))
     }

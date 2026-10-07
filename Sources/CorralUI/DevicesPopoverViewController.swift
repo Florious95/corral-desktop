@@ -257,7 +257,9 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         editingDeviceID = nil
         tableView.reloadData()
         guard name != current.name else { return nil }
-        return DeviceRecord(id: current.id, name: name, endpoint: current.endpoint, credential: current.credential)
+        var renamed = current
+        renamed.name = name
+        return renamed
     }
 
     private func scheduleRename(_ id: DeviceID, to name: String) {

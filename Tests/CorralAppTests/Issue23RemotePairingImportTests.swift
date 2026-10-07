@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import CryptoKit
 import CorralContracts
 import CorralProtocol
 import CorralServices
@@ -70,6 +71,14 @@ final class Issue23RemotePairingImportTests: XCTestCase {
         XCTAssertEqual(device.name, fixture.name)
         XCTAssertEqual(device.endpoint.url.absoluteString, fixture.primaryCandidate)
 
+        // The coordinator dials the host's Tailscale route first and LAN joins
+        // after the head start, so its own authentication may still be in flight.
+        for _ in 0..<250 where !coordinator.connected { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(coordinator.connected, "Importing the QR must connect the coordinator to the paired host")
+        let coordinatorTokens = await fixture.authenticatedTokens()
+        XCTAssertFalse(coordinatorTokens.isEmpty)
+        XCTAssertTrue(coordinatorTokens.allSatisfy { $0 == fixture.token }, "Only the paired token may reach any route")
+
         // Reload the actual private stores, as a second app process would, and
         // reconnect through the same URLSession WebSocket implementation.
         let reloadedRepository = try DeviceRepository(applicationSupportDirectory: support)
@@ -87,7 +96,7 @@ final class Issue23RemotePairingImportTests: XCTestCase {
         )
         XCTAssertEqual(connection.deviceID, device.id)
         let acceptedTokens = await fixture.authenticatedTokens()
-        XCTAssertEqual(acceptedTokens, [fixture.token, fixture.token])
+        XCTAssertEqual(acceptedTokens, coordinatorTokens + [fixture.token])
         await link.disconnect()
     }
 
@@ -222,9 +231,11 @@ private actor RemotePairingDaemonState {
     func tokensSnapshot() -> [String] { tokens }
 }
 
-/// A real WebSocket fixture on an ephemeral port.  It binds all local
+/// A real daemon-shaped fixture on an ephemeral port.  It binds all local
 /// interfaces so a LAN/Tailscale candidate is a genuine URLSession connection,
-/// while remaining isolated from the production daemon on 9900.
+/// while remaining isolated from the production daemon on 9900.  Like
+/// agentmirrord it answers `/pair/identify` (paired routes must prove the host
+/// before the client sends its token) and the `/ws` WebSocket on one port.
 private final class RemotePairingDaemonFixture: @unchecked Sendable {
     let token: String
     let hostID = "issue23-remote-host"
@@ -243,13 +254,10 @@ private final class RemotePairingDaemonFixture: @unchecked Sendable {
         self.token = token
         let addresses = Self.nonLoopbackIPv4Addresses()
         guard addresses.first != nil else { throw Issue23TestError.noPrivateIPv4Address }
-        let parameters = NWParameters.tcp
-        let webSocket = NWProtocolWebSocket.Options()
-        parameters.defaultProtocolStack.applicationProtocols.insert(webSocket, at: 0)
         guard let dynamicPort = NWEndpoint.Port(rawValue: 0) else {
             throw Issue23TestError.listenerDidNotBecomeReady
         }
-        listener = try NWListener(using: parameters, on: dynamicPort)
+        listener = try NWListener(using: .tcp, on: dynamicPort)
     }
 
     func start() async throws {
@@ -296,48 +304,109 @@ private final class RemotePairingDaemonFixture: @unchecked Sendable {
         connections.append(connection)
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard case .ready = state, let self, let connection else { return }
-            self.receive(on: connection)
+            self.readRequest(on: connection, buffer: Data())
         }
         connection.start(queue: queue)
     }
 
-    private func receive(on connection: NWConnection) {
-        connection.receiveMessage { [weak self, weak connection] data, context, _, _ in
-            guard let self, let connection, let data,
-                  let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
-                    as? NWProtocolWebSocket.Metadata,
-                  metadata.opcode == .text else {
-                connection?.cancel()
+    /// One HTTP request: `POST /pair/identify` is answered and closed; a WebSocket upgrade switches
+    /// the connection to frames.
+    private func readRequest(on connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [weak self] data, _, complete, error in
+            guard let self, error == nil else { connection.cancel(); return }
+            let buffer = buffer + (data ?? Data())
+            guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if complete { connection.cancel() } else { self.readRequest(on: connection, buffer: buffer) }
                 return
             }
-            // Only an auth JSON text message is part of the authentication
-            // ledger.  A real WebSocket also delivers control frames (and the
-            // client may send other protocol text after auth); those frames
-            // must not become a synthetic empty-token observation.
-            guard let token = Self.token(from: data) else {
-                self.receive(on: connection)
-                return
+            let head = String(decoding: buffer[..<headerEnd.lowerBound], as: UTF8.self)
+            let lines = head.components(separatedBy: "\r\n")
+            var headers: [String: String] = [:]
+            for line in lines.dropFirst() {
+                guard let colon = line.firstIndex(of: ":") else { continue }
+                headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
             }
-            Task { await self.state.record(token: token) }
-            let ok = token == self.token
-            let response = ok
-                ? #"{"v":1,"type":"auth_ack","payload":{"ok":true}}"#
-                : #"{"v":1,"type":"auth_ack","payload":{"ok":false,"reason":"unauthorized"}}"#
-            let responseMetadata = NWProtocolWebSocket.Metadata(opcode: .text)
-            let responseContext = NWConnection.ContentContext(
-                identifier: "issue23-auth-ack",
-                metadata: [responseMetadata]
-            )
-            connection.send(
-                content: Data(response.utf8),
-                contentContext: responseContext,
-                isComplete: true,
-                completion: .contentProcessed { _ in
-                    if ok { self.receive(on: connection) }
-                    else { connection.cancel() }
-                }
-            )
+            let body = buffer[headerEnd.upperBound...]
+            if lines.first?.hasPrefix("POST /pair/identify ") == true {
+                let length = Int(headers["content-length"] ?? "") ?? 0
+                guard body.count >= length else { self.readRequest(on: connection, buffer: buffer); return }
+                self.answerIdentify(Data(body.prefix(length)), on: connection)
+            } else if let key = headers["sec-websocket-key"] {
+                let accept = Data(Insecure.SHA1.hash(data: Data((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
+                let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
+                    self.readFrames(on: connection, buffer: Data(body))
+                })
+            } else {
+                connection.send(content: Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8),
+                                isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+            }
         }
+    }
+
+    private func answerIdentify(_ body: Data, on connection: NWConnection) {
+        var status = "400 Bad Request", json = #"{"code":"bad_request"}"#
+        if let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let nonce = object["nonce"] as? String, let destination = object["dest_ip"] as? String,
+           (object["host_id"] as? String).map({ $0 == hostID }) ?? true {
+            let mac = HostIdentityProbe.identifyMAC(token: token, hostID: hostID, nonce: nonce, boundIP: destination, boundPort: Int(port))
+            status = "200 OK"
+            json = #"{"v":1,"host_id":"\#(hostID)","name":"\#(name)","bound":"\#(destination):\#(port)","mac":"\#(mac)"}"#
+        }
+        let response = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nConnection: close\r\n\r\n\(json)"
+        connection.send(content: Data(response.utf8), isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    /// Client frames are masked (RFC 6455 §5.3); the only text frame that matters is `auth`.
+    private func readFrames(on connection: NWConnection, buffer: Data) {
+        var buffer = buffer
+        while let frame = Self.takeFrame(from: &buffer) {
+            switch frame.opcode {
+            case 0x1:
+                guard let token = Self.token(from: frame.payload) else { continue }
+                Task { await self.state.record(token: token) }
+                let ok = token == self.token
+                let reply = ok ? #"{"v":1,"type":"auth_ack","payload":{"ok":true}}"#
+                               : #"{"v":1,"type":"auth_ack","payload":{"ok":false,"reason":"unauthorized"}}"#
+                connection.send(content: Self.serverFrame(opcode: 0x1, Data(reply.utf8)), completion: .contentProcessed { _ in
+                    if !ok { connection.cancel() }
+                })
+                if !ok { return }
+            case 0x9:
+                connection.send(content: Self.serverFrame(opcode: 0xA, frame.payload), completion: .idempotent)
+            case 0x8:
+                connection.cancel(); return
+            default:
+                continue
+            }
+        }
+        let pending = buffer
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
+            guard let self, error == nil, !(complete && (data?.isEmpty ?? true)) else { connection.cancel(); return }
+            self.readFrames(on: connection, buffer: pending + (data ?? Data()))
+        }
+    }
+
+    private static func takeFrame(from buffer: inout Data) -> (opcode: UInt8, payload: Data)? {
+        let bytes = [UInt8](buffer)
+        guard bytes.count >= 2 else { return nil }
+        var length = Int(bytes[1] & 0x7F), offset = 2
+        if length == 126 { guard bytes.count >= 4 else { return nil }; length = Int(bytes[2]) << 8 | Int(bytes[3]); offset = 4 }
+        else if length == 127 { guard bytes.count >= 10 else { return nil }; length = bytes[2..<10].reduce(0) { $0 << 8 | Int($1) }; offset = 10 }
+        let masked = bytes[1] & 0x80 != 0
+        let mask = masked ? Array(bytes.dropFirst(offset).prefix(4)) : []
+        offset += masked ? 4 : 0
+        guard bytes.count >= offset + length else { return nil }
+        let payload = Data(bytes[offset..<offset + length].enumerated().map { masked ? $0.element ^ mask[$0.offset % 4] : $0.element })
+        buffer = Data(bytes[(offset + length)...])
+        return (bytes[0] & 0x0F, payload)
+    }
+
+    private static func serverFrame(opcode: UInt8, _ payload: Data) -> Data {
+        var frame = Data([0x80 | opcode])
+        if payload.count < 126 { frame.append(UInt8(payload.count)) }
+        else { frame.append(126); frame.append(UInt8(payload.count >> 8)); frame.append(UInt8(payload.count & 0xFF)) }
+        return frame + payload
     }
 
     private static func token(from data: Data) -> String? {

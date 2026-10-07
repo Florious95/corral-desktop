@@ -153,6 +153,44 @@ final class DeviceRepositoryTests: XCTestCase {
         XCTAssertTrue(String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("9900"))
     }
 
+    func testHostRoutesPersistReloadAndSurviveRename() async throws {
+        let support = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let lan = try ApprovedEndpoint(host: "192.168.31.116", port: 9931, pairingHostID: "studio-host-01")
+        let tailnet = try ApprovedEndpoint(host: "100.101.2.3", port: 9931, pairingHostID: "studio-host-01")
+        let device = DeviceRecord(id: DeviceID("studio"), name: "Studio", endpoint: lan, credential: CredentialHandle("c"), alternateEndpoints: [tailnet])
+        let repository = try DeviceRepository(applicationSupportDirectory: support)
+        try await repository.save(device)
+        try await repository.rename(id: device.id, to: "Mac Studio")
+
+        let reloaded = try await DeviceRepository(applicationSupportDirectory: support).listDevices()
+        XCTAssertEqual(reloaded.first?.name, "Mac Studio")
+        XCTAssertEqual(reloaded.first?.endpoints, [tailnet, lan], "Rename must not drop the Tailscale route")
+    }
+
+    func testOneUnusableStoredRouteNeverPrunesTheHost() async throws {
+        let support = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let directory = support.appendingPathComponent(DeviceRepository.namespace, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let store = """
+        [{"id":"studio","name":"Studio","credentialHandle":"c",
+          "endpoint":{"scheme":"ws","host":"192.168.31.116","port":9931,"path":"/ws","pairingHostID":"studio-host-01"},
+          "alternateEndpoints":[{"scheme":"ws","host":"8.8.8.8","port":9931,"path":"/ws","pairingHostID":"studio-host-01"},
+                                {"scheme":"ws","host":"100.101.2.3","port":9931,"path":"/ws","pairingHostID":"studio-host-01"}]},
+         {"id":"legacy","name":"Legacy","credentialHandle":"l",
+          "endpoint":{"scheme":"ws","host":"127.0.0.1","port":9919,"path":"/ws"}}]
+        """
+        let file = directory.appendingPathComponent(DeviceRepository.storageFilename)
+        try Data(store.utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+
+        let devices = try await DeviceRepository(applicationSupportDirectory: support).listDevices()
+        XCTAssertEqual(devices.map(\.id.rawValue), ["studio", "legacy"])
+        XCTAssertEqual(devices.first?.endpoints.map(\.host), ["100.101.2.3", "192.168.31.116"], "The public 8.8.8.8 route is dropped, the host kept")
+        XCTAssertEqual(devices.last?.alternateEndpoints, [])
+    }
+
     private func makeDevice(id: String, name: String) throws -> DeviceRecord {
         DeviceRecord(
             id: DeviceID(id),

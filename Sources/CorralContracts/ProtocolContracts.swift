@@ -559,8 +559,25 @@ public protocol WireCodecProtocol: BinaryFrameCodecProtocol, V1ControlCodecProto
 /// old-epoch work is rejected and side-effecting commands are never automatically replayed.
 public protocol SessionLinkProtocol: Sendable {
     func connect(to endpoint: ApprovedEndpoint, deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection
+    /// Host-centric connect: every route to one host, in dial order. The first route to authenticate
+    /// wins, and every reconnect races all routes again, so a dropped route fails over to the others.
+    func connect(toAnyOf routes: [ApprovedEndpoint], deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection
+    /// Replaces the routes later reconnects race, without touching the live connection.
+    func updateRoutes(_ routes: [ApprovedEndpoint]) async
+    /// The route the authenticated connection currently runs over.
+    func activeEndpoint() async -> ApprovedEndpoint?
     /// Claims the one event consumer; a second claim must fail explicitly.
     func eventStream() async throws -> any SessionEventStream
     func send(_ command: ClientCommand) async throws -> CommandSendReceipt
     func disconnect() async
+}
+
+/// Single-route links (test doubles) dial the preferred route only.
+public extension SessionLinkProtocol {
+    func connect(toAnyOf routes: [ApprovedEndpoint], deviceID: DeviceID, credential: CredentialHandle) async throws -> AuthenticatedConnection {
+        guard let preferred = routes.first else { throw EndpointSafetyError.invalidEndpoint }
+        return try await connect(to: preferred, deviceID: deviceID, credential: credential)
+    }
+    func updateRoutes(_ routes: [ApprovedEndpoint]) async {}
+    func activeEndpoint() async -> ApprovedEndpoint? { nil }
 }
