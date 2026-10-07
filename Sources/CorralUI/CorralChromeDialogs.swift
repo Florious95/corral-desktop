@@ -2,6 +2,7 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CorralContracts
+import Darwin
 import UniformTypeIdentifiers
 import Vision
 
@@ -925,6 +926,12 @@ public final class PairingDialogViewController: CorralDialogViewController {
     public var onCancel: (() -> Void)?
     private let imageView = NSImageView()
     private let copyButton = NSButton(title: "复制配对链接 / Token", target: nil, action: nil)
+    private let saveButton = NSButton(title: "保存二维码", target: nil, action: nil)
+    /// Test-only presentation seam. The default path below remains the native
+    /// NSSavePanel; tests inject only the user's response/selected URL so they
+    /// can exercise the real export completion without driving the remote
+    /// open-and-save-panel-service process.
+    var savePanelPresenter: ((NSSavePanel, NSWindow?, (NSApplication.ModalResponse, URL?) -> Void) -> Void)?
     public init(payload: CorralPairingPayload, onCopied: ((String) -> Void)? = nil, onSaveToken: ((String) -> Void)? = nil, onCancel: (() -> Void)? = nil) { self.payload = payload; self.onCopied = onCopied; self.onSaveToken = onSaveToken; self.onCancel = onCancel; super.init() }
     public override func loadView() {
         let root = rootView(size: NSSize(width: 380, height: 570)); view = root
@@ -936,14 +943,17 @@ public final class PairingDialogViewController: CorralDialogViewController {
         imageView.imageScaling = .scaleProportionallyUpOrDown; imageView.wantsLayer = true; imageView.layer?.backgroundColor = NSColor.white.cgColor; imageView.translatesAutoresizingMaskIntoConstraints = false; imageView.wantsLayer = true; imageView.layer?.cornerRadius = 10; root.addSubview(imageView)
         let help = NSTextField(labelWithString: payload.hostID.map { "主机 ID: \($0.prefix(8))…" } ?? "打开 Corral 移动端，选择扫码连接并对准此二维码"); help.font = .systemFont(ofSize: 10); help.textColor = CorralAestheticTokens.textMuted; help.alignment = .center; help.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(help)
         copyButton.target = self; copyButton.action = #selector(copyPairing); copyButton.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(copyButton)
+        saveButton.target = self; saveButton.action = #selector(saveQRCode); saveButton.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(saveButton)
         let done = NSButton(title: "完成", target: self, action: #selector(cancel)); done.bezelStyle = .rounded; done.translatesAutoresizingMaskIntoConstraints = false; stylePrimary(done); root.addSubview(done)
         let credentialTop: NSLayoutYAxisAnchor = payload.token.isEmpty ? tokenField.bottomAnchor : root.topAnchor
         let qrTop: CGFloat = payload.token.isEmpty ? 18 : 88
-        NSLayoutConstraint.activate([tokenField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), tokenField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), tokenField.topAnchor.constraint(equalTo: root.topAnchor, constant: 78), tokenField.heightAnchor.constraint(equalToConstant: 32), hostField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), hostField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), hostField.topAnchor.constraint(equalTo: root.topAnchor, constant: payload.token.isEmpty ? 118 : 78), hostField.heightAnchor.constraint(equalToConstant: 32), imageView.centerXAnchor.constraint(equalTo: root.centerXAnchor), imageView.topAnchor.constraint(equalTo: local ? hostField.bottomAnchor : credentialTop, constant: qrTop), imageView.widthAnchor.constraint(equalToConstant: 260), imageView.heightAnchor.constraint(equalToConstant: 260), help.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), help.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), help.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 10), copyButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), copyButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22), done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), done.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor), done.widthAnchor.constraint(equalToConstant: 84)])
+        NSLayoutConstraint.activate([tokenField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), tokenField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), tokenField.topAnchor.constraint(equalTo: root.topAnchor, constant: 78), tokenField.heightAnchor.constraint(equalToConstant: 32), hostField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), hostField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), hostField.topAnchor.constraint(equalTo: root.topAnchor, constant: payload.token.isEmpty ? 118 : 78), hostField.heightAnchor.constraint(equalToConstant: 32), imageView.centerXAnchor.constraint(equalTo: root.centerXAnchor), imageView.topAnchor.constraint(equalTo: local ? hostField.bottomAnchor : credentialTop, constant: qrTop), imageView.widthAnchor.constraint(equalToConstant: 260), imageView.heightAnchor.constraint(equalToConstant: 260), help.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), help.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), help.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 10), copyButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), copyButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22), done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), done.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor), done.widthAnchor.constraint(equalToConstant: 84), saveButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 8), saveButton.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8), saveButton.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor)])
         tokenField.target = self; tokenField.action = #selector(credentialsChanged); hostField.target = self; hostField.action = #selector(credentialsChanged)
         updateQR()
     }
     public func updateQR(token: String? = nil, hosts: String? = nil) {
+        qrImage = nil; imageView.image = nil; pairingText = nil
+        defer { saveButton.isEnabled = qrImage != nil }
         let actualToken = token ?? (payload.token.isEmpty ? tokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : payload.token)
         let suppliedHosts = (hosts ?? hostField.stringValue).split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
         let local = isLoopback(payload.url) && payload.hostID == nil
@@ -965,6 +975,43 @@ public final class PairingDialogViewController: CorralDialogViewController {
         guard let pairingText else { return }
         if payload.token.isEmpty { onSaveToken?(tokenField.stringValue) }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pairingText, forType: .string); onCopied?("配对信息已复制")
+    }
+    @objc private func saveQRCode() {
+        guard pairingText != nil, let cgImage = qrImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "Corral-Pairing.png"
+        let completion: (NSApplication.ModalResponse, URL?) -> Void = { [weak self] response, selectedURL in
+            guard let self, response == .OK, let destination = selectedURL ?? panel.url else { return }
+            do {
+                let image = CIImage(cgImage: cgImage)
+                let white = CIImage(color: .white).cropped(to: image.extent.insetBy(dx: -32, dy: -32))
+                guard let png = CIContext().pngRepresentation(of: image.composited(over: white), format: .RGBA8,
+                                                              colorSpace: CGColorSpaceCreateDeviceRGB()) else { return }
+                let temporary = destination.deletingLastPathComponent().appendingPathComponent(".corral-qr-\(UUID().uuidString).tmp")
+                let fd = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL, mode_t(0o600))
+                guard fd >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+                defer { try? output.close(); try? FileManager.default.removeItem(at: temporary) }
+                try output.write(contentsOf: png)
+                try output.synchronize()
+                try output.close()
+                guard Darwin.rename(temporary.path, destination.path) == 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+                if payload.token.isEmpty { onSaveToken?(tokenField.stringValue) }
+                ToastManager.shared.show("二维码已保存", kind: .success, in: view)
+            } catch {
+                ToastManager.shared.show("保存二维码失败", kind: .error, in: view)
+            }
+        }
+        if let savePanelPresenter {
+            savePanelPresenter(panel, view.window, completion)
+        } else if let window = view.window {
+            panel.beginSheetModal(for: window) { response in completion(response, panel.url) }
+        } else {
+            panel.begin { response in completion(response, panel.url) }
+        }
     }
     public override func handleEscape() { onCancel?(); dismiss() }
     @objc private func cancel() { onCancel?(); dismiss() }
