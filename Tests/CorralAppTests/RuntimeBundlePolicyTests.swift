@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import CorralApp
 
 /// Release gate for the native app's runtime distribution boundary.
 ///
@@ -46,27 +47,64 @@ final class RuntimeBundlePolicyTests: XCTestCase {
         )
     }
 
+    func testRuntimeManifestDoesNotRequireTheRemovedTmuxClosure() throws {
+        let runtime = appBundleURL()
+            .appendingPathComponent("Contents/Resources/Runtime", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: runtime.path) else {
+            XCTFail("Candidate keeps no verifiable runtime manifest: \(runtime.path)")
+            return
+        }
+
+        let manifestURL = runtime.appendingPathComponent("runtime-manifest.json")
+        var manifest = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
+        )
+        let files = try XCTUnwrap(manifest["files"] as? [String: Any])
+        let forbidden = files.keys.filter { name in
+            name == "tmux" || name == "lib" || name.hasPrefix("lib/") || name.hasSuffix(".dylib")
+        }
+        XCTAssertTrue(
+            forbidden.isEmpty,
+            "The runtime manifest must not advertise removed tmux/lib assets: \(forbidden.sorted())"
+        )
+
+        // Exercise the actual verifier against the expected no-tmux manifest.
+        // This catches a verifier that still treats tmux as required while
+        // allowing a defensive blacklist to mention and reject it.
+        let fixture = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        var cleanFiles: [String: Any] = [:]
+        for (name, metadata) in files where !forbidden.contains(name) {
+            let source = runtime.appendingPathComponent(name)
+            let target = fixture.appendingPathComponent(name)
+            try FileManager.default.createDirectory(
+                at: target.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.copyItem(at: source, to: target)
+            cleanFiles[name] = metadata
+        }
+        manifest["files"] = cleanFiles
+        try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+            .write(to: fixture.appendingPathComponent("runtime-manifest.json"))
+
+        XCTAssertNoThrow(
+            try BundledRuntime.verify(fixture),
+            "A valid manifest with the optional tmux/dylib closure removed must remain acceptable"
+        )
+    }
+
     func testRuntimeLaunchEnvironmentUsesSystemTmuxSearchPath() throws {
         let runtimeSource = try source("Sources/CorralApp/BundledRuntime.swift")
-        let prepareScript = try source("Scripts/prepare-runtime.py")
-        let verifyScript = try source("Scripts/verify-runtime.py")
 
+        let pathLine = runtimeSource.split(separator: "\n").first { $0.contains("\"PATH\"") }
+        XCTAssertNotNil(pathLine, "The daemon launch environment must define PATH")
         XCTAssertFalse(
-            runtimeSource.contains("\"tmux\""),
-            "The runtime manifest contract must not require an embedded tmux"
-        )
-        XCTAssertFalse(
-            runtimeSource.contains("\"PATH\": installed.path"),
+            pathLine?.contains("installed.path") == true,
             "launchd PATH must not prefer the content-addressed app runtime"
         )
-        XCTAssertTrue(runtimeSource.contains("/opt/homebrew/bin"))
-        XCTAssertTrue(runtimeSource.contains("/usr/local/bin"))
-
-        XCTAssertFalse(prepareScript.contains("args.tmux"), "Packaging must not consume a tmux input")
-        XCTAssertFalse(prepareScript.contains("stage / 'tmux'"), "Packaging must not stage tmux")
-        XCTAssertFalse(prepareScript.contains("stage / 'lib'"), "Packaging must not stage a dylib closure")
-        XCTAssertFalse(verifyScript.contains("'tmux'"), "Runtime verification must not require tmux")
-        XCTAssertFalse(verifyScript.contains("root / 'lib'"), "Runtime verification must not require lib")
+        XCTAssertTrue(pathLine?.contains("/opt/homebrew/bin") == true)
+        XCTAssertTrue(pathLine?.contains("/usr/local/bin") == true)
     }
 
     private func appBundleURL() -> URL {
@@ -88,6 +126,13 @@ final class RuntimeBundlePolicyTests: XCTestCase {
 
     private func source(_ relativePath: String) throws -> String {
         try String(contentsOf: sourceRoot.appendingPathComponent(relativePath), encoding: .utf8)
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corral-runtime-policy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
     private func isDirectory(_ url: URL) -> Bool {
