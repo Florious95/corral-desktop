@@ -17,4 +17,12 @@ mkdir -p "$APP/Contents/Resources/Fonts"
 cp "$ROOT/Resources/Corral.icns" "$APP/Contents/Resources/"
 cp "$ROOT/Sources/CorralApp/Resources/Fonts/CorralTerminalSymbols.ttf" "$APP/Contents/Resources/Fonts/"
 /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'com.corral.native.dev' >/dev/null
+if [ -n "${CORRAL_NATIVE_RUNTIME_RESOURCES:-}" ]; then
+  python3 "$ROOT/Scripts/verify-runtime.py" "$CORRAL_NATIVE_RUNTIME_RESOURCES"
+  cp -R "$CORRAL_NATIVE_RUNTIME_RESOURCES" "$APP/Contents/Resources/Runtime"
+  /usr/libexec/PlistBuddy -c 'Add :CorralSelfContainedRuntime bool true' "$APP/Contents/Info.plist"
+  # Do not use --deep: re-signing the accepted nodeprobe changes its capability hash.
+  codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP"
+  python3 "$ROOT/Scripts/verify-runtime.py" "$APP/Contents/Resources/Runtime"
+fi
 printf 'Packaged isolated development app: %s\n' "$APP"

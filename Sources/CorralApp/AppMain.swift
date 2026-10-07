@@ -125,6 +125,14 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
 
     private func startCoordinator(environment: [String: String], background: Bool) async {
         do {
+            var environment = environment
+            let explicitEndpoint = environment["CORRAL_NATIVE_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 }
+            let resources = Bundle.main.resourceURL?.appendingPathComponent(BundledRuntime.folderName, isDirectory: true)
+            let hasRuntime = resources.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(BundledRuntime.manifestName).path) } == true
+            if Bundle.main.object(forInfoDictionaryKey: "CorralSelfContainedRuntime") as? Bool == true, !hasRuntime {
+                throw BundledRuntime.Failure.invalidManifest
+            }
+            if hasRuntime, explicitEndpoint == nil { environment["CORRAL_NATIVE_PREFER_LOCAL"] = "1" }
             var supportDirectory: URL?
 #if DEBUG
             let acceptanceDirectory = try CorralAcceptanceDriver.directory(environment: environment)
@@ -165,14 +173,42 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
                 coordinator.windowController.window?.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
             }
-            let hasExplicitEndpoint = environment["CORRAL_NATIVE_ENDPOINT"].flatMap({ $0.isEmpty ? nil : $0 }) != nil
+            let hasExplicitEndpoint = explicitEndpoint != nil
+            var runtimeToken: String?
+            var runtimeConfiguration: BundledRuntime.Configuration?
+            if hasRuntime, !hasExplicitEndpoint, let resources {
+                let home = URL(fileURLWithPath: environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path).resolvingSymlinksInPath()
+                let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent(DeviceRepository.namespace, isDirectory: true)
+                runtimeConfiguration = BundledRuntime.Configuration(resources: resources, home: home, support: support,
+                    port: 9900, label: "com.corral.native.dev.agentmirrord")
+            }
+#if DEBUG
+            if environment["CORRAL_NATIVE_BOOTSTRAP_RUNTIME"] == "1" {
+                guard let acceptanceDirectory, let supportDirectory, hasRuntime, let resources,
+                      let explicitEndpoint, let url = URL(string: explicitEndpoint),
+                      let endpoint = try? ApprovedEndpoint(url: url), endpoint.port != 9900,
+                      endpoint.host == "127.0.0.1", endpoint.scheme == "ws" else { throw CorralAcceptanceDriver.Failure.unsafeConfiguration }
+                let home = acceptanceDirectory.appendingPathComponent("home", isDirectory: true)
+                guard home.resolvingSymlinksInPath().path.hasPrefix(acceptanceDirectory.path + "/") else { throw CorralAcceptanceDriver.Failure.unsafeConfiguration }
+                runtimeConfiguration = BundledRuntime.Configuration(resources: resources, home: home,
+                    support: supportDirectory.appendingPathComponent(DeviceRepository.namespace, isDirectory: true),
+                    port: endpoint.port, label: "com.corral.native.test." + String(BundledRuntime.hash(Data(acceptanceDirectory.path.utf8)).prefix(12)),
+                    discoveryDirectory: acceptanceDirectory.appendingPathComponent("tmux-\(getuid())", isDirectory: true),
+                    activityDirectory: acceptanceDirectory.appendingPathComponent("pi-activity", isDirectory: true))
+            }
+#endif
+            if let runtimeConfiguration {
+                let ready = try await BundledRuntime.shared.prepare(runtimeConfiguration)
+                runtimeToken = ready.token
+            }
             let startupDevices = try await repository.listDevices()
             let startupUsesLocalHost = startupDevices.first?.id == LocalDaemonTokenDiscovery.deviceID || startupDevices.isEmpty
-            if !hasExplicitEndpoint, startupUsesLocalHost {
+            if runtimeConfiguration == nil, !hasExplicitEndpoint, startupUsesLocalHost {
                 let token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentials)
                 await LocalDaemonSupervisor.ensureLocalDaemonRunning(token: token, environment: environment)
             }
-            await coordinator.start()
+            await coordinator.start(bootstrapToken: runtimeToken)
 #if DEBUG
             if let acceptanceDirectory {
                 let driver = CorralAcceptanceDriver(directory: acceptanceDirectory, coordinator: coordinator)

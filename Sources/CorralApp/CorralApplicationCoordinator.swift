@@ -382,7 +382,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
-    public func start() async {
+    public func start(bootstrapToken: String? = nil) async {
         guard !started else { return }
         started = true
         await deviceSessionLifecycle.configure(
@@ -394,13 +394,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         startTelemetryTimer()
         do {
             var devices = try await deviceRepository.listDevices()
-            var localToken: String?
+            var localToken = bootstrapToken
+            let preferLocal = environment["CORRAL_NATIVE_PREFER_LOCAL"] == "1"
             let hasExplicitEndpoint = environment["CORRAL_NATIVE_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 } != nil
             let selectedDevice = selectedDeviceIDs.count == 1
                 ? devices.first(where: { selectedDeviceIDs.contains($0.id) })
                 : nil
-            if !hasExplicitEndpoint, selectedDevice == nil {
-                if devices.isEmpty {
+            if !hasExplicitEndpoint, selectedDevice == nil || preferLocal {
+                if devices.isEmpty || preferLocal {
                     let local = try await prepareLocalDevice(in: devices)
                     devices = local.devices
                     localToken = local.token

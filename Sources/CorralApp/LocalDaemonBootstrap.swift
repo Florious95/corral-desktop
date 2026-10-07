@@ -111,7 +111,7 @@ enum LocalDaemonSupervisor {
             .filter { seen.insert($0.path).inserted }
     }
 
-    private static func portIsListening() -> Bool {
+    static func portIsListening(port: Int = 9900) -> Bool {
         let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
         defer { Darwin.close(descriptor) }
@@ -119,7 +119,7 @@ enum LocalDaemonSupervisor {
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = in_port_t(9900).bigEndian
+        address.sin_port = in_port_t(port).bigEndian
         address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
         return withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
