@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import QuartzCore
 import UniformTypeIdentifiers
 import Vision
 import XCTest
@@ -29,7 +30,6 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
             port: 9919
         )
         let (dialog, window) = try makeDialog(payload: payload)
-        defer { window.close() }
 
         let target = destination.appendingPathComponent("pairing.png")
         var presentedPanel: NSSavePanel?
@@ -82,8 +82,7 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
             candidates: ["wss://100.64.0.1:9919/ws"],
             hostID: "issue22-cancel-host"
         )
-        let (dialog, window) = try makeDialog(payload: payload)
-        defer { window.close() }
+        let (dialog, _) = try makeDialog(payload: payload)
 
         var presenterCalls = 0
         dialog.savePanelPresenter = { _, _, completion in
@@ -103,8 +102,7 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: destination) }
 
         let payload = CorralPairingPayload(url: "ws://127.0.0.1:9919/ws")
-        let (dialog, window) = try makeDialog(payload: payload)
-        defer { window.close() }
+        let (dialog, _) = try makeDialog(payload: payload)
         XCTAssertNil(dialog.qrImage, "A local pairing dialog without token/hosts must have no QR")
 
         var presenterCalls = 0
@@ -138,10 +136,30 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        // AppKit may still finish a close transform after close() returns.
+        // Keep the test owner alive until the teardown RunLoop drain releases
+        // it, instead of letting the animation message a deallocated window.
+        window.isReleasedWhenClosed = false
         window.contentViewController = dialog
         window.makeKeyAndOrderFront(nil)
         window.displayIfNeeded()
         dialog.view.layoutSubtreeIfNeeded()
+        addTeardownBlock { @MainActor in
+            if let sheet = window.attachedSheet {
+                window.endSheet(sheet, returnCode: .cancel)
+                sheet.orderOut(nil)
+                sheet.close()
+            }
+            dialog.savePanelPresenter = nil
+            window.orderOut(nil)
+            window.contentViewController = nil
+            window.close()
+            for _ in 0..<6 {
+                CATransaction.flush()
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.025))
+            }
+            CATransaction.flush()
+        }
         return (dialog, window)
     }
 
