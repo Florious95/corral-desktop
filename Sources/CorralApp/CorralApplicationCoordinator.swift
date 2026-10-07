@@ -1247,7 +1247,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         defer { isAddingDevice = false }
         do {
             guard let url = URL(string: request.url) else { throw EndpointSafetyError.invalidEndpoint }
-            let endpoint = try ApprovedEndpoint(url: url)
+            let endpoint = try ApprovedEndpoint(url: url, pairingHostID: request.pairingHostID)
             guard !request.token.isEmpty else { throw SessionLinkFailure.protocolViolation("device token is empty") }
             let existing = cachedDevices.first(where: { $0.endpoint == endpoint })
             let deviceID = existing?.id ?? DeviceID(UUID().uuidString)
@@ -1535,11 +1535,15 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             device = stored
             endpoint = stored.endpoint
         }
+        if endpoint.pairingHostID != nil, let device {
+            guard let token = LocalDaemonTokenDiscovery.valid(try await credentialVault.resolve(device.credential)) else { return nil }
+            return ConnectionConfiguration(endpoint: endpoint, token: token, deviceID: device.id, deviceName: device.name)
+        }
         var token = LocalDaemonTokenDiscovery.valid(environment["CORRAL_NATIVE_TOKEN"])
             ?? LocalDaemonTokenDiscovery.valid(environment["AGENTMIRROR_TOKEN"])
             ?? LocalDaemonTokenDiscovery.valid(environment["CORRAL_TOKEN"])
             ?? LocalDaemonTokenDiscovery.valid(localToken)
-        let isLocalDaemon = endpoint.port == LocalDaemonTokenDiscovery.endpoint.port
+        let isLocalDaemon = (endpoint.host == "127.0.0.1" || endpoint.host == "::1") && endpoint.port == LocalDaemonTokenDiscovery.endpoint.port
         if token == nil, isLocalDaemon {
             token = LocalDaemonTokenDiscovery.nonKeychainToken(environment: environment)
         }

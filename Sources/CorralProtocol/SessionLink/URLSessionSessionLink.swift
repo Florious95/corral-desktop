@@ -90,12 +90,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         deviceID: DeviceID,
         credential: CredentialHandle
     ) async throws -> AuthenticatedConnection {
-        let approved = try ApprovedEndpoint(
-            scheme: endpoint.scheme,
-            host: endpoint.host,
-            port: endpoint.port,
-            path: endpoint.path
-        )
+        let approved = try endpoint.revalidated()
         lifecycle &+= 1
         let currentLifecycle = lifecycle
         cancelCurrentTasks()
