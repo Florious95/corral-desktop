@@ -37,12 +37,8 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
         XCTAssertTrue(saveButton.isEnabled, "A rendered QR payload must make Save QR actionable")
 
         let target = destination.appendingPathComponent("pairing.png")
-        let panelHandled = Task { @MainActor in
-            await handleNextSavePanel(destination: target, decision: .save)
-        }
-        await Task.yield()
         saveButton.performClick(nil)
-        let didHandlePanel = await panelHandled.value
+        let didHandlePanel = await handleNextSavePanel(destination: target, decision: .save)
         XCTAssertTrue(didHandlePanel, "The Save QR action must present a controllable NSSavePanel")
 
         let savedURL = await waitForPNG(in: destination)
@@ -77,15 +73,11 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
         let (dialog, window) = try makeDialog(payload: payload)
         defer { window.close() }
         let saveButton = try XCTUnwrap(saveButton(in: dialog), "The pairing dialog must expose 保存二维码")
-        let panelHandled = Task { @MainActor in
-            await handleNextSavePanel(
-                destination: destination.appendingPathComponent("must-not-exist.png"),
-                decision: .cancel
-            )
-        }
-        await Task.yield()
         saveButton.performClick(nil)
-        let didHandlePanel = await panelHandled.value
+        let didHandlePanel = await handleNextSavePanel(
+            destination: destination.appendingPathComponent("must-not-exist.png"),
+            decision: .cancel
+        )
         XCTAssertTrue(didHandlePanel, "Cancel must be handled by the real SavePanel")
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil).isEmpty,
                       "Canceling Save QR must not create a file")
