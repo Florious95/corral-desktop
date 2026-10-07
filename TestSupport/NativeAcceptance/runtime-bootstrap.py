@@ -24,10 +24,14 @@ class RuntimeRun(Run):
         self.home = self.directory / 'home'
         self.label = 'com.corral.native.test.' + hashlib.sha256(str(self.directory).encode()).hexdigest()[:12]
         self.service = f'gui/{os.getuid()}/{self.label}'
+        self.extra_socket = self.socket.parent / 'another-user-server'
+
+    def tmux_on(self, sock, *args):
+        return subprocess.check_output([str(self.runtime / 'tmux'), '-S', str(sock), *args],
+                                       env=self.tmux_env, text=True).strip()
 
     def tmux(self, *args):
-        return subprocess.check_output([str(self.runtime / 'tmux'), '-S', str(self.socket), *args],
-                                       env=self.tmux_env, text=True).strip()
+        return self.tmux_on(self.socket, *args)
 
     def adopt_owned_label(self):
         marker = self.directory / 'storage/com.corral.native.dev/runtime/service-owner.json'
@@ -84,48 +88,56 @@ class RuntimeRun(Run):
     def verify(self):
         activity = self.directory / 'pi-activity'
         # Real Pi loads the extension by canonical auto-discovery, not --extension injection.
-        self.tmux('new-session', '-d', '-s', 'RUNTIME-PI', '-x', '100', '-y', '30', '-c', str(self.home),
-                  '/usr/bin/env', '-i', 'HOME=' + str(self.home),
+        pi_args = ['/usr/bin/env', '-i', 'HOME=' + str(self.home),
                   'PATH=' + str(self.runtime) + ':/opt/homebrew/bin:/usr/bin:/bin', 'TERM=xterm-256color',
                   'LANG=en_US.UTF-8', 'LC_ALL=en_US.UTF-8',
                   'PI_CODING_AGENT_DIR=' + str(self.home / '.pi/agent'), 'PI_TELEMETRY=0', 'PI_SKIP_VERSION_CHECK=1',
                   'NODEPROBE_PI_ACTIVITY_DIR=' + str(activity), '/opt/homebrew/bin/pi', '--offline',
-                  '--no-skills', '--no-prompt-templates', '--no-context-files', '--session-dir', str(self.directory / 'pi-sessions'))
+                  '--no-skills', '--no-prompt-templates', '--no-context-files', '--session-dir', str(self.directory / 'pi-sessions')]
+        for sock, name in [(self.socket, 'RUNTIME-PI'), (self.extra_socket, 'RUNTIME-PI-B')]:
+            self.tmux_on(sock, 'new-session', '-d', '-s', name, '-x', '100', '-y', '30', '-c', str(self.home), *pi_args)
         def record():
             if not activity.exists(): return None
             records = [json.loads(p.read_text()) for p in activity.glob('*.json')]
-            return next((r for r in records if r.get('provider') == 'pi' and r.get('schema_version') == 2), None)
-        rec = wait_for(record, 30)
-        with socket.socket(socket.AF_UNIX) as peer:
-            peer.settimeout(3)
-            peer.connect(rec['socket_path'])
-            peer.sendall(b'{"challenge":"native-package-acceptance"}\n')
-            reply = json.loads(peer.recv(65536))
-        assert reply['challenge'] == 'native-package-acceptance' and reply['instance_id'] == rec['instance_id']
-        assert reply['pid'] == rec['pid'] and reply['activity'] == 'idle'
+            valid = [r for r in records if r.get('provider') == 'pi' and r.get('schema_version') == 2]
+            return valid if len(valid) == 2 else None
+        records = wait_for(record, 30)
+        rec = records[0]
+        for record in records:
+            with socket.socket(socket.AF_UNIX) as peer:
+                peer.settimeout(3)
+                peer.connect(record['socket_path'])
+                peer.sendall(b'{"challenge":"native-package-acceptance"}\n')
+                reply = json.loads(peer.recv(65536))
+            assert reply['challenge'] == 'native-package-acceptance' and reply['instance_id'] == record['instance_id']
+            assert reply['pid'] == record['pid'] and reply['activity'] == 'idle'
         env = dict(self.tmux_env, NODEPROBE_FIXTURES=str(self.runtime / 'nodeprobe-titles.tsv'),
                    NODEPROBE_PROVIDERS=str(self.runtime / 'nodeprobe-providers.tsv'), NODEPROBE_PI_ACTIVITY_DIR=str(activity))
-        probe = subprocess.run([str(self.runtime / 'nodeprobe'), '-S', str(self.socket)], env=env, text=True, capture_output=True)
-        (self.directory / 'nodeprobe.json').write_text(probe.stdout)
-        (self.directory / 'nodeprobe.stderr').write_text(probe.stderr)
-        assert probe.returncode == 0, (probe.returncode, probe.stdout, probe.stderr)
-        report = json.loads(probe.stdout)
-        pi_nodes = [n for n in report['nodes'] if n.get('provider') == 'pi']
-        assert pi_nodes and all(n['health'] == 'normal' and n['activity'] == 'idle' for n in pi_nodes), report
+        pi_nodes = []
+        for index, sock in enumerate([self.socket, self.extra_socket]):
+            probe = subprocess.run([str(self.runtime / 'nodeprobe'), '-S', str(sock)], env=env, text=True, capture_output=True)
+            (self.directory / f'nodeprobe-{index}.json').write_text(probe.stdout)
+            (self.directory / f'nodeprobe-{index}.stderr').write_text(probe.stderr)
+            assert probe.returncode == 0, (probe.returncode, probe.stdout, probe.stderr)
+            report = json.loads(probe.stdout)
+            pi_nodes.extend(n for n in report['nodes'] if n.get('provider') == 'pi')
+        assert len(pi_nodes) == 2 and all(n['health'] == 'normal' and n['activity'] == 'idle' for n in pi_nodes), pi_nodes
         def discovered():
             state = self.command('state')
-            return state if state['agents'] and any(not p['hidden'] for p in state['panes']) else None
+            return state if len(state['agents']) == 2 and any(not p['hidden'] for p in state['panes']) else None
         state = wait_for(discovered, 30)
         assert state['connected'] and state['agents']
         pane = next(p for p in state['panes'] if not p['hidden'])
-        pane_id = pane['ref'].split('\x1f')[-1]
+        pane_socket, pane_id = pane['ref'].rsplit('\x1f', 1)
+        assert Path(pane_socket).resolve().is_relative_to(self.socket.parent.resolve())
         self.command('terminal-click', ref=pane['ref'], x=60, y=80)
         marker = 'BOOTSTRAP' + self.nonce
         self.command('key', text=marker, plain=marker, code=0)
-        wait_for(lambda: marker in self.tmux('capture-pane', '-p', '-t', pane_id), 10)
+        wait_for(lambda: marker in self.tmux_on(pane_socket, 'capture-pane', '-p', '-t', pane_id), 10)
         wait_for(lambda: any(marker in row for p in self.command('state')['panes'] for row in p['rows']), 10)
         screenshot = self.capture('bundled-runtime-real-pi', state)
-        print('PI_AUTO_DISCOVERED', json.dumps({'pid': rec['pid'], 'nodes': len(pi_nodes), 'agents': len(state['agents']), 'screenshot': str(screenshot)}), flush=True)
+        print('PI_AUTO_DISCOVERED', json.dumps({'pids': [r['pid'] for r in records], 'directProbeNodes': len(pi_nodes),
+                                               'independentTmuxServers': 2, 'agents': len(state['agents']), 'screenshot': str(screenshot)}), flush=True)
         # Owned crash recovery, then UI reopen without restarting a healthy daemon.
         subprocess.run(['launchctl', 'kill', 'SIGKILL', self.service], check=True)
         new_pid = wait_for(lambda: (pid if (pid := self.job_pid()) and pid != self.daemon_pid else None), 25)
@@ -147,6 +159,8 @@ class RuntimeRun(Run):
         self.adopt_owned_label()
         # This unique job is the only service this runner may stop.
         subprocess.run(['launchctl', 'bootout', self.service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if self.extra_socket.exists():
+            self.tmux_on(self.extra_socket, 'kill-server')
         super().cleanup()
 
 

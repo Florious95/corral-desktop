@@ -46,9 +46,9 @@ python3 TestSupport/NativeAcceptance/runtime-bootstrap.py --legacy-root /path/to
 # Also pass --app /path/copied-from-readonly-DMG/Corral.app after detaching the DMG.
 ```
 
-The runner uses the packaged tmux (no formatting shim), private HOME/token/port/socket and a unique launchd label. The app itself installs and starts the real daemon. A real offline Pi is launched without `--extension` or `--no-extensions`; auto-discovered plugin state/challenge, real nodeprobe health, Core/client listing and Pi input/echo are checked. It kills only its unique job to verify crash restart, closes/reopens only its own App and verifies daemon PID/token/plugin stability. Cleanup bootouts that exact owned job and private tmux server. No9900 requests, host Pi installation or global input.
+The runner uses the packaged tmux (no formatting shim), private HOME/token/port/socket and a unique launchd label. The app itself installs and starts the real daemon. Two real offline Pi processes on independent named tmux servers are launched without `--extension` or `--no-extensions`; both auto-discovered plugin states/challenges, real nodeprobe health, Core/client listing and Pi input/echo are checked. It kills only its unique job to verify crash restart, closes/reopens only its own App and verifies daemon PID/token/plugin stability. Cleanup bootouts that exact owned job and private tmux server. No9900 requests, host Pi installation or global input.
 
-Negative checks include corrupt bytes, outer-manifest attempts to bless a Core-incompatible plugin, symlink escape and preservation of unrelated user extensions. Missing-token authentication is not bypassed. Runtime samples and process identity receipts must remain separate from unit-test assertions.
+Negative checks include corrupt bytes, outer-manifest attempts to bless a Core-incompatible plugin, symlink escape and preservation of unrelated user extensions. A private existing listener is reused without creating a service job/token or changing that service's state directory. Missing-token authentication is not bypassed. Runtime samples and process identity receipts must remain separate from unit-test assertions.
 
 ## Boundaries
 

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import CorralApp
 
@@ -76,6 +77,39 @@ final class BundledRuntimeTests: XCTestCase {
             XCTFail("A private HOME must not escape to another Library")
         } catch BundledRuntime.Failure.unsafePath {}
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: outside.path), [])
+    }
+
+    func testAnExistingListenerIsReusedWithoutCreatingAnOwnedServiceOrToken() async throws {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer { Darwin.close(descriptor) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafeMutablePointer(to: &address) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, length) == 0 && getsockname(descriptor, $0, &length) == 0
+            }
+        }
+        XCTAssertTrue(bound)
+        XCTAssertEqual(listen(descriptor, 2), 0)
+        let port = Int(UInt16(bigEndian: address.sin_port))
+        XCTAssertNotEqual(port, 9900)
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resources = try fixture(root.appendingPathComponent("resources"), version: "one")
+        let home = root.appendingPathComponent("home")
+        let support = root.appendingPathComponent("support")
+        let configuration = BundledRuntime.Configuration(resources: resources, home: home, support: support,
+            port: port, label: "com.corral.native.test.reuse.\(UUID().uuidString)")
+        let ready = try await BundledRuntime().prepare(configuration)
+        XCTAssertTrue(ready.reusedExistingService)
+        XCTAssertNil(ready.token)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent("Library/LaunchAgents").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent("Library/Application Support/agentmirror").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.appendingPathComponent("runtime/service-owner.json").path))
     }
 
     private func root() throws -> URL {
