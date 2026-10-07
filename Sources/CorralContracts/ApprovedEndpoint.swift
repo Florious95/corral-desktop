@@ -104,9 +104,15 @@ public struct ApprovedEndpoint: Codable, Hashable, Sendable {
         public static func < (lhs: Route, rhs: Route) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
-    public var route: Route {
-        guard let bytes = Self.ipv4Octets(host) else { return .loopback }
-        return bytes[0] == 100 && (64...127).contains(bytes[1]) ? .tailnet : bytes[0] == 127 ? .loopback : .lan
+    public var route: Route { Self.route(forHost: host) ?? .loopback }
+
+    /// Classifies a literal address; nil for names and public addresses, which are no route of ours.
+    public static func route(forHost host: String) -> Route? {
+        if host == "::1" || host == "localhost" { return .loopback }
+        guard let bytes = ipv4Octets(host) else { return nil }
+        if bytes[0] == 127 { return .loopback }
+        if bytes[0] == 100 && (64...127).contains(bytes[1]) { return .tailnet }
+        return isPairingHost(host) ? .lan : nil
     }
 
     /// Host-centric dial order: Tailscale, then LAN, then loopback; stable within a route and de-duplicated.

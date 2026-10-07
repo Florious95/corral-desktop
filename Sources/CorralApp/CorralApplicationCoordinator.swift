@@ -1079,6 +1079,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             self?.addDeviceDialog = nil
             self?.activeDialog = nil
         })
+        dialog.onDiscoverNearby = { [weak self] in self?.presentNearbyHostsDialog() }
         addDeviceDialog = dialog
         activeDialog = dialog
         dialog.present(over: windowController.window)
@@ -1445,7 +1446,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         Task { @MainActor in
             do {
                 try await controller.reloadDevices()
-                controller.setReadyDevices(connected ? Set([configuredDeviceID].compactMap { $0 }) : [])
+                controller.setReadyDevices(connected ? Set([configuredDeviceID].compactMap { $0 }) : [], activeRoute: activeRoute)
                 if let configuredDeviceID { controller.setDevice(configuredDeviceID, selected: true) }
                 self.selectedDeviceIDs = controller.selectedDeviceIDs
                 panel.updateContentSizeAndPosition(anchoredTo: self.workspaceView.tabBar.devicesButton)

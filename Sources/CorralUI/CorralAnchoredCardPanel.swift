@@ -47,17 +47,23 @@ public final class CorralAnchoredCardPanel: NSPanel {
         let contentSize = contentViewController?.preferredContentSize ?? frame.size
         let sourceRect = window.convertToScreen(sourceView.convert(sourceView.bounds, to: nil))
         setFrame(
-            Self.frame(contentSize: contentSize, sourceRectInScreen: sourceRect, windowFrame: window.frame),
+            Self.frame(contentSize: contentSize, sourceRectInScreen: sourceRect, windowFrame: window.frame,
+                       visibleFrame: window.screen?.visibleFrame),
             display: false
         )
     }
 
-    public static func frame(contentSize: NSSize, sourceRectInScreen: NSRect, windowFrame: NSRect) -> NSRect {
-        NSRect(
+    /// Anchored above the source; kept inside the screen's visible frame when the window sits near an edge.
+    public static func frame(contentSize: NSSize, sourceRectInScreen: NSRect, windowFrame: NSRect, visibleFrame: NSRect? = nil) -> NSRect {
+        var frame = NSRect(
             x: windowFrame.minX + windowLeftInset,
             y: sourceRectInScreen.maxY + anchorGap,
             width: cardWidth,
             height: contentSize.height
         )
+        guard let visible = visibleFrame else { return frame }
+        frame.origin.x = min(max(frame.minX, visible.minX + 8), visible.maxX - frame.width - 8)
+        frame.origin.y = min(max(frame.minY, visible.minY + 8), visible.maxY - frame.height - 8)
+        return frame
     }
 }

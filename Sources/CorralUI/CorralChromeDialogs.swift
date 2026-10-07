@@ -147,44 +147,6 @@ open class CorralDialogViewController: NSViewController {
         return row
     }
 
-    public func addHeader(to root: NSView, title: String, subtitle: String? = nil, top: CGFloat = 26) -> CGFloat {
-        let titleLabel = NSTextField(labelWithString: title); titleLabel.font = .systemFont(ofSize: 16, weight: .semibold); titleLabel.textColor = CorralAestheticTokens.text; titleLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(titleLabel)
-        NSLayoutConstraint.activate([titleLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), titleLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: top)])
-        guard let subtitle else { return top + 28 }
-        let sub = NSTextField(labelWithString: subtitle); sub.font = .systemFont(ofSize: 11); sub.textColor = CorralAestheticTokens.textMuted; sub.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(sub)
-        NSLayoutConstraint.activate([sub.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor), sub.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor), sub.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5)])
-        return top + 47
-    }
-
-    public func addLabel(_ text: String, to root: NSView, x: CGFloat = 24, y: CGFloat, width: CGFloat = 400) -> NSTextField {
-        let label = NSTextField(labelWithString: text); label.font = .systemFont(ofSize: 11, weight: .medium); label.textColor = CorralAestheticTokens.textSecondary; label.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(label)
-        NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: x), label.topAnchor.constraint(equalTo: root.topAnchor, constant: y), label.widthAnchor.constraint(lessThanOrEqualToConstant: width)])
-        return label
-    }
-
-    public func addTextField(to root: NSView, placeholder: String, y: CGFloat, secure: Bool = false) -> NSTextField {
-        let field: NSTextField = secure ? NSSecureTextField() : NSTextField()
-        field.placeholderString = placeholder; field.font = .systemFont(ofSize: 12); field.textColor = CorralAestheticTokens.text; field.backgroundColor = CorralAestheticTokens.surface0; field.isBezeled = true; field.bezelStyle = .roundedBezel; field.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(field)
-        NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), field.topAnchor.constraint(equalTo: root.topAnchor, constant: y), field.heightAnchor.constraint(equalToConstant: 32)])
-        return field
-    }
-
-    @discardableResult public func addActionButtons(to root: NSView, cancel: Selector, primary: Selector, primaryTitle: String = "完成", primaryEnabled: Bool = true) -> (cancel: NSButton, primary: NSButton) {
-        let cancelButton = NSButton(title: "取消", target: self, action: cancel); cancelButton.bezelStyle = .rounded; cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        let primaryButton = NSButton(title: primaryTitle, target: self, action: primary); primaryButton.bezelStyle = .rounded; primaryButton.keyEquivalent = "\r"; primaryButton.isEnabled = primaryEnabled; primaryButton.translatesAutoresizingMaskIntoConstraints = false
-        stylePrimary(primaryButton)
-        root.addSubview(cancelButton); root.addSubview(primaryButton)
-        NSLayoutConstraint.activate([cancelButton.trailingAnchor.constraint(equalTo: primaryButton.leadingAnchor, constant: -8), cancelButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20), cancelButton.widthAnchor.constraint(equalToConstant: 74), primaryButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), primaryButton.bottomAnchor.constraint(equalTo: cancelButton.bottomAnchor), primaryButton.widthAnchor.constraint(equalToConstant: 84)])
-        return (cancelButton, primaryButton)
-    }
-
-    public func stylePrimary(_ button: NSButton) {
-        // `.chr-btn-primary`: action-primary fill, 8px radius, no bezel.
-        button.isBordered = false; button.wantsLayer = true; button.layer?.backgroundColor = CorralAestheticTokens.actionPrimaryBackground.cgColor; button.layer?.cornerRadius = 8; button.layer?.borderWidth = 0
-        button.attributedTitle = NSAttributedString(string: button.title, attributes: [.foregroundColor: CorralAestheticTokens.actionPrimaryForeground, .font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
-        button.contentTintColor = CorralAestheticTokens.actionPrimaryForeground
-    }
-
     public func dismiss() { closeDialog() }
 }
 
@@ -213,9 +175,9 @@ final class CorralDialogLabel: NSTextField {
 }
 
 @MainActor
-func chrLabel(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor, lineHeight: CGFloat = 1.4) -> NSTextField {
+func chrLabel(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor, lineHeight: CGFloat = 1.4, alignment: NSTextAlignment = .natural) -> NSTextField {
     let label = CorralDialogLabel(wrappingLabelWithString: "")
-    label.attributedStringValue = chrText(text, size: size, weight: weight, color: color, lineHeight: lineHeight)
+    label.attributedStringValue = chrText(text, size: size, weight: weight, color: color, lineHeight: lineHeight, alignment: alignment)
     label.lineHeight = size * lineHeight; label.isSelectable = false; label.preferredMaxLayoutWidth = 380
     return label
 }
@@ -686,8 +648,8 @@ public final class SettingsDialogViewController: CorralDialogViewController {
 
         let savedIcon = NSImageView(image: CorralLegacyIcon.image(.check, size: 12) ?? NSImage()); savedIcon.contentTintColor = CorralAestheticTokens.success
         let saved = horizontal([savedIcon, label("修改即时保存", size: 11, color: CorralAestheticTokens.textSecondary)], spacing: 6)
-        let done = NSButton(title: "完成", target: self, action: #selector(close)); done.keyEquivalent = "\r"; done.setAccessibilityIdentifier("corral.settings.done")
-        stylePrimary(done); pin(done, width: 76, height: 32)
+        let done = CorralDialogButton(title: "完成", kind: .primary, target: self, action: #selector(close)); done.keyEquivalent = "\r"; done.setAccessibilityIdentifier("corral.settings.done")
+        done.minimumWidth = CorralDialogButton.footerMinimumWidth
         let footer = horizontal([saved, spacer(), done])
         footer.edgeInsets = NSEdgeInsets(top: 12, left: 24, bottom: 12, right: 24)
         let footerBorder = NSView(); footerBorder.wantsLayer = true; footerBorder.layer?.backgroundColor = CorralAestheticTokens.borderSubtle.cgColor
@@ -799,15 +761,33 @@ public final class SettingsDialogViewController: CorralDialogViewController {
     }
 }
 
+/// A floating capsule: kind dot, one line of text, soft shadow. The text stays in the body colour so long
+/// errors remain readable; the dot carries the kind.
 @MainActor
 public final class ToastView: NSView {
     public enum Kind: String, Sendable { case info, success, warning, error }
     public let messageLabel = NSTextField(labelWithString: "")
+    public let kind: Kind
     public init(message: String, kind: Kind = .info) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 44)); wantsLayer = true; layer?.cornerRadius = 8; layer?.backgroundColor = CorralAestheticTokens.surface2.cgColor; layer?.borderColor = CorralAestheticTokens.border.cgColor; layer?.borderWidth = 1
-        let color: NSColor = switch kind { case .info: CorralAestheticTokens.text; case .success: CorralAestheticTokens.success; case .warning: CorralAestheticTokens.warning; case .error: CorralAestheticTokens.danger }
-        messageLabel.stringValue = message; messageLabel.textColor = color; messageLabel.font = .systemFont(ofSize: 12); messageLabel.lineBreakMode = .byTruncatingTail; messageLabel.translatesAutoresizingMaskIntoConstraints = false; addSubview(messageLabel)
-        NSLayoutConstraint.activate([messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14), messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14), messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor)])
+        self.kind = kind
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 44)); wantsLayer = true
+        layer?.cornerRadius = 12; layer?.backgroundColor = CorralAestheticTokens.dialogBackground.cgColor
+        layer?.borderColor = CorralAestheticTokens.dialogRing.cgColor; layer?.borderWidth = CorralAestheticTokens.isDark ? 1 : 0.5
+        layer?.shadowColor = NSColor.black.cgColor; layer?.shadowOpacity = CorralAestheticTokens.isDark ? 0.4 : 0.16
+        layer?.shadowRadius = 14; layer?.shadowOffset = NSSize(width: 0, height: -6)
+        let tint: NSColor = switch kind { case .info: CorralAestheticTokens.accent; case .success: CorralAestheticTokens.success; case .warning: CorralAestheticTokens.warning; case .error: CorralAestheticTokens.danger }
+        let dot = NSView(); dot.wantsLayer = true; dot.layer?.cornerRadius = 4; dot.layer?.backgroundColor = tint.cgColor
+        dot.translatesAutoresizingMaskIntoConstraints = false; addSubview(dot)
+        messageLabel.stringValue = message; messageLabel.textColor = CorralAestheticTokens.text; messageLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
+        messageLabel.lineBreakMode = .byTruncatingTail; messageLabel.toolTip = message
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false; addSubview(messageLabel)
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16), dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 8), dot.heightAnchor.constraint(equalToConstant: 8),
+            messageLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 10), messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        setAccessibilityElement(true); setAccessibilityRole(.staticText); setAccessibilityLabel(message)
     }
     public required init?(coder: NSCoder) { nil }
 }
@@ -848,33 +828,59 @@ private struct ImportedPairing: Decodable {
 }
 
 @MainActor
-public final class AddDeviceDialogViewController: CorralDialogViewController {
+public final class AddDeviceDialogViewController: CorralDialogViewController, NSTextFieldDelegate {
     public required init?(coder: NSCoder) { nil }
     public override var initialFirstResponder: NSView? { addressField }
-    public let nameField = NSTextField()
-    public let addressField = NSTextField()
-    public let tokenField = NSSecureTextField()
+    public let nameField = CorralDialogTextField()
+    public let addressField = CorralDialogTextField()
+    public let tokenField = CorralDialogSecureTextField()
     public private(set) var candidates: [String] = []
     private var pairingHostID: String?
     public private(set) var validationMessage: String?
     public var onSubmit: ((CorralAddDeviceRequest) -> Void)?
     public var onCancel: (() -> Void)?
-    private let errorLabel = NSTextField(labelWithString: "")
+    /// Hides the 发现附近主机 suggestion when unset.
+    public var onDiscoverNearby: (() -> Void)? { didSet { discoverRow?.isHidden = onDiscoverNearby == nil } }
+    public private(set) weak var addButton: NSButton?
+    private let errorLabel = chrLabel("", size: 11, color: CorralAestheticTokens.danger)
+    private let hintLabel = chrLabel("可直接粘贴配对二维码里的 JSON，自动填好以上内容。", size: 11, color: CorralAestheticTokens.textMuted)
+    private weak var discoverRow: NSView?
+    private weak var cardStack: NSStackView?
     public init(onSubmit: ((CorralAddDeviceRequest) -> Void)? = nil, onCancel: (() -> Void)? = nil) { self.onSubmit = onSubmit; self.onCancel = onCancel; super.init() }
+
+    /// Title, a 发现附近主机 shortcut, three labelled inputs, a hint that becomes the error line, then
+    /// 导入二维码图片… on the left and a matched 取消 / 添加 pair on the right.
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 460, height: 430)); view = root
-        _ = addHeader(to: root, title: "添加设备", subtitle: "填写 agentmirrord 打印的地址与配对 Token")
-        _ = addLabel("显示名称（可选）", to: root, y: 86); nameField.placeholderString = "Mac Studio @ Home"; style(nameField); place(nameField, in: root, y: 107)
-        _ = addLabel("WebSocket 地址", to: root, y: 147); addressField.placeholderString = "ws://192.168.31.116:9900/ws"; style(addressField); place(addressField, in: root, y: 168)
-        _ = addLabel("配对 Token", to: root, y: 208); tokenField.placeholderString = "粘贴配对 Token"; style(tokenField); place(tokenField, in: root, y: 229)
-        let hint = NSTextField(labelWithString: "粘贴配对二维码里的 JSON 可自动填充"); hint.font = .systemFont(ofSize: 10); hint.textColor = CorralAestheticTokens.textMuted; hint.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(hint); hint.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true; hint.topAnchor.constraint(equalTo: tokenField.bottomAnchor, constant: 8).isActive = true
-        errorLabel.font = .systemFont(ofSize: 10); errorLabel.textColor = CorralAestheticTokens.danger; errorLabel.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(errorLabel); errorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24).isActive = true; errorLabel.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 6).isActive = true
-        let actions = addActionButtons(to: root, cancel: #selector(cancel), primary: #selector(submit), primaryTitle: "添加")
-        let importButton = NSButton(title: "导入二维码", target: self, action: #selector(importQRCode))
-        importButton.bezelStyle = .rounded; importButton.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(importButton)
-        NSLayoutConstraint.activate([importButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), importButton.bottomAnchor.constraint(equalTo: actions.cancel.bottomAnchor)])
-        root.registerForDraggedTypes([.string])
+        let discover = CorralSuggestionButton(icon: .radar, title: "发现附近主机", detail: "自动查找局域网与 Tailscale 上的 Corral 主机",
+                                              target: self, action: #selector(discoverNearby))
+        discover.setAccessibilityIdentifier("corral.adddevice.discover"); discover.isHidden = onDiscoverNearby == nil; discoverRow = discover
+        nameField.setAccessibilityIdentifier("corral.adddevice.name"); addressField.setAccessibilityIdentifier("corral.adddevice.address")
+        tokenField.setAccessibilityIdentifier("corral.adddevice.token")
+        for field in [nameField, addressField] as [NSTextField] { field.delegate = self }
+        tokenField.delegate = self
+        let importButton = CorralDialogButton(title: "导入二维码图片…", kind: .plain, icon: .image, target: self, action: #selector(importQRCode))
+        let cancel = CorralDialogButton(title: "取消", kind: .plain, target: self, action: #selector(cancel))
+        let add = CorralDialogButton(title: "添加", kind: .primary, target: self, action: #selector(submit)); add.keyEquivalent = "\r"
+        addButton = add
+        errorLabel.isHidden = true
+        view = cardLayout([
+            (chrLabel("添加设备", size: 15, weight: .bold, color: CorralAestheticTokens.text), 2),
+            (chrLabel("扫描主机的配对二维码，或填写它打印的地址与 Token。", size: 12, color: CorralAestheticTokens.textMuted), 14),
+            (discover, 16),
+            (fieldLabel("显示名称（可选）"), 6), (CorralDialogInputBox(field: nameField, placeholder: "Mac Studio @ Home"), 12),
+            (fieldLabel("WebSocket 地址"), 6), (CorralDialogInputBox(field: addressField, placeholder: "ws://192.168.31.116:9900/ws"), 12),
+            (fieldLabel("配对 Token"), 6), (CorralDialogInputBox(field: tokenField, placeholder: "粘贴配对 Token"), 8),
+            (hintLabel, 18),
+            (errorLabel, 14),
+            (actionsRow([cancel, add], leading: [importButton]), 0)
+        ])
+        cardStack = view.subviews.first as? NSStackView
+        view.setAccessibilityIdentifier("corral.adddevice.dialog")
+        view.registerForDraggedTypes([.string])
     }
+
+    private func fieldLabel(_ text: String) -> NSTextField { chrLabel(text, size: 11.5, weight: .semibold, color: CorralAestheticTokens.textMuted) }
+
     public override func handlePaste(_ text: String) -> Bool { acceptPairingJSON(text) }
     public func acceptPairingJSON(_ text: String) -> Bool {
         pairingHostID = nil
@@ -899,13 +905,19 @@ public final class AddDeviceDialogViewController: CorralDialogViewController {
         validate(); return true
     }
     @objc public func submit() {
-        validate(); guard validationMessage == nil else { errorLabel.stringValue = validationMessage ?? ""; return }
+        validate(); guard validationMessage == nil else { return }
         let url = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let defaultName = URL(string: url)?.host ?? url
         onSubmit?(CorralAddDeviceRequest(name: nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultName : nameField.stringValue, url: url, token: tokenField.stringValue, candidates: candidates, pairingHostID: candidates.contains(url) ? pairingHostID : nil))
     }
+    public func controlTextDidChange(_ obj: Notification) {
+        // Editing clears a stale error; validation runs again on 添加.
+        guard validationMessage != nil else { return }
+        validationMessage = nil; showValidation()
+    }
     public override func handleEscape() { onCancel?(); dismiss() }
     @objc private func cancel() { onCancel?(); dismiss() }
+    @objc private func discoverNearby() { onDiscoverNearby?() }
     @objc private func importQRCode() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
@@ -923,7 +935,7 @@ public final class AddDeviceDialogViewController: CorralDialogViewController {
                 }
                 submit()
             } catch {
-                errorLabel.stringValue = "无法导入，请选择有效的 Corral 配对二维码"
+                validationMessage = "无法导入，请选择有效的 Corral 配对二维码"; showValidation()
             }
         }
         if let window = view.window { panel.beginSheetModal(for: window, completionHandler: completion) }
@@ -932,10 +944,57 @@ public final class AddDeviceDialogViewController: CorralDialogViewController {
     private func validate() {
         let url = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         validationMessage = url.hasPrefix("ws://") || url.hasPrefix("wss://") ? nil : "地址必须以 ws:// 或 wss:// 开头"
-        if isViewLoaded { errorLabel.stringValue = validationMessage ?? "" }
+        showValidation()
     }
-    private func style(_ field: NSTextField) { field.font = .systemFont(ofSize: 12); field.textColor = CorralAestheticTokens.text; field.backgroundColor = CorralAestheticTokens.surface0; field.isBezeled = true; field.bezelStyle = .roundedBezel; field.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(field) }
-    private func place(_ field: NSTextField, in root: NSView, y: CGFloat) { NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), field.topAnchor.constraint(equalTo: root.topAnchor, constant: y), field.heightAnchor.constraint(equalToConstant: 32)]) }
+    /// The error line sits under the hint and grows the card, like `.nad-error`.
+    private func showValidation() {
+        guard isViewLoaded else { return }
+        errorLabel.attributedStringValue = chrText(validationMessage ?? "", size: 11, color: CorralAestheticTokens.danger)
+        errorLabel.isHidden = validationMessage == nil
+        cardStack?.setCustomSpacing(validationMessage == nil ? 18 : 6, after: hintLabel)
+    }
+}
+
+/// A full-width shortcut card: tinted glyph tile, title, one-line detail and a chevron.
+@MainActor
+final class CorralSuggestionButton: NSButton {
+    private let glyph: CorralLegacyIcon
+    private let detail: String
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init(icon: CorralLegacyIcon, title: String, detail: String, target: AnyObject?, action: Selector?) {
+        glyph = icon; self.detail = detail
+        super.init(frame: .zero)
+        self.title = title; self.target = target; self.action = action
+        isBordered = false; translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 52).isActive = true
+        setAccessibilityLabel("\(title)，\(detail)")
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+    override func mouseEntered(with event: NSEvent) { hovering = isEnabled }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: 11, yRadius: 11).fill() }
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let box = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let accent = CorralAestheticTokens.accent
+        accent.withAlphaComponent(hovering || isHighlighted ? (CorralAestheticTokens.isDark ? 0.16 : 0.10) : (CorralAestheticTokens.isDark ? 0.09 : 0.055)).setFill()
+        NSBezierPath(roundedRect: box, xRadius: 11, yRadius: 11).fill()
+        let ring = NSBezierPath(roundedRect: box, xRadius: 11, yRadius: 11); ring.lineWidth = 1
+        accent.withAlphaComponent(CorralAestheticTokens.isDark ? 0.28 : 0.22).setStroke(); ring.stroke()
+        let tile = NSRect(x: 12, y: (bounds.height - 30) / 2, width: 30, height: 30)
+        accent.withAlphaComponent(CorralAestheticTokens.isDark ? 0.20 : 0.13).setFill()
+        NSBezierPath(roundedRect: tile, xRadius: 8, yRadius: 8).fill()
+        CorralLegacyIcon.image(glyph, size: 16, tint: accent)?.draw(in: tile.insetBy(dx: 7, dy: 7), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        chrText(title, size: 13, weight: .semibold, color: CorralAestheticTokens.text).draw(with: NSRect(x: 54, y: 8, width: bounds.width - 84, height: 18.2), options: [.usesLineFragmentOrigin])
+        chrText(detail, size: 11.5, color: CorralAestheticTokens.textMuted).draw(with: NSRect(x: 54, y: 27, width: bounds.width - 84, height: 16.1), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        CorralLegacyIcon.image(.chevronRight, size: 14, tint: CorralAestheticTokens.textMuted)?.draw(in: NSRect(x: bounds.width - 26, y: (bounds.height - 14) / 2, width: 14, height: 14),
+                                                                                                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
 }
 
 public struct CorralPairingPayload: Equatable, Sendable {
@@ -949,11 +1008,11 @@ public struct CorralPairingPayload: Equatable, Sendable {
 }
 
 @MainActor
-public final class PairingDialogViewController: CorralDialogViewController {
+public final class PairingDialogViewController: CorralDialogViewController, NSTextFieldDelegate {
     public required init?(coder: NSCoder) { nil }
     public override var initialFirstResponder: NSView? { payload.token.isEmpty ? tokenField : (isLoopback(payload.url) ? hostField : copyButton) }
-    public let tokenField = NSSecureTextField()
-    public let hostField = NSTextField()
+    public let tokenField = CorralDialogSecureTextField()
+    public let hostField = CorralDialogTextField()
     public override var canDismissWithEscape: Bool { true }
     public private(set) var qrImage: NSImage?
     public private(set) var pairingText: String?
@@ -961,52 +1020,84 @@ public final class PairingDialogViewController: CorralDialogViewController {
     public var onCopied: ((String) -> Void)?
     public var onSaveToken: ((String) -> Void)?
     public var onCancel: (() -> Void)?
-    private let imageView = NSImageView()
-    private let copyButton = NSButton(title: "复制配对链接 / Token", target: nil, action: nil)
-    private let saveButton = NSButton(title: "保存二维码", target: nil, action: nil)
+    private let qrStage = CorralQRStageView()
+    private lazy var copyButton = CorralDialogButton(title: "复制配对信息", kind: .secondary, icon: .copy, target: self, action: #selector(copyPairing))
+    private lazy var saveButton = CorralDialogButton(title: "保存二维码", kind: .secondary, icon: .download, target: self, action: #selector(saveQRCode))
     /// Test-only presentation seam. The default path below remains the native
     /// NSSavePanel; tests inject only the user's response/selected URL so they
     /// can exercise the real export completion without driving the remote
     /// open-and-save-panel-service process.
     var savePanelPresenter: ((NSSavePanel, NSWindow?, (NSApplication.ModalResponse, URL?) -> Void) -> Void)?
     public init(payload: CorralPairingPayload, onCopied: ((String) -> Void)? = nil, onSaveToken: ((String) -> Void)? = nil, onCancel: (() -> Void)? = nil) { self.payload = payload; self.onCopied = onCopied; self.onSaveToken = onSaveToken; self.onCancel = onCancel; super.init() }
+
+    /// Title, optional credential inputs, the QR on a white tile, the host and its routes, then
+    /// 复制配对信息 / 保存二维码 on the left and 完成 on the right; the card hugs its rows.
     public override func loadView() {
-        let root = rootView(size: NSSize(width: 380, height: 570)); view = root
-        _ = addHeader(to: root, title: "配对移动端", subtitle: "用手机扫描二维码，即可连接这台 Mac")
-        tokenField.placeholderString = "粘贴 agentmirrord 配对 Token"; tokenField.isBezeled = true; tokenField.bezelStyle = .roundedBezel; tokenField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(tokenField)
-        hostField.placeholderString = "192.168.1.23，可用逗号分隔多个地址"; hostField.isBezeled = true; hostField.bezelStyle = .roundedBezel; hostField.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(hostField)
         let local = isLoopback(payload.url) && payload.hostID == nil
-        tokenField.isHidden = !payload.token.isEmpty; hostField.isHidden = !local
-        imageView.imageScaling = .scaleProportionallyUpOrDown; imageView.wantsLayer = true; imageView.layer?.backgroundColor = NSColor.white.cgColor; imageView.translatesAutoresizingMaskIntoConstraints = false; imageView.wantsLayer = true; imageView.layer?.cornerRadius = 10; root.addSubview(imageView)
-        let help = NSTextField(labelWithString: payload.hostID.map { "主机 ID: \($0.prefix(8))…" } ?? "打开 Corral 移动端，选择扫码连接并对准此二维码"); help.font = .systemFont(ofSize: 10); help.textColor = CorralAestheticTokens.textMuted; help.alignment = .center; help.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(help)
-        copyButton.target = self; copyButton.action = #selector(copyPairing); copyButton.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(copyButton)
-        saveButton.target = self; saveButton.action = #selector(saveQRCode); saveButton.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(saveButton)
-        let done = NSButton(title: "完成", target: self, action: #selector(cancel)); done.bezelStyle = .rounded; done.translatesAutoresizingMaskIntoConstraints = false; stylePrimary(done); root.addSubview(done)
-        let credentialTop: NSLayoutYAxisAnchor = payload.token.isEmpty ? tokenField.bottomAnchor : root.topAnchor
-        let qrTop: CGFloat = payload.token.isEmpty ? 18 : 88
-        NSLayoutConstraint.activate([tokenField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), tokenField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), tokenField.topAnchor.constraint(equalTo: root.topAnchor, constant: 78), tokenField.heightAnchor.constraint(equalToConstant: 32), hostField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), hostField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), hostField.topAnchor.constraint(equalTo: root.topAnchor, constant: payload.token.isEmpty ? 118 : 78), hostField.heightAnchor.constraint(equalToConstant: 32), imageView.centerXAnchor.constraint(equalTo: root.centerXAnchor), imageView.topAnchor.constraint(equalTo: local ? hostField.bottomAnchor : credentialTop, constant: qrTop), imageView.widthAnchor.constraint(equalToConstant: 260), imageView.heightAnchor.constraint(equalToConstant: 260), help.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), help.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), help.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 10), copyButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), copyButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22), done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), done.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor), done.widthAnchor.constraint(equalToConstant: 84), saveButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 8), saveButton.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8), saveButton.bottomAnchor.constraint(equalTo: copyButton.bottomAnchor)])
+        tokenField.delegate = self; hostField.delegate = self
         tokenField.target = self; tokenField.action = #selector(credentialsChanged); hostField.target = self; hostField.action = #selector(credentialsChanged)
+        let done = CorralDialogButton(title: "完成", kind: .primary, target: self, action: #selector(cancel)); done.keyEquivalent = "\r"
+        copyButton.setAccessibilityIdentifier("corral.pairing.copy"); saveButton.setAccessibilityIdentifier("corral.pairing.save")
+        var rows: [(view: NSView, marginBottom: CGFloat)] = [
+            (chrLabel("配对移动端", size: 15, weight: .bold, color: CorralAestheticTokens.text), 2),
+            (chrLabel("打开 Corral 移动端扫描二维码，即可连接这台 Mac。", size: 12, color: CorralAestheticTokens.textMuted), 16)
+        ]
+        if payload.token.isEmpty {
+            rows += [(fieldLabel("配对 Token"), 6), (CorralDialogInputBox(field: tokenField, placeholder: "粘贴 agentmirrord 配对 Token"), 12)]
+        }
+        if local {
+            rows += [(fieldLabel("手机可访问的地址"), 6), (CorralDialogInputBox(field: hostField, placeholder: "192.168.1.23，可用逗号分隔多个地址"), 14)]
+        }
+        let chips = routeChips()
+        rows += [(qrStage, 12), (hostCaption(), chips.arrangedSubviews.isEmpty ? 18 : 8)]
+        if !chips.arrangedSubviews.isEmpty { rows.append((chips, 18)) }
+        rows.append((actionsRow([done], leading: [copyButton, saveButton]), 0))
+        view = cardLayout(rows)
+        view.setAccessibilityIdentifier("corral.pairing.dialog")
         updateQR()
     }
+
+    private func fieldLabel(_ text: String) -> NSTextField { chrLabel(text, size: 11.5, weight: .semibold, color: CorralAestheticTokens.textMuted) }
+
+    private func hostCaption() -> NSTextField {
+        let name = payload.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let text = [name, payload.hostID.map { "主机 ID \($0.prefix(8))…" }].compactMap { $0 }.joined(separator: " · ")
+        return chrLabel(text.isEmpty ? "用手机扫码后即可添加这台 Mac" : text, size: 11.5, color: CorralAestheticTokens.textMuted, alignment: .center)
+    }
+
+    /// One centred chip per route the QR advertises, Tailscale first.
+    private func routeChips() -> NSStackView {
+        var seen = Set<ApprovedEndpoint.Route>()
+        let routes = payload.candidates.compactMap { URLComponents(string: $0)?.host }
+            .compactMap { host in ApprovedEndpoint.route(forHost: host).map { ($0, host) } }
+            .filter { $0.0 != .loopback }
+            .sorted { $0.0 < $1.0 }
+            .filter { seen.insert($0.0).inserted }
+        let row = NSStackView(views: routes.map { CorralRouteChip(route: $0.0, address: $0.1) }); row.orientation = .horizontal; row.spacing = 6
+        let centred = NSStackView(views: [row]); centred.orientation = .vertical; centred.alignment = .centerX
+        return row.arrangedSubviews.isEmpty ? row : centred
+    }
+
     public func updateQR(token: String? = nil, hosts: String? = nil) {
-        qrImage = nil; imageView.image = nil; pairingText = nil
-        defer { saveButton.isEnabled = qrImage != nil }
+        qrImage = nil; qrStage.image = nil; pairingText = nil
+        defer { saveButton.isEnabled = qrImage != nil; copyButton.isEnabled = pairingText != nil }
         let actualToken = token ?? (payload.token.isEmpty ? tokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : payload.token)
         let suppliedHosts = (hosts ?? hostField.stringValue).split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
         let local = isLoopback(payload.url) && payload.hostID == nil
-        guard !actualToken.isEmpty, !local || !suppliedHosts.isEmpty else { qrImage = nil; imageView.image = nil; pairingText = nil; return }
+        guard !actualToken.isEmpty, !local || !suppliedHosts.isEmpty else { qrStage.placeholder = local ? "填写 Token 与地址后生成二维码" : "填写配对 Token 后生成二维码"; return }
         let candidates = local ? suppliedHosts.map { reachableURL(host: $0, baseURL: payload.url) } : payload.candidates
         let url = candidates.first ?? payload.url
         var payloadObject: [String: Any] = ["v": 1, "url": url, "token": actualToken, "ts_authkey": "", "candidates": candidates]
         if let name = payload.name { payloadObject["name"] = name }
         if let hostID = payload.hostID { payloadObject["host_id"] = hostID }
         if let port = payload.port { payloadObject["port"] = Int(port) }
-        guard let data = try? JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]) else { qrImage = nil; imageView.image = nil; pairingText = nil; return }
+        guard let data = try? JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]) else { return }
         let text = String(data: data, encoding: .utf8) ?? ""
         let filter = CIFilter.qrCodeGenerator(); filter.message = Data(text.utf8); filter.correctionLevel = "M"
         guard let output = filter.outputImage, let cg = CIContext().createCGImage(output.transformed(by: CGAffineTransform(scaleX: 8, y: 8)), from: output.extent.applying(CGAffineTransform(scaleX: 8, y: 8))) else { return }
-        qrImage = NSImage(cgImage: cg, size: NSSize(width: 224, height: 224)); imageView.image = qrImage; pairingText = text
+        qrImage = NSImage(cgImage: cg, size: NSSize(width: 224, height: 224)); qrStage.image = qrImage; pairingText = text
     }
+    public func controlTextDidChange(_ obj: Notification) { updateQR() }
     @objc private func credentialsChanged() { updateQR() }
     @objc public func copyPairing() {
         guard let pairingText else { return }
@@ -1060,6 +1151,48 @@ public final class PairingDialogViewController: CorralDialogViewController {
         guard var components = URLComponents(string: baseURL) else { return host }
         components.host = host; return components.string ?? host
     }
+}
+
+/// The QR on a white, softly shadowed tile with a quiet zone; a dashed placeholder until it exists.
+@MainActor
+final class CorralQRStageView: NSView {
+    static let tile: CGFloat = 236
+    var image: NSImage? { didSet { needsDisplay = true; setAccessibilityLabel(image == nil ? placeholder : "配对二维码") } }
+    var placeholder = "填写配对 Token 后生成二维码" { didSet { needsDisplay = true } }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: Self.tile + 8).isActive = true
+        setAccessibilityElement(true); setAccessibilityRole(.image); setAccessibilityIdentifier("corral.pairing.qr")
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let tile = NSRect(x: (bounds.width - Self.tile) / 2, y: (bounds.height - Self.tile) / 2, width: Self.tile, height: Self.tile)
+        let path = NSBezierPath(roundedRect: tile, xRadius: 16, yRadius: 16)
+        guard let image else {
+            CorralAestheticTokens.hoverTile.setFill(); path.fill()
+            let dashed = NSBezierPath(roundedRect: tile.insetBy(dx: 0.5, dy: 0.5), xRadius: 15.5, yRadius: 15.5)
+            dashed.lineWidth = 1; dashed.setLineDash([5, 4], count: 2, phase: 0)
+            CorralAestheticTokens.inputBorder.withAlphaComponent(0.6).setStroke(); dashed.stroke()
+            CorralLegacyIcon.image(.qr, size: 30, tint: CorralAestheticTokens.textMuted)?.draw(in: NSRect(x: tile.midX - 15, y: tile.midY + 2, width: 30, height: 30))
+            chrText(placeholder, size: 11.5, color: CorralAestheticTokens.textMuted, alignment: .center)
+                .draw(with: NSRect(x: tile.minX + 18, y: tile.midY - 40, width: tile.width - 36, height: 34), options: [.usesLineFragmentOrigin])
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow(); shadow.shadowColor = NSColor.black.withAlphaComponent(CorralAestheticTokens.isDark ? 0.35 : 0.14)
+        shadow.shadowOffset = NSSize(width: 0, height: -3); shadow.shadowBlurRadius = 10; shadow.set()
+        NSColor.white.setFill(); path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSGraphicsContext.current?.imageInterpolation = .none
+        image.draw(in: tile.insetBy(dx: 16, dy: 16), from: .zero, operation: .sourceOver, fraction: 1)
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 @MainActor

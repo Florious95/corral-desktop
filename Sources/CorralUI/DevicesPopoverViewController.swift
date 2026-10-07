@@ -11,6 +11,8 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public private(set) var errorMessage: String?
     public private(set) var selectedDeviceIDs = Set<DeviceID>()
     public private(set) var readyDeviceIDs = Set<DeviceID>()
+    /// The route the connected device currently runs over; its chip is lit.
+    public private(set) var activeRoute: ApprovedEndpoint?
     public var onDevicesChanged: (([DeviceRecord]) -> Void)?
     public var onSelectionChanged: ((Set<DeviceID>) -> Void)?
     public var onAddDevice: (() -> Void)?
@@ -19,13 +21,13 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
 
     public let tableView = NSTableView()
     /// Retained for API compatibility; the visible control is `allDevicesRow` (`.dp-row` "All Devices").
-    public let allDevicesButton = NSButton(checkboxWithTitle: "All Devices", target: nil, action: nil)
-    public let allDevicesRow = DevicesMenuRowView(icon: .layers, title: "All Devices")
+    public let allDevicesButton = NSButton(checkboxWithTitle: "全部设备", target: nil, action: nil)
+    public let allDevicesRow = DevicesMenuRowView(icon: .layers, title: "全部设备")
     public let discoverRow = DevicesMenuRowView(icon: .radar, title: "发现附近主机…", secondary: true)
     public let pairRow = DevicesMenuRowView(icon: .qr, title: "配对移动端…", secondary: true)
-    public let addRow = DevicesMenuRowView(icon: .plus, title: "Add Device…", secondary: true)
+    public let addRow = DevicesMenuRowView(icon: .plus, title: "添加设备…", secondary: true)
     public let connectionStatus = CorralStatusIndicatorView()
-    public let selectionSummary = NSTextField(labelWithString: "0 devices · 0 connected")
+    public let selectionSummary = NSTextField(labelWithString: "0 台设备 · 0 台已连接")
     private let errorLabel = NSTextField(labelWithString: "")
     private var tableHeight: NSLayoutConstraint!
     /// Native hosts card: 300pt wide, its rows' fixed chrome, 50pt per visible device row.
@@ -66,8 +68,9 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         scrollView.borderType = .noBorder
 
         let title = NSTextField(labelWithString: "")
-        title.attributedStringValue = NSAttributedString(string: "DEVICES", attributes: [.font: NSFont.systemFont(ofSize: 10.5, weight: .semibold), .kern: 0.5, .foregroundColor: CorralAestheticTokens.textMuted])
+        title.attributedStringValue = NSAttributedString(string: "设备", attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .kern: 0.3, .foregroundColor: CorralAestheticTokens.textMuted])
         let titleRow = NSStackView(views: [title]); titleRow.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 6, right: 12)
+        titleRow.setHuggingPriority(.init(1), for: .horizontal)
 
         allDevicesButton.target = self; allDevicesButton.action = #selector(toggleAllDevices)
         allDevicesRow.accessory = connectionStatus
@@ -154,7 +157,8 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
             confirmingDelete: confirmingDelete,
             deleting: deletionInProgressDeviceID == record.id,
             selected: selectedDeviceIDs.contains(record.id),
-            online: readyDeviceIDs.contains(record.id)
+            online: readyDeviceIDs.contains(record.id),
+            activeRoute: readyDeviceIDs.contains(record.id) ? activeRoute : nil
         )
         rowView.nameField.delegate = self
         rowView.onSelection = { [weak self] id, selected in self?.setDevice(id, selected: selected) }
@@ -302,8 +306,9 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         }
     }
 
-    public func setReadyDevices(_ ids: Set<DeviceID>) {
+    public func setReadyDevices(_ ids: Set<DeviceID>, activeRoute: ApprovedEndpoint? = nil) {
         readyDeviceIDs = ids.intersection(Set(devices.map(\.id)))
+        self.activeRoute = activeRoute
         tableView.reloadData(); updateSelectionSummary()
     }
 
@@ -315,7 +320,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
 
     private func updateSelectionSummary() {
         let selectedCount = devices.filter { selectedDeviceIDs.contains($0.id) }.count
-        selectionSummary.stringValue = "\(devices.count) devices · \(readyDeviceIDs.count) connected"
+        selectionSummary.stringValue = "\(devices.count) 台设备 · \(readyDeviceIDs.count) 台已连接"
         allDevicesButton.state = selectedCount == 0 ? .off : selectedCount == devices.count ? .on : .mixed
         allDevicesRow.isChecked = !devices.isEmpty && selectedCount == devices.count
         connectionStatus.status = readyDeviceIDs.isEmpty ? .offline : .working
@@ -411,7 +416,7 @@ private final class DeviceManagementRowView: NSView {
     private let actions = NSStackView()
     private let persistentActions: Bool
 
-    init(record: DeviceRecord, editing: Bool, confirmingDelete: Bool, deleting: Bool, selected: Bool, online: Bool) {
+    init(record: DeviceRecord, editing: Bool, confirmingDelete: Bool, deleting: Bool, selected: Bool, online: Bool, activeRoute: ApprovedEndpoint? = nil) {
         deviceID = record.id
         self.editing = editing
         self.confirmingDelete = confirmingDelete
@@ -435,11 +440,19 @@ private final class DeviceManagementRowView: NSView {
         dot.translatesAutoresizingMaskIntoConstraints = false
         dot.widthAnchor.constraint(equalToConstant: 6).isActive = true; dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
         dot.setAccessibilityLabel(online ? "在线" : "离线")
-        let sub = NSTextField(labelWithString: "\(record.endpoint.host):\(record.endpoint.port) · WebSocket")
-        sub.font = .systemFont(ofSize: 11); sub.textColor = CorralAestheticTokens.textMuted; sub.lineBreakMode = .byTruncatingTail
+        // One chip per route kind, Tailscale first; the live route's chip is lit. Addresses live in the tooltip.
+        // A loopback-only device (this Mac) has no route worth naming.
+        var kinds: [ApprovedEndpoint.Route] = []
+        for route in record.endpoints.map(\.route) where !kinds.contains(route) { kinds.append(route) }
+        if kinds == [.loopback] { kinds = [] }
+        let sub = NSStackView(views: kinds.map { CorralRouteChip(route: $0, address: nil, active: online && activeRoute?.route == $0) })
+        sub.orientation = .horizontal; sub.spacing = 4; sub.isHidden = kinds.isEmpty
+        sub.setAccessibilityIdentifier("corral.devices.routes")
+        toolTip = record.endpoints.map { "\(CorralRouteChip.title($0.route)) \($0.host):\($0.port)" }.joined(separator: "\n")
         let titleRow = NSStackView(views: [nameField, dot]); titleRow.orientation = .horizontal; titleRow.alignment = .centerY; titleRow.spacing = 6
-        let text = NSStackView(views: [titleRow, sub]); text.orientation = .vertical; text.alignment = .leading; text.spacing = 2
+        let text = NSStackView(views: [titleRow, sub]); text.orientation = .vertical; text.alignment = .leading; text.spacing = 3
         text.setHuggingPriority(.init(1), for: .horizontal)
+        for stack in [text, sub, titleRow] { stack.setHuggingPriority(.defaultHigh, for: .vertical) }
         let icon = NSImageView(image: CorralLegacyIcon.image(.monitor, size: 16) ?? NSImage()); icon.contentTintColor = CorralAestheticTokens.text
 
         for button in [primaryButton, secondaryButton] {

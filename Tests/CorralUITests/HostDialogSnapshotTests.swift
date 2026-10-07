@@ -41,12 +41,81 @@ final class HostDialogSnapshotTests: XCTestCase {
                 dialog.tokenField.stringValue = "secret-token"; dialog.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
                 return dialog
             }),
+            ("adddevice-empty", {
+                let dialog = AddDeviceDialogViewController(); dialog.onDiscoverNearby = {}; return dialog
+            }),
+            ("adddevice-error", {
+                let dialog = AddDeviceDialogViewController(); dialog.onDiscoverNearby = {}; dialog.loadViewIfNeeded()
+                dialog.nameField.stringValue = "Mac Studio"; dialog.addressField.stringValue = "http://192.168.31.20"; dialog.submit(); return dialog
+            }),
+            ("pairing-remote", {
+                PairingDialogViewController(payload: CorralPairingPayload(url: "ws://100.75.207.88:9900/ws", token: "secret-token", name: "MacBook-Pro.local",
+                    candidates: ["ws://100.75.207.88:9900/ws", "ws://192.168.31.116:9900/ws", "ws://10.202.81.20:9900/ws"], hostID: "RBXDBVMA5BQXZ7N4SSE5U55XG4", port: 9900))
+            }),
+            ("pairing-local-needs-input", {
+                PairingDialogViewController(payload: CorralPairingPayload(url: "ws://127.0.0.1:9900/ws"))
+            }),
+            ("settings", { SettingsDialogViewController() }),
+            ("newagent", {
+                NewAgentDialogViewController(spaceName: "corral-native", launchers: [
+                    CorralAgentLauncher(provider: "claude_code", displayName: "Claude Code", supportsBypass: true),
+                    CorralAgentLauncher(provider: "codex", displayName: "Codex CLI", supportsBypass: true),
+                    CorralAgentLauncher(provider: "cursor", displayName: "Cursor Agent", supportsBypass: false),
+                    CorralAgentLauncher(provider: "grok", displayName: "Grok", supportsBypass: false)])
+            }),
+            ("closeagent", { CloseAgentDialogViewController(agentName: "ACCEPT-A-3F8976A4") }),
             ("nearby-failed", {
                 let dialog = NearbyHostsDialogViewController(); dialog.loadViewIfNeeded()
                 dialog.update(hosts: hosts); dialog.select(hostID: "lab-host-000003"); dialog.tokenField.stringValue = "wrong"
                 dialog.phase = .failed("配对 Token 不正确，或该地址不是这台主机。"); return dialog
             })
         ]
+    }
+
+    func testCaptureDevicesCard() async throws {
+        guard let directory = ProcessInfo.processInfo.environment["CORRAL_UI_SNAPSHOT_DIR"] else { throw XCTSkip("Set CORRAL_UI_SNAPSHOT_DIR to capture") }
+        let previous = CorralAestheticTokens.themeMode
+        defer { CorralAestheticTokens.themeMode = previous }
+        let hostID = "studio-host-0001"
+        let local = DeviceRecord(id: DeviceID("local"), name: "本机", endpoint: try ApprovedEndpoint(host: "127.0.0.1", port: 9900), credential: CredentialHandle("l"))
+        let studio = DeviceRecord(id: DeviceID("studio"), name: "Mac Studio", endpoint: try ApprovedEndpoint(host: "192.168.31.20", port: 9900, pairingHostID: hostID),
+                                  credential: CredentialHandle("s"), alternateEndpoints: [try ApprovedEndpoint(host: "100.101.2.3", port: 9900, pairingHostID: hostID)])
+        for theme in [CorralThemeMode.dark, .light] {
+            CorralAestheticTokens.themeMode = theme
+            let controller = DevicesPopoverViewController(repository: SnapshotRepository(records: [local, studio]))
+            controller.loadViewIfNeeded()
+            try await controller.reloadDevices()
+            controller.setReadyDevices([studio.id], activeRoute: studio.endpoints.first)
+            let size = controller.preferredContentSize
+            let window = NSWindow(contentRect: NSRect(x: -12_000, y: -12_000, width: size.width, height: size.height), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+            window.contentViewController = controller
+            window.setContentSize(size)
+            window.orderBack(nil)
+            controller.view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+            window.displayIfNeeded(); controller.view.display()
+            if ProcessInfo.processInfo.environment["CORRAL_UI_SNAPSHOT_DEBUG"] != nil {
+                func dump(_ view: NSView, _ depth: Int) {
+                    print("DBG " + String(repeating: "  ", count: depth) + "\(type(of: view)) \(view.frame) \((view as? NSTextField)?.stringValue ?? "")")
+                    view.subviews.forEach { dump($0, depth + 1) }
+                }
+                dump(controller.view, 0)
+            }
+            try render(controller.view, size: size, to: URL(fileURLWithPath: directory).appendingPathComponent("devices-card-\(theme.rawValue).png"))
+            window.orderOut(nil); window.close()
+        }
+    }
+
+    private func render(_ view: NSView, size: NSSize, to url: URL) throws {
+        let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
+                                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                  colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        rep.size = size
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+        try XCTUnwrap(view.layer).render(in: context.cgContext)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
     }
 
     private func capture(_ dialog: CorralDialogViewController, to url: URL) throws {
@@ -74,4 +143,12 @@ final class HostDialogSnapshotTests: XCTestCase {
         dialog.dismiss()
         window.orderOut(nil); window.close()
     }
+}
+
+private actor SnapshotRepository: DeviceRepositoryProtocol {
+    let records: [DeviceRecord]
+    init(records: [DeviceRecord]) { self.records = records }
+    func listDevices() async throws -> [DeviceRecord] { records }
+    func save(_ device: DeviceRecord) async throws {}
+    func delete(id: DeviceID) async throws {}
 }

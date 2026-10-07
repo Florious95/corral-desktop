@@ -1035,7 +1035,7 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertTrue(dialog.acceptPairingJSON("""
         {"url":"wss://device.example/ws","token":"secret","name":"Studio","candidates":["wss://device.example/ws"]}
         """))
-        XCTAssertEqual(dialog.tokenField.isBezeled, true)
+        XCTAssertTrue(dialog.tokenField.superview is CorralDialogInputBox, "The token is a secure field inside the shared dialog input")
         var request: CorralAddDeviceRequest?
         dialog.onSubmit = { request = $0 }
         dialog.submit()
@@ -1123,15 +1123,15 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(controller.view.layer?.cornerRadius, 12)
         XCTAssertEqual(rgb(controller.view.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)) ?? .clear), 0x272F3A)
         XCTAssertEqual(controller.view.accessibilityIdentifier(), "corral.devices.popover")
-        XCTAssertEqual(controller.selectionSummary.stringValue, "2 devices · 1 connected")
+        XCTAssertEqual(controller.selectionSummary.stringValue, "2 台设备 · 1 台已连接")
         XCTAssertTrue(controller.allDevicesRow.isChecked)
         XCTAssertEqual(controller.allDevicesRow.accessibilityIdentifier(), "corral.devices.all")
 
         let row = try XCTUnwrap(controller.tableView(controller.tableView, viewFor: nil, row: 0))
         XCTAssertEqual(row.accessibilityIdentifier(), "corral.devices.row")
         XCTAssertEqual(row.accessibilityLabel(), "Local")
-        let texts = descendants(of: row).compactMap { ($0 as? NSTextField)?.stringValue }
-        XCTAssertTrue(texts.contains("127.0.0.1:\(ApprovedEndpoint.developmentPort) · WebSocket"))
+        XCTAssertTrue(descendants(of: row).compactMap { $0 as? CorralRouteChip }.isEmpty, "This Mac's loopback route needs no chip")
+        XCTAssertEqual(row.toolTip, "本机 127.0.0.1:\(ApprovedEndpoint.developmentPort)")
         XCTAssertEqual(descendants(of: row).compactMap { $0 as? CorralStatusIndicatorView }.first?.status, .working)
         XCTAssertEqual(row.accessibilityCustomActions()?.map(\.name), ["重命名", "删除"])
         XCTAssertTrue(row.accessibilityPerformPress())
@@ -1146,6 +1146,54 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(controller.discoverRow.accessibilityIdentifier(), "corral.devices.discover")
         XCTAssertTrue(controller.discoverRow.accessibilityPerformPress())
         XCTAssertEqual(added, 1); XCTAssertEqual(paired, 1); XCTAssertEqual(discovered, 1)
+    }
+
+    /// The reported defect: 取消 74pt beside 添加 84pt, the primary shorter and lower than AppKit bezels.
+    func testAddDeviceFooterIsOneMatchedSetOnTheSharedButton() throws {
+        let dialog = AddDeviceDialogViewController()
+        dialog.onDiscoverNearby = {}
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 1000, height: 800), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 1000, height: 800))
+        defer { dialog.dismiss(); window.close() }
+        dialog.present(over: window)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let card = dialog.view
+        let buttons = descendants(of: card).compactMap { $0 as? NSButton }
+        let cancel = try XCTUnwrap(buttons.first { $0.title == "取消" }), add = try XCTUnwrap(buttons.first { $0.title == "添加" })
+        let importButton = try XCTUnwrap(buttons.first { $0.title == "导入二维码图片…" })
+        XCTAssertTrue([cancel, add, importButton].allSatisfy { $0 is CorralDialogButton }, "No AppKit bezel buttons mixed into the footer")
+        let rects = [cancel, add, importButton].map { card.convert($0.bounds, from: $0) }
+        XCTAssertEqual(rects[0].width, rects[1].width, accuracy: 0.5, "取消 and 添加 are a matched pair")
+        for rect in rects {
+            XCTAssertEqual(rect.height, 32.2, accuracy: 0.5)
+            XCTAssertEqual(rect.midY, rects[1].midY, accuracy: 0.25, "Every footer button shares one centre line")
+        }
+        XCTAssertEqual(card.frame.width - rects[1].maxX, 20, accuracy: 0.5)
+        XCTAssertEqual(rects[1].minX - rects[0].maxX, 8, accuracy: 0.5)
+        XCTAssertEqual(rects[2].minX, 20, accuracy: 0.5)
+        XCTAssertNotNil(descendants(of: card).first { $0 is CorralSuggestionButton }, "发现附近主机 is offered inside Add Device")
+        // The card hugs its rows; an error grows it instead of floating in a reserved void.
+        let height = card.frame.height
+        dialog.addressField.stringValue = "http://invalid"
+        dialog.submit()
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(card.frame.height, height)
+    }
+
+    func testDevicePopoverRoutesShowEveryChannelAndLightTheLiveOne() async throws {
+        let lan = try ApprovedEndpoint(host: "192.168.31.20", port: 9900, pairingHostID: "studio-host-0001")
+        let tailnet = try ApprovedEndpoint(host: "100.101.2.3", port: 9900, pairingHostID: "studio-host-0001")
+        let studio = DeviceRecord(id: DeviceID("studio"), name: "Mac Studio", endpoint: lan, credential: CredentialHandle("s"), alternateEndpoints: [tailnet])
+        let controller = DevicesPopoverViewController(repository: TestDeviceRepository(records: [studio]))
+        controller.loadViewIfNeeded()
+        try await controller.reloadDevices()
+        controller.setReadyDevices([studio.id], activeRoute: tailnet)
+        let row = try XCTUnwrap(controller.tableView(controller.tableView, viewFor: nil, row: 0))
+        let chips = descendants(of: row).compactMap { $0 as? CorralRouteChip }
+        XCTAssertEqual(chips.map(\.route), [.tailnet, .lan], "Tailscale first")
+        XCTAssertEqual(chips.map(\.active), [true, false], "The live route is lit")
+        XCTAssertEqual(row.toolTip, "Tailscale 100.101.2.3:9900\n局域网 192.168.31.20:9900")
     }
 
     func testDevicePopoverRequiresSecondConfirmationBeforeCascadeDelete() async throws {
