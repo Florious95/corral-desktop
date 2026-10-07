@@ -14,6 +14,7 @@ mkdir -p "$APP/Contents/MacOS"
 cp "$ROOT/.build/debug/CorralApp" "$APP/Contents/MacOS/CorralApp"
 cp "$ROOT/Resources/CorralApp-Info.plist" "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/Fonts"
+cp "$ROOT/Resources/Corral.icns" "$APP/Contents/Resources/"
 cp "$ROOT/Sources/CorralApp/Resources/Fonts/CorralTerminalSymbols.ttf" "$APP/Contents/Resources/Fonts/"
 /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'com.corral.native.dev' >/dev/null
 printf 'Packaged isolated development app: %s\n' "$APP"
