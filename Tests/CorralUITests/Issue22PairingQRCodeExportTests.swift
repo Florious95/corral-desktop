@@ -156,11 +156,29 @@ final class Issue22PairingQRCodeExportTests: XCTestCase {
                 case .cancel:
                     panel.cancel(nil)
                 }
+                // NSSavePanel completion handlers are allowed to run while a
+                // sheet's dismissal transform is still active.  Do not let
+                // the test's parent-window defer close the owner during that
+                // animation; AppKit can otherwise tear down an
+                // NSWindowTransformAnimation from inside XCTest.
+                await waitForSavePanelToDisappear()
                 return true
             }
             try? await Task.sleep(for: .milliseconds(10))
         }
         return false
+    }
+
+    private func waitForSavePanelToDisappear() async {
+        for _ in 0..<300 {
+            if visibleSavePanel() == nil {
+                // The sheet may have left the window list one run-loop turn
+                // before its transform animation releases its layer.
+                try? await Task.sleep(for: .milliseconds(250))
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private func visibleSavePanel() -> NSSavePanel? {
