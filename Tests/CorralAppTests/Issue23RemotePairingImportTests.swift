@@ -310,7 +310,14 @@ private final class RemotePairingDaemonFixture: @unchecked Sendable {
                 connection?.cancel()
                 return
             }
-            let token = Self.token(from: data) ?? ""
+            // Only an auth JSON text message is part of the authentication
+            // ledger.  A real WebSocket also delivers control frames (and the
+            // client may send other protocol text after auth); those frames
+            // must not become a synthetic empty-token observation.
+            guard let token = Self.token(from: data) else {
+                self.receive(on: connection)
+                return
+            }
             Task { await self.state.record(token: token) }
             let ok = token == self.token
             let response = ok
