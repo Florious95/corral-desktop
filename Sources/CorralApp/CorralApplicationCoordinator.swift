@@ -123,6 +123,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private let credentialVault: any DeviceCredentialVault
     private let sessionLink: any SessionLinkProtocol
     private let hostIdentityProbe: HostIdentityProbe
+    private let makeNearbyHostDiscovery: @MainActor () -> NearbyHostDiscovery
+    private var nearbyHostDiscovery: NearbyHostDiscovery?
+    private var nearbyHostsDialog: NearbyHostsDialogViewController?
+    private var nearbyScanIndicator: Task<Void, Never>?
     /// The route the live connection runs over (Tailscale, LAN or loopback).
     public private(set) var activeRoute: ApprovedEndpoint?
     private let deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle
@@ -237,13 +241,15 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         initialUserPreferences: UserPreferences,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         maximumVisiblePanes: Int = .max,
-        hostIdentityProbe: HostIdentityProbe = HostIdentityProbe()
+        hostIdentityProbe: HostIdentityProbe = HostIdentityProbe(),
+        nearbyHostDiscovery: (@MainActor () -> NearbyHostDiscovery)? = nil
     ) {
         precondition(maximumVisiblePanes > 0)
         self.deviceRepository = deviceRepository
         self.credentialVault = credentialVault
         self.sessionLink = sessionLink
         self.hostIdentityProbe = hostIdentityProbe
+        self.makeNearbyHostDiscovery = nearbyHostDiscovery ?? { NearbyHostDiscovery() }
         self.deviceSessionLifecycle = deviceSessionLifecycle
         self.inputRouter = SessionLinkInputRouter(sessionLink: sessionLink)
         self.workspaceStore = workspaceStore
@@ -1078,6 +1084,95 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         dialog.present(over: windowController.window)
     }
 
+    func presentNearbyHostsDialog() {
+        guard nearbyHostsDialog == nil else { return }
+        if let addDeviceDialog { addDeviceDialog.dismiss(); self.addDeviceDialog = nil; activeDialog = nil }
+        let dialog = NearbyHostsDialogViewController(pairedHostIDs: Set(cachedDevices.compactMap(\.endpoint.pairingHostID)))
+        let discovery = makeNearbyHostDiscovery()
+        discovery.onUpdate = { [weak dialog] hosts in dialog?.update(hosts: hosts) }
+        dialog.onRescan = { [weak self] in self?.startNearbyScan() }
+        dialog.onAddManually = { [weak self] in
+            self?.dismissNearbyHostsDialog()
+            self?.presentAddDeviceDialog()
+        }
+        dialog.onCancel = { [weak self] in self?.dismissNearbyHostsDialog() }
+        dialog.onConnect = { [weak self] host, token in
+            Task { @MainActor in await self?.connectNearbyHost(host, token: token) }
+        }
+        nearbyHostDiscovery = discovery
+        nearbyHostsDialog = dialog
+        activeDialog = dialog
+        dialog.present(over: windowController.window)
+        startNearbyScan()
+    }
+
+    /// Bonjour keeps browsing while the dialog is open; the "searching" state covers the first seconds.
+    private func startNearbyScan() {
+        guard let discovery = nearbyHostDiscovery, let dialog = nearbyHostsDialog else { return }
+        discovery.start()
+        dialog.update(hosts: [])
+        dialog.isScanning = true
+        nearbyScanIndicator?.cancel()
+        nearbyScanIndicator = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.nearbyHostsDialog?.isScanning = false
+        }
+    }
+
+    private func dismissNearbyHostsDialog() {
+        nearbyScanIndicator?.cancel()
+        nearbyScanIndicator = nil
+        nearbyHostDiscovery?.stop()
+        nearbyHostDiscovery = nil
+        guard let dialog = nearbyHostsDialog else { return }
+        dialog.dismiss()
+        nearbyHostsDialog = nil
+        if activeDialog === dialog { activeDialog = nil }
+    }
+
+    /// Discovery is only a hint: every route must pass identify under the token before the host is
+    /// saved, so a pairing token is never sent over WebSocket to an unproven address.
+    private func connectNearbyHost(_ host: NearbyHost, token: String?) async {
+        guard let dialog = nearbyHostsDialog else { return }
+        if token == nil, let device = cachedDevices.first(where: { $0.endpoint.pairingHostID == host.hostID }) {
+            dismissNearbyHostsDialog()
+            selectedDeviceIDs = [device.id]
+            await selectDevice(device.id)
+            return
+        }
+        guard let token, !token.isEmpty else { return }
+        dialog.phase = .verifying
+        let probe = hostIdentityProbe
+        var proven: [ApprovedEndpoint] = []
+        var rejected = false
+        await withTaskGroup(of: (ApprovedEndpoint, Error?).self) { group in
+            for route in host.routes {
+                group.addTask {
+                    do { try await probe.verify(route, hostID: host.hostID, token: token); return (route, nil) }
+                    catch { return (route, error) }
+                }
+            }
+            for await (route, error) in group {
+                if let error { rejected = rejected || error is HostIdentityError } else { proven.append(route) }
+            }
+        }
+        guard nearbyHostsDialog === dialog else { return }
+        proven = ApprovedEndpoint.dialOrder(proven)
+        guard let primary = proven.first else {
+            dialog.phase = .failed(rejected ? "配对 Token 不正确，或该地址不是这台主机。" : "无法连接到「\(host.name)」，请确认网络可达后重试。")
+            return
+        }
+        await addDevice(CorralAddDeviceRequest(name: host.name, url: primary.url.absoluteString, token: token,
+                                               candidates: proven.map(\.url.absoluteString), pairingHostID: host.hostID))
+        guard nearbyHostsDialog === dialog else { return }
+        if cachedDevices.contains(where: { $0.endpoint.pairingHostID == host.hostID }) {
+            dismissNearbyHostsDialog()
+        } else {
+            dialog.phase = .failed("无法保存「\(host.name)」，请稍后重试。")
+        }
+    }
+
     private func presentPairingDialog() {
         Task { [weak self] in
             guard let self else { return }
@@ -1338,6 +1433,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             self?.devicesCardPanel?.orderOut(nil)
             self?.devicesCardPanel = nil
             self?.presentPairingDialog()
+        }
+        controller.onDiscoverHosts = { [weak self] in
+            self?.devicesCardPanel?.orderOut(nil)
+            self?.devicesCardPanel = nil
+            self?.presentNearbyHostsDialog()
         }
         let panel = CorralAnchoredCardPanel(contentViewController: controller, anchoredTo: workspaceView.tabBar.devicesButton)
         devicesCardPanel = panel

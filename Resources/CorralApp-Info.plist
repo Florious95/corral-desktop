@@ -22,6 +22,12 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_agentmirror._tcp</string>
+    </array>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Corral 会在局域网中查找并连接运行 Corral 服务的主机。</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

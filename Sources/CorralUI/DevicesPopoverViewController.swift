@@ -15,22 +15,23 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public var onSelectionChanged: ((Set<DeviceID>) -> Void)?
     public var onAddDevice: (() -> Void)?
     public var onPairMobile: (() -> Void)?
+    public var onDiscoverHosts: (() -> Void)?
 
     public let tableView = NSTableView()
     /// Retained for API compatibility; the visible control is `allDevicesRow` (`.dp-row` "All Devices").
     public let allDevicesButton = NSButton(checkboxWithTitle: "All Devices", target: nil, action: nil)
     public let allDevicesRow = DevicesMenuRowView(icon: .layers, title: "All Devices")
+    public let discoverRow = DevicesMenuRowView(icon: .radar, title: "发现附近主机…", secondary: true)
     public let pairRow = DevicesMenuRowView(icon: .qr, title: "配对移动端…", secondary: true)
     public let addRow = DevicesMenuRowView(icon: .plus, title: "Add Device…", secondary: true)
     public let connectionStatus = CorralStatusIndicatorView()
     public let selectionSummary = NSTextField(labelWithString: "0 devices · 0 connected")
     private let errorLabel = NSTextField(labelWithString: "")
     private var tableHeight: NSLayoutConstraint!
-    /// Native hosts card: 300pt wide, 155pt fixed chrome, 50pt per visible device row.
+    /// Native hosts card: 300pt wide, its rows' fixed chrome, 50pt per visible device row.
     public static let width: CGFloat = 300
     public static let contentInset: CGFloat = 6
     public static let cornerRadius: CGFloat = 12
-    public static let fixedChromeHeight: CGFloat = 155
     public static let rowHeight: CGFloat = 50
 
     public init(repository: any DeviceRepositoryProtocol) {
@@ -77,6 +78,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
             self.allDevicesButton.state = self.allDevicesRow.isChecked ? .off : .on
             self.toggleAllDevices()
         }
+        discoverRow.setAccessibilityIdentifier("corral.devices.discover"); discoverRow.onPress = { [weak self] in self?.onDiscoverHosts?() }
         pairRow.setAccessibilityIdentifier("corral.devices.pair"); pairRow.onPress = { [weak self] in self?.pairMobile() }
         addRow.setAccessibilityIdentifier("corral.devices.add"); addRow.onPress = { [weak self] in self?.addDevice() }
         connectionStatus.status = .offline
@@ -88,7 +90,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         errorLabel.textColor = CorralAestheticTokens.danger
         errorLabel.isHidden = true
 
-        let content = NSStackView(views: [titleRow, allDevicesRow, scrollView, pairRow, separator, addRow, errorLabel])
+        let content = NSStackView(views: [titleRow, allDevicesRow, scrollView, discoverRow, pairRow, separator, addRow, errorLabel])
         content.orientation = .vertical
         content.alignment = .width
         content.distribution = .fill
@@ -124,8 +126,15 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         guard isViewLoaded else { return }
         let visibleRows = min(devices.count, 5)
         tableHeight.constant = CGFloat(visibleRows) * Self.rowHeight
-        view.layoutSubtreeIfNeeded()
-        preferredContentSize = NSSize(width: Self.width, height: Self.fixedChromeHeight + CGFloat(visibleRows) * Self.rowHeight)
+        // Sum the rows' own heights: the hosting window holds the stack at its previous size.
+        guard let content = view as? NSStackView else { return }
+        let rows = content.arrangedSubviews.filter { !$0.isHidden }
+        let gaps = rows.dropLast().reduce(CGFloat(0)) { total, row in
+            let custom = content.customSpacing(after: row)
+            return total + (custom == NSStackView.useDefaultSpacing ? content.spacing : custom)
+        }
+        let height = rows.reduce(content.edgeInsets.top + content.edgeInsets.bottom + gaps) { $0 + $1.fittingSize.height }
+        preferredContentSize = NSSize(width: Self.width, height: ceil(height))
     }
 
     public static func shouldCommitReturn(hasMarkedText: Bool) -> Bool {

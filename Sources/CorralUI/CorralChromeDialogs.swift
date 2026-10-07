@@ -138,10 +138,12 @@ open class CorralDialogViewController: NSViewController {
         return card
     }
 
-    /// `.chr-actions`: right-aligned buttons with an 8pt gap.
-    public func actionsRow(_ buttons: [NSButton]) -> NSView {
+    /// `.chr-actions`: right-aligned buttons with an 8pt gap; an optional leading button sits at the
+    /// left edge. Footer buttons share one minimum width so a pair reads as a matched set.
+    public func actionsRow(_ buttons: [NSButton], leading: [NSButton] = []) -> NSView {
         let row = NSStackView(); row.orientation = .horizontal; row.spacing = 8
-        buttons.forEach { row.addView($0, in: .trailing) }
+        for button in buttons { (button as? CorralDialogButton)?.minimumWidth = CorralDialogButton.footerMinimumWidth; row.addView(button, in: .trailing) }
+        leading.forEach { row.addView($0, in: .leading) }
         return row
     }
 
@@ -238,12 +240,17 @@ final class CorralDialogCardView: NSView {
 /// `.chr-btn` (borderless, hover fill), `.chr-btn-primary` and `.cad-danger`: 8pt radius around a 7pt-padded 13pt line.
 @MainActor
 final class CorralDialogButton: NSButton {
-    enum Kind { case plain, primary, danger }
+    enum Kind { case plain, primary, danger, secondary }
+    static let footerMinimumWidth: CGFloat = 76
     let kind: Kind
+    /// A leading 14pt glyph, drawn in the title colour.
+    var icon: CorralLegacyIcon? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    var minimumWidth: CGFloat = 0 { didSet { invalidateIntrinsicContentSize() } }
     private var hovering = false { didSet { needsDisplay = true } }
 
-    init(title: String, kind: Kind, target: AnyObject?, action: Selector?) {
+    init(title: String, kind: Kind, icon: CorralLegacyIcon? = nil, target: AnyObject?, action: Selector?) {
         self.kind = kind
+        self.icon = icon
         super.init(frame: .zero)
         self.title = title; self.target = target; self.action = action
         isBordered = false
@@ -255,8 +262,8 @@ final class CorralDialogButton: NSButton {
     override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     override var isEnabled: Bool { didSet { alphaValue = isEnabled ? 1 : 0.5; hovering = hovering && isEnabled } }
     override var intrinsicContentSize: NSSize {
-        let width = ceil(chrText(title, size: 13, weight: .semibold, color: .black).size().width)
-        return NSSize(width: width + (kind == .plain ? 28 : 32), height: 32.2)
+        let width = ceil(chrText(title, size: 13, weight: .semibold, color: .black).size().width) + (icon == nil ? 0 : 20)
+        return NSSize(width: max(minimumWidth, width + (kind == .plain ? 28 : 32)), height: 32.2)
     }
     override func mouseEntered(with event: NSEvent) { hovering = isEnabled }
     override func mouseExited(with event: NSEvent) { hovering = false }
@@ -267,18 +274,48 @@ final class CorralDialogButton: NSButton {
         let pressed = isHighlighted && isEnabled
         let (fill, ink): (NSColor, NSColor) = switch kind {
         case .plain: (hovering || pressed ? CorralAestheticTokens.hover : .clear, CorralAestheticTokens.iconStrong)
+        case .secondary: (hovering || pressed ? CorralAestheticTokens.hover : CorralAestheticTokens.hoverTile, CorralAestheticTokens.iconStrong)
         case .primary: (pressed ? CorralAestheticTokens.actionPrimaryPressed : hovering ? CorralAestheticTokens.actionPrimaryHover : CorralAestheticTokens.actionPrimaryBackground, CorralAestheticTokens.actionPrimaryForeground)
         case .danger: (hovering || pressed ? CorralAestheticTokens.dangerFillHover : CorralAestheticTokens.dangerFill, .white)
         }
         fill.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
-        let line = NSRect(x: 0, y: (bounds.height - 18.2) / 2, width: bounds.width, height: 18.2)
-        chrText(title, size: 13, weight: .semibold, color: ink, alignment: .center).draw(with: line, options: [.usesLineFragmentOrigin])
+        if kind == .secondary {
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7.5, yRadius: 7.5); ring.lineWidth = 1
+            CorralAestheticTokens.ringTile.setStroke(); ring.stroke()
+        }
+        let text = chrText(title, size: 13, weight: .semibold, color: ink, alignment: .center)
+        guard let icon, let glyph = CorralLegacyIcon.image(icon, size: 14, tint: ink) else {
+            text.draw(with: NSRect(x: 0, y: (bounds.height - 18.2) / 2, width: bounds.width, height: 18.2), options: [.usesLineFragmentOrigin])
+            return
+        }
+        let textWidth = ceil(text.size().width), start = (bounds.width - textWidth - 20) / 2
+        glyph.draw(in: NSRect(x: start, y: (bounds.height - 14) / 2, width: 14, height: 14))
+        text.draw(with: NSRect(x: start + 20, y: (bounds.height - 18.2) / 2, width: textWidth + 1, height: 18.2), options: [.usesLineFragmentOrigin])
     }
+}
+
+@MainActor
+protocol CorralDialogFocusReporting: NSTextField {
+    var onFocusChange: ((Bool) -> Void)? { get set }
 }
 
 /// `.chr-input` text: borderless; the surrounding `CorralDialogInputBox` draws its frame and focus ring.
 @MainActor
-public final class CorralDialogTextField: NSTextField {
+public final class CorralDialogTextField: NSTextField, CorralDialogFocusReporting {
+    var onFocusChange: ((Bool) -> Void)?
+    public override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+    public override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification); onFocusChange?(false)
+    }
+}
+
+/// The secure twin of `CorralDialogTextField`, for pairing tokens.
+@MainActor
+public final class CorralDialogSecureTextField: NSSecureTextField, CorralDialogFocusReporting {
     var onFocusChange: ((Bool) -> Void)?
     public override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -296,7 +333,7 @@ final class CorralDialogInputBox: NSView {
     private static let ring: CGFloat = 3
     private var focused = false { didSet { needsDisplay = true } }
 
-    init(field: CorralDialogTextField, placeholder: String) {
+    init(field: some CorralDialogFocusReporting, placeholder: String) {
         super.init(frame: .zero)
         field.isBordered = false; field.isBezeled = false; field.drawsBackground = false; field.focusRingType = .none
         field.font = .systemFont(ofSize: 13); field.textColor = CorralAestheticTokens.text

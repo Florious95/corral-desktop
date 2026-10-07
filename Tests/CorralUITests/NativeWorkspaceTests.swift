@@ -212,7 +212,7 @@ final class NativeWorkspaceTests: XCTestCase {
     }
 
     func testAllExtractedLegacyIconsLoadAsNativeAppKitImages() {
-        XCTAssertEqual(CorralLegacyIcon.allCases.count, 26)
+        XCTAssertEqual(CorralLegacyIcon.allCases.count, 32)
         for icon in CorralLegacyIcon.allCases {
             XCTAssertNotNil(CorralLegacyIcon.image(icon, size: 16), "Missing native icon: \\(icon.rawValue)")
         }
@@ -1116,7 +1116,8 @@ final class NativeWorkspaceTests: XCTestCase {
         try await controller.reloadDevices()
         controller.setReadyDevices([local.id])
         XCTAssertEqual(controller.preferredContentSize.width, 300)
-        XCTAssertEqual(controller.preferredContentSize.height, 255, accuracy: 1)
+        // 6 + 25 title + 32 all + 2×50 rows + 32 discover + 32 pair + 4 + 1 + 4 + 32 add + 6: every row at full height.
+        XCTAssertEqual(controller.preferredContentSize.height, 274, accuracy: 1)
         XCTAssertEqual(DevicesPopoverViewController.contentInset, 6)
         XCTAssertEqual(DevicesPopoverViewController.cornerRadius, 12)
         XCTAssertEqual(controller.view.layer?.cornerRadius, 12)
@@ -1140,7 +1141,11 @@ final class NativeWorkspaceTests: XCTestCase {
         XCTAssertEqual(selection, [local.id, remote.id])
         XCTAssertTrue(controller.pairRow.accessibilityPerformPress())
         XCTAssertTrue(controller.addRow.accessibilityPerformPress())
-        XCTAssertEqual(added, 1); XCTAssertEqual(paired, 1)
+        var discovered = 0
+        controller.onDiscoverHosts = { discovered += 1 }
+        XCTAssertEqual(controller.discoverRow.accessibilityIdentifier(), "corral.devices.discover")
+        XCTAssertTrue(controller.discoverRow.accessibilityPerformPress())
+        XCTAssertEqual(added, 1); XCTAssertEqual(paired, 1); XCTAssertEqual(discovered, 1)
     }
 
     func testDevicePopoverRequiresSecondConfirmationBeforeCascadeDelete() async throws {

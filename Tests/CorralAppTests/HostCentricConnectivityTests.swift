@@ -67,6 +67,70 @@ final class HostCentricConnectivityTests: XCTestCase {
         XCTAssertEqual(secondDial, ["ws://100.101.2.3:9931/ws", "ws://10.0.0.8:9931/ws"], "Tailscale is dialed before LAN")
     }
 
+    func testDiscoveredHostIsProvenBeforeItsTokenIsSentAndKeepsEveryRoute() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("corral-nearby-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("support", isDirectory: true)
+        let repository = try DeviceRepository(applicationSupportDirectory: support)
+        let link = HostCentricRecordingLink()
+        let host = FakeAgentMirrorHost(hostID: hostID, token: token, port: 9931, addresses: ["192.168.31.116", "100.101.2.3"], impostors: [])
+        let probe = HostIdentityProbe(transport: host.transport)
+        let sightings = [NearbyHostSighting(host: "192.168.31.116", port: 9931, advertisedHostID: hostID, channel: .bonjour)]
+        let workspace = try CorralWorkspaceStore(applicationSupportDirectory: support.appendingPathComponent("workspace"))
+        let preferences = try UserPreferencesStore(applicationSupportDirectory: support.appendingPathComponent("preferences"))
+        let coordinator = CorralApplicationCoordinator(
+            deviceRepository: repository,
+            credentialVault: PrivateFileCredentialVault(directoryURL: support.appendingPathComponent(".credentials", isDirectory: true)),
+            sessionLink: link, deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle(sessionLink: link),
+            workspaceStore: workspace, userPreferencesStore: preferences,
+            initialWorkspaceState: await workspace.snapshot(), initialUserPreferences: await preferences.snapshot(),
+            environment: ["CORRAL_NATIVE_BACKGROUND": "1", "HOME": root.path],
+            hostIdentityProbe: probe,
+            nearbyHostDiscovery: { NearbyHostDiscovery(sources: [FixedSightings(sightings)], probe: probe, excludedAddresses: []) }
+        )
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { coordinator.devicesCardPanel?.orderOut(nil); window.close(); ToastManager.shared.dismissCurrent() }
+
+        window.orderBack(nil)
+        coordinator.workspaceView.sidebar.devicesButton.performClick(nil)
+        var pressed = false
+        for _ in 0..<100 where !pressed {
+            if let devices = coordinator.devicesCardPanel?.contentViewController as? DevicesPopoverViewController {
+                pressed = devices.discoverRow.accessibilityPerformPress()
+            } else { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        XCTAssertTrue(pressed, "The Devices card must offer 发现附近主机")
+        let dialog = try XCTUnwrap(Mirror(reflecting: coordinator).children.first { $0.label == "nearbyHostsDialog" }?.value as? NearbyHostsDialogViewController)
+        let found = await waitUntil { dialog.hosts.count == 1 }
+        XCTAssertTrue(found, "The Bonjour sighting must surface as a host")
+        XCTAssertEqual(dialog.hosts.first?.name, "Mac Studio")
+        XCTAssertEqual(dialog.selectedHostID, hostID, "A single discovered host is preselected")
+        XCTAssertEqual(dialog.hosts.first?.routes.map(\.route), [.tailnet, .lan], "whoami contributes the Tailscale route")
+
+        dialog.tokenField.stringValue = "not-the-token"
+        dialog.connect()
+        let rejected = await waitUntil { if case .failed = dialog.phase { true } else { false } }
+        XCTAssertTrue(rejected)
+        let dialsAfterWrongToken = await link.dials()
+        XCTAssertTrue(dialsAfterWrongToken.isEmpty, "A token that fails identify must never be sent over WebSocket")
+        let devicesAfterWrongToken = try await repository.listDevices()
+        XCTAssertTrue(devicesAfterWrongToken.isEmpty)
+
+        dialog.tokenField.stringValue = token
+        dialog.connect()
+        let saved = await waitUntil { (try? await repository.listDevices().isEmpty) == false }
+        XCTAssertTrue(saved)
+        let savedDevices = try await repository.listDevices()
+        let device = try XCTUnwrap(savedDevices.first)
+        XCTAssertEqual(device.name, "Mac Studio")
+        XCTAssertEqual(device.endpoints.map(\.url.absoluteString), ["ws://100.101.2.3:9931/ws", "ws://192.168.31.116:9931/ws"])
+        let dials = await link.dials()
+        XCTAssertEqual(dials.first, ["ws://100.101.2.3:9931/ws", "ws://192.168.31.116:9931/ws"], "Connect dials Tailscale first")
+        let dismissed = await waitUntil { Mirror(reflecting: coordinator).children.first { $0.label == "nearbyHostsDialog" }?.value as? NearbyHostsDialogViewController == nil }
+        XCTAssertTrue(dismissed, "A successful connection closes the discovery dialog")
+    }
+
     private func qr(candidates: [String]) -> String {
         let object: [String: Any] = ["v": 1, "host_id": hostID, "name": "Mac Studio", "token": token, "url": candidates[0], "candidates": candidates, "port": 9931]
         return String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
@@ -152,6 +216,14 @@ private actor HostCentricRecordingLink: SessionLinkProtocol {
     func disconnect() async {}
     func dials() -> [[String]] { dialed }
     func routeUpdates() -> [[ApprovedEndpoint]] { updates }
+}
+
+private struct FixedSightings: NearbyHostSource {
+    let fixed: [NearbyHostSighting]
+    init(_ sightings: [NearbyHostSighting]) { fixed = sightings }
+    func sightings() -> AsyncStream<NearbyHostSighting> {
+        AsyncStream { continuation in fixed.forEach { continuation.yield($0) }; continuation.finish() }
+    }
 }
 
 private struct HostCentricSilentStream: SessionEventStream {
