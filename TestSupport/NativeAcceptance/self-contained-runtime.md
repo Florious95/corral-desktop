@@ -29,7 +29,7 @@ The App shows its native window, then performs installation/process work on a no
 - `~/.pi/agent/extensions/nodeprobe-pi-activity.js`
 - `~/.pi/agent/plugins/agentmirror-probe/index.js` (compatibility)
 
-A user-domain launchd job owns the daemon, survives UI exit, and restarts unsuccessful exits. Only a matching private ownership receipt and registered program may be upgraded/stopped. A listening externally managed9900 is reused, never killed/replaced. The daemon owns its durable state/token file; secrets are not launchd arguments. UTF-8 locale is explicit: launchd's C locale would turn tmux's inventory separators and Unicode into underscores, breaking nodeprobe.
+A user-domain launchd job owns the daemon, survives UI exit, and restarts unsuccessful exits. Normal installations listen on `:<port>` (all interfaces) so the LAN/Tailscale addresses advertised by `/pair/whoami` are reachable; the native client still connects over loopback. DEBUG acceptance explicitly selects loopback-only. Ownership receipts include the listener configuration, so upgrading an older owned loopback job applies the new policy even if daemon bytes are unchanged. Only a matching private ownership receipt and registered program may be upgraded/stopped. A listening externally managed9900 is reused, never killed/replaced. The daemon owns its durable state/token file; secrets are not launchd arguments. UTF-8 locale is explicit: launchd's C locale would turn tmux's inventory separators and Unicode into underscores, breaking nodeprobe.
 
 Self-contained normal launch always chooses local discovery. Explicit developer endpoints retain their previous behavior. A private DEBUG bootstrap mode requires the existing validated acceptance directory and a non9900 loopback endpoint; home, discovery, activity, storage and launchd label are derived from that directory, never production paths.
 
@@ -47,6 +47,8 @@ python3 TestSupport/NativeAcceptance/runtime-bootstrap.py --legacy-root /path/to
 ```
 
 The runner uses the packaged tmux (no formatting shim), private HOME/token/port/socket and a unique launchd label. The app itself installs and starts the real daemon. Two real offline Pi processes on independent named tmux servers are launched without `--extension` or `--no-extensions`; both auto-discovered plugin states/challenges, real nodeprobe health, Core/client listing and Pi input/echo are checked. It kills only its unique job to verify crash restart, closes/reopens only its own App and verifies daemon PID/token/plugin stability. Cleanup bootouts that exact owned job and private tmux server. No9900 requests, host Pi installation or global input.
+
+`CORRAL_TEST_RUNTIME_RESOURCES=/path/to/verified-runtime swift test -Xswiftc -O --filter BundledRuntimeListenerTests` additionally verifies the actual Core on a private port: loopback sandbox, migration of the old receipt/job, HTTP200 on active physical IPv4 addresses, and idempotent reopen. It never touches production9900.
 
 Negative checks include corrupt bytes, outer-manifest attempts to bless a Core-incompatible plugin, symlink escape and preservation of unrelated user extensions. A private existing listener is reused without creating a service job/token or changing that service's state directory. Missing-token authentication is not bypassed. Runtime samples and process identity receipts must remain separate from unit-test assertions.
 

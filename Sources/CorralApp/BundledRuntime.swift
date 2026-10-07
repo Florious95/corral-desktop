@@ -32,12 +32,16 @@ actor BundledRuntime {
         enum CodingKeys: String, CodingKey { case platform, binary, corpora; case piExtension = "pi_extension" }
     }
 
+    enum ListenScope: Sendable { case allInterfaces, loopback }
+
     struct Configuration: Sendable {
         let resources: URL
         let home: URL
         let support: URL
         let port: Int
         let label: String
+        var listenScope: ListenScope = .allInterfaces
+        var listenAddress: String { listenScope == .loopback ? "127.0.0.1:\(port)" : ":\(port)" }
         /// Nil in normal launches. Acceptance restricts discovery to its own socket tree.
         var discoveryDirectory: URL? = nil
         var activityDirectory: URL? = nil
@@ -52,6 +56,8 @@ actor BundledRuntime {
     private struct Ownership: Codable {
         let label: String
         let executable: String
+        // Optional so older owned jobs are upgraded once even with the same daemon bytes.
+        let listenAddress: String?
     }
 
     static func hash(_ data: Data) -> String {
@@ -161,7 +167,8 @@ actor BundledRuntime {
                 && URL(fileURLWithPath: $0.executable).standardizedFileURL.path == $0.executable
                 && inspection.output.contains($0.executable)
         } == true
-        let shouldUpgrade = ownsRegistered && oldOwner?.executable != executable
+        let shouldUpgrade = ownsRegistered && (oldOwner?.executable != executable
+            || oldOwner?.listenAddress != configuration.listenAddress)
         if LocalDaemonSupervisor.portIsListening(port: configuration.port), !shouldUpgrade {
             // An externally managed service may use an existing stored credential;
             // let the Coordinator's normal fallback resolve it, without replacing it.
@@ -170,7 +177,17 @@ actor BundledRuntime {
         }
         guard !registered || ownsRegistered else { throw Failure.foreignJob }
         try Self.privateDirectory(state)
-        if shouldUpgrade { _ = try Self.run("/bin/launchctl", ["bootout", service]) }
+        if shouldUpgrade {
+            let stopped = try Self.run("/bin/launchctl", ["bootout", service])
+            guard stopped.status == 0 else { throw Failure.commandFailed("launchctl bootout") }
+            // bootout may return while launchd still owns the old service name.
+            // Re-bootstrap only after that owned job is actually unregistered.
+            for _ in 0..<200 {
+                if try Self.run("/bin/launchctl", ["print", service]).status != 0 { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            guard try Self.run("/bin/launchctl", ["print", service]).status != 0 else { throw Failure.notReady }
+        }
         if !registered || shouldUpgrade {
             let agents = home.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
             try Self.rejectSymlinks(below: home, through: agents)
@@ -202,7 +219,7 @@ actor BundledRuntime {
             let job: [String: Any] = [
                 "Label": configuration.label,
                 "ProgramArguments": ["/usr/bin/env", "-u", "AGENTMIRROR_TOKEN", executable,
-                                     "-listen", "127.0.0.1:\(configuration.port)", "-state-dir", state.path],
+                                     "-listen", configuration.listenAddress, "-state-dir", state.path],
                 "EnvironmentVariables": environment, "WorkingDirectory": home.path,
                 "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 10,
                 "StandardOutPath": log.path, "StandardErrorPath": log.path, "Umask": 0o077
@@ -210,7 +227,8 @@ actor BundledRuntime {
             let data = try PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0)
             try data.write(to: plist, options: .atomic)
             guard chmod(plist.path, 0o600) == 0 else { throw Failure.unsafePath }
-            try JSONEncoder().encode(Ownership(label: configuration.label, executable: executable)).write(to: marker, options: .atomic)
+            try JSONEncoder().encode(Ownership(label: configuration.label, executable: executable,
+                                               listenAddress: configuration.listenAddress)).write(to: marker, options: .atomic)
             let result = try Self.run("/bin/launchctl", ["bootstrap", domain, plist.path])
             guard result.status == 0 else { throw Failure.commandFailed("launchctl bootstrap: \(result.output)") }
         } else {

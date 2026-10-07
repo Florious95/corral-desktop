@@ -194,6 +194,7 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
                 runtimeConfiguration = BundledRuntime.Configuration(resources: resources, home: home,
                     support: supportDirectory.appendingPathComponent(DeviceRepository.namespace, isDirectory: true),
                     port: endpoint.port, label: "com.corral.native.test." + String(BundledRuntime.hash(Data(acceptanceDirectory.path.utf8)).prefix(12)),
+                    listenScope: .loopback,
                     discoveryDirectory: acceptanceDirectory.appendingPathComponent("tmux-\(getuid())", isDirectory: true),
                     activityDirectory: acceptanceDirectory.appendingPathComponent("pi-activity", isDirectory: true))
             }
