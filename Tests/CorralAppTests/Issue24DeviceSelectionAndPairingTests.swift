@@ -111,18 +111,17 @@ final class Issue24DeviceSelectionAndPairingTests: XCTestCase {
             localFixture.stop()
             remoteFixture.stop()
         }
-        Issue24LocalDaemonURLProtocol.install(localFixture)
-        URLProtocol.registerClass(Issue24LocalDaemonURLProtocol.self)
-        defer {
-            Issue24LocalDaemonURLProtocol.uninstall()
-            URLProtocol.unregisterClass(Issue24LocalDaemonURLProtocol.self)
-        }
 
+        // Keep the standard local identity, but bind its stored endpoint to
+        // this test's private dynamic port.  A fix that cannot find this
+        // record must fail closed in the test; it must never fall back to the
+        // production 127.0.0.1:9900 endpoint.
+        let localEndpoint = try ApprovedEndpoint(host: "127.0.0.1", port: Int(localFixture.port))
         let remoteEndpoint = try ApprovedEndpoint(host: "127.0.0.1", port: Int(remoteFixture.port))
         let localDevice = DeviceRecord(
             id: LocalDaemonTokenDiscovery.deviceID,
             name: LocalDaemonTokenDiscovery.deviceName,
-            endpoint: LocalDaemonTokenDiscovery.endpoint,
+            endpoint: localEndpoint,
             credential: LocalDaemonTokenDiscovery.credentialHandle)
         let remoteDevice = DeviceRecord(
             id: DeviceID("issue24-remote-device"), name: "Remote Mac",
@@ -420,52 +419,3 @@ private final class Issue24WhoAmIFixture: @unchecked Sendable {
 }
 
 private enum Issue24FixtureError: Error { case notReady }
-
-private final class Issue24URLProtocolHolder: @unchecked Sendable {
-    let lock = NSLock()
-    var fixture: Issue24WhoAmIFixture?
-}
-
-private final class Issue24LocalDaemonURLProtocol: URLProtocol {
-    private static let holder = Issue24URLProtocolHolder()
-
-    static func install(_ fixture: Issue24WhoAmIFixture) {
-        holder.lock.lock(); defer { holder.lock.unlock() }
-        holder.fixture = fixture
-    }
-
-    static func uninstall() {
-        holder.lock.lock(); defer { holder.lock.unlock() }
-        holder.fixture = nil
-    }
-
-    private static func currentFixture() -> Issue24WhoAmIFixture? {
-        holder.lock.lock(); defer { holder.lock.unlock() }
-        return holder.fixture
-    }
-
-    override class func canInit(with request: URLRequest) -> Bool {
-        guard let url = request.url else { return false }
-        return url.scheme == "http" && url.host == "127.0.0.1" && url.port == 9900 && url.path == "/pair/whoami"
-    }
-
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let fixture = Self.currentFixture(), let url = request.url else {
-            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
-            return
-        }
-        Task { await fixture.stateRecordForURLProtocol() }
-        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: fixture.whoAmIData())
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-}
-
-private extension Issue24WhoAmIFixture {
-    func stateRecordForURLProtocol() async { await state.record("/pair/whoami") }
-}
