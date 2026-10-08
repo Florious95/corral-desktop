@@ -1184,9 +1184,17 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 let local = self.cachedDevices.first {
                     $0.id == LocalDaemonTokenDiscovery.deviceID && $0.endpoint.route == .loopback
                 }
-                let localEndpoint = local?.endpoint ?? LocalDaemonTokenDiscovery.endpoint
-                var token = localEndpoint.port == LocalDaemonTokenDiscovery.endpoint.port
-                    ? LocalDaemonTokenDiscovery.fileToken(environment: self.environment) : nil
+                let configuredLocal = self.environment["CORRAL_NATIVE_ENDPOINT"].flatMap(URL.init(string:))
+                    .flatMap { try? ApprovedEndpoint(url: $0) }.flatMap { $0.route == .loopback ? $0 : nil }
+                let localEndpoint = local?.endpoint ?? configuredLocal ?? LocalDaemonTokenDiscovery.endpoint
+                var token: String?
+                if configuredLocal == localEndpoint {
+                    token = LocalDaemonTokenDiscovery.valid(self.environment["CORRAL_NATIVE_TOKEN"])
+                        ?? LocalDaemonTokenDiscovery.valid(self.environment["AGENTMIRROR_TOKEN"] ?? self.environment["CORRAL_TOKEN"])
+                }
+                if token == nil, localEndpoint.port == LocalDaemonTokenDiscovery.endpoint.port {
+                    token = LocalDaemonTokenDiscovery.fileToken(environment: self.environment)
+                }
                 if token == nil {
                     token = LocalDaemonTokenDiscovery.valid(try? await self.credentialVault.resolve(
                         local?.credential ?? LocalDaemonTokenDiscovery.credentialHandle))
