@@ -115,7 +115,7 @@ final class Issue24DeviceSelectionAndPairingTests: XCTestCase {
         // Keep the standard local identity, but bind its stored endpoint to
         // this test's private dynamic port.  A fix that cannot find this
         // record must fail closed in the test; it must never fall back to the
-        // production 127.0.0.1:9900 endpoint.
+        // production default endpoint.
         let localEndpoint = try ApprovedEndpoint(host: "127.0.0.1", port: Int(localFixture.port))
         let remoteEndpoint = try ApprovedEndpoint(host: "127.0.0.1", port: Int(remoteFixture.port))
         let localDevice = DeviceRecord(
