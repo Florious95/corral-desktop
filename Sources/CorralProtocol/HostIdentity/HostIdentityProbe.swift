@@ -25,7 +25,10 @@ public struct HostIdentityProbe: Sendable {
             var request = request
             request.timeoutInterval = timeout
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.connectionProxyDictionary = [:]
+            if let url = request.url, let host = url.host, let port = url.port,
+               (try? ApprovedEndpoint(host: host, port: port, pairingHostID: "identity-probe")) != nil {
+                configuration.connectionProxyDictionary = [:]
+            }
             let session = URLSession(configuration: configuration, delegate: RejectIdentityRedirects(), delegateQueue: nil)
             defer { session.invalidateAndCancel() }
             let (data, response) = try await session.data(for: request)
