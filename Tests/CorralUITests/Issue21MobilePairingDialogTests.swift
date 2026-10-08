@@ -3,6 +3,7 @@ import CorralContracts
 import CorralProtocol
 import CorralServices
 import CorralUI
+import Darwin
 import Foundation
 import Network
 import XCTest
@@ -17,14 +18,15 @@ final class Issue21MobilePairingDialogTests: XCTestCase {
         try await fixture.start()
         defer { fixture.stop() }
 
-        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:9919/pair/whoami"))
+        let url = try XCTUnwrap(URL(string: fixture.httpWhoAmIURL))
         let (data, response) = try await URLSession.shared.data(from: url)
         let http = try XCTUnwrap(response as? HTTPURLResponse)
         XCTAssertEqual(http.statusCode, 200)
         let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(body["v"] as? Int, 1)
         XCTAssertEqual(body["host_id"] as? String, fixture.hostID)
-        XCTAssertEqual(body["addresses"] as? [String], ["100.64.0.1", "192.168.1.50", "127.0.0.1"])
+        XCTAssertEqual(body["port"] as? Int, Int(fixture.port))
+        XCTAssertEqual(body["addresses"] as? [String], fixture.addresses)
         let requestPaths = await fixture.requestPaths()
         XCTAssertEqual(requestPaths, ["/pair/whoami"])
     }
@@ -53,7 +55,7 @@ final class Issue21MobilePairingDialogTests: XCTestCase {
             initialUserPreferences: await preferencesStore.snapshot(),
             environment: [
                 "CORRAL_NATIVE_ENDPOINT": whoAmIFixture.endpoint,
-                "CORRAL_NATIVE_TOKEN": "issue21-private-daemon-token",
+                "CORRAL_NATIVE_TOKEN": whoAmIFixture.token,
                 "CORRAL_NATIVE_BACKGROUND": "1"
             ]
         )
@@ -98,17 +100,20 @@ final class Issue21MobilePairingDialogTests: XCTestCase {
         let hostID = try XCTUnwrap(object["host_id"] as? String, "QR payload must contain the daemon host_id")
         XCTAssertEqual(hostID, whoAmIFixture.hostID)
         let token = try XCTUnwrap(object["token"] as? String, "QR payload must contain the daemon token")
-        XCTAssertEqual(token, "issue21-private-daemon-token", "QR must use the daemon credential, not a placeholder")
+        XCTAssertEqual(token, whoAmIFixture.token, "QR must use the credential supplied by this run's daemon")
         let candidates = try XCTUnwrap(object["candidates"] as? [String], "QR payload must contain endpoint candidates")
+        let expectedCandidates = whoAmIFixture.addresses.map { "ws://\($0):\(whoAmIFixture.port)/ws" }
+        XCTAssertEqual(candidates, expectedCandidates,
+                       "QR candidates must come from this run's /pair/whoami response, not a development-machine constant")
         XCTAssertFalse(candidates.isEmpty)
         XCTAssertTrue(candidates.allSatisfy { $0.hasPrefix("ws://") || $0.hasPrefix("wss://") })
-        XCTAssertTrue(candidates.contains(whoAmIFixture.tailnetURL), "QR must advertise a phone-reachable Tailnet candidate")
-        XCTAssertTrue(candidates.contains(whoAmIFixture.lanURL), "QR must advertise a phone-reachable LAN candidate")
-        XCTAssertEqual(URL(string: candidates.first ?? "")?.host, "100.64.0.1", "The primary QR endpoint must not be a phone-local loopback")
+        XCTAssertEqual(object["port"] as? Int, Int(whoAmIFixture.port))
+        XCTAssertEqual(URL(string: candidates.first ?? "")?.host, URL(string: expectedCandidates.first ?? "")?.host,
+                       "The primary QR endpoint must be the current host's advertised address")
         if let loopbackIndex = candidates.firstIndex(where: { URL(string: $0)?.host == "127.0.0.1" }) {
             XCTAssertGreaterThan(loopbackIndex, 0, "127.0.0.1 may only be a lower-priority diagnostic fallback")
         }
-        XCTAssertEqual(object["url"] as? String, candidates.first)
+        XCTAssertEqual(object["url"] as? String, expectedCandidates.first)
         XCTAssertNotNil(pairingDialog.qrImage, "The QR image itself must be rendered")
 
         // Token is allowed in the machine-readable QR payload, but not in
@@ -193,19 +198,25 @@ private actor Issue21PairWhoAmIState {
 /// A real loopback HTTP fixture. It binds the development-only 9919 port and
 /// never listens on or connects to production 9900.
 private final class Issue21PairWhoAmIFixture: @unchecked Sendable {
-    let hostID = "issue21-host-fixture"
-    let endpoint = "ws://127.0.0.1:9919/ws"
-    let tailnetURL = "ws://100.64.0.1:9919/ws"
-    let lanURL = "ws://192.168.1.50:9919/ws"
+    let hostID = "issue21-host-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))"
+    let token = "issue21-token-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(32))"
+    let port: UInt16 = 9919
+    let addresses: [String]
 
     private let listener: NWListener
     private let queue = DispatchQueue(label: "corral.issue21.pair-whoami")
     private let state = Issue21PairWhoAmIState()
 
     init() throws {
-        guard let port = NWEndpoint.Port(rawValue: 9919) else { throw Issue21PairWhoAmIFixtureError.invalidPort }
-        listener = try NWListener(using: .tcp, on: port)
+        let addresses = Self.nonLoopbackPrivateIPv4Addresses()
+        guard !addresses.isEmpty else { throw Issue21PairWhoAmIFixtureError.noPrivateIPv4Address }
+        self.addresses = addresses
+        guard let listenerPort = NWEndpoint.Port(rawValue: port) else { throw Issue21PairWhoAmIFixtureError.invalidPort }
+        listener = try NWListener(using: .tcp, on: listenerPort)
     }
+
+    var endpoint: String { "ws://127.0.0.1:\(port)/ws" }
+    var httpWhoAmIURL: String { "http://127.0.0.1:\(port)/pair/whoami" }
 
     func start() async throws {
         listener.stateUpdateHandler = { state in
@@ -254,16 +265,47 @@ private final class Issue21PairWhoAmIFixture: @unchecked Sendable {
                 return
             }
             Task { await self.state.record(path: path) }
-            let body = #"{"v":1,"host_id":"issue21-host-fixture","name":"issue21-daemon","port":9919,"addresses":["100.64.0.1","192.168.1.50","127.0.0.1"]}"#
-            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            let value: [String: Any] = ["v": 1, "host_id": self.hostID, "name": "issue21-daemon", "port": Int(self.port), "addresses": self.addresses]
+            let bodyData = try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+            let body = String(decoding: bodyData, as: UTF8.self)
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(bodyData.count)\r\nConnection: close\r\n\r\n\(body)"
             connection.send(content: Data(response.utf8), contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed { _ in
                 connection.cancel()
             })
+        }
+    }
+
+    private static func nonLoopbackPrivateIPv4Addresses() -> [String] {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+        var result: [String] = []
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+        while let item = current {
+            defer { current = item.pointee.ifa_next }
+            guard let address = item.pointee.ifa_addr,
+                  address.pointee.sa_family == UInt8(AF_INET) else { continue }
+            var storage = sockaddr_in()
+            memcpy(&storage, address, MemoryLayout<sockaddr_in>.size)
+            let host = withUnsafePointer(to: &storage.sin_addr) { pointer in
+                pointer.withMemoryRebound(to: UInt8.self, capacity: 4) { bytes in
+                    (0..<4).map { String(bytes[$0]) }.joined(separator: ".")
+                }
+            }
+            guard let route = ApprovedEndpoint.route(forHost: host), route != .loopback,
+                  !result.contains(host) else { continue }
+            result.append(host)
+        }
+        return result.sorted {
+            let lhs = ApprovedEndpoint.route(forHost: $0)?.rawValue ?? Int.max
+            let rhs = ApprovedEndpoint.route(forHost: $1)?.rawValue ?? Int.max
+            return (lhs, $0) < (rhs, $1)
         }
     }
 }
 
 private enum Issue21PairWhoAmIFixtureError: Error {
     case invalidPort
+    case noPrivateIPv4Address
     case notReady
 }
