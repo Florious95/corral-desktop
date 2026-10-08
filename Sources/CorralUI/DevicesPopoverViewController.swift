@@ -10,6 +10,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public private(set) var deletionInProgressDeviceID: DeviceID?
     public private(set) var errorMessage: String?
     public private(set) var selectedDeviceIDs = Set<DeviceID>()
+    private var selectionInitialized = false
     public private(set) var readyDeviceIDs = Set<DeviceID>()
     /// The route the connected device currently runs over; its chip is lit.
     public private(set) var activeRoute: ApprovedEndpoint?
@@ -36,8 +37,10 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public static let cornerRadius: CGFloat = 12
     public static let rowHeight: CGFloat = 50
 
-    public init(repository: any DeviceRepositoryProtocol) {
+    public init(repository: any DeviceRepositoryProtocol, selectedDeviceIDs: Set<DeviceID>? = nil) {
         self.repository = repository
+        self.selectedDeviceIDs = selectedDeviceIDs ?? []
+        self.selectionInitialized = selectedDeviceIDs != nil
         super.init(nibName: nil, bundle: nil)
         preferredContentSize = NSSize(width: Self.width, height: 240)
     }
@@ -118,7 +121,10 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
 
     public func reloadDevices() async throws {
         devices = try await repository.listDevices()
-        if selectedDeviceIDs.isEmpty { selectedDeviceIDs = Set(devices.map(\.id)) }
+        if !selectionInitialized {
+            selectedDeviceIDs = Set(devices.map(\.id))
+            selectionInitialized = true
+        }
         tableView.reloadData()
         updateSelectionSummary()
         onDevicesChanged?(devices)
@@ -313,6 +319,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     }
 
     public func setDevice(_ id: DeviceID, selected: Bool) {
+        selectionInitialized = true
         if selected { selectedDeviceIDs.insert(id) } else { selectedDeviceIDs.remove(id) }
         tableView.reloadData(); updateSelectionSummary()
         onSelectionChanged?(selectedDeviceIDs)
@@ -327,7 +334,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         updateContentSize()
     }
 
-    @objc private func toggleAllDevices() { selectedDeviceIDs = allDevicesButton.state == .on ? Set(devices.map(\.id)) : []; tableView.reloadData(); updateSelectionSummary(); onSelectionChanged?(selectedDeviceIDs) }
+    @objc private func toggleAllDevices() { selectionInitialized = true; selectedDeviceIDs = allDevicesButton.state == .on ? Set(devices.map(\.id)) : []; tableView.reloadData(); updateSelectionSummary(); onSelectionChanged?(selectedDeviceIDs) }
     private func addDevice() { onAddDevice?() }
     private func pairMobile() { onPairMobile?() }
 

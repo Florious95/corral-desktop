@@ -162,6 +162,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var lastSidebarSelectionSpaceID: UUID?
     private var sidebarSessionSelectionPending = false
     private var selectedDeviceIDs = Set<DeviceID>()
+    private var hasDeviceSelectionFilter = false
     private var activeDialog: CorralDialogViewController?
     private var settingsDialog: SettingsDialogViewController?
     private var newAgentDialog: NewAgentDialogViewController?
@@ -1419,13 +1420,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 return
             }
         }
-        let controller = DevicesPopoverViewController(repository: deviceRepository)
+        let controller = DevicesPopoverViewController(repository: deviceRepository,
+            selectedDeviceIDs: hasDeviceSelectionFilter ? selectedDeviceIDs : nil)
         controller.onDevicesChanged = { [weak self] devices in
             Task { @MainActor in await self?.devicesChanged(devices) }
         }
         controller.onSelectionChanged = { [weak self] ids in
             guard let self else { return }
             self.selectedDeviceIDs = ids
+            self.hasDeviceSelectionFilter = true
+            self.updateSidebar(devices: self.cachedDevices)
             guard ids.count == 1, let id = ids.first, id != self.configuredDeviceID else { return }
             Task { @MainActor in await self.selectDevice(id) }
         }
@@ -1451,8 +1455,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             do {
                 try await controller.reloadDevices()
                 controller.setReadyDevices(connected ? Set([configuredDeviceID].compactMap { $0 }) : [], activeRoute: activeRoute)
-                if let configuredDeviceID { controller.setDevice(configuredDeviceID, selected: true) }
                 self.selectedDeviceIDs = controller.selectedDeviceIDs
+                self.hasDeviceSelectionFilter = true
+                self.updateSidebar(devices: self.cachedDevices)
                 panel.updateContentSizeAndPosition(anchoredTo: self.workspaceView.tabBar.devicesButton)
             } catch {
                 self.showToast("设备列表读取失败：\(error)", kind: .error)
@@ -2504,7 +2509,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private func updateSidebar(devices: [DeviceRecord]) {
         cachedDevices = devices
-        var sidebarDevices = devices.map { device in
+        var sidebarDevices = devices.filter { !hasDeviceSelectionFilter || selectedDeviceIDs.contains($0.id) }.map { device in
             let id = self.sidebarDeviceIDs[device.id] ?? UUID()
             self.sidebarDeviceIDs[device.id] = id
             let deviceSessions = sessionOrder.compactMap { key -> CorralSidebarSession? in
@@ -2514,7 +2519,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let isOnline = connected && configuredDeviceID == device.id
             return CorralSidebarDevice(id: id, name: device.name, sessions: deviceSessions, isOnline: isOnline)
         }
-        if let configuredDeviceID, !devices.contains(where: { $0.id == configuredDeviceID }) {
+        if let configuredDeviceID, !devices.contains(where: { $0.id == configuredDeviceID }),
+           !hasDeviceSelectionFilter || selectedDeviceIDs.contains(configuredDeviceID) {
             let id = sidebarDeviceIDs[configuredDeviceID] ?? UUID()
             sidebarDeviceIDs[configuredDeviceID] = id
             let deviceSessions = sessionOrder.compactMap { key -> CorralSidebarSession? in
@@ -2525,7 +2531,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         workspaceView.sidebar.setDeviceMetadata(sidebarDevices)
 
-        let liveDescriptors = sessionOrder.compactMap { sessions[$0]?.descriptor }
+        let liveDescriptors = sessionOrder.filter { !hasDeviceSelectionFilter || selectedDeviceIDs.contains($0.deviceID) }
+            .compactMap { sessions[$0]?.descriptor }
         var spacesByDirectory: [String: CorralSidebarSpace] = [:]
         let agents = liveDescriptors.map { descriptor -> CorralSidebarAgent in
             let directory = descriptor.workingDirectory
@@ -2559,6 +2566,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         workspaceView.sidebar.setSpaces(Array(spacesByDirectory.values).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
         workspaceView.sidebar.setAgents(agents)
+        if selectedSidebarSpaceID != CorralSidebarSpace.allSpacesID,
+           !spacesByDirectory.values.contains(where: { $0.id == selectedSidebarSpaceID }) {
+            selectedSidebarSpaceID = CorralSidebarSpace.allSpacesID
+        }
         workspaceView.sidebar.selectSpace(id: selectedSidebarSpaceID)
         synchronizeSidebarSelectionIfNeeded()
     }
