@@ -165,8 +165,8 @@ final class Issue24DeviceSelectionAndPairingTests: XCTestCase {
 
         let pairingDialog = try await waitForPairingDialog(in: coordinator)
         XCTAssertNotNil(pairingDialog, "The real pairing entry must present a native pairing dialog")
-        let remoteRequested = await remoteFixture.waitForPath("/pair/whoami")
-        XCTAssertTrue(remoteRequested, "The red baseline must prove which route the current implementation used")
+        let requestArrived = await waitForAnyWhoAmI(local: localFixture, remote: remoteFixture)
+        XCTAssertTrue(requestArrived, "Pairing must issue exactly one whoami request to an isolated fixture")
         let localRequestCount = await localFixture.requestCount(for: "/pair/whoami")
         XCTAssertGreaterThan(
             localRequestCount, 0,
@@ -220,6 +220,20 @@ final class Issue24DeviceSelectionAndPairingTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return predicate()
+    }
+
+    private func waitForAnyWhoAmI(local: Issue24WhoAmIFixture, remote: Issue24WhoAmIFixture) async -> Bool {
+        for _ in 0..<100 {
+            let localCount = await local.requestCount(for: "/pair/whoami")
+            let remoteCount = await remote.requestCount(for: "/pair/whoami")
+            if localCount > 0 || remoteCount > 0 {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let localCount = await local.requestCount(for: "/pair/whoami")
+        let remoteCount = await remote.requestCount(for: "/pair/whoami")
+        return localCount > 0 || remoteCount > 0
     }
 }
 
