@@ -1179,19 +1179,25 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             guard let self else { return }
             let sourceConnection = self.connection
             do {
-                let configuration: ConnectionConfiguration
-                if let active = self.activeConnectionConfiguration {
-                    configuration = active
-                } else if let configured = try await self.connectionConfiguration(devices: self.cachedDevices) {
-                    configuration = configured
-                } else {
+                // Pair this Mac, never the remote host selected for the workspace.
+                let local = self.cachedDevices.first {
+                    $0.id == LocalDaemonTokenDiscovery.deviceID && $0.endpoint.route == .loopback
+                }
+                let localEndpoint = local?.endpoint ?? LocalDaemonTokenDiscovery.endpoint
+                var token = localEndpoint.port == LocalDaemonTokenDiscovery.endpoint.port
+                    ? LocalDaemonTokenDiscovery.fileToken(environment: self.environment) : nil
+                if token == nil {
+                    token = LocalDaemonTokenDiscovery.valid(try? await self.credentialVault.resolve(
+                        local?.credential ?? LocalDaemonTokenDiscovery.credentialHandle))
+                }
+                guard let token else {
                     self.showToast("未找到本机配对 Token，请先配置本机服务凭证", kind: .warning)
                     return
                 }
-                // Ask the route the live connection actually uses; the paired one may be off this network.
-                let live = self.activeConnectionConfiguration?.deviceID == configuration.deviceID ? self.activeRoute ?? configuration.endpoint : configuration.endpoint
-                var endpoint = URLComponents(url: live.url, resolvingAgainstBaseURL: false)!
-                endpoint.scheme = live.scheme == "wss" ? "https" : "http"
+                let configuration = ConnectionConfiguration(endpoint: localEndpoint,
+                    token: token, deviceID: LocalDaemonTokenDiscovery.deviceID, deviceName: LocalDaemonTokenDiscovery.deviceName)
+                var endpoint = URLComponents(url: configuration.endpoint.url, resolvingAgainstBaseURL: false)!
+                endpoint.scheme = configuration.endpoint.scheme == "wss" ? "https" : "http"
                 endpoint.path = "/pair/whoami"
                 var request = URLRequest(url: endpoint.url!)
                 request.timeoutInterval = 5
@@ -1213,8 +1219,6 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     guard let value = url.string, seen.insert(value).inserted else { return nil }
                     return value
                 }
-                if let current = self.activeConnectionConfiguration,
-                   current.endpoint != configuration.endpoint || current.token != configuration.token { return }
                 guard self.activeDialog == nil else { return }
                 let payload = CorralPairingPayload(url: candidates.first ?? "", token: configuration.token,
                     name: identity.name, candidates: candidates, hostID: identity.hostID, port: identity.port)
