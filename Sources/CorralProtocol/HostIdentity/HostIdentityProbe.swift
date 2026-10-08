@@ -24,7 +24,9 @@ public struct HostIdentityProbe: Sendable {
         transport = { request in
             var request = request
             request.timeoutInterval = timeout
-            let session = URLSession(configuration: .ephemeral, delegate: RejectIdentityRedirects(), delegateQueue: nil)
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.connectionProxyDictionary = [:]
+            let session = URLSession(configuration: configuration, delegate: RejectIdentityRedirects(), delegateQueue: nil)
             defer { session.invalidateAndCancel() }
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }

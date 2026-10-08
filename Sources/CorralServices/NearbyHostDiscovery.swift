@@ -185,8 +185,8 @@ public struct BonjourHostSource: NearbyHostSource {
     }
 }
 
-/// Online desktop peers of the user's tailnet, from the Tailscale CLI. Each is a sighting on the daemon
-/// port; whoami decides whether a Corral host really answers there.
+/// Peers of the user's tailnet, from the Tailscale CLI. Each is a sighting on the daemon
+/// port; whoami, not cached Online/OS hints, decides whether a Corral host really answers there.
 public struct TailscalePeerSource: NearbyHostSource {
     public struct Peer: Equatable, Sendable {
         public let name: String
@@ -217,14 +217,12 @@ public struct TailscalePeerSource: NearbyHostSource {
         }
     }
 
-    /// Online macOS/Linux/Windows peers with a Tailscale IPv4 (phones never run the daemon).
+    /// Every peer with a Tailscale IPv4 is a probe candidate, regardless of Online/OS hints.
     public static func parsePeers(_ status: Data) -> [Peer] {
         guard let object = try? JSONSerialization.jsonObject(with: status) as? [String: Any],
               let peers = object["Peer"] as? [String: [String: Any]] else { return [] }
         return peers.values.compactMap { peer -> Peer? in
-            guard peer["Online"] as? Bool == true,
-                  ["macOS", "linux", "windows"].contains(peer["OS"] as? String ?? ""),
-                  let address = (peer["TailscaleIPs"] as? [String])?.first(where: { $0.hasPrefix("100.") && !$0.contains(":") }),
+            guard let address = (peer["TailscaleIPs"] as? [String])?.first(where: { $0.hasPrefix("100.") && !$0.contains(":") }),
                   (try? ApprovedEndpoint(host: address, port: 9900, pairingHostID: "tailscale-peer"))?.route == .tailnet else { return nil }
             return Peer(name: peer["HostName"] as? String ?? address, address: address)
         }.sorted { $0.address < $1.address }
