@@ -794,7 +794,9 @@ private final class URLSessionWebSocketConnection: WebSocketConnection, @uncheck
     private let task: URLSessionWebSocketTask
 
     init(url: URL) {
-        let session = URLSession(configuration: .ephemeral, delegate: RejectWebSocketRedirects(), delegateQueue: nil)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration, delegate: RejectWebSocketRedirects(), delegateQueue: nil)
         self.session = session
         self.task = session.webSocketTask(with: url)
     }
