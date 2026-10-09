@@ -14,6 +14,7 @@ import shlex
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import traceback
 
@@ -32,16 +33,18 @@ def wait_for(fn, timeout=20):
 
 
 class Run:
-    def __init__(self, legacy, case='parity', no_resize=False, server_binary=None, pi_session=None):
+    def __init__(self, legacy, case='parity', no_resize=False, server_binary=None, pi_session=None, runtime_root=None, app_binary=None):
         self.legacy = legacy
         self.case = case
         self.no_resize = no_resize
         self.server_binary = server_binary
+        self.runtime_root = runtime_root
+        self.app_binary = app_binary
         self.suffixes = 'ABCDEFGHIJ' if case.startswith('many-sessions') else 'ABCD'
         if case == 'session-liveness': self.suffixes = [f'S{i:02}' for i in range(50)]
         # A real Pi TUI (offline, no extensions) on a private copy of a long session.
         self.pi_session = pi_session
-        if case in ('pi-scrollbar-drag', 'mobile-shared-anchor'): self.suffixes = 'ABCDP'
+        if case in ('pi-scrollbar-drag', 'mobile-shared-anchor', 'mobile-resize-repro'): self.suffixes = 'ABCDP'
         self.directory = Path(tempfile.mkdtemp(prefix='corral-native-acceptance-', dir='/tmp')).resolve()
         self.nonce = secrets.token_hex(4).upper()
         self.processes = []
@@ -49,6 +52,10 @@ class Run:
         self.receipts = []
         self.socket = self.directory / ('tmux-'+str(os.getuid())) / 'acceptance'
         self.refs = {}
+        self.pty_sampler_stop = None
+        self.pty_sampler_thread = None
+        self.pty_samples = []
+        self.pty_phase = 'startup'
 
     def start_process(self, args, env, name):
         log = open(self.directory / (name + '.log'), 'wb')
@@ -60,7 +67,9 @@ class Run:
         return subprocess.check_output(['/opt/homebrew/bin/tmux', '-S', str(self.socket), *args], text=True).strip()
 
     def start(self):
-        runtime = ROOT / 'TestSupport/Fixtures/runtime/nodeprobe'
+        runtime = self.runtime_root or ROOT / 'TestSupport/Fixtures/runtime/nodeprobe'
+        runtime = runtime.resolve()
+        assert runtime.is_dir(), f'private runtime directory is missing: {runtime}'
         self.socket.parent.mkdir(mode=0o700)
         helper = self.directory / 'helpers'
         helper.mkdir()
@@ -152,8 +161,12 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                        CORRAL_NATIVE_ENDPOINT=f'ws://127.0.0.1:{proxy_port}/ws', CORRAL_NATIVE_TOKEN=token)
         app_env.pop('CORRAL_NATIVE_NO_RESIZE', None)
         if self.no_resize: app_env['CORRAL_NATIVE_NO_RESIZE'] = '1'
-        app = ROOT / '.build/CorralNativeDev.app/Contents/MacOS/CorralApp'
+        app = self.app_binary or ROOT / '.build/CorralNativeDev.app/Contents/MacOS/CorralApp'
+        app = app.resolve()
+        assert app.is_file(), f'candidate app executable is missing: {app}'
         self.app = self.start_process([str(app)], app_env, 'app')
+        self.app_env = app_env
+        self.app_path = app
         self.identity = {'app': str(app), 'appSHA256': hashlib.sha256(app.read_bytes()).hexdigest(),
                          'baseHEAD': subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip(),
                          'sourceTree': subprocess.check_output(['git','rev-parse','HEAD^{tree}'], cwd=ROOT, text=True).strip(),
@@ -163,7 +176,10 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                          'origin': 'appkit-synthetic', 'systemHID': 'NOT-RUN', 'nativeOSDragTracking': 'NOT-RUN',
                          'case': self.case, 'noResize': self.no_resize,
                          'piIsolatedConfig': str(self.directory / 'pi-config') if self.pi_session else None,
-                         'piCopyOnSelect': False if self.pi_session else None}
+                         'piCopyOnSelect': False if self.pi_session else None,
+                         'runtimeRoot': str(runtime),
+                         'nodeprobeRuntime': {name: hashlib.sha256((runtime / name).read_bytes()).hexdigest()
+                                              for name in ('nodeprobe', 'nodeprobe-pi-activity.js', 'titles.tsv', 'providers.tsv')}}
         print(f'RUN_DIR={self.directory}', flush=True)
         wait_for(lambda: self.command('state').get('connected'), 25)
         self.state = wait_for(lambda: self.ready_state(), 25)
@@ -612,6 +628,27 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
                      self.tmux('list-panes', '-a', '-F', '#{pane_id}\t#{pane_width}\t#{pane_height}').splitlines())
         return sizes[ref]
 
+    def start_pty_sampler(self):
+        self.pty_sampler_stop = threading.Event()
+        def sample():
+            while not self.pty_sampler_stop.is_set():
+                try:
+                    grid = list(self.pane_size('P'))
+                    self.pty_samples.append({'at': int(time.time() * 1000), 'phase': self.pty_phase, 'grid': grid})
+                except (OSError, subprocess.SubprocessError, KeyError):
+                    pass
+                self.pty_sampler_stop.wait(.02)
+        self.pty_sampler_thread = threading.Thread(target=sample, name='private-pty-sampler', daemon=True)
+        self.pty_sampler_thread.start()
+
+    def stop_pty_sampler(self):
+        if self.pty_sampler_stop:
+            self.pty_sampler_stop.set()
+        if self.pty_sampler_thread:
+            self.pty_sampler_thread.join(timeout=2)
+        self.pty_sampler_stop = None
+        self.pty_sampler_thread = None
+
     def run_mobile_shared_anchor(self, phone=(46, 44)):
         """A phone shares Pi: the desktop keeps the phone's PTY grid, hung from the pane's bottom-left."""
         from PIL import Image
@@ -693,6 +730,174 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
             ('desktop takes over after the phone leaves', summary['takeoverGrid'] is not None)] if not ok]
         assert not failures, ('RED', failures)
         print('PASS mobile-shared anchor: remote grid kept, bottom-left anchored, top clipped, input live, takeover', flush=True)
+
+    def run_mobile_resize_repro(self):
+        """Red gate: mobile owns P while desktop opens, resizes, switches and reconnects."""
+        phone_one = (46, 44)
+        phone_two = (80, 24)
+        p_ref = self.refs['P']
+        p_id = self.session_id('P')
+        a_id = self.session_id('A')
+        records = []
+        wire_cursor = 0
+        mobile_logs = []
+        self.start_pty_sampler()
+
+        def wire_since():
+            nonlocal wire_cursor
+            events = self.wire()[wire_cursor:]
+            wire_cursor += len(events)
+            return events
+
+        def start_mobile(phone, label):
+            log = self.directory / (label + '.jsonl')
+            mobile = self.start_process(
+                ['node', str(HERE / 'mobile-client.mjs'), str(self.daemon_port), p_ref,
+                 str(phone[0]), str(phone[1]), str(log)],
+                dict(self.daemon_env, CORRAL_WEB_PACKAGE=str(self.legacy / 'package.json')),
+                label)
+            mobile_logs.append({'label': label, 'phone': list(phone), 'log': log.name})
+            return mobile
+
+        def capture_checkpoint(label, expected_phone=None):
+            state = self.command('state')
+            pty = list(self.pane_size('P'))
+            p_view = next((p for p in state['panes'] if p['ref'] == p_ref and not p['hidden']), None)
+            desktop_resizes = [e for e in wire_since()
+                               if e.get('direction') == 'client-to-daemon' and e.get('type') == 'resize']
+            shot = self.capture('mobile-resize-' + label, state)
+            records.append({
+                'label': label,
+                'at': int(time.time() * 1000),
+                'ptyGrid': pty,
+                'expectedMobileGrid': list(expected_phone) if expected_phone else None,
+                'pViewGrid': [p_view['cols'], len(p_view['rows'])] if p_view else None,
+                'visibleRefs': [p['ref'] for p in state['panes'] if not p['hidden']],
+                'activeTab': state['workspace'].get('activeTabId'),
+                'desktopResizeFrames': desktop_resizes,
+                'screenshot': shot.name,
+            })
+
+        # Phone first: P must be at the phone grid before desktop ever opens P.
+        self.pty_phase = 'mobile-one-online'
+        mobile_one = start_mobile(phone_one, 'mobile-online-one')
+        wait_for(lambda: self.pane_size('P') == phone_one, 20)
+        capture_checkpoint('mobile-online-before-desktop', phone_one)
+
+        # Desktop initial subscribe, activation and window resizes while phone is online.
+        self.pty_phase = 'desktop-open-after-mobile'
+        self.command('sidebar', session=p_id, count=2)
+        wait_for(lambda: self.view(self.command('state'), 'P')['ref'] == p_ref, 15)
+        time.sleep(1)
+        capture_checkpoint('desktop-opens-after-mobile', phone_one)
+        self.pty_phase = 'desktop-activates-a-mobile-one'
+        self.command('sidebar', session=a_id, count=2)
+        time.sleep(.5)
+        capture_checkpoint('desktop-activates-a-mobile-p', phone_one)
+        for label, size in [('wide', (1400, 860)), ('short', (1000, 420)), ('narrow', (800, 380))]:
+            self.pty_phase = 'desktop-resize-mobile-one-' + label
+            self.command('resize-window', width=size[0], height=size[1])
+            time.sleep(1.5)
+            capture_checkpoint('mobile-one-' + label, phone_one)
+        self.pty_phase = 'desktop-reactivates-p-mobile-one'
+        self.command('sidebar', session=p_id, count=2)
+        time.sleep(.8)
+        capture_checkpoint('desktop-reactivates-p-mobile-one', phone_one)
+
+        # Restart only this private desktop process with the phone still connected.
+        self.pty_phase = 'desktop-app-reconnect-mobile-one'
+        self.app.terminate()
+        self.app.wait(timeout=5)
+        self.app = self.start_process([str(self.app_path)], self.app_env, 'app-reconnect')
+        wait_for(lambda: self.command('state').get('connected'), 25)
+        time.sleep(1)
+        capture_checkpoint('desktop-reconnected-mobile-one', phone_one)
+        self.pty_phase = 'desktop-reconnected-activates-a-mobile-one'
+        self.command('sidebar', session=a_id, count=2)
+        self.pty_phase = 'desktop-reconnected-resize-mobile-one'
+        time.sleep(.5)
+        self.command('resize-window', width=1200, height=640)
+        time.sleep(1.5)
+        capture_checkpoint('desktop-reconnected-activates-a-mobile-one', phone_one)
+        self.pty_phase = 'desktop-reconnected-reactivates-p-mobile-one'
+        self.command('sidebar', session=p_id, count=2)
+        time.sleep(.8)
+        capture_checkpoint('desktop-reconnected-reactivates-p-mobile-one', phone_one)
+
+        # Mobile reconnect with a changed phone grid, then repeat desktop actions.
+        self.pty_phase = 'mobile-one-disconnect'
+        mobile_one.terminate()
+        mobile_one.wait(timeout=5)
+        time.sleep(1.5)
+        capture_checkpoint('mobile-disconnected', None)
+        self.pty_phase = 'desktop-resize-without-mobile'
+        self.command('resize-window', width=1400, height=860)
+        time.sleep(1.5)
+        capture_checkpoint('desktop-resizes-without-mobile', None)
+        self.pty_phase = 'mobile-two-reconnect'
+        mobile_two = start_mobile(phone_two, 'mobile-online-two')
+        wait_for(lambda: self.pane_size('P') == phone_two, 20)
+        capture_checkpoint('mobile-two-reconnected-before-desktop', phone_two)
+        self.pty_phase = 'desktop-activates-a-mobile-two'
+        self.command('sidebar', session=a_id, count=2)
+        time.sleep(.5)
+        capture_checkpoint('desktop-activates-a-mobile-two', phone_two)
+        for label, size in [('mobile-two-short', (1000, 420)), ('mobile-two-wide', (1400, 860))]:
+            self.pty_phase = 'desktop-resize-' + label
+            self.command('resize-window', width=size[0], height=size[1])
+            time.sleep(1.5)
+            capture_checkpoint(label, phone_two)
+        self.pty_phase = 'desktop-reactivates-p-mobile-two'
+        self.command('sidebar', session=p_id, count=2)
+        time.sleep(.8)
+        capture_checkpoint('desktop-reactivates-p-mobile-two', phone_two)
+        self.pty_phase = 'mobile-two-disconnect'
+        mobile_two.terminate()
+        mobile_two.wait(timeout=5)
+        time.sleep(1.5)
+        self.pty_phase = 'desktop-final-resize-without-mobile'
+        self.command('resize-window', width=1400, height=860)
+        time.sleep(1.5)
+        capture_checkpoint('mobile-two-disconnected-final', None)
+
+        all_wire = self.wire()
+        all_resizes = [e for e in all_wire if e.get('direction') == 'client-to-daemon' and e.get('type') == 'resize']
+        mobile_events = []
+        for item in mobile_logs:
+            path = self.directory / item['log']
+            events = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+            item['eventTypes'] = [e.get('type') for e in events]
+            item['events'] = events
+            mobile_events.extend(events)
+        transitions = []
+        last = None
+        for sample in self.pty_samples:
+            key = tuple(sample['grid'])
+            if key != last:
+                transitions.append(sample)
+                last = key
+        self.stop_pty_sampler()
+        summary = {
+            'phoneGrids': [list(phone_one), list(phone_two)],
+            'checkpoints': records,
+            'desktopResizeFrames': all_resizes,
+            'mobileLogs': mobile_logs,
+            'mobileEventTypes': [e.get('type') for e in mobile_events],
+            'appReconnect': True,
+            'ptyGridTransitions': transitions,
+            'destructiveResizeEvidence': [
+                {'label': r['label'], 'expected': r['expectedMobileGrid'], 'actualPTY': r['ptyGrid'],
+                 'desktopResizeFrames': r['desktopResizeFrames']}
+                for r in records if r['expectedMobileGrid'] and r['ptyGrid'] != r['expectedMobileGrid']
+            ],
+        }
+        (self.directory / 'mobile-resize-repro.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+        self.receipts.append({'mobileResizeRepro': summary})
+        print('MOBILE_RESIZE_REPRO', json.dumps({k: v for k, v in summary.items() if k not in ('checkpoints', 'desktopResizeFrames', 'mobileLogs')}, ensure_ascii=False), flush=True)
+        for record in records:
+            print('MOBILE_RESIZE_CHECK', json.dumps({k: v for k, v in record.items() if k != 'desktopResizeFrames'}, ensure_ascii=False), flush=True)
+        assert not summary['destructiveResizeEvidence'], ('RED: desktop changed the shared PTY grid while mobile was online', summary['destructiveResizeEvidence'])
+        self.write_case_summary()
 
     def run_window_resize(self):
         state = self.sidebar('A')
@@ -781,6 +986,7 @@ os.execv('/opt/homebrew/bin/tmux', ['tmux', *args])
         print('PASS PTY keys/Enter/Tab/Esc/arrows/Ctrl+C/D, IME composition, text/file/image paste',flush=True)
 
     def cleanup(self):
+        self.stop_pty_sampler()
         for process in reversed(self.processes):
             if process.poll() is None:
                 process.terminate()
@@ -797,13 +1003,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--legacy-root', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
-    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog','pi-scrollbar-drag','mobile-shared-anchor'], default='parity')
+    parser.add_argument('--case', choices=['parity','many-sessions','many-sessions-stress','window-resize','session-liveness','mouse-drag-backlog','pi-scrollbar-drag','mobile-shared-anchor','mobile-resize-repro'], default='parity')
     parser.add_argument('--no-resize', action='store_true')
     parser.add_argument('--server-binary', type=Path)
     parser.add_argument('--pi-session', type=Path, help='Pi transcript copied privately for pi-scrollbar-drag')
+    parser.add_argument('--runtime-root', type=Path, help='private accepted nodeprobe runtime directory')
+    parser.add_argument('--app-binary', type=Path, help='candidate CorralApp executable')
     args = parser.parse_args()
-    assert args.case not in ('pi-scrollbar-drag', 'mobile-shared-anchor') or args.pi_session, '--pi-session is required'
-    run = Run(args.legacy_root, args.case, args.no_resize, args.server_binary, args.pi_session)
+    assert args.case not in ('pi-scrollbar-drag', 'mobile-shared-anchor', 'mobile-resize-repro') or args.pi_session, '--pi-session is required'
+    run = Run(args.legacy_root, args.case, args.no_resize, args.server_binary, args.pi_session, args.runtime_root, args.app_binary)
     try:
         run.start()
         if args.smoke: print('CAPTURE', run.capture('initial', run.state), flush=True)
@@ -813,6 +1021,7 @@ def main():
         elif args.case == 'mouse-drag-backlog': run.run_mouse_drag_backlog()
         elif args.case == 'pi-scrollbar-drag': run.run_pi_scrollbar_drag()
         elif args.case == 'mobile-shared-anchor': run.run_mobile_shared_anchor()
+        elif args.case == 'mobile-resize-repro': run.run_mobile_resize_repro()
         else: run.run_suite()
     except Exception:
         (run.directory/'failure.txt').write_text(traceback.format_exc())

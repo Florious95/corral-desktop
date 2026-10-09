@@ -112,8 +112,8 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
         let adaptItem = try XCTUnwrap(menu.items.first { $0.title == "适应当前窗口" })
         let frameBefore = terminal.frame
         let gridBefore = GridSize(rows: terminal.terminal.rows, columns: terminal.terminal.cols)
-        let subscribedGrid = await fixture.link.subscribedGrid(for: reference)
-        XCTAssertEqual(subscribedGrid, gridBefore, "The fixture must start with the PTY grid matching its current viewport")
+        let initialResizes = await fixture.link.resizeCommands(for: reference)
+        XCTAssertEqual(initialResizes.last, gridBefore, "The fixture must start with the PTY grid matching its current viewport")
         try await Task.sleep(for: .milliseconds(150))
         let resizeCountBeforeAction = await fixture.link.resizeCommands(for: reference).count
         let otherCountBeforeAction = await fixture.link.resizeCommands(for: fixture.references[0]).count
@@ -205,6 +205,37 @@ final class Issue11ContextMenuActionsTests: XCTestCase {
                 && coordinator.workspaceView.stageContainer.splitView.projection.panes.count == 2
         }
         guard panesReady else {
+            await coordinator.stop()
+            window.close()
+            try? FileManager.default.removeItem(at: root)
+            throw FixtureError.splitPanesDidNotLoad
+        }
+        let gridsMeasured = await waitUntil(timeout: .seconds(3)) {
+            references.allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                return GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                    != GridSize(rows: 24, columns: 80)
+            }
+        }
+        guard gridsMeasured else {
+            await coordinator.stop()
+            window.close()
+            try? FileManager.default.removeItem(at: root)
+            throw FixtureError.splitPanesDidNotLoad
+        }
+        for reference in references {
+            try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        }
+        let ownershipReady = await waitUntil(timeout: .seconds(3)) {
+            for reference in references {
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                let grid = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                let resizes = await link.resizeCommands(for: reference)
+                guard resizes.contains(grid) else { return false }
+            }
+            return true
+        }
+        guard ownershipReady else {
             await coordinator.stop()
             window.close()
             try? FileManager.default.removeItem(at: root)

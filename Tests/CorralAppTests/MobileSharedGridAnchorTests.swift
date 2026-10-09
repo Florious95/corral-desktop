@@ -49,9 +49,23 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         XCTAssertTrue(subscribed)
         let view = try XCTUnwrap(coordinator.terminalView(for: reference))
         let stage = try XCTUnwrap(view.superview)
-        let desktop = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+        let advertised = GridSize(rows: 24, columns: 80)
         let opened = await link.commands()
-        XCTAssertTrue(opened.contains(.subscribe(reference: reference, size: desktop)), "the desktop owns the PTY until Core reports a phone")
+        XCTAssertTrue(opened.contains(.subscribe(reference: reference, size: advertised)), "unknown presence keeps the server-advertised grid for the first subscribe")
+        let localGridReady = await waitUntil { GridSize(rows: view.terminal.rows, columns: view.terminal.cols) != advertised }
+        XCTAssertTrue(localGridReady, "the local terminal must measure its pane before desktop ownership is announced")
+        try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        let desktopReady = await waitUntil {
+            let current = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+            let commands = await link.commands()
+            return current != advertised && commands.contains {
+                if case let .resize(resizedReference, size) = $0 { return resizedReference == reference && size == current }
+                return false
+            }
+        }
+        XCTAssertTrue(desktopReady, "desktop takeover requires an explicit presence=false event")
+        let desktop = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+        let resizeCountBeforePhone = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
         try await link.emit(.control(.listDelta(SessionListDelta(sequence: 2, changedSessions: [record(desktop)]))))
 
         // The phone attaches: Core reports it, then the next catalog scan reports its grid.
@@ -95,7 +109,7 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         }
         XCTAssertTrue(typed, "the anchored terminal stays interactive")
         let resizesWhilePhonePresent = await link.commands().filter { if case .resize = $0 { true } else { false } }
-        XCTAssertEqual(resizesWhilePhonePresent, [], "window and catalog changes never resize a phone-owned PTY")
+        XCTAssertEqual(resizesWhilePhonePresent.count, resizeCountBeforePhone, "window and catalog changes never resize a phone-owned PTY")
 
         try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
         let takenOver = await waitUntil {
@@ -151,10 +165,24 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         ]))))
         _ = await waitUntil { coordinator.subscribedSessionIDs.contains(reference.rawValue) }
         let view = try XCTUnwrap(coordinator.terminalView(for: reference))
-        let desktop = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+        let advertised = stale
         let opened = await link.commands()
-        XCTAssertTrue(opened.contains(.subscribe(reference: reference, size: desktop)), "the catalog never confirmed this request")
+        XCTAssertTrue(opened.contains(.subscribe(reference: reference, size: advertised)), "unknown presence keeps the server-advertised grid for the first subscribe")
+        let localGridReady = await waitUntil { GridSize(rows: view.terminal.rows, columns: view.terminal.cols) != advertised }
+        XCTAssertTrue(localGridReady, "the local terminal must measure its pane before desktop ownership is announced")
+        try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        let desktopReady = await waitUntil {
+            let current = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+            let commands = await link.commands()
+            return current != advertised && commands.contains {
+                if case let .resize(resizedReference, size) = $0 { return resizedReference == reference && size == current }
+                return false
+            }
+        }
+        XCTAssertTrue(desktopReady, "desktop takeover requires an explicit presence=false event")
+        let desktop = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
         XCTAssertGreaterThanOrEqual(desktop.rows, phone.rows)
+        let resizeCountBeforePhone = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
 
         // The phone attaches: its 46x44 redraw reaches the desktop before presence, and the catalog still lags.
         let redraw = (1...44).map { "\u{1b}[\($0);1H\u{1b}[2K\($0 > 41 ? "FOOTER-\($0)" : "ROW-\($0)")" }.joined() + "\u{1b}[41;1H"
@@ -175,7 +203,7 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         let bottom = (41..<44).map { view.getTerminal().getLine(row: $0)?.translateToString(trimRight: true) ?? "" }
         XCTAssertEqual(bottom, ["FOOTER-42", "FOOTER-43", "FOOTER-44"], "the phone's footer stays on the desktop's bottom rows")
         let resizes = await link.commands().filter { if case .resize = $0 { true } else { false } }
-        XCTAssertEqual(resizes, [], "a phone-owned PTY is never resized by the desktop")
+        XCTAssertEqual(resizes.count, resizeCountBeforePhone, "a phone-owned PTY is never resized by the desktop")
 
         // Negative control: the same screen taken through the stale grid first loses the footer.
         let control = CorralNativeTerminalView(frame: .zero, pasteboard: NSPasteboard(name: NSPasteboard.Name(UUID().uuidString)))

@@ -27,8 +27,19 @@ python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/desktop --cas
 python3 TestSupport/NativeAcceptance/selection-run.py --legacy-root /path/to/desktop --pi-session /authorized/long-session.jsonl --mode selection
 python3 TestSupport/NativeAcceptance/selection-run.py --legacy-root /path/to/desktop --pi-session /authorized/long-session.jsonl --mode scrollbar
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/desktop --pi-session /authorized/long-session.jsonl --case mobile-shared-anchor
+python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/desktop --pi-session /authorized/long-session.jsonl --case mobile-resize-repro --runtime-root /private/staged/runtime/nodeprobe --server-binary /private/staged/agentmirrord --app-binary /private/candidate/CorralApp
 python3 TestSupport/NativeAcceptance/run.py --legacy-root /path/to/desktop --case session-liveness
 ```
+
+`mobile-resize-repro` is a red/green dynamic gate. It brings up a private
+`client_type=mobile` subscriber before the desktop opens the same Pi session,
+then exercises desktop activation, window resizes, a private desktop reconnect,
+mobile disconnect/reconnect with a changed grid, and post-reconnect resizes. It
+samples the real private tmux PTY grid at 20 ms and records desktop WebSocket
+`subscribe`/`resize` frames, mobile presence events, exact WindowServer
+screenshots, and `mobile-resize-repro.json`. It fails when a phone-owned grid
+is replaced while the mobile subscriber is still online; `9900` and the
+operator's app/session are never used.
 
 The Pi run is offline, without extensions/skills/context files, on a private copy deleted by cleanup. It has a private `PI_CODING_AGENT_DIR` with `fullscreenCopyOnSelect: false` (Pi defaults to writing the host clipboard on release), disabled telemetry/cache warming and untrusted project resources. Corral's private NSPasteboard alone does not isolate a remote/local Pi process's clipboard side effects. Do not commit transcripts or capture unrelated windows.
 
