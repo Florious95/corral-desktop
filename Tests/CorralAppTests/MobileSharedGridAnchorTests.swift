@@ -54,7 +54,12 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         XCTAssertTrue(opened.contains(.subscribe(reference: reference, size: advertised)), "unknown presence keeps the server-advertised grid for the first subscribe")
         let localGridReady = await waitUntil { GridSize(rows: view.terminal.rows, columns: view.terminal.cols) != advertised }
         XCTAssertTrue(localGridReady, "the local terminal must measure its pane before desktop ownership is announced")
-        try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        _ = try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        // A non-catalog heartbeat is a deterministic barrier: when it has
+        // been dequeued, the coordinator has already processed presence=false
+        // and is ready for the lease assertion below.
+        let presenceBarrier = try await link.emit(.control(.level2Heartbeat(workspace: "/fixture/anchor", sequence: 5)))
+        await link.waitUntilEventConsumed(presenceBarrier)
         let desktopReady = await waitUntil {
             let current = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
             let commands = await link.commands()
@@ -96,8 +101,11 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         XCTAssertTrue(view.hitTest(CGPoint(x: short.minX + 10, y: short.maxY - 10)) === view, "the bottom-left input rows stay hittable")
         XCTAssertNotNil(view.layer?.mask)
 
-        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 4, changedSessions: [record(GridSize(rows: 24, columns: 80))]))))
-        let rotated = await waitUntil { view.terminal.cols == 80 && view.terminal.rows == 24 }
+        let rotatedPhone = GridSize(rows: 24, columns: 80)
+        // This is the latest phone catalog, not an old desktop snapshot.  The
+        // following presence=false event must keep this exact grid leased.
+        try await link.emit(.control(.listDelta(SessionListDelta(sequence: 4, changedSessions: [record(rotatedPhone)]))))
+        let rotated = await waitUntil { GridSize(rows: view.terminal.rows, columns: view.terminal.cols) == rotatedPhone }
         XCTAssertTrue(rotated, "a phone resize reaches the desktop as a catalog grid and is kept locally")
 
         _ = window.makeFirstResponder(view)
@@ -116,8 +124,8 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         // events may let the desktop reclaim the PTY grid behind its back.
         try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
         let leaseStillPinned = await waitUntil {
-            view.pinnedGrid == phone
-                && GridSize(rows: view.terminal.rows, columns: view.terminal.cols) == phone
+            view.pinnedGrid == rotatedPhone
+                && GridSize(rows: view.terminal.rows, columns: view.terminal.cols) == rotatedPhone
         }
         XCTAssertTrue(leaseStillPinned, "has_mobile=false must preserve a previously acquired mobile grid lease")
         guard leaseStillPinned else {
@@ -147,7 +155,7 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         let explicitTakeover = await waitUntil {
             let current = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
             let commands = await link.commands()
-            return view.pinnedGrid == nil && current != phone
+            return view.pinnedGrid == nil && current != rotatedPhone
                 && commands.contains(.resize(reference: reference, size: current))
         }
         XCTAssertTrue(explicitTakeover, "only explicit Adapt to Current Window may release the mobile grid lease")
@@ -294,7 +302,8 @@ private actor AnchorRecordingSessionLink: SessionLinkProtocol {
         await stream.finish()
     }
 
-    func emit(_ event: SessionEvent) async throws {
+    @discardableResult
+    func emit(_ event: SessionEvent) async throws -> UInt64 {
         guard let authenticated else { throw SessionLinkFailure.disconnected }
         if case let .frame(frame) = event {
             switch frame {
@@ -308,9 +317,14 @@ private actor AnchorRecordingSessionLink: SessionLinkProtocol {
         let origin = SessionEventOrigin(linkInstanceID: authenticated.linkInstanceID, deviceID: authenticated.deviceID,
                                         connectionEpoch: authenticated.connectionEpoch, receiveOrdinal: ReceiveOrdinal(ordinal))
         try await stream.yield(SessionEventEnvelope(origin: origin, wireByteCount: 0, event: event))
+        return ordinal
     }
 
     func commands() -> [ClientCommand] { sent }
+
+    func waitUntilEventConsumed(_ ordinal: UInt64) async {
+        await stream.waitUntilDelivered(ordinal)
+    }
 }
 
 private func anchorSnapshot(for size: GridSize) -> Data {
@@ -327,6 +341,8 @@ private func anchorSnapshot(for size: GridSize) -> Data {
 private actor AnchorEventStream: SessionEventStream {
     private var queued: [SessionEventEnvelope] = []
     private var waiter: CheckedContinuation<SessionEventEnvelope?, Never>?
+    private var deliveredOrdinal: UInt64 = 0
+    private var deliveryWaiters: [(UInt64, CheckedContinuation<Void, Never>)] = []
     private var finished = false
 
     var budget: SessionEventStreamBudget {
@@ -334,9 +350,30 @@ private actor AnchorEventStream: SessionEventStream {
     }
 
     func next() async throws -> SessionEventEnvelope? {
-        if !queued.isEmpty { return queued.removeFirst() }
+        if !queued.isEmpty {
+            let envelope = queued.removeFirst()
+            markDelivered(envelope.origin.receiveOrdinal.rawValue)
+            return envelope
+        }
         if finished { return nil }
-        return await withCheckedContinuation { waiter = $0 }
+        guard let envelope = await withCheckedContinuation({ waiter = $0 }) else { return nil }
+        markDelivered(envelope.origin.receiveOrdinal.rawValue)
+        return envelope
+    }
+
+    func waitUntilDelivered(_ ordinal: UInt64) async {
+        guard deliveredOrdinal < ordinal else { return }
+        await withCheckedContinuation { deliveryWaiters.append((ordinal, $0)) }
+    }
+
+    private func markDelivered(_ ordinal: UInt64) {
+        deliveredOrdinal = max(deliveredOrdinal, ordinal)
+        var pending: [(UInt64, CheckedContinuation<Void, Never>)] = []
+        for (target, continuation) in deliveryWaiters {
+            if target <= deliveredOrdinal { continuation.resume() }
+            else { pending.append((target, continuation)) }
+        }
+        deliveryWaiters = pending
     }
 
     func yield(_ envelope: SessionEventEnvelope) {
@@ -352,6 +389,8 @@ private actor AnchorEventStream: SessionEventStream {
         finished = true
         waiter?.resume(returning: nil)
         waiter = nil
+        for (_, continuation) in deliveryWaiters { continuation.resume() }
+        deliveryWaiters.removeAll()
     }
 }
 
