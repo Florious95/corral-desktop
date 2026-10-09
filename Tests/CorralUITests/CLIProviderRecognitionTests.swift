@@ -9,20 +9,21 @@ final class CLIProviderRecognitionTests: XCTestCase {
         let wireValue: String
         let canonicalKind: String
         let displayName: String
+        let badgeCharacter: Character?
     }
 
     private let cases = [
-        Case(wireValue: "pi", canonicalKind: "pi", displayName: "Pi"),
-        Case(wireValue: "claude_code", canonicalKind: "claude_code", displayName: "Claude Code"),
-        Case(wireValue: "codex", canonicalKind: "codex", displayName: "Codex"),
-        Case(wireValue: "cursor", canonicalKind: "cursor", displayName: "Cursor"),
-        Case(wireValue: "aider", canonicalKind: "aider", displayName: "Aider"),
-        Case(wireValue: "goose", canonicalKind: "goose", displayName: "Goose"),
-        Case(wireValue: "opencode", canonicalKind: "opencode", displayName: "OpenCode"),
-        Case(wireValue: "kiro-cli", canonicalKind: "kiro_cli", displayName: "Kiro CLI"),
+        Case(wireValue: "pi", canonicalKind: "pi", displayName: "Pi", badgeCharacter: nil),
+        Case(wireValue: "claude_code", canonicalKind: "claude_code", displayName: "Claude Code", badgeCharacter: nil),
+        Case(wireValue: "codex", canonicalKind: "codex", displayName: "Codex", badgeCharacter: nil),
+        Case(wireValue: "cursor", canonicalKind: "cursor", displayName: "Cursor", badgeCharacter: nil),
+        Case(wireValue: "aider", canonicalKind: "aider", displayName: "Aider", badgeCharacter: "A"),
+        Case(wireValue: "goose", canonicalKind: "goose", displayName: "Goose", badgeCharacter: "G"),
+        Case(wireValue: "opencode", canonicalKind: "opencode", displayName: "OpenCode", badgeCharacter: "O"),
+        Case(wireValue: "kiro_cli", canonicalKind: "kiro_cli", displayName: "Kiro CLI", badgeCharacter: "K"),
     ]
 
-    func testSidebarRecognizesAllEightCLIsWithCanonicalKindTextAndDedicatedIcon() throws {
+    func testSidebarRecognizesAllEightCLIsWithCanonicalKindTextAndClassifiedIcon() throws {
         let sidebar = CorralSidebarView(frame: NSRect(x: 0, y: 0, width: 280, height: 700))
         let space = CorralSidebarSpace(name: "CLI workspace")
         sidebar.setSpaces([space])
@@ -43,12 +44,14 @@ final class CLIProviderRecognitionTests: XCTestCase {
                            "\(item.displayName) must resolve to its canonical ProviderKind")
             XCTAssertEqual(icon.accessibilityLabel(), item.displayName,
                            "\(item.displayName) must be the native sidebar/AX label")
-            XCTAssertNotNil(icon.image, "\(item.displayName) must render an icon image")
-            let usesSyntheticFallback = icon.image?.representations.contains {
-                String(describing: type(of: $0)).contains("NSCustomImageRep")
-            } ?? true
-            XCTAssertFalse(usesSyntheticFallback,
-                           "\(item.displayName) must use its dedicated/classified provider asset, not a fallback initial")
+            let image = try XCTUnwrap(icon.image, "\(item.displayName) must render an icon image")
+            if let badgeCharacter = item.badgeCharacter {
+                XCTAssertTrue(image.isTemplate,
+                              "\(item.displayName) must render a template letter badge for \(badgeCharacter)")
+                XCTAssertTrue(image.representations.contains {
+                    String(describing: type(of: $0)).contains("NSCustomImageRep")
+                }, "\(item.displayName) must render its \(badgeCharacter) classified letter badge, not a missing icon")
+            }
         }
     }
 
