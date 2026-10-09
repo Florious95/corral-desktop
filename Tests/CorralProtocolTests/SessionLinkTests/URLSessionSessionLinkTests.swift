@@ -204,6 +204,49 @@ final class URLSessionSessionLinkTests: XCTestCase {
         await link.disconnect()
     }
 
+    func testReconnectReplaysOnlyLatestSubscribeGridAfterMobileRotation() async throws {
+        var configuration = URLSessionSessionLink.Configuration()
+        configuration.heartbeatIntervalNanoseconds = 60_000_000_000
+        configuration.initialReconnectDelayNanoseconds = 1_000_000
+        configuration.maximumReconnectDelayNanoseconds = 10_000_000
+        let first = MockWebSocket()
+        let second = MockWebSocket()
+        let factory = MockWebSocketFactory(sockets: [first, second])
+        let link = URLSessionSessionLink(configuration: configuration) { factory.make($0) }
+        let events = try await link.eventStream()
+        let endpoint = try ApprovedEndpoint(host: "127.0.0.1", port: 9919)
+        let reference = try SessionReference("mobile-rotation")
+        let desktopGrid = GridSize(rows: 51, columns: 139)
+        let phoneGrid = GridSize(rows: 24, columns: 80)
+
+        let connect = Task {
+            try await link.connect(to: endpoint, deviceID: DeviceID("device-a"), credential: CredentialHandle("test"))
+        }
+        try await waitForAuthentication(on: first)
+        await first.enqueue(.text(authenticationAck()))
+        _ = try await connect.value
+        _ = try await waitForReady(in: events)
+
+        // A phone rotation replaces the desktop's previously requested grid.
+        _ = try await link.send(.subscribe(reference: reference, size: desktopGrid))
+        _ = try await link.send(.subscribe(reference: reference, size: phoneGrid))
+
+        await first.fail()
+        try await waitForAuthentication(on: second)
+        await second.enqueue(.text(authenticationAck()))
+        _ = try await waitForReady(in: events)
+
+        let replayed = await second.sentMessages()
+        let replayedSubscriptions = subscriptionPayloads(in: replayed, reference: reference)
+        XCTAssertEqual(replayedSubscriptions.count, 1, "reconnect must replay one current subscription, not stale size history")
+        let payload = try XCTUnwrap(replayedSubscriptions.first)
+        XCTAssertEqual(payload["rows"] as? Int, phoneGrid.rows)
+        XCTAssertEqual(payload["cols"] as? Int, phoneGrid.columns)
+        XCTAssertFalse(replayedSubscriptions.contains { ($0["rows"] as? Int) == desktopGrid.rows && ($0["cols"] as? Int) == desktopGrid.columns },
+                       "reconnect must not replay the old desktop grid after mobile rotation")
+        await link.disconnect()
+    }
+
     func testHeartbeatUsesWebSocketPing() async throws {
         var configuration = URLSessionSessionLink.Configuration()
         configuration.heartbeatIntervalNanoseconds = 100_000_000
@@ -348,6 +391,17 @@ final class URLSessionSessionLinkTests: XCTestCase {
             return payload
         }
         return nil
+    }
+
+    private func subscriptionPayloads(in messages: [WebSocketMessage], reference: SessionReference) -> [[String: Any]] {
+        messages.compactMap { message in
+            guard case let .text(text) = message,
+                  let envelope = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+                  envelope["type"] as? String == "subscribe",
+                  let payload = envelope["payload"] as? [String: Any],
+                  payload["ref"] as? String == reference.rawValue else { return nil }
+            return payload
+        }
     }
 }
 
