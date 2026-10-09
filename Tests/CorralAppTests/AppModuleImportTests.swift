@@ -1482,11 +1482,29 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
             WorkspaceRecord(workingDirectory: "/fixture/split", sessionCount: 2, aggregateState: .idle, sessions: records)
         ]))))
 
+        let subscriptionsReady = await waitUntil { coordinator.subscribedSessionIDs.count == references.count }
+        XCTAssertTrue(subscriptionsReady)
+        let panesMeasured = await waitUntil {
+            references.allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                return GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                    != GridSize(rows: 1, columns: 69)
+            }
+        }
+        XCTAssertTrue(panesMeasured, "wait for both restored panes to measure before announcing desktop presence")
+        for reference in references {
+            try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        }
         let panesReady = await waitUntil {
             guard let left = coordinator.terminalView(for: references[0]),
                   let right = coordinator.terminalView(for: references[1]) else { return false }
-            return coordinator.subscribedSessionIDs.count == 2 && left.terminal.rows > 1 && right.terminal.rows > 1
-                && left.terminal.cols > 20 && right.terminal.cols > 20
+            let commands = await link.commands()
+            let leftGrid = GridSize(rows: left.terminal.rows, columns: left.terminal.cols)
+            let rightGrid = GridSize(rows: right.terminal.rows, columns: right.terminal.cols)
+            return coordinator.subscribedSessionIDs.count == 2 && leftGrid.rows > 1 && rightGrid.rows > 1
+                && leftGrid.columns > 20 && rightGrid.columns > 20
+                && commands.contains(.resize(reference: references[0], size: leftGrid))
+                && commands.contains(.resize(reference: references[1], size: rightGrid))
         }
         let leftMetrics = coordinator.terminalView(for: references[0]).map { "frame=\($0.frame), grid=\($0.terminal.cols)x\($0.terminal.rows), hidden=\($0.isHidden)" } ?? "missing"
         let rightMetrics = coordinator.terminalView(for: references[1]).map { "frame=\($0.frame), grid=\($0.terminal.cols)x\($0.terminal.rows), hidden=\($0.isHidden)" } ?? "missing"
@@ -1504,10 +1522,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let initialLeftGrid = GridSize(rows: left.terminal.rows, columns: left.terminal.cols)
         let initialRightGrid = GridSize(rows: right.terminal.rows, columns: right.terminal.cols)
         let initialCommands = await link.commands()
-        XCTAssertTrue(initialCommands.contains(.subscribe(reference: references[0], size: initialLeftGrid)))
-        XCTAssertTrue(initialCommands.contains(.subscribe(reference: references[1], size: initialRightGrid)))
-        XCTAssertFalse(initialCommands.contains { if case .resize = $0 { true } else { false } },
-                       "initial subscriptions already carry the measured grid; a second reflow would block input")
+        let advertised = GridSize(rows: 1, columns: 69)
+        XCTAssertTrue(initialCommands.contains(.subscribe(reference: references[0], size: advertised)))
+        XCTAssertTrue(initialCommands.contains(.subscribe(reference: references[1], size: advertised)))
+        for (reference, grid) in [(references[0], initialLeftGrid), (references[1], initialRightGrid)] {
+            XCTAssertTrue(initialCommands.contains(.resize(reference: reference, size: grid)),
+                          "explicit presence=false must precede desktop takeover for \(reference.rawValue)")
+        }
 
         try await link.emit(.frame(.snapshot(reference: references[0], ansi: Data("LEFT-SWIFTTERM".utf8))))
         try await link.emit(.frame(.snapshot(reference: references[1], ansi: Data("RIGHT-SWIFTTERM".utf8))))
@@ -1968,6 +1989,13 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         ]))))
         let ready = await waitUntil { coordinator.subscribedSessionIDs.contains(refs[0].rawValue) }
         XCTAssertTrue(ready)
+        let panesMeasured = await waitUntil {
+            guard let view = coordinator.terminalView(for: refs[0]) else { return false }
+            return GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                != GridSize(rows: 24, columns: 80)
+        }
+        XCTAssertTrue(panesMeasured, "wait for the initial interaction pane to measure before announcing desktop presence")
+        try await link.emit(.control(.presenceUpdate(reference: refs[0], hasMobile: false, mobileCount: 0, desktopCount: 1)))
         return (coordinator, link, refs)
     }
 
@@ -2477,6 +2505,17 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.splitWorkspacePane(key, target: firstID, edge: .right)
         window.contentView?.layoutSubtreeIfNeeded()
         let overlay = coordinator.workspaceView.stageContainer.splitView
+        let splitPanesMeasured = await waitUntil {
+            refs.allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                return GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                    != GridSize(rows: 24, columns: 80)
+            }
+        }
+        XCTAssertTrue(splitPanesMeasured, "wait for both split panes to measure before announcing desktop presence")
+        for reference in refs {
+            try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        }
         let initialGridsSent = await waitUntil {
             guard coordinator.subscribedSessionIDs.count == 2 else { return false }
             let commands = await link.commands()
