@@ -1,6 +1,6 @@
 [package]
 name = "corral-desktop"
-version = "0.1.14"
+version = "0.1.15"
 description = "Corral desktop client"
 authors = ["Corral contributors"]
 license = "Apache-2.0"
