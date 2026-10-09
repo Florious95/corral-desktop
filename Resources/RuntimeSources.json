@@ -1,10 +1,10 @@
 {
-  "coreCommit": "a38b528af9014fc05b9b205139259925ab9e2c63",
-  "coreTree": "d5c1ca34503b5eb1073be329bc3f0702984a287d",
-  "coreSHA256": "f4f5956f9d5ba603745c2d81c76be82a63a34ebe41be806db9cda2f4953a60e3",
+  "coreCommit": "c3af584eca932692948eb9e140391b0c3006b1fe",
+  "coreTree": "214e6a67676e2b9fcb6fdc03938b9451ae4958db",
+  "coreSHA256": "9d06359e8bab39101a9c06275f051c9c5d8fe899c6705a9dc1f9d4af0c71d7ab",
   "coreManifestPath": "server/internal/nodeprobe/accepted-source.json",
   "windowsCommit": "7cb91b05d5b894ca18fc0e14e7adfff05fe10a58",
   "platform": "darwin/arm64",
-  "nodeprobeSHA256": "57073fd42d7bdcfbd339687c09531d01aaaa02e02271257a5dd2a9ce72ffb2a3",
+  "nodeprobeSHA256": "4c2cd0cd420c9e78e82980cbab5d03957d73a8e4745e596de84860d48066f934",
   "piExtensionSHA256": "c28855ea4ac6f411044fb9a8066c2e5c3e5580197c1ae412e88d23d07467b714"
 }
