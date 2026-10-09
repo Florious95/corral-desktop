@@ -13,14 +13,14 @@ import {
 } from '../src/core/providers.js';
 
 const CASES = [
-  { wire: 'pi', key: 'pi', label: 'Pi' },
-  { wire: 'claude_code', key: 'claude_code', label: 'Claude Code' },
-  { wire: 'codex', key: 'codex', label: 'Codex' },
-  { wire: 'cursor', key: 'cursor', label: 'Cursor' },
-  { wire: 'aider', key: 'aider', label: 'Aider' },
-  { wire: 'goose', key: 'goose', label: 'Goose' },
-  { wire: 'opencode', key: 'opencode', label: 'OpenCode' },
-  { wire: 'kiro-cli', key: 'kiro_cli', label: 'Kiro CLI' },
+  { wire: 'pi', key: 'pi', label: 'Pi', badgeCharacter: null },
+  { wire: 'claude_code', key: 'claude_code', label: 'Claude Code', badgeCharacter: null },
+  { wire: 'codex', key: 'codex', label: 'Codex', badgeCharacter: null },
+  { wire: 'cursor', key: 'cursor', label: 'Cursor', badgeCharacter: null },
+  { wire: 'aider', key: 'aider', label: 'Aider', badgeCharacter: 'A' },
+  { wire: 'goose', key: 'goose', label: 'Goose', badgeCharacter: 'G' },
+  { wire: 'opencode', key: 'opencode', label: 'OpenCode', badgeCharacter: 'O' },
+  { wire: 'kiro_cli', key: 'kiro_cli', label: 'Kiro CLI', badgeCharacter: 'K' },
 ];
 
 // Load the actual production JSX through Vite's SSR pipeline so the test
@@ -39,7 +39,7 @@ const { default: ProviderIcon } = await server.ssrLoadModule('/src/components/si
 test('all eight mainstream Agent CLIs keep a canonical provider identity', () => {
   const actual = CASES.map(({ wire }) => normalizeProvider(wire));
   assert.deepEqual(actual, CASES.map(({ key }) => key),
-    'listing provider values must not collapse kiro-cli/aider/goose/opencode to unknown');
+    'listing provider values must not collapse kiro_cli/aider/goose/opencode to unknown');
 
   for (const { key, label } of CASES) {
     assert.equal(providerLabel(key), label, `${key} needs its canonical display name`);
@@ -49,10 +49,17 @@ test('all eight mainstream Agent CLIs keep a canonical provider identity', () =>
   }
 });
 
-test('sidebar ProviderIcon renders a real mapped image and accessible CLI name for every provider', () => {
-  for (const { key, label } of CASES) {
+test('sidebar ProviderIcon renders a mapped asset or canonical letter badge for every provider', () => {
+  for (const { key, label, badgeCharacter } of CASES) {
     const html = renderToStaticMarkup(createElement(ProviderIcon, { provider: key, active: true, size: 18 }));
-    assert.match(html, /<img\b/, `${key} must render an image, not the unknown-provider circle`);
-    assert.match(html, new RegExp(`alt="${label}"`), `${key} icon must expose ${label} to the sidebar/AX surface`);
+    if (badgeCharacter) {
+      assert.match(html, /<span\b/, `${key} must render a Letter Badge when no third-party asset is used`);
+      assert.match(html, new RegExp(`>${badgeCharacter}</span>`), `${key} must render its ${badgeCharacter} classification badge`);
+      assert.match(html, new RegExp(`aria-label="${label}"`), `${key} badge must expose ${label} to the sidebar/AX surface`);
+      assert.doesNotMatch(html, /aria-hidden="true"/, `${key} badge must remain visible to the sidebar/AX surface`);
+    } else {
+      assert.match(html, /<img\b/, `${key} must render its mapped provider image`);
+      assert.match(html, new RegExp(`alt="${label}"`), `${key} icon must expose ${label} to the sidebar/AX surface`);
+    }
   }
 });
