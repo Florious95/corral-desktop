@@ -18,6 +18,9 @@ const RULES = Object.freeze([
   ['cursor', 'cursor'],
   ['grok', 'grok'],
   ['opencode', 'opencode'],
+  ['kiro', 'kiro_cli'],
+  ['aider', 'aider'],
+  ['goose', 'goose'],
   ['kimi', 'kimi'],
   ['zcode', 'zai'],
   ['z-code', 'zai'],
@@ -28,7 +31,8 @@ const RULES = Object.freeze([
 
 /** Canonical provider IDs emitted by the daemon (plus the fail-closed sentinel). */
 export const CANONICAL_PROVIDERS = Object.freeze([
-  'claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown',
+  'claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi',
+  'kiro_cli', 'aider', 'goose', 'opencode', 'unknown',
 ]);
 
 /**
@@ -52,7 +56,15 @@ const PROVIDER_ALIASES = Object.freeze({
   copilot: 'copilot',
   grok: 'grok',
   cursor: 'cursor',
+  'cursor-agent': 'cursor',
   pi: 'pi',
+  kiro_cli: 'kiro_cli',
+  kiro: 'kiro_cli',
+  'kiro-cli': 'kiro_cli',
+  'kiro-cli-chat': 'kiro_cli',
+  aider: 'aider',
+  goose: 'goose',
+  opencode: 'opencode',
   unknown: 'unknown',
 });
 
@@ -75,15 +87,18 @@ export const PROVIDER_LABEL = Object.freeze({
   grok: 'Grok',
   cursor: 'Cursor',
   pi: 'Pi',
+  kiro_cli: 'Kiro CLI',
+  aider: 'Aider',
+  goose: 'Goose',
+  opencode: 'OpenCode',
   // Legacy UI-only aliases remain readable in the sealed new-agent dialog.
   'claude-code': 'Claude Code',
   claude: 'Claude Code',
-  opencode: 'OpenCode',
   zai: 'Z Code',
   kimi: 'Kimi Code',
 });
 
-/** Canonical icon slug metadata; actual assets are imported by ProviderIcon. */
+/** Canonical icon/badge keys; ProviderIcon uses a letter badge when no asset exists. */
 export const PROVIDER_ICON_SLUG = Object.freeze({
   claude_code: { active: 'claude_code', idle: 'claude_code' },
   codex: { active: 'codex', idle: 'codex' },
@@ -91,10 +106,13 @@ export const PROVIDER_ICON_SLUG = Object.freeze({
   grok: { active: 'grok', idle: 'grok' },
   cursor: { active: 'cursor', idle: 'cursor' },
   pi: { active: 'pi', idle: 'pi' },
+  kiro_cli: { active: 'kiro_cli', idle: 'kiro_cli' },
+  aider: { active: 'aider', idle: 'aider' },
+  goose: { active: 'goose', idle: 'goose' },
+  opencode: { active: 'opencode', idle: 'opencode' },
   // Compatibility aliases, not additional canonical providers.
   'claude-code': { active: 'claude_code', idle: 'claude_code' },
   claude: { active: 'claude_code', idle: 'claude_code' },
-  opencode: { active: 'unknown', idle: 'unknown' },
   zai: { active: 'unknown', idle: 'unknown' },
   kimi: { active: 'unknown', idle: 'unknown' },
 });
@@ -108,8 +126,8 @@ export function inferProvider(sessionName) {
   if (typeof sessionName !== 'string' || sessionName.length === 0) return null;
   const n = sessionName.toLowerCase();
   for (const [needle, key] of RULES) {
-    if (needle === 'pi') {
-      if (/(?:^|[^a-z0-9])pi(?:[^a-z0-9]|$)/.test(n)) return key;
+    if (['pi', 'kiro', 'aider', 'goose'].includes(needle)) {
+      if (new RegExp(`(?:^|[^a-z0-9])${needle}(?:[^a-z0-9]|$)`).test(n)) return key;
       continue;
     }
     if (n.includes(needle)) return key;

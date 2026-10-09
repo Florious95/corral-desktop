@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'windows-v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -137,6 +138,7 @@ jobs:
           if-no-files-found: error
 
   macos-release:
+    if: ${{ !startsWith(github.ref_name, 'windows-v') && !startsWith(inputs.tag, 'windows-v') }}
     runs-on: macos-14
     outputs:
       tag: ${{ steps.artifacts.outputs.tag }}
@@ -227,6 +229,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
+    if: ${{ always() && needs.windows-release.result == 'success' && (needs.macos-release.result == 'success' || needs.macos-release.result == 'skipped') }}
     runs-on: ubuntu-latest
     needs:
       - windows-release
@@ -257,11 +260,12 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: release/*
           generate_release_notes: true
+          make_latest: ${{ startsWith(needs.windows-release.outputs.tag, 'windows-v') && 'false' || 'true' }}
           body: |
             Corral desktop release.
 
             - Windows: NSIS installer, MSI installer when produced, and a portable x64 ZIP.
             - Windows WSL2: local-direct mode can connect to the local agentmirrord WebSocket on port 9900 without pairing.
-            - macOS: native Swift AppKit + WKWebView arm64 DMG. Open the DMG and drag `Corral.app` to the `Applications` shortcut.
+            - ${{ startsWith(needs.windows-release.outputs.tag, 'windows-v') && 'Windows-only release: no legacy macOS bundle is built or published. Mainstream CLI provider names and accessible letter badges are preserved; bundled WSL probe bytes and activity rules are unchanged.' || 'macOS: native Swift AppKit + WKWebView arm64 DMG. Open the DMG and drag Corral.app to the Applications shortcut.' }}
 
             Verify downloaded artifacts with the attached `SHA256SUMS` file.
