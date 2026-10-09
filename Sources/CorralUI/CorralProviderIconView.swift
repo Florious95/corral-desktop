@@ -6,6 +6,7 @@ public final class CorralProviderIconView: NSImageView {
     public let isActive: Bool
 
     public init(provider: String, size: CGFloat = 18, active: Bool = false) {
+        let provider = Self.canonicalProvider(provider)
         self.provider = provider
         isActive = active
         super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
@@ -30,7 +31,7 @@ public final class CorralProviderIconView: NSImageView {
             self.image = fallback
             contentTintColor = tint
         }
-        setAccessibilityLabel(provider)
+        setAccessibilityLabel(Self.displayName(for: provider))
     }
 
     public required init?(coder: NSCoder) { nil }
@@ -41,6 +42,34 @@ public final class CorralProviderIconView: NSImageView {
         } else {
             contentTintColor = Self.fallbackTint(for: provider, active: isActive)
             alphaValue = 1
+        }
+    }
+
+    private static func canonicalProvider(_ provider: String) -> String {
+        let normalized = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return switch normalized {
+        case "claude", "claude-code", "claude_code": "claude_code"
+        case "codex", "openai": "codex"
+        case "cursor", "cursor-agent": "cursor"
+        case "kiro", "kiro_cli", "kiro-cli", "kiro-cli-chat": "kiro_cli"
+        case "pi", "copilot", "grok", "aider", "goose", "opencode": normalized
+        default: provider
+        }
+    }
+
+    private static func displayName(for provider: String) -> String {
+        switch provider {
+        case "claude_code": "Claude Code"
+        case "codex": "Codex"
+        case "copilot": "Copilot"
+        case "grok": "Grok"
+        case "cursor": "Cursor"
+        case "pi": "Pi"
+        case "kiro_cli": "Kiro CLI"
+        case "aider": "Aider"
+        case "goose": "Goose"
+        case "opencode": "OpenCode"
+        default: provider
         }
     }
 

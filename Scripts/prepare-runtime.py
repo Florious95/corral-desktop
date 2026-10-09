@@ -57,7 +57,10 @@ def assemble(args):
         coords = {'nodeprobe-pi-activity.js': cap['pi_extension']}
         coords.update({f'nodeprobe-{Path(c["path"]).name}': c for c in cap['corpora']})
         for name, coordinate in coords.items():
-            data = git_file(args.windows_repository, PIN['windowsCommit'], 'src-tauri/resources/' + name)
+            if name == 'nodeprobe-pi-activity.js':
+                data = git_file(args.windows_repository, PIN['windowsCommit'], 'src-tauri/resources/' + name)
+            else:
+                data = git_file(args.core_repository, PIN['coreCommit'], coordinate['path'])
             assert digest(data) == coordinate['sha256'], f'{name} capability mismatch'
             if 'size' in coordinate:
                 assert len(data) == coordinate['size']
