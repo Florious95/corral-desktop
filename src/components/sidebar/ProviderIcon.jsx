@@ -1,3 +1,5 @@
+import { normalizeProvider, providerLabel } from '../../core/providers.js';
+
 // Canonical provider assets are consumed directly from the pinned core
 // submodule. Vite emits them into the bundle; no CDN or runtime fetch.
 import claudeCodeUrl from '../../../deps/corral-core/app/app/src/main/res/raw/provider_icon_claude_code.svg';
@@ -43,6 +45,9 @@ const MONOCHROME_PROVIDERS = new Set(['codex', 'openai', 'cursor', 'pi', 'grok']
  * @param {boolean} [props.active=false]  运行态（state 为 working/blocked）
  */
 export default function ProviderIcon({ provider = null, size = 18, active = false }) {
+  const canonical = normalizeProvider(provider);
+  if (canonical !== 'unknown') provider = canonical;
+  const label = providerLabel(provider, provider || 'Unknown Agent');
   const isMonochrome = Boolean(provider && MONOCHROME_PROVIDERS.has(provider));
   const pair = provider ? ICONS[provider] : null;
   if (pair) {
@@ -51,7 +56,7 @@ export default function ProviderIcon({ provider = null, size = 18, active = fals
         src={active ? pair[0] : pair[1]}
         width={size}
         height={size}
-        alt={provider}
+        alt={label}
         className={`provider-icon${isMonochrome ? ' is-monochrome' : ''}${active ? ' is-active' : ''}`}
         style={{
           display: 'block',
@@ -65,7 +70,8 @@ export default function ProviderIcon({ provider = null, size = 18, active = fals
   const tint = active ? (TINT[provider] ?? 'var(--tint-default)') : 'var(--icon-idle)';
   return (
     <span
-      aria-hidden="true"
+      role="img"
+      aria-label={label}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

@@ -68,8 +68,8 @@ test('providerLabel falls back to the raw session name', () => {
 });
 
 test('canonical provider normalization is exact and fail-closed', () => {
-  assert.deepEqual(CANONICAL_PROVIDERS, ['claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown']);
-  for (const value of ['claude_code', 'claude-code', 'claude', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'unknown']) {
+  assert.deepEqual(CANONICAL_PROVIDERS, ['claude_code', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'kiro_cli', 'aider', 'goose', 'opencode', 'unknown']);
+  for (const value of ['claude_code', 'claude-code', 'claude', 'codex', 'copilot', 'grok', 'cursor', 'pi', 'kiro_cli', 'aider', 'goose', 'opencode', 'unknown']) {
     assert.equal(normalizeProvider(value), value === 'claude' || value === 'claude-code' ? 'claude_code' : value);
   }
   for (const value of [undefined, null, '', 'openai', 'codex-test', 'Claude Code']) {
