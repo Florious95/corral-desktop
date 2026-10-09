@@ -111,13 +111,46 @@ final class MobileSharedGridAnchorTests: XCTestCase {
         let resizesWhilePhonePresent = await link.commands().filter { if case .resize = $0 { true } else { false } }
         XCTAssertEqual(resizesWhilePhonePresent.count, resizeCountBeforePhone, "window and catalog changes never resize a phone-owned PTY")
 
+        // Mobile ownership is a lease, not a momentary presence flag. A phone
+        // can sleep, background, or lose its transport briefly; none of those
+        // events may let the desktop reclaim the PTY grid behind its back.
         try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
-        let takenOver = await waitUntil {
-            let commands = await link.commands()
-            return view.pinnedGrid == nil && view.terminal.cols != 80
-                && commands.contains(.resize(reference: reference, size: GridSize(rows: view.terminal.rows, columns: view.terminal.cols)))
+        let leaseStillPinned = await waitUntil {
+            view.pinnedGrid == phone
+                && GridSize(rows: view.terminal.rows, columns: view.terminal.cols) == phone
         }
-        XCTAssertTrue(takenOver, "once the phone leaves, the desktop fits its pane and resizes the PTY")
+        XCTAssertTrue(leaseStillPinned, "has_mobile=false must preserve a previously acquired mobile grid lease")
+        guard leaseStillPinned else {
+            await coordinator.stop()
+            return
+        }
+        let resizeCountAtLease = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
+        window.setFrame(NSRect(x: 0, y: 0, width: 1_400, height: 1_000), display: true, animate: false)
+        window.displayIfNeeded()
+        coordinator.workspaceView.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+        let resizesAfterPresenceJitter = await link.commands().filter { if case .resize = $0 { true } else { false } }.count
+        XCTAssertEqual(resizesAfterPresenceJitter, resizeCountAtLease,
+                       "window reflow after a transient mobile presence loss must not resize the leased PTY")
+
+        // Only the explicit terminal context-menu action may end the lease.
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 7,
+            clickCount: 1, pressure: 1
+        ))
+        let menu = try XCTUnwrap(view.menu(for: event) as? CorralTerminalContextMenu)
+        let adaptItem = try XCTUnwrap(menu.items.first { $0.title == "适应当前窗口" })
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(adaptItem.action), to: adaptItem.target, from: adaptItem))
+        let explicitTakeover = await waitUntil {
+            let current = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+            let commands = await link.commands()
+            return view.pinnedGrid == nil && current != phone
+                && commands.contains(.resize(reference: reference, size: current))
+        }
+        XCTAssertTrue(explicitTakeover, "only explicit Adapt to Current Window may release the mobile grid lease")
         await coordinator.stop()
     }
 
