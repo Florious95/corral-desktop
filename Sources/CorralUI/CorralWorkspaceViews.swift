@@ -267,7 +267,10 @@ public final class CorralTabBarView: NSView {
         for item in items {
             item.setWidth(item.tab.isPinned ? CorralTabItemView.pinnedWidth : regularWidth, animated: animated && lockedTabWidth == nil)
         }
-        let documentSize = NSSize(width: itemsStack.fittingSize.width, height: 28)
+        // fittingSize can still reflect the previous animated widths after a close.
+        // The document must match the same target geometry as its arranged Tabs.
+        let documentSize = NSSize(width: CGFloat(pinnedCount) * CorralTabItemView.pinnedWidth
+            + CGFloat(regularItems.count) * regularWidth + gaps, height: 28)
         // Do not let a stale document frame collapse the lane under the drag region.
         laneHugsTabs.constant = documentSize.width + 2
         if abs(itemsStack.frame.width - documentSize.width) > 0.25 {
@@ -286,8 +289,8 @@ public final class CorralTabBarView: NSView {
     }
 
     public override func layout() {
-        super.layout()
         updateTabWidths(animated: false)
+        super.layout()
         itemsStack.layoutSubtreeIfNeeded()
         if revealSelectedTab, let item = itemsStack.arrangedSubviews.first(where: { ($0 as? CorralTabItemView)?.tab.id == selectedTabID }) {
             item.scrollToVisible(item.bounds)
@@ -675,7 +678,7 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate {
         isCompact = compact
         isMinimal = minimal
         providerIconView?.isHidden = compact
-        title.isHidden = minimal
+        title.isHidden = minimal || editField != nil
         statusLeadingConstraint?.constant = compact ? 3 : 8
         closeTrailingConstraint?.constant = compact ? -4 : -6
         if compact {
@@ -815,8 +818,15 @@ private final class CorralTabItemView: NSView, NSTextFieldDelegate {
         field.textColor = CorralAestheticTokens.text; field.font = .systemFont(ofSize: 12); field.delegate = self
         field.onCommit = { [weak self] text in self?.finishRename(text) }
         field.onCancel = { [weak self] in self?.removeEditor() }
-        field.frame = NSRect(x: title.frame.minX, y: bounds.midY - 9, width: title.frame.width, height: 18)
+        field.translatesAutoresizingMaskIntoConstraints = false
         addSubview(field); title.isHidden = true; editField = field
+        NSLayoutConstraint.activate([
+            field.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            field.trailingAnchor.constraint(equalTo: title.trailingAnchor),
+            field.centerYAnchor.constraint(equalTo: centerYAnchor),
+            field.heightAnchor.constraint(equalToConstant: 18)
+        ])
+        layoutSubtreeIfNeeded()
         field.selectText(nil)
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
