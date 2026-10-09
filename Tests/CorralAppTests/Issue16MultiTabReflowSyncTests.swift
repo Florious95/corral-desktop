@@ -86,6 +86,26 @@ final class Issue16MultiTabReflowSyncTests: XCTestCase {
                 coordinator.terminalView(for: references[1])?.terminal.cols ?? 0 > 0
         }
         XCTAssertTrue(tabAReady, "Tab A must be active and sized at the initial window width")
+        let tabAGridsMeasured = await waitUntil {
+            [references[0], references[1]].allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                return GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                    != GridSize(rows: 24, columns: 80)
+            }
+        }
+        XCTAssertTrue(tabAGridsMeasured, "Tab A panes must measure before desktop presence is announced")
+        for reference in [references[0], references[1]] {
+            try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        }
+        let tabAOwnershipReady = await waitUntil {
+            let commands = await link.commands()
+            return [references[0], references[1]].allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                let grid = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                return commands.contains(.resize(reference: reference, size: grid))
+            }
+        }
+        XCTAssertTrue(tabAOwnershipReady, "Tab A panes must receive their desktop resize after presence=false")
 
         await coordinator.selectWorkspaceTab(id: tabBID)
         let tabBReady = await waitUntil {
@@ -97,6 +117,26 @@ final class Issue16MultiTabReflowSyncTests: XCTestCase {
                 coordinator.terminalView(for: references[3])?.terminal.cols ?? 0 > 0
         }
         XCTAssertTrue(tabBReady, "Tab B must be opened once at the initial window width")
+        let tabBGridsMeasured = await waitUntil {
+            [references[2], references[3]].allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                return GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                    != GridSize(rows: 24, columns: 80)
+            }
+        }
+        XCTAssertTrue(tabBGridsMeasured, "Tab B panes must measure before desktop presence is announced")
+        for reference in [references[2], references[3]] {
+            try await link.emit(.control(.presenceUpdate(reference: reference, hasMobile: false, mobileCount: 0, desktopCount: 1)))
+        }
+        let tabBOwnershipReady = await waitUntil {
+            let commands = await link.commands()
+            return [references[2], references[3]].allSatisfy { reference in
+                guard let view = coordinator.terminalView(for: reference) else { return false }
+                let grid = GridSize(rows: view.terminal.rows, columns: view.terminal.cols)
+                return commands.contains(.resize(reference: reference, size: grid))
+            }
+        }
+        XCTAssertTrue(tabBOwnershipReady, "Tab B panes must receive their desktop resize after presence=false")
         let viewA = try XCTUnwrap(coordinator.terminalView(for: references[0]))
         let viewA2 = try XCTUnwrap(coordinator.terminalView(for: references[1]))
         let viewB = try XCTUnwrap(coordinator.terminalView(for: references[2]))
