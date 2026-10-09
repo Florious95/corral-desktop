@@ -82,8 +82,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         var presenceKnown = false
         var mobileCount: UInt32 = 0
         var desktopCount: UInt32 = 0
-        /// While Core reports a phone on this session, its PTY grid is not the desktop's to change.
-        var followsRemoteGrid: Bool { hasMobile }
+        /// A phone's grid remains leased across presence loss until the user explicitly fits it.
+        var followsRemoteGrid: Bool { hasMobile || remoteGrid != nil }
         /// The phone's grid as the catalog last reported a change to it. Until then the desktop keeps
         /// its current grid: a catalog that has not yet caught up must not be mistaken for the phone's.
         var remoteGrid: GridSize?
@@ -807,8 +807,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func adaptTerminalWindow(for key: SessionKey) {
-        guard let runtime = sessions[key],
+        guard var runtime = sessions[key], runtime.presenceKnown, !runtime.hasMobile,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
+        runtime.remoteGrid = nil
+        runtime.requestedGrid = nil
+        sessions[key] = runtime
+        applyGridOwnership(key)
         relayoutSessionKeys.insert(key)
         reflowAndResizeVisibleSessions([key])
     }
@@ -1857,7 +1861,6 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                         runtime.remoteGrid = !presenceWasKnown || advanced ? runtime.descriptor.size : (local ?? runtime.descriptor.size)
                     }
                     if hasMobile, !runtime.hasMobile { runtime.requestedGrid = nil } // the PTY is no longer at our request
-                    if !hasMobile { runtime.remoteGrid = nil; runtime.mobileGridRequestID = nil }
                     runtime.hasMobile = hasMobile
                     runtime.presenceKnown = true
                     runtime.mobileCount = mobileCount
@@ -1937,7 +1940,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         for workspace in listing.workspaces {
             for record in workspace.sessions {
                 let key = upsert(record, deviceID: origin.deviceID, origin: origin)
-                if key == refreshedKey, var runtime = sessions[key], runtime.hasMobile {
+                if key == refreshedKey, var runtime = sessions[key], runtime.followsRemoteGrid {
                     runtime.remoteGrid = runtime.descriptor.size
                     sessions[key] = runtime
                     applyGridOwnership(key)
@@ -2010,12 +2013,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 runtime.awaitingSnapshot = false
                 runtime.requestedGrid = nil
                 runtime.presenceKnown = false
-                if runtime.hasMobile { runtime.remoteGrid = descriptor.size }
+                if runtime.followsRemoteGrid { runtime.remoteGrid = descriptor.size }
                 runtime.catalogBaselineGrid = nil
                 runtime.mobileGridRequestID = nil
                 runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
             }
-            if runtime.hasMobile, descriptor.size != runtime.descriptor.size { runtime.remoteGrid = descriptor.size }
+            if runtime.followsRemoteGrid, descriptor.size != runtime.descriptor.size { runtime.remoteGrid = descriptor.size }
             if descriptor.size == runtime.requestedGrid { runtime.catalogBaselineGrid = descriptor.size }
             runtime.descriptor = descriptor
             runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
