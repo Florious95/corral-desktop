@@ -3203,6 +3203,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         didSet { scrollSensitivity = max(0.05, scrollSensitivity) }
     }
 
+    /// Lets a remote host supply history when this normal-screen buffer has none.
+    /// Positive values scroll up; unset hosts retain local scrollback behavior.
+    public var onEmptyScrollbackScroll: ((Int) -> Void)?
+
     public override func scrollWheel(with event: NSEvent) {
         // Preserves the previous `deltaY == 0` early exit, restated against the
         // delta this method now reads. Without it a zero delta would fall into
@@ -3273,7 +3277,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                 }
             }
         } else {
-            if scrollingUp {
+            if terminal.mouseMode == .off, terminal.displayBuffer.yBase == 0,
+               let onEmptyScrollbackScroll {
+                onEmptyScrollbackScroll(lines)
+            } else if scrollingUp {
                 scrollUp(lines: magnitude)
             } else {
                 scrollDown(lines: magnitude)

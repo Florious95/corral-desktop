@@ -209,6 +209,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let bytes: Data
         let isScrollWheel: Bool
         var isPointerMotion = false
+        var remoteScrollDelta: Int32?
     }
     private struct BufferedScrollWheelInput {
         let session: SessionKey
@@ -769,6 +770,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         view = CorralNativeTerminalView(frame: .zero)
 #endif
         view.terminalDelegate = self
+        view.onEmptyScrollbackScroll = { [weak self, weak view] lines in
+            guard let view else { return }
+            self?.scrollRemoteHistory(source: view, lines: lines)
+        }
         view.onFocus = { [weak self] in
             guard let self, let id = self.sessions[key]?.descriptor.id,
                   self.workspaceState.visibleSessionID != id else { return }
@@ -2250,6 +2255,25 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         Task { @MainActor [weak self] in await self?.resizeSessionIfNeeded(key, to: grid, force: force, relayout: relayout) }
     }
 
+    private func scrollRemoteHistory(source: TerminalView, lines: Int) {
+        guard !noResizeMode, lines != 0, let connection,
+              let key = terminalRegistry.key(for: source), key.deviceID == connection.deviceID,
+              let runtime = sessions[key], connected,
+              runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
+              terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden else { return }
+        lastPointerMotion = nil
+        releasePendingPointerMotion()
+        flushPendingScrollWheelInput()
+        guard pendingInput.count < 1024 else {
+            lastConnectionError = "Terminal input queue is full."
+            showToast("终端输入队列已满，请等待连接恢复后重试", kind: .error)
+            return
+        }
+        pendingInput.append(PendingInput(session: key, connection: connection, bytes: Data(),
+                                         isScrollWheel: false, remoteScrollDelta: Int32(clamping: -lines)))
+        scheduleInputDrain()
+    }
+
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let isScrollWheelEvent = Self.isPointerScrollEvent(for: source) || Self.isMouseWheelReport(data)
         guard !noResizeMode, !data.isEmpty, let connection,
@@ -2465,7 +2489,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 showToast("会话连接已变化，待发送输入已取消", kind: .warning)
                 continue
             }
-            if input.isScrollWheel {
+            if let delta = input.remoteScrollDelta {
+                do { _ = try await sessionLink.send(.scrollWheel(reference: input.session.reference, delta: delta)) }
+                catch {
+                    lastConnectionError = String(describing: error)
+                    showToast("终端历史滚动失败：\(error)", kind: .error)
+                }
+            } else if input.isScrollWheel {
                 var wheelBytes = input.bytes
                 var wheelReportCount = 1
                 while let next = pendingInput.first, next.isScrollWheel,
