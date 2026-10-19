@@ -854,6 +854,64 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    /// Cursor CLI stays in the normal buffer with mouse reporting disabled. Its
+    /// scrollback therefore exists only in tmux/Core; a fresh Native snapshot
+    /// intentionally has no local history to scroll. The fixture publishes the
+    /// authoritative older view only after the expected command is observed, so
+    /// this cannot pass by merely changing SwiftTerm's local scrollPosition.
+    func testCursorCLIWheelRequestsRemoteHistoryAndMovesViewport() async throws {
+        let (coordinator, link, refs) = try await interactionFixture()
+        let window = try XCTUnwrap(coordinator.windowController.window)
+        defer { window.close() }
+        let terminal = try XCTUnwrap(coordinator.terminalView(for: refs[0]))
+        XCTAssertTrue(window.makeFirstResponder(terminal))
+
+        try await link.emit(.frame(.snapshot(reference: refs[0], ansi: Data(
+            "\u{1b}[?25l\u{1b}[2J\u{1b}[H LIVE-BOTTOM\r\n".utf8
+        ))))
+        let liveReady = await waitUntil {
+            self.terminalText(coordinator, reference: refs[0]).contains("LIVE-BOTTOM")
+        }
+        XCTAssertTrue(liveReady)
+        let before = self.terminalText(coordinator, reference: refs[0])
+
+        let location = terminal.convert(CGPoint(x: terminal.bounds.midX, y: terminal.bounds.midY), to: nil)
+        terminal.scrollWheel(with: ScrollBurstEvent(window: window, location: location, delta: 3))
+        let wheelSent = await waitUntil(timeout: .seconds(1)) {
+            await link.commands().contains { command in
+                guard case let .scrollWheel(reference, delta) = command else { return false }
+                return reference == refs[0] && delta == -3
+            }
+        }
+        print("CURSOR_WHEEL_RED wheelSent=\(wheelSent) commands=\(await link.commands()) before=\(before.debugDescription)")
+        XCTAssertTrue(wheelSent, "normal-buffer wheel-up must send Core scroll_wheel(delta=-lines), not local scrollback or CSI arrows")
+        guard wheelSent else {
+            await coordinator.stop()
+            return
+        }
+
+        // The private Core fixture's response is deliberately gated on the
+        // command above: this is the remote history movement under test.
+        try await link.emit(.frame(.snapshot(reference: refs[0], ansi: Data(
+            "\u{1b}[?25l\u{1b}[2J\u{1b}[H REMOTE-HISTORY-OLDER\r\n".utf8
+        ))))
+        let moved = await waitUntil {
+            let after = self.terminalText(coordinator, reference: refs[0])
+            return after.contains("REMOTE-HISTORY-OLDER") && !after.contains("LIVE-BOTTOM")
+        }
+        let after = self.terminalText(coordinator, reference: refs[0])
+        print("CURSOR_WHEEL_REMOTE before=\(before.debugDescription) after=\(after.debugDescription) commands=\(await link.commands())")
+        XCTAssertTrue(moved, "the authoritative Core history snapshot must move the visible viewport")
+
+        let inputBytes = await link.commands().compactMap { command -> Data? in
+            guard case let .input(request) = command, case let .bytes(bytes) = request.payload else { return nil }
+            return bytes
+        }.reduce(into: Data()) { $0.append($1) }
+        XCTAssertFalse(inputBytes.contains(Data("\u{1b}[A".utf8)), "normal-buffer wheel must not pollute the shell with CSI Up")
+        XCTAssertFalse(inputBytes.contains(Data("\u{1b}[B".utf8)), "normal-buffer wheel must not pollute the shell with CSI Down")
+        await coordinator.stop()
+    }
+
     func testTabContextMenuSplitActionsMoveSessionIntoActiveTab() async throws {
         let cases: [(String, SplitDirection)] = [("splitRight", .horizontal), ("splitDown", .vertical)]
         for (action, expectedDirection) in cases {
