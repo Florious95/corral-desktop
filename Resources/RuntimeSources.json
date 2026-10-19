@@ -1,7 +1,7 @@
 {
-  "coreCommit": "55bd317d2ef13df5ff890a8335d808b0b6023aad",
-  "coreTree": "379de84d48294a1c7133e81c849f026663f2a9e5",
-  "coreSHA256": "e231a355798697c4c730d11aa8cf22b5dc4715e2c7c14cfae12ac47b72839ea7",
+  "coreCommit": "b7c2f24d4a0a03864b4bc498c54ed704663c58e8",
+  "coreTree": "c6ae681a76173c927ae794fb2a96b0d0a2d9600c",
+  "coreSHA256": "ab36ccf8dc255017258de65db01de8c011a300fcc61752dcbeba444a0996efed",
   "coreManifestPath": "server/internal/nodeprobe/accepted-source.json",
   "windowsCommit": "7cb91b05d5b894ca18fc0e14e7adfff05fe10a58",
   "platform": "darwin/arm64",
