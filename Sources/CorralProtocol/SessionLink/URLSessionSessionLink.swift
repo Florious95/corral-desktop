@@ -491,6 +491,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         switch command {
         case let .list(requestID): requestID
         case let .createAgent(request): request.requestID
+        case let .conversationCreate(request): request.requestID
         case let .closeSession(request): request.requestID
         case let .input(request): request.sequence
         default: nil

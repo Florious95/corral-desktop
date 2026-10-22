@@ -95,6 +95,15 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             return try encodeEnvelope(type: "close_session", payload: CloseSessionPayload(request: request))
         case let .conversationSubscribe(reference):
             return try encodeEnvelope(type: "conversation_subscribe", payload: ConversationSubscribePayload(ref: reference.rawValue))
+        case let .conversationSubscribeControl(reference):
+            return try encodeEnvelope(type: "conversation_subscribe", payload: ReferencePayload(ref: reference.rawValue))
+        case let .conversationCreate(request):
+            guard request.requestID > 0, !request.workspace.isEmpty, !request.provider.isEmpty,
+                  let anchor = request.anchorReference, !request.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw V1ControlCodecError.invalidField("conversation_create")
+            }
+            return try encodeEnvelope(type: "conversation_create", payload: ConversationCreatePayload(
+                requestID: request.requestID, workspace: request.workspace, anchorReference: anchor.rawValue, provider: request.provider, name: request.name))
         case let .conversationUnsubscribe(reference):
             return try encodeEnvelope(type: "conversation_unsubscribe", payload: ReferencePayload(ref: reference.rawValue))
         case let .conversationCommand(reference, id, command):
@@ -116,7 +125,12 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
     }
 
     public func decodeControlMessage(_ bytes: Data) throws -> ControlMessage {
-        guard bytes.count <= Self.maximumControlMessageBytes else { throw V1ControlCodecError.payloadTooLarge }
+        // A control lane's legacy replay may carry native records beyond the control budget. They are never
+        // rendered, and must not tear down the terminal link: recognise the spliced envelope prefix only.
+        if bytes.count > Self.maximumControlMessageBytes {
+            if bytes.prefix(64).starts(with: Data(#"{"v":1,"type":"conversation_"#.utf8)) { return .conversationIgnored(type: "oversize") }
+            throw V1ControlCodecError.payloadTooLarge
+        }
         let envelope: IncomingEnvelope
         do {
             envelope = try JSONDecoder().decode(IncomingEnvelope.self, from: bytes)
@@ -234,8 +248,10 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         case "conversation_ready":
             let value = try decodePayload(ConversationReadyPayload.self, from: payload)
             let reference = try SessionReference(value.ref)
-            // A legacy (non-windowed) replay is never adopted; it stays a negotiated, ignorable frame.
-            guard value.historyMode == "windowed" else { return .conversationIgnored(type: type) }
+            // A non-windowed ready opens a control lane: only its native mode is used, never its replay.
+            guard value.historyMode == "windowed" else {
+                return .conversationControlReady(reference: reference, mode: (value.mode ?? "").isEmpty ? "rpc" : value.mode!, running: value.running ?? false)
+            }
             guard let sessionID = value.sessionID, !sessionID.isEmpty, let viewID = value.viewID, !viewID.isEmpty,
                   let sourceEpoch = value.sourceEpoch, !sourceEpoch.isEmpty, let snapshot = value.snapshotSeq,
                   let token = value.windowToken, !token.isEmpty,
@@ -262,6 +278,11 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             let value = try decodePayload(ConversationResyncPayload.self, from: payload)
             guard !value.viewID.isEmpty, !value.sourceEpoch.isEmpty else { throw V1ControlCodecError.invalidField("conversation_resync") }
             return .conversationResync(reference: try SessionReference(value.ref), viewID: value.viewID, sourceEpoch: value.sourceEpoch, reason: value.reason)
+        case "conversation_created":
+            let value = try decodePayload(ConversationCreatedPayload.self, from: payload)
+            guard value.requestID > 0, value.ok == (value.ref?.isEmpty == false) else { throw V1ControlCodecError.invalidField("conversation_created") }
+            return .conversationCreated(ConversationCreatedResult(requestID: value.requestID, ok: value.ok, reference: try value.ref.map(SessionReference.init),
+                                                                  name: value.name, reason: value.reason))
         case "conversation_closed":
             let value = try decodePayload(ConversationClosedPayload.self, from: payload)
             guard let reason = ConversationClosedReason(rawValue: value.reason) else { throw V1ControlCodecError.invalidField("conversation_closed.reason") }
@@ -480,6 +501,22 @@ private struct ConversationResyncPayload: Decodable {
     enum CodingKeys: String, CodingKey { case ref, reason, viewID = "view_id", sourceEpoch = "source_epoch" }
 }
 private struct ConversationClosedPayload: Decodable { let ref: String; let reason: String }
+private struct ConversationCreatePayload: Encodable {
+    let requestID: UInt32
+    let workspace: String
+    let anchorReference: String
+    let provider: String
+    let name: String
+    enum CodingKeys: String, CodingKey { case requestID = "req_id", workspace, provider, name, anchorReference = "anchor_ref" }
+}
+private struct ConversationCreatedPayload: Decodable {
+    let requestID: UInt32
+    let ok: Bool
+    let ref: String?
+    let name: String?
+    let reason: String?
+    enum CodingKeys: String, CodingKey { case requestID = "req_id", ok, ref, name, reason }
+}
 
 private struct ListPayload: Encodable {
     let requestID: UInt32

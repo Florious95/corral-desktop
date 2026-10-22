@@ -53,8 +53,11 @@ final class ConversationCodecTests: XCTestCase {
         XCTAssertTrue(value.sourceOmitted)
         XCTAssertEqual(value.historySupport, "retained_window")
 
-        let legacy = try codec.decodeControlMessage(Data(#"{"v":1,"type":"conversation_ready","payload":{"ref":"r","stream":"s","head_seq":3}}"#.utf8))
-        XCTAssertEqual(legacy, .conversationIgnored(type: "conversation_ready"))
+        let legacy = try codec.decodeControlMessage(Data(#"{"v":1,"type":"conversation_ready","payload":{"ref":"r","stream":"s","head_seq":3,"mode":"tui","running":true}}"#.utf8))
+        XCTAssertEqual(legacy, .conversationControlReady(reference: try SessionReference("r"), mode: "tui", running: true),
+                       "a non-windowed ready opens only a mode-control lane; its replay is never adopted")
+        let olderWorker = try codec.decodeControlMessage(Data(#"{"v":1,"type":"conversation_ready","payload":{"ref":"r","stream":"s","head_seq":3}}"#.utf8))
+        XCTAssertEqual(olderWorker, .conversationControlReady(reference: try SessionReference("r"), mode: "rpc", running: false))
 
         XCTAssertEqual(try codec.decodeControlMessage(Data(#"{"v":1,"type":"conversation_ready","payload":{"ref":"r","history_mode":"windowed","view_id":"v"}}"#.utf8)),
                        .conversationMalformed(reference: try SessionReference("r"), type: "conversation_ready"),
@@ -93,5 +96,30 @@ final class ConversationCodecTests: XCTestCase {
         let listing = try codec.decodeControlMessage(Data(#"{"v":1,"type":"listing","payload":{"req_id":1,"seq":1,"workspaces":[{"cwd":"/w","session_count":2,"sessions":[{"ref":"a","name":"pi","cwd":"/w","rows":24,"cols":80,"provider":"pi","activity":"idle","health":"normal","conversation":true},{"ref":"b","name":"sh","cwd":"/w","rows":24,"cols":80}]}]}}"#.utf8))
         guard case let .listing(value) = listing else { return XCTFail("\(listing)") }
         XCTAssertEqual(value.workspaces[0].sessions.map(\.conversation), [true, false])
+    }
+
+    func testControlLaneCreationAndOversizeReplayNeverBreakTheLink() throws {
+        let control = try object(codec.encodeClientCommand(.conversationSubscribeControl(reference: ref)))
+        XCTAssertEqual(control["type"] as? String, "conversation_subscribe")
+        XCTAssertEqual(control["payload"] as? [String: String], ["ref": ref.rawValue], "no history_mode, stream or after_seq")
+
+        let request = CreateAgentRequest(requestID: 9, workspace: "/w", anchorReference: ref, provider: "pi", name: "GUI Pi", bypass: false)
+        let create = try object(codec.encodeClientCommand(.conversationCreate(request)))
+        XCTAssertEqual(create["type"] as? String, "conversation_create")
+        let payload = try XCTUnwrap(create["payload"] as? [String: Any])
+        XCTAssertEqual(payload["req_id"] as? Int, 9)
+        XCTAssertEqual(payload["anchor_ref"] as? String, ref.rawValue)
+        XCTAssertEqual(payload["provider"] as? String, "pi")
+        XCTAssertNil(payload["bypass"], "a structured launch carries no bypass flag")
+
+        XCTAssertEqual(try codec.decodeControlMessage(Data(#"{"v":1,"type":"conversation_created","payload":{"req_id":9,"ok":true,"ref":"r2","name":"GUI Pi"}}"#.utf8)),
+                       .conversationCreated(ConversationCreatedResult(requestID: 9, ok: true, reference: try SessionReference("r2"), name: "GUI Pi")))
+        XCTAssertEqual(try codec.decodeControlMessage(Data(#"{"v":1,"type":"conversation_created","payload":{"req_id":9,"ok":false,"reason":"launch_failed"}}"#.utf8)),
+                       .conversationCreated(ConversationCreatedResult(requestID: 9, ok: false, reason: "launch_failed")))
+
+        let huge = Data((#"{"v":1,"type":"conversation_event","payload":{"ref":"r","seq":4,"event":{"type":"tool_execution_end","output":""# + String(repeating: "x", count: 70_000) + #""}}}"#).utf8)
+        XCTAssertEqual(try codec.decodeControlMessage(huge), .conversationIgnored(type: "oversize"))
+        let hugeOther = Data((#"{"v":1,"type":"listing","payload":{"pad":""# + String(repeating: "x", count: 70_000) + #""}}"#).utf8)
+        XCTAssertThrowsError(try codec.decodeControlMessage(hugeOther), "non-GUI frames keep the strict control budget")
     }
 }

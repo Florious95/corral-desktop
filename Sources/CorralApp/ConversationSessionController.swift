@@ -4,9 +4,12 @@ import CorralServices
 import CorralUI
 import Foundation
 
-/// One windowed conversation view for one pane on one authenticated connection (Core contract 11).
-/// Ready → initial HTTP page at H → buffered then contiguous live commits, each acknowledged only after adoption.
-/// HTTP failures stay local to this pane; they never touch the terminal link, other panes or native state.
+/// One managed agent pane on one authenticated connection.
+/// - Windowed lane (Core contract 11): ready → initial HTTP page at H → buffered then contiguous live commits,
+///   each acknowledged only after adoption. HTTP failures stay local to this pane.
+/// - Control lane: a non-windowed stream whose replay is ignored; it proves a TUI-mode pane's native mode and
+///   carries `switch_mode` back to RPC, because a Pi TUI has no windowed source.
+/// The presented mode follows the native mode Core confirms, never the local switch intent.
 @MainActor
 final class ConversationSessionController {
     enum Phase: Equatable {
@@ -19,6 +22,19 @@ final class ConversationSessionController {
         case closed(ConversationClosedReason)
     }
 
+    enum Lane: Equatable { case windowed, control }
+    enum NativeMode: Equatable { case unknown, rpc, tui }
+
+    /// One serial native mode change: requested, possibly awaiting the user's busy consent, then confirmed.
+    struct ModeSwitch: Equatable {
+        let target: CorralViewportHeaderState.Mode
+        var force: Bool
+        var awaitingConsent = false
+        var commandID: String?
+        let automatic: Bool
+        var started = Date()
+    }
+
     struct NativeState: Equatable {
         var sessionName: String?
         var model: String?
@@ -28,18 +44,35 @@ final class ConversationSessionController {
     let key: SessionKey
     private(set) var connectionEpoch: ConnectionEpoch
     let pane = CorralConversationPaneView()
+    let header = CorralViewportHeaderView()
+    private(set) var lane: Lane = .windowed
+    private(set) var nativeMode: NativeMode = .unknown
+    /// Core proved this pane is a managed structured agent (a windowed or control ready arrived).
+    private(set) var managed = false
+    /// Neither lane can attach: the pane is not (or no longer) a managed agent; plain terminal.
+    private(set) var unavailable = false
+    private(set) var modeSwitch: ModeSwitch?
+    private var controlProbeAttempted = false
+    private var controlRecoveries: [Date] = []
+    private var notice: (text: String, tone: CorralViewportHeaderState.Tone, until: Date)?
+    /// The user's default open mode, applied once after an explicit open when the pane is idle.
+    private var preferredOnOpen: CorralViewportHeaderState.Mode?
+    private var switchTimeout: Task<Void, Never>?
+    private static let switchTimeoutSeconds: Double = 45
     private(set) var phase: Phase = .subscribing
     private(set) var ready: ConversationReady?
     private(set) var transcript: ConversationTranscript?
     private(set) var liveState: ConversationLiveState?
     private(set) var nativeState = NativeState()
-    var title = ""
+    var title = "" { didSet { if oldValue != title { publish() } } }
     var provider: String?
 
     /// Wire and HTTP are injected; the controller owns ordering and ownership checks only.
     var send: (ClientCommand) async throws -> Void = { _ in }
     var fetch: (ConversationHistoryRequest) async throws -> ConversationHistoryPage = { _ in throw ConversationHistoryFailure("network") }
     var onPresentationChange: () -> Void = {}
+    /// Busy native work needs explicit consent before a forced switch; nil answer means cancelled.
+    var onConsentNeeded: (CorralViewportHeaderState.Mode) -> Void = { _ in }
 
     private var buffered: [ConversationUpdate] = []
     private var olderState: CorralConversationPaneState.Older = .complete
@@ -63,22 +96,28 @@ final class ConversationSessionController {
         pane.onLoadOlder = { [weak self] in self?.loadOlder() }
         pane.onNeedBodies = { [weak self] ids in self?.requestBodies(ids) }
         pane.onRetry = { [weak self] in self?.retry() }
+        header.onSelectMode = { [weak self] mode in self?.requestSwitch(to: mode) }
     }
 
     /// Whether this pane should currently show the structured view instead of the terminal.
-    var presentsConversation: Bool {
-        switch phase {
-        case .closed(.unavailable), .closed(.exited): false
-        default: (ready?.mode ?? "rpc") == "rpc"
-        }
-    }
+    var presentsConversation: Bool { !unavailable && nativeMode != .tui }
+    /// Managed panes (and panes still being identified) carry the viewport header in either presentation.
+    var presentsHeader: Bool { !unavailable }
 
     func start() {
         phase = .subscribing
+        lane = .windowed
         publish()
+        subscribe(.windowed)
+    }
+
+    private func subscribe(_ target: Lane) {
+        lane = target
+        let reference = key.reference
+        let command: ClientCommand = target == .windowed ? .conversationSubscribe(reference: reference) : .conversationSubscribeControl(reference: reference)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            do { try await self.send(.conversationSubscribe(reference: self.key.reference)) }
+            do { try await self.send(command) }
             catch { self.phase = .recovering("network"); self.publish() }
         }
     }
@@ -96,6 +135,11 @@ final class ConversationSessionController {
         olderInFlight = false
         stateCommandID = nil
         recoveries.removeAll()
+        controlRecoveries.removeAll()
+        controlProbeAttempted = false
+        unavailable = false
+        // A switch written on the old connection has an unknown outcome; the new lane's ready reports the truth.
+        if modeSwitch != nil { finishSwitch(notice: "切换结果未确认，已按主机当前模式显示", tone: .warning) }
         start()
     }
 
@@ -110,6 +154,12 @@ final class ConversationSessionController {
     func handleReady(_ value: ConversationReady) {
         if let current = transcript, current.viewID == value.viewID { return }
         if transcript?.initialAdopted == true { staleRows = rows() }
+        lane = .windowed
+        managed = true
+        unavailable = false
+        controlProbeAttempted = false
+        nativeMode = value.mode == "tui" ? .tui : .rpc
+        if modeSwitch?.target == .gui { finishSwitch(notice: nil) }
         ready = value
         transcript = ConversationTranscript(ready: value)
         buffered.removeAll()
@@ -124,6 +174,51 @@ final class ConversationSessionController {
         onPresentationChange()
         loadInitial()
         requestNativeState()
+        applyPreferredModeIfIdle()
+    }
+
+    /// A control lane's ready is the worker's own statement of the pane's mode.
+    func handleControlReady(mode: String, running: Bool) {
+        lane = .control
+        managed = true
+        unavailable = false
+        let confirmed: NativeMode = mode == "tui" ? .tui : .rpc
+        nativeMode = confirmed
+        phase = .ready
+        if confirmed == .rpc {
+            if var pending = modeSwitch, pending.target == .tui, pending.commandID != nil {
+                // Core refuses an unforced switch while Pi works, and that refusal went to the retired view.
+                if running, !pending.force {
+                    if pending.automatic {
+                        finishSwitch(notice: "Pi 正在运行任务，已保持 GUI", tone: .warning)
+                        subscribe(.windowed)
+                        return
+                    }
+                    pending.awaitingConsent = true
+                    pending.commandID = nil
+                    modeSwitch = pending
+                    switchTimeout?.cancel()
+                    publish()
+                    onConsentNeeded(.tui)
+                    return
+                }
+                // Mid-switch the worker still reports rpc: it publishes worker_mode only once the replacement Pi
+                // is confirmed (its response id belongs to the retired view), so wait here for that event.
+                publish()
+                return
+            }
+            // Not a TUI after all: the structured view belongs on the windowed lane.
+            onPresentationChange()
+            subscribe(.windowed)
+            return
+        }
+        if let pending = modeSwitch {
+            if pending.target == .tui { finishSwitch(notice: nil) }
+            else if pending.commandID == nil { sendSwitch() }
+        }
+        publish()
+        onPresentationChange()
+        applyPreferredModeIfIdle()
     }
 
     func handleUpdate(_ update: ConversationUpdate) {
@@ -146,9 +241,20 @@ final class ConversationSessionController {
     }
 
     func handleEvent(_ event: ConversationEvent) {
+        // A control lane replays retained native records; only our response and mode changes matter.
+        if lane == .control, !Self.mentions(event.event, ["worker_mode", modeSwitch?.commandID].compactMap { $0 }) { return }
         guard event.viewID == nil || event.viewID == transcript?.viewID,
-              let object = try? JSONSerialization.jsonObject(with: event.event) as? [String: Any],
-              object["type"] as? String == "response", let id = object["id"] as? String, id == stateCommandID else { return }
+              let object = try? JSONSerialization.jsonObject(with: event.event) as? [String: Any] else { return }
+        if object["type"] as? String == "worker_mode", let mode = object["mode"] as? String {
+            handleWorkerMode(mode)
+            return
+        }
+        guard object["type"] as? String == "response", let id = object["id"] as? String else { return }
+        if id == modeSwitch?.commandID {
+            handleSwitchResponse(success: object["success"] as? Bool == true, data: object["data"] as? [String: Any], error: object["error"] as? String)
+            return
+        }
+        guard id == stateCommandID else { return }
         stateCommandID = nil
         guard object["success"] as? Bool == true, let data = object["data"] as? [String: Any] else { return }
         var state = NativeState()
@@ -163,14 +269,201 @@ final class ConversationSessionController {
 
     func handleResync(viewID: String, reason: String) {
         guard viewID == transcript?.viewID else { return }
+        // A requested switch to the TUI retires the windowed source; the control lane confirms the new mode.
+        if modeSwitch?.target == .tui, modeSwitch?.commandID != nil {
+            subscribe(.control)
+            return
+        }
         recover(reason)
     }
 
     func handleMalformed() { recover("malformed") }
 
     func handleClosed(_ reason: ConversationClosedReason) {
+        switch lane {
+        case .windowed:
+            if reason == .lost { phase = .closed(reason); recover("lost"); return }
+            // A managed Pi in its TUI has no windowed source; ask the worker itself before falling back.
+            if modeSwitch?.target == .tui || !controlProbeAttempted {
+                controlProbeAttempted = true
+                subscribe(.control)
+                return
+            }
+        case .control:
+            if reason == .lost, recoverControl() { return }
+        }
         phase = .closed(reason)
-        if reason == .lost { recover("lost") } else { publish(); onPresentationChange() }
+        managed = false
+        unavailable = true
+        nativeMode = .unknown
+        if modeSwitch != nil { finishSwitch(notice: nil) }
+        publish()
+        onPresentationChange()
+    }
+
+    private func recoverControl() -> Bool {
+        let now = Date()
+        controlRecoveries = controlRecoveries.filter { now.timeIntervalSince($0) < 60 }
+        guard controlRecoveries.count < 3 else { return false }
+        controlRecoveries.append(now)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard let self, self.lane == .control, !self.unavailable else { return }
+            self.subscribe(.control)
+        }
+        return true
+    }
+
+    // MARK: Mode switching
+
+    /// The viewport switcher and the default-mode preference share this one serial native operation.
+    func requestSwitch(to target: CorralViewportHeaderState.Mode, automatic: Bool = false) {
+        guard modeSwitch == nil, managed, !unavailable else { return }
+        let current: CorralViewportHeaderState.Mode = nativeMode == .tui ? .tui : .gui
+        guard target != current else { return }
+        // Each direction needs its own attached lane; otherwise nothing is written.
+        let attached = target == .tui ? (lane == .windowed && transcript != nil) : (lane == .control && phase == .ready)
+        guard attached else {
+            if !automatic { showNotice("会话尚未就绪，请稍后再切换", tone: .warning) }
+            return
+        }
+        notice = nil
+        modeSwitch = ModeSwitch(target: target, force: false, automatic: automatic)
+        sendSwitch()
+    }
+
+    /// Busy consent: the user explicitly agreed to stop the running native task for this switch.
+    func confirmSwitch() {
+        guard var pending = modeSwitch, pending.awaitingConsent else { return }
+        pending.awaitingConsent = false
+        pending.force = true
+        pending.commandID = nil
+        modeSwitch = pending
+        sendSwitch()
+    }
+
+    /// Cancelling consent writes nothing; the pane keeps its confirmed mode.
+    func cancelSwitch() {
+        guard modeSwitch?.awaitingConsent == true else { return }
+        finishSwitch(notice: nil)
+        // The refusal left only the control lane attached to a still-running RPC Pi; resume the live view.
+        if lane == .control, nativeMode == .rpc { subscribe(.windowed) }
+    }
+
+    private func sendSwitch() {
+        guard var pending = modeSwitch else { return }
+        let id = nextRequestID("sw")
+        pending.commandID = id
+        pending.started = Date()
+        modeSwitch = pending
+        publish()
+        let body = (try? JSONSerialization.data(withJSONObject: ["type": "switch_mode", "mode": pending.target == .tui ? "tui" : "rpc", "force": pending.force])) ?? Data()
+        let reference = key.reference
+        Task { @MainActor [weak self] in
+            do { try await self?.send(.conversationCommand(reference: reference, id: id, command: body)) }
+            catch { if self?.modeSwitch?.commandID == id { self?.finishSwitch(notice: "切换请求未能发送", tone: .error) } }
+        }
+        switchTimeout?.cancel()
+        switchTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.switchTimeoutSeconds))
+            guard let self, self.modeSwitch?.commandID == id else { return }
+            // Never resend a switch whose outcome is unknown: re-read the worker's mode instead.
+            self.finishSwitch(notice: "切换结果未确认，正在核实当前模式…", tone: .warning)
+            self.subscribe(.control)
+        }
+    }
+
+    private func handleSwitchResponse(success: Bool, data: [String: Any]?, error: String?) {
+        guard let pending = modeSwitch else { return }
+        if success {
+            let mode = data?["mode"] as? String
+            if pending.target == .tui || mode == "tui" {
+                // The windowed source is gone with the RPC process; the control lane confirms and observes.
+                subscribe(.control)
+            } else {
+                nativeMode = .rpc
+                // worker_mode usually arrives first and already moved to the windowed lane.
+                if lane == .control { subscribe(.windowed) }
+            }
+            return
+        }
+        if data?["busy"] as? Bool == true, !pending.force {
+            if pending.automatic {
+                finishSwitch(notice: pending.target == .tui ? "Pi 正在运行任务，已保持 GUI" : "Pi 正在运行任务，已保持终端", tone: .warning)
+                return
+            }
+            var waiting = pending
+            waiting.awaitingConsent = true
+            waiting.commandID = nil
+            modeSwitch = waiting
+            switchTimeout?.cancel()
+            publish()
+            onConsentNeeded(pending.target)
+            return
+        }
+        finishSwitch(notice: "切换失败：\(error ?? "主机拒绝")", tone: .error)
+    }
+
+    private func handleWorkerMode(_ mode: String) {
+        let confirmed: NativeMode = mode == "tui" ? .tui : .rpc
+        guard confirmed != nativeMode || modeSwitch != nil else { return }
+        nativeMode = confirmed
+        if confirmed == .rpc, lane == .control {
+            // Another client (or our own control-lane switch) brought the pane back to RPC.
+            subscribe(.windowed)
+        } else if confirmed == .tui, modeSwitch?.target == .tui {
+            finishSwitch(notice: nil)
+        }
+        publish()
+        onPresentationChange()
+    }
+
+    private func finishSwitch(notice text: String?, tone: CorralViewportHeaderState.Tone = .info) {
+        switchTimeout?.cancel()
+        switchTimeout = nil
+        modeSwitch = nil
+        if let text { showNotice(text, tone: tone) }
+        publish()
+    }
+
+    func showSwitchNotice(_ text: String, tone: CorralViewportHeaderState.Tone) { showNotice(text, tone: tone) }
+
+    private func showNotice(_ text: String, tone: CorralViewportHeaderState.Tone) {
+        let until = Date().addingTimeInterval(6)
+        notice = (text, tone, until)
+        publish()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(6.2))
+            guard let self, let current = self.notice, current.until <= Date() else { return }
+            self.notice = nil
+            self.publish()
+        }
+    }
+
+    /// Records the default open mode for one explicit open; applied as soon as the pane's mode is known.
+    func noteExplicitOpen(preferred: CorralViewportHeaderState.Mode) {
+        preferredOnOpen = preferred
+        applyPreferredModeIfIdle()
+    }
+
+    private func applyPreferredModeIfIdle() {
+        guard let preferred = preferredOnOpen, managed, modeSwitch == nil, nativeMode != .unknown else { return }
+        let current: CorralViewportHeaderState.Mode = nativeMode == .tui ? .tui : .gui
+        if preferred == current { preferredOnOpen = nil; return }
+        if preferred == .tui {
+            // Only a confirmed idle RPC pane is switched; a busy one keeps its mode, visibly.
+            guard transcript != nil, let running = liveState?.running else { return }
+            preferredOnOpen = nil
+            if running { showNotice("Pi 正在运行任务，已保持 GUI", tone: .warning); return }
+        } else {
+            guard lane == .control, phase == .ready else { return }
+            preferredOnOpen = nil
+        }
+        requestSwitch(to: preferred, automatic: true)
+    }
+
+    private static func mentions(_ data: Data, _ needles: [String]) -> Bool {
+        needles.contains { needle in data.range(of: Data(needle.utf8)) != nil }
     }
 
     // MARK: History
@@ -405,12 +698,25 @@ final class ConversationSessionController {
             guard let self else { return }
             self.publishScheduled = false
             self.pane.apply(self.paneState())
+            self.header.apply(self.headerState())
         }
     }
 
     func publishNow() {
         publishScheduled = false
         pane.apply(paneState())
+        header.apply(headerState())
+    }
+
+    func headerState() -> CorralViewportHeaderState {
+        let pane = paneState()
+        let ready = managed && (lane == .control ? phase == .ready : transcript != nil)
+        return CorralViewportHeaderState(
+            title: pane.title, provider: provider, modelLabel: pane.modelLabel, phase: pane.phase, running: pane.running, queued: pane.queued,
+            mode: nativeMode == .tui ? .tui : .gui, pendingMode: modeSwitch.flatMap { $0.awaitingConsent ? nil : $0.target },
+            canSwitch: managed ? ready && modeSwitch?.awaitingConsent != true : nil,
+            switchHint: ready ? nil : "会话尚未就绪",
+            notice: notice?.text, noticeTone: notice?.tone ?? .info)
     }
 
     func paneState() -> CorralConversationPaneState {

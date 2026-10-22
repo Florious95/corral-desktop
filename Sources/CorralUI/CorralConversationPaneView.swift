@@ -128,8 +128,9 @@ enum CorralConversationStyle {
     }
 }
 
-/// The native structured view that replaces a Pi terminal inside a split pane: header, virtualized transcript
-/// and explicit loading, empty, failure and reconnect states. It sends typed intents only.
+/// The native structured view that replaces a Pi terminal inside a split pane: a virtualized transcript with
+/// explicit loading, empty, failure and reconnect states. It sends typed intents only. The pane's header is
+/// viewport chrome (`CorralViewportHeaderView`), shared with the terminal presentation of the same session.
 @MainActor
 public final class CorralConversationPaneView: NSView {
     public var onFocus: (() -> Void)?
@@ -138,10 +139,6 @@ public final class CorralConversationPaneView: NSView {
     public var onRetry: (() -> Void)?
 
     public private(set) var state = CorralConversationPaneState(title: "")
-    /// Right-edge space kept clear for the split pane's own close button.
-    public var trailingChromeInset: CGFloat = 0 { didSet { if oldValue != trailingChromeInset { needsLayout = true } } }
-
-    public let header = CorralConversationHeaderView()
     public let transcript = CorralConversationTranscriptView()
     private let overlay = CorralConversationStateOverlay()
 
@@ -157,7 +154,6 @@ public final class CorralConversationPaneView: NSView {
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("corral.conversation.pane")
         addSubview(transcript)
-        addSubview(header)
         addSubview(overlay)
         transcript.onLoadOlder = { [weak self] in self?.onLoadOlder?() }
         transcript.onNeedBodies = { [weak self] ids in self?.onNeedBodies?(ids) }
@@ -169,13 +165,7 @@ public final class CorralConversationPaneView: NSView {
     public required init?(coder: NSCoder) { fatalError("CorralConversationPaneView is created programmatically") }
 
     public func apply(_ state: CorralConversationPaneState) {
-        let previous = self.state
         self.state = state
-        if previous.title != state.title || previous.provider != state.provider || previous.modelLabel != state.modelLabel
-            || previous.running != state.running || previous.queued != state.queued || previous.phase != state.phase {
-            header.apply(title: state.title, provider: state.provider, model: state.modelLabel, running: state.running,
-                         queued: state.queued, phase: state.phase)
-        }
         overlay.apply(phase: state.phase, isEmpty: state.rows.isEmpty)
         transcript.apply(rows: state.rows, older: state.rows.isEmpty ? .complete : state.older)
         setAccessibilityLabel("\(state.title) 结构化会话")
@@ -186,34 +176,77 @@ public final class CorralConversationPaneView: NSView {
 
     public func refreshTheme() {
         layer?.backgroundColor = CorralConversationStyle.paneBackground.cgColor
-        header.refreshTheme()
         overlay.refreshTheme()
         transcript.refreshTheme()
     }
 
     public override func layout() {
         super.layout()
-        let headerHeight = CorralConversationHeaderView.height
-        header.trailingInset = trailingChromeInset
-        header.frame = CGRect(x: 0, y: 0, width: bounds.width, height: headerHeight)
-        transcript.frame = CGRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, bounds.height - headerHeight))
-        overlay.frame = transcript.frame
+        transcript.frame = bounds
+        overlay.frame = bounds
     }
 
     public override func mouseDown(with event: NSEvent) { onFocus?() }
 }
 
-/// 40pt pane header: provider, native session title, model and authoritative run state.
+/// What a managed agent viewport shows in its header. Native facts and the viewport's switch intent are
+/// separate fields: the selected segment moves only when the native mode is confirmed.
+public struct CorralViewportHeaderState: Equatable, Sendable {
+    public enum Mode: String, Sendable { case gui, tui }
+    public enum Tone: Equatable, Sendable { case info, warning, error }
+
+    public var title: String
+    public var provider: String?
+    public var modelLabel: String?
+    public var phase: CorralConversationPaneState.Phase
+    public var running: Bool?
+    public var queued: Int
+    /// Confirmed native presentation of this pane.
+    public var mode: Mode
+    /// A mode change written to Core but not yet confirmed.
+    public var pendingMode: Mode?
+    /// nil hides the switcher (unsupported); false disables it with `switchHint` as the reason.
+    public var canSwitch: Bool?
+    public var switchHint: String?
+    public var notice: String?
+    public var noticeTone: Tone
+
+    public init(title: String, provider: String? = nil, modelLabel: String? = nil, phase: CorralConversationPaneState.Phase = .connecting,
+                running: Bool? = nil, queued: Int = 0, mode: Mode = .gui, pendingMode: Mode? = nil, canSwitch: Bool? = nil,
+                switchHint: String? = nil, notice: String? = nil, noticeTone: Tone = .info) {
+        self.title = title
+        self.provider = provider
+        self.modelLabel = modelLabel
+        self.phase = phase
+        self.running = running
+        self.queued = queued
+        self.mode = mode
+        self.pendingMode = pendingMode
+        self.canSwitch = canSwitch
+        self.switchHint = switchHint
+        self.notice = notice
+        self.noticeTone = noticeTone
+    }
+}
+
+/// 40pt viewport header for managed agent panes in either presentation: provider, native session title,
+/// model, authoritative run state or a switch notice, and the GUI/terminal segmented switcher.
 @MainActor
-public final class CorralConversationHeaderView: NSView {
+public final class CorralViewportHeaderView: NSView {
     public static let height: CGFloat = 40
-    var trailingInset: CGFloat = 0 { didSet { if oldValue != trailingInset { needsLayout = true } } }
+    public var onSelectMode: ((CorralViewportHeaderState.Mode) -> Void)?
+    public var trailingInset: CGFloat = 0 { didSet { if oldValue != trailingInset { needsLayout = true } } }
+    public private(set) var state = CorralViewportHeaderState(title: "")
     private var iconView: CorralProviderIconView?
     private var provider: String?
     public let titleLabel = NSTextField(labelWithString: "")
     private let modelChip = CorralChipLabel()
     private let statusDot = CorralStatusIndicatorView()
     public let statusLabel = NSTextField(labelWithString: "")
+    public let modeControl = CorralSegmentedControl(segments: [
+        .init(id: CorralViewportHeaderState.Mode.gui.rawValue, title: "GUI", icon: .message),
+        .init(id: CorralViewportHeaderState.Mode.tui.rawValue, title: "终端", icon: .terminal)
+    ], size: .compact, identifier: "corral.viewport.mode")
     private let separator = NSView()
 
     public override var isFlipped: Bool { true }
@@ -221,20 +254,28 @@ public final class CorralConversationHeaderView: NSView {
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.toolbar)
         setAccessibilityIdentifier("corral.conversation.header")
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setAccessibilityIdentifier("corral.conversation.title")
         statusLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
         statusLabel.alignment = .right
+        statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setAccessibilityIdentifier("corral.conversation.status")
         statusDot.fillsIdle = true
         separator.wantsLayer = true
-        for view in [titleLabel, modelChip, statusDot, statusLabel, separator] { addSubview(view) }
+        modeControl.onSelect = { [weak self] id in
+            guard let mode = CorralViewportHeaderState.Mode(rawValue: id) else { return }
+            self?.onFocus?()
+            self?.onSelectMode?(mode)
+        }
+        for view in [titleLabel, modelChip, statusDot, statusLabel, modeControl, separator] { addSubview(view) }
         refreshTheme()
     }
 
-    public required init?(coder: NSCoder) { fatalError("CorralConversationHeaderView is created programmatically") }
+    public required init?(coder: NSCoder) { fatalError("CorralViewportHeaderView is created programmatically") }
 
     /// Labels are decoration; a click anywhere except a real control focuses the pane.
     public override func hitTest(_ point: NSPoint) -> NSView? {
@@ -243,51 +284,82 @@ public final class CorralConversationHeaderView: NSView {
         return self
     }
     public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    public override func mouseDown(with event: NSEvent) { notifyConversationPaneInteraction() }
+    public var onFocus: (() -> Void)?
+    public override func mouseDown(with event: NSEvent) { onFocus?() }
 
-    func apply(title: String, provider: String?, model: String?, running: Bool?, queued: Int, phase: CorralConversationPaneState.Phase) {
-        titleLabel.stringValue = title
-        titleLabel.toolTip = title
-        if provider != self.provider {
-            self.provider = provider
+    public func apply(_ state: CorralViewportHeaderState) {
+        guard state != self.state || iconView == nil && state.provider != nil else { return }
+        self.state = state
+        titleLabel.stringValue = state.title
+        titleLabel.toolTip = state.title
+        if state.provider != provider {
+            provider = state.provider
             iconView?.removeFromSuperview()
-            iconView = provider.map { CorralProviderIconView(provider: $0, size: 16, active: true) }
+            iconView = state.provider.map { CorralProviderIconView(provider: $0, size: 16, active: true) }
             if let iconView { iconView.translatesAutoresizingMaskIntoConstraints = true; addSubview(iconView) }
         }
-        modelChip.text = model ?? ""
-        modelChip.isHidden = model?.isEmpty ?? true
-        modelChip.toolTip = model
-        switch phase {
-        case .connecting:
-            statusDot.status = .unknown; statusLabel.stringValue = "连接中…"
-        case .reconnecting:
-            statusDot.status = .unknown; statusLabel.stringValue = "正在重新连接…"
-        case .unavailable:
-            statusDot.status = .offline; statusLabel.stringValue = "不可用"
-        case .loadingHistory, .ready, .historyFailed:
-            switch running {
-            case .some(true):
-                statusDot.status = .working
-                statusLabel.stringValue = queued > 0 ? "运行中 · 排队 \(queued)" : "运行中"
-            case .some(false):
-                statusDot.status = .idle
-                statusLabel.stringValue = queued > 0 ? "空闲 · 排队 \(queued)" : "空闲"
-            case .none:
-                statusDot.status = .unknown; statusLabel.stringValue = "状态未知"
-            }
-        }
-        statusLabel.setAccessibilityLabel("会话状态：\(statusLabel.stringValue)")
+        modelChip.text = state.mode == .gui ? (state.modelLabel ?? "") : ""
+        modelChip.toolTip = state.modelLabel
+        applyStatus()
+        modeControl.isHidden = state.canSwitch == nil
+        modeControl.selectedID = state.mode.rawValue
+        modeControl.pendingID = state.pendingMode?.rawValue
+        modeControl.isEnabled = state.canSwitch == true
+        modeControl.toolTip = state.switchHint ?? (state.mode == .gui ? "切换到 Pi 终端界面" : "切换到原生 GUI")
+        modeControl.setAccessibilityLabel("显示模式")
         needsLayout = true
     }
 
-    func refreshTheme() {
+    private func applyStatus() {
+        statusDot.isHidden = false
+        if let notice = state.notice {
+            statusDot.status = state.noticeTone == .info ? .unknown : .blocked
+            statusLabel.stringValue = notice
+            statusLabel.textColor = state.noticeTone == .error ? CorralAestheticTokens.danger : state.noticeTone == .warning ? CorralAestheticTokens.warnText : CorralAestheticTokens.textMuted
+        } else {
+            statusLabel.textColor = CorralAestheticTokens.textMuted
+            if let pending = state.pendingMode {
+                statusDot.status = .unknown
+                statusLabel.stringValue = pending == .tui ? "正在切换到终端…" : "正在切换到 GUI…"
+            } else if state.mode == .tui {
+                // The terminal itself shows Pi's state; the switcher already says which presentation this is.
+                statusDot.isHidden = true
+                statusLabel.stringValue = ""
+            } else {
+                switch state.phase {
+                case .connecting:
+                    statusDot.status = .unknown; statusLabel.stringValue = "连接中…"
+                case .reconnecting:
+                    statusDot.status = .unknown; statusLabel.stringValue = "正在重新连接…"
+                case .unavailable:
+                    statusDot.status = .offline; statusLabel.stringValue = "不可用"
+                case .loadingHistory, .ready, .historyFailed:
+                    switch state.running {
+                    case .some(true):
+                        statusDot.status = .working
+                        statusLabel.stringValue = state.queued > 0 ? "运行中 · 排队 \(state.queued)" : "运行中"
+                    case .some(false):
+                        statusDot.status = .idle
+                        statusLabel.stringValue = state.queued > 0 ? "空闲 · 排队 \(state.queued)" : "空闲"
+                    case .none:
+                        statusDot.status = .unknown; statusLabel.stringValue = "状态未知"
+                    }
+                }
+            }
+        }
+        statusLabel.toolTip = statusLabel.stringValue
+        statusLabel.setAccessibilityLabel("会话状态：\(statusLabel.stringValue)")
+    }
+
+    public func refreshTheme() {
         layer?.backgroundColor = CorralConversationStyle.paneBackground.cgColor
         separator.layer?.backgroundColor = CorralAestheticTokens.borderSubtle.cgColor
         titleLabel.textColor = CorralAestheticTokens.text
-        statusLabel.textColor = CorralAestheticTokens.textMuted
         modelChip.refreshTheme()
         statusDot.refreshTheme()
         iconView?.refreshTheme()
+        modeControl.refreshTheme()
+        applyStatus()
     }
 
     public override func layout() {
@@ -298,13 +370,20 @@ public final class CorralConversationHeaderView: NSView {
             iconView.frame = CGRect(x: x, y: midY - 8, width: 16, height: 16)
             x += 24
         }
-        let right = bounds.width - 14 - trailingInset
-        let statusWidth = min(170, TranscriptRowView.width(of: statusLabel))
+        var right = bounds.width - 12 - trailingInset
+        if !modeControl.isHidden {
+            let size = modeControl.intrinsicContentSize
+            modeControl.frame = CGRect(x: right - size.width, y: midY - size.height / 2, width: size.width, height: size.height)
+            right = modeControl.frame.minX - 14
+        }
+        let available = max(0, right - x)
+        let statusWidth = min(max(60, available * 0.42), TranscriptRowView.width(of: statusLabel))
         statusLabel.frame = CGRect(x: right - statusWidth, y: midY - 8, width: statusWidth, height: 16)
         statusDot.frame = CGRect(x: statusLabel.frame.minX - 13, y: midY - 4, width: 8, height: 8)
-        let available = max(0, statusDot.frame.minX - 14 - x)
-        let chipWidth = modelChip.text.isEmpty ? 0 : min(modelChip.intrinsicContentSize.width, max(0, available * 0.5))
-        let titleWidth = min(TranscriptRowView.width(of: titleLabel), max(0, available - (chipWidth > 0 ? chipWidth + 8 : 0)))
+        let leftLimit = (statusDot.isHidden ? statusLabel.frame.minX : statusDot.frame.minX) - 14
+        let room = max(0, leftLimit - x)
+        let chipWidth = modelChip.text.isEmpty ? 0 : min(modelChip.intrinsicContentSize.width, max(0, room * 0.5))
+        let titleWidth = min(TranscriptRowView.width(of: titleLabel), max(0, room - (chipWidth > 0 ? chipWidth + 8 : 0)))
         titleLabel.frame = CGRect(x: x, y: midY - 9, width: titleWidth, height: 18)
         modelChip.frame = CGRect(x: titleLabel.frame.maxX + 8, y: midY - 10, width: chipWidth, height: 20)
         modelChip.isHidden = modelChip.text.isEmpty || chipWidth < 36

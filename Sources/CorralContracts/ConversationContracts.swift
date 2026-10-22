@@ -260,3 +260,19 @@ public struct ConversationHistoryFailure: Error, Equatable, Sendable {
     /// The view itself is gone; only a fresh subscription can recover it.
     public var retiresView: Bool { ["stale_view", "source_unavailable", "cursor_expired"].contains(code) }
 }
+
+/// `conversation_created`: the managed structured agent's pane ref, or a visible reason.
+public struct ConversationCreatedResult: Equatable, Sendable {
+    public let requestID: UInt32
+    public let ok: Bool
+    public let reference: SessionReference?
+    public let name: String?
+    public let reason: String?
+    public init(requestID: UInt32, ok: Bool, reference: SessionReference? = nil, name: String? = nil, reason: String? = nil) {
+        self.requestID = requestID
+        self.ok = ok
+        self.reference = reference
+        self.name = name
+        self.reason = reason
+    }
+}

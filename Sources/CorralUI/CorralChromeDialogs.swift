@@ -2,6 +2,7 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CorralContracts
+import CorralServices
 import Darwin
 import UniformTypeIdentifiers
 import Vision
@@ -45,8 +46,9 @@ public struct CorralSettingsValues: Equatable, Sendable {
     public var fontFamily: String
     public var fontSize: Double
     public var directoryTracking: Bool
-    public init(theme: CorralThemeMode = .system, fontFamily: String = "Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, monospace", fontSize: Double = 13, directoryTracking: Bool = false) {
-        self.theme = theme; self.fontFamily = fontFamily; self.fontSize = min(24, max(10, fontSize)); self.directoryTracking = directoryTracking
+    public var piOpenMode: PiOpenMode
+    public init(theme: CorralThemeMode = .system, fontFamily: String = "Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, monospace", fontSize: Double = 13, directoryTracking: Bool = false, piOpenMode: PiOpenMode = .gui) {
+        self.theme = theme; self.fontFamily = fontFamily; self.fontSize = min(24, max(10, fontSize)); self.directoryTracking = directoryTracking; self.piOpenMode = piOpenMode
     }
 }
 
@@ -559,8 +561,14 @@ public final class SettingsDialogViewController: CorralDialogViewController {
     public let fontSizeDecrementButton = NSButton(title: "−", target: nil, action: nil)
     public let fontSizeIncrementButton = NSButton(title: "+", target: nil, action: nil)
     public let directoryTrackingSwitch = NSSwitch()
+    public let piOpenModeControl = CorralSegmentedControl(segments: [
+        .init(id: PiOpenMode.gui.rawValue, title: "原生 GUI", icon: .message), .init(id: PiOpenMode.tui.rawValue, title: "终端 TUI", icon: .terminal)
+    ], size: .compact, identifier: "corral.settings.pi-open-mode")
     public private(set) var fontPreviewLabel: NSTextField?
     private let previewSizeCaption = NSTextField(labelWithString: "")
+    private let bodyScroll = NSScrollView()
+    private var bodyHeightConstraint: NSLayoutConstraint?
+    private var naturalBodyHeight: CGFloat = 0
     public static let width: CGFloat = 560
 
     public init(values: CorralSettingsValues = CorralSettingsValues(), onChange: ((CorralSettingsValues) -> Void)? = nil, onClose: (() -> Void)? = nil) {
@@ -641,10 +649,39 @@ public final class SettingsDialogViewController: CorralDialogViewController {
         let trackingTitle = label("目录跟踪", size: 13, weight: .semibold, color: CorralAestheticTokens.text)
         let trackingHint = label("切换 Agent 时，自动定位并展开左侧目录。", size: 11, color: CorralAestheticTokens.textSecondary)
         directoryTrackingSwitch.target = self; directoryTrackingSwitch.action = #selector(trackingChanged); directoryTrackingSwitch.setAccessibilityIdentifier("corral.settings.tracking")
-        let trackingCard = card([horizontal([vertical([trackingTitle, trackingHint], spacing: 4), spacer(), directoryTrackingSwitch])])
+        let piModeTitle = label("Pi 默认打开模式", size: 13, weight: .semibold, color: CorralAestheticTokens.text)
+        let piModeHint = label("新建或打开空闲的受管理 Pi 时使用", size: 11, color: CorralAestheticTokens.textSecondary)
+        piModeHint.lineBreakMode = .byTruncatingTail
+        piModeHint.toolTip = "新建 Pi，或在 Pi 空闲时打开它的视口，会使用这里的模式；运行中的会话保持当前模式，保存设置不会切换已打开的会话。"
+        piModeHint.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        piOpenModeControl.onSelect = { [weak self] id in self?.setPiOpenMode(PiOpenMode(rawValue: id) ?? .gui) }
+        piOpenModeControl.setContentHuggingPriority(.required, for: .horizontal)
+        piOpenModeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let workspaceDivider = NSView(); workspaceDivider.wantsLayer = true; workspaceDivider.layer?.backgroundColor = CorralAestheticTokens.border.cgColor
+        workspaceDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        let trackingCard = card([horizontal([vertical([trackingTitle, trackingHint], spacing: 4), spacer(), directoryTrackingSwitch]), workspaceDivider,
+                                 horizontal([vertical([piModeTitle, piModeHint], spacing: 4), spacer(), piOpenModeControl], spacing: 16)], spacing: [12, 12])
 
         let body = vertical([section("界面外观", themeCard), section("终端外观", typographyCard), section("工作区行为", trackingCard)], spacing: 12)
-        let top = vertical([header, body], spacing: 14, insets: NSEdgeInsets(top: 18, left: 24, bottom: 14, right: 24))
+        // The cards scroll inside the dialog when the window is shorter than the settings, so the footer stays reachable.
+        let bodyDocument = SettingsBodyDocumentView()
+        body.translatesAutoresizingMaskIntoConstraints = false
+        bodyDocument.addSubview(body)
+        bodyScroll.drawsBackground = false; bodyScroll.hasVerticalScroller = true; bodyScroll.autohidesScrollers = true
+        bodyScroll.scrollerStyle = .overlay; bodyScroll.borderType = .noBorder; bodyScroll.documentView = bodyDocument
+        bodyScroll.translatesAutoresizingMaskIntoConstraints = false
+        bodyDocument.translatesAutoresizingMaskIntoConstraints = false
+        let bodyWidth = Self.width - 48
+        NSLayoutConstraint.activate([
+            body.leadingAnchor.constraint(equalTo: bodyDocument.leadingAnchor), body.trailingAnchor.constraint(equalTo: bodyDocument.trailingAnchor),
+            body.topAnchor.constraint(equalTo: bodyDocument.topAnchor), body.bottomAnchor.constraint(equalTo: bodyDocument.bottomAnchor),
+            body.widthAnchor.constraint(equalToConstant: bodyWidth), bodyScroll.widthAnchor.constraint(equalToConstant: bodyWidth),
+            bodyDocument.widthAnchor.constraint(equalTo: bodyScroll.contentView.widthAnchor)
+        ])
+        naturalBodyHeight = ceil(body.fittingSize.height)
+        bodyHeightConstraint = bodyScroll.heightAnchor.constraint(equalToConstant: naturalBodyHeight)
+        bodyHeightConstraint?.isActive = true
+        let top = vertical([header, bodyScroll], spacing: 14, insets: NSEdgeInsets(top: 18, left: 24, bottom: 14, right: 24))
 
         let savedIcon = NSImageView(image: CorralLegacyIcon.image(.check, size: 12) ?? NSImage()); savedIcon.contentTintColor = CorralAestheticTokens.success
         let saved = horizontal([savedIcon, label("修改即时保存", size: 11, color: CorralAestheticTokens.textSecondary)], spacing: 6)
@@ -659,15 +696,39 @@ public final class SettingsDialogViewController: CorralDialogViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content)
         NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: root.leadingAnchor), content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: root.topAnchor), content.widthAnchor.constraint(equalToConstant: Self.width)])
-        root.setFrameSize(NSSize(width: Self.width, height: ceil(content.fittingSize.height)))
+        var height = ceil(content.fittingSize.height)
+        // Fit the 1100×700 minimum window by default; `present(over:)` grows the cards area in taller windows.
+        if height > Self.defaultMaximumHeight, let constraint = bodyHeightConstraint {
+            constraint.constant = max(160, constraint.constant - (height - Self.defaultMaximumHeight))
+            height = Self.defaultMaximumHeight
+        }
+        root.setFrameSize(NSSize(width: Self.width, height: height))
         view = root
         syncControls()
+    }
+
+    static let defaultMaximumHeight: CGFloat = 684
+
+    /// Fits the dialog to the window: only the cards area shrinks (and scrolls); header and footer stay whole.
+    public override func present(over window: NSWindow? = NSApp.keyWindow) {
+        loadViewIfNeeded()
+        if let available = window?.contentView?.bounds.height, let constraint = bodyHeightConstraint {
+            let chrome = view.frame.height - constraint.constant
+            let fitted = max(160, min(naturalBodyHeight, available - 32 - chrome))
+            if fitted != constraint.constant {
+                constraint.constant = fitted
+                view.setFrameSize(NSSize(width: view.frame.width, height: chrome + fitted))
+            }
+        }
+        super.present(over: window)
     }
 
     public func setTheme(_ theme: CorralThemeMode) { values.theme = theme; syncControls(); apply() }
     public func setFontFamily(_ family: String) { values.fontFamily = family; syncControls(); apply() }
     public func setFontSize(_ size: Double) { values.fontSize = min(24, max(10, size.rounded())); syncControls(); apply() }
     public func setDirectoryTracking(_ enabled: Bool) { values.directoryTracking = enabled; syncControls(); apply() }
+    /// Saving only changes what new and idle-opened Pi sessions use; running sessions are never switched in bulk.
+    public func setPiOpenMode(_ mode: PiOpenMode) { values.piOpenMode = mode; syncControls(); apply() }
 
     public static func primaryFamily(_ stack: String) -> String {
         (stack.split(separator: ",", maxSplits: 1).first.map(String.init) ?? stack).trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
@@ -711,6 +772,7 @@ public final class SettingsDialogViewController: CorralDialogViewController {
         fontSizeDecrementButton.isEnabled = values.fontSize > 10; fontSizeIncrementButton.isEnabled = values.fontSize < 24
         previewSizeCaption.stringValue = "\(Int(values.fontSize)) px"
         directoryTrackingSwitch.state = values.directoryTracking ? .on : .off
+        piOpenModeControl.selectedID = values.piOpenMode.rawValue
         let previewFont = NSFont(name: Self.primaryFamily(values.fontFamily), size: CGFloat(values.fontSize)) ?? .monospacedSystemFont(ofSize: values.fontSize, weight: .regular)
         let sample = NSMutableAttributedString(string: "❯ ", attributes: [.foregroundColor: CorralAestheticTokens.success, .font: previewFont])
         sample.append(NSAttributedString(string: "Aa Bb 012345 · 清晰可见", attributes: [.foregroundColor: CorralAestheticTokens.previewForeground, .font: previewFont]))
@@ -1222,4 +1284,46 @@ public final class CloseAgentDialogViewController: CorralDialogViewController {
     @objc private func cancelAction() { guard !isLoading else { return }; onCancel?(); dismiss() }
     public func confirmAction() { guard !isLoading else { return }; onConfirm?(); dismiss() }
     @objc private func confirm() { confirmAction() }
+}
+
+/// Generic `.chr-dialog` confirmation for agent operations that need explicit consent (busy work, new or
+/// cloned sessions). Cancel and Escape write nothing; only the confirm button runs `onConfirm`, once.
+public final class CorralConfirmDialogViewController: CorralDialogViewController {
+    public enum Kind: Sendable { case primary, danger }
+    public required init?(coder: NSCoder) { nil }
+    public let titleText: String
+    public let subject: String?
+    public let message: String
+    public let confirmTitle: String
+    public let kind: Kind
+    public var onConfirm: (() -> Void)?
+    public var onCancel: (() -> Void)?
+    private var finished = false
+
+    public init(title: String, subject: String? = nil, message: String, confirmTitle: String, kind: Kind = .primary) {
+        self.titleText = title; self.subject = subject; self.message = message; self.confirmTitle = confirmTitle; self.kind = kind
+        super.init()
+    }
+
+    public override func loadView() {
+        let cancel = CorralDialogButton(title: "取消", kind: .plain, target: self, action: #selector(cancelAction))
+        cancel.setAccessibilityIdentifier("corral.confirm.cancel"); cancel.identifier = NSUserInterfaceItemIdentifier("corral.confirm.cancel")
+        let confirm = CorralDialogButton(title: confirmTitle, kind: kind == .danger ? .danger : .primary, target: self, action: #selector(confirmAction))
+        confirm.setAccessibilityIdentifier("corral.confirm.ok"); confirm.identifier = NSUserInterfaceItemIdentifier("corral.confirm.ok")
+        var rows: [(view: NSView, marginBottom: CGFloat)] = [(chrLabel(titleText, size: 15, weight: .bold, color: CorralAestheticTokens.text), 2)]
+        if let subject { rows.append((chrLabel(subject, size: 12, color: CorralAestheticTokens.textMuted), 14)) }
+        rows.append((chrLabel(message, size: 12, color: CorralAestheticTokens.textSecondary, lineHeight: 1.45), 18))
+        rows.append((actionsRow([cancel, confirm]), 0))
+        view = cardLayout(rows)
+        view.setAccessibilityIdentifier("corral.confirm.dialog")
+    }
+
+    public override func handleEscape() { cancelAction() }
+    @objc private func cancelAction() { guard !finished else { return }; finished = true; onCancel?(); dismiss() }
+    @objc private func confirmAction() { guard !finished else { return }; finished = true; onConfirm?(); dismiss() }
+}
+
+@MainActor
+private final class SettingsBodyDocumentView: NSView {
+    override var isFlipped: Bool { true }
 }

@@ -251,8 +251,23 @@ final class CorralAcceptanceDriver {
             if let family = command["font"] as? String { preferences.fontFamily = family }
             if let size = command["size"] as? Int { preferences.fontSize = size }
             if let theme = command["theme"] as? String { preferences.theme = ThemePreference(rawValue: theme) ?? preferences.theme }
+            if let mode = command["piOpenMode"] as? String { preferences.piOpenMode = PiOpenMode(rawValue: mode) ?? preferences.piOpenMode }
             try await coordinator.updateUserPreferences(preferences)
         case "new-agent-dialog": coordinator.showNewAgentDialog()
+        case "settings": workspace.onSettings?()
+        case "click-ax":
+            // Clicks the first visible view with this accessibility identifier (dialogs are searched first).
+            guard let identifier = command["identifier"] as? String, let content = window.contentView else { throw Failure.invalidCommand }
+            let candidates = descendants(content).reversed().filter { $0.accessibilityIdentifier() == identifier && !$0.isHiddenOrHasHiddenAncestor }
+            guard let target = candidates.first else { throw Failure.missingView }
+            if let button = target as? NSButton { button.performClick(nil) } else { try click(target) }
+        case "create-agent":
+            // The coordinator path the New Agent dialog submits, anchored at the given session's workspace.
+            guard let provider = command["provider"] as? String, let name = command["name"] as? String,
+                  let anchor = command["anchor"] as? String,
+                  let descriptor = coordinator.sessionDescriptor(referenceID: anchor) else { throw Failure.invalidCommand }
+            _ = try await coordinator.createAgent(workspace: descriptor.workingDirectory, anchorReference: descriptor.key.reference,
+                                                  provider: provider, name: name, bypass: false)
         case "close-agent-dialog":
             // The sidebar row's real "关闭 agent-cli" menu item, as a right-click would offer it.
             guard let session = command["session"] as? String,
@@ -290,6 +305,13 @@ final class CorralAcceptanceDriver {
                 throw HitTestMismatch(description: String(describing: window.contentView?.hitTest(window.contentView!.convert(point, from: nil))))
             }
             try click(target)
+        case "conversation-mode":
+            // Presses the viewport header's GUI/terminal segment through the window, like a pointer click.
+            guard let ref = command["ref"] as? String, let mode = command["mode"] as? String,
+                  let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }),
+                  let button = controller.header.modeControl.buttons.first(where: { $0.identifier?.rawValue == mode }),
+                  !button.isHiddenOrHasHiddenAncestor else { throw Failure.missingView }
+            try click(button)
         case "quit":
             await coordinator.stop()
             NSApp.terminate(nil)
@@ -358,6 +380,16 @@ final class CorralAcceptanceDriver {
             let clip = pane.transcript.scrollView.contentView.bounds
             return [
                 "ref": controller.key.reference.rawValue, "presented": controller.presentsConversation, "hidden": pane.isHiddenOrHasHiddenAncestor,
+                "header": [
+                    "visible": !controller.header.isHiddenOrHasHiddenAncestor && controller.header.superview != nil,
+                    "frame": rect(controller.header.convert(controller.header.bounds, to: nil)),
+                    "mode": controller.header.state.mode.rawValue, "pendingMode": controller.header.state.pendingMode?.rawValue ?? NSNull(),
+                    "canSwitch": controller.header.state.canSwitch.map { $0 as Any } ?? NSNull(),
+                    "switcherVisible": !controller.header.modeControl.isHidden,
+                    "status": controller.header.statusLabel.stringValue, "notice": controller.header.state.notice ?? NSNull()
+                ] as [String: Any],
+                "lane": controller.lane == .windowed ? "windowed" : "control", "nativeMode": String(describing: controller.nativeMode),
+                "managed": controller.managed, "unavailable": controller.unavailable,
                 "phase": String(describing: controller.phase), "viewID": controller.transcript?.viewID ?? "",
                 "liveSeq": controller.transcript?.liveSeq ?? 0, "snapshotSeq": controller.ready?.snapshotSeq ?? 0,
                 "title": state.title, "model": state.modelLabel ?? "", "running": state.running.map { $0 as Any } ?? NSNull(),

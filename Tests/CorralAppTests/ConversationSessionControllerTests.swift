@@ -42,6 +42,35 @@ final class ConversationSessionControllerTests: XCTestCase {
     }
 
     private var subscribes: Int { sent.filter { if case .conversationSubscribe = $0 { true } else { false } }.count }
+    private var controlSubscribes: Int { sent.filter { if case .conversationSubscribeControl = $0 { true } else { false } }.count }
+
+    private func switchCommands() -> [[String: Any]] {
+        sent.compactMap { command in
+            guard case let .conversationCommand(_, id, body) = command,
+                  var object = try? JSONSerialization.jsonObject(with: body) as? [String: Any], object["type"] as? String == "switch_mode" else { return nil }
+            object["id"] = id
+            return object
+        }
+    }
+
+    private func event(_ object: [String: Any], view: String? = nil) -> ConversationEvent {
+        ConversationEvent(reference: ref, viewID: view, sourceEpoch: nil, event: try! JSONSerialization.data(withJSONObject: object))
+    }
+
+    /// A ready windowed controller whose initial page has been adopted.
+    private func readyController() async throws -> ConversationSessionController {
+        let controller = makeController()
+        controller.start()
+        controller.handleReady(ready(view: "v1"))
+        await settle()
+        let initial = pending.removeFirst()
+        initial.continuation.resume(returning: try page(for: initial.request, items: [row("a", "a")]))
+        await settle()
+        controller.handleUpdate(ConversationUpdate(reference: ref, viewID: "v1", sourceEpoch: "e", baseSeq: 4, commitSeq: 5, upserts: [], removes: [],
+                                                   state: ConversationLiveState(running: false, queued: 0, mode: "rpc")))
+        await settle()
+        return controller
+    }
 
     func testInitialPageIsAdoptedBeforeBufferedLiveCommitsWhichAreAcknowledgedOnce() async throws {
         let controller = makeController()
@@ -125,14 +154,124 @@ final class ConversationSessionControllerTests: XCTestCase {
         XCTAssertEqual(controller.paneState().rows.map(\.id), ["new"])
     }
 
-    func testClosedUnavailableFallsBackToTheTerminalAndToolBodiesParseOnlyWhenComplete() {
+    func testClosedUnavailableFallsBackToTheTerminalAndToolBodiesParseOnlyWhenComplete() async {
         let controller = makeController()
         XCTAssertTrue(controller.presentsConversation, "a managed pane shows the structured view while it connects")
         controller.handleClosed(.unavailable)
+        await settle()
+        XCTAssertEqual(controlSubscribes, 1, "a closed windowed view first asks the worker itself (a TUI has no window)")
+        controller.handleClosed(.unavailable)
         XCTAssertFalse(controller.presentsConversation)
+        XCTAssertFalse(controller.presentsHeader, "an unmanaged pane is a plain terminal: no switcher")
         XCTAssertNil(ConversationSessionController.toolBody(#"{"arguments":{"path":"a"},"output":"partial"#))
         let parsed = ConversationSessionController.toolBody(#"{"arguments":{"path":"a"},"output":"done"}"#)
         XCTAssertEqual(parsed?.arguments, #"{"path":"a"}"#)
         XCTAssertEqual(parsed?.output, "done")
+    }
+
+    // MARK: Mode switching (b40 facts: a switch to the TUI retires the windowed view and loses its response;
+    // the worker's control-lane ready reports rpc until worker_mode announces the confirmed replacement).
+
+    func testSwitchToTerminalIsConfirmedByTheWorkerNotByTheLocalClick() async throws {
+        let controller = try await readyController()
+        controller.requestSwitch(to: .tui)
+        await settle()
+        let command = try XCTUnwrap(switchCommands().first)
+        XCTAssertEqual(command["mode"] as? String, "tui")
+        XCTAssertEqual(command["force"] as? Bool, false)
+        XCTAssertEqual(controller.headerState().pendingMode, .tui)
+        XCTAssertEqual(controller.headerState().mode, .gui, "the selected segment waits for the native mode")
+        controller.handleResync(viewID: "v1", reason: "source_changed")
+        await settle()
+        XCTAssertEqual(controlSubscribes, 1)
+        controller.handleControlReady(mode: "rpc", running: false)
+        await settle()
+        XCTAssertTrue(controller.presentsConversation, "mid-switch the GUI stays until the worker confirms")
+        XCTAssertEqual(subscribes, 1, "no premature windowed resubscribe while the replacement Pi starts")
+        controller.handleEvent(event(["type": "worker_mode", "mode": "tui"]))
+        await settle()
+        XCTAssertFalse(controller.presentsConversation)
+        XCTAssertTrue(controller.presentsHeader)
+        XCTAssertEqual(controller.headerState().mode, .tui)
+        XCTAssertNil(controller.headerState().pendingMode)
+        XCTAssertEqual(switchCommands().count, 1, "a switch is written exactly once")
+    }
+
+    func testABusyRefusalAsksForConsentAndCancelWritesNothing() async throws {
+        let controller = try await readyController()
+        var consent: [CorralViewportHeaderState.Mode] = []
+        controller.onConsentNeeded = { consent.append($0) }
+        controller.requestSwitch(to: .tui)
+        controller.handleResync(viewID: "v1", reason: "source_changed")
+        controller.handleControlReady(mode: "rpc", running: true)
+        await settle()
+        XCTAssertEqual(consent, [.tui])
+        XCTAssertEqual(controller.headerState().canSwitch, false)
+        controller.cancelSwitch()
+        await settle()
+        XCTAssertEqual(switchCommands().count, 1, "cancelling consent sends no second switch")
+        XCTAssertEqual(subscribes, 2, "the still-running RPC Pi gets its live view back")
+        XCTAssertNil(controller.modeSwitch)
+    }
+
+    func testConfirmedConsentForcesOnTheAttachedLane() async throws {
+        let controller = try await readyController()
+        controller.requestSwitch(to: .tui)
+        controller.handleResync(viewID: "v1", reason: "source_changed")
+        controller.handleControlReady(mode: "rpc", running: true)
+        controller.confirmSwitch()
+        await settle()
+        let commands = switchCommands()
+        XCTAssertEqual(commands.count, 2)
+        XCTAssertEqual(commands.last?["force"] as? Bool, true)
+        controller.handleEvent(event(["type": "worker_mode", "mode": "tui"]))
+        XCTAssertEqual(controller.nativeMode, .tui)
+    }
+
+    func testTerminalToGUIUsesTheControlLaneAndResubscribesOnce() async throws {
+        let controller = makeController()
+        controller.start()
+        controller.handleClosed(.exited)
+        await settle()
+        XCTAssertEqual(controlSubscribes, 1)
+        controller.handleControlReady(mode: "tui", running: false)
+        XCTAssertTrue(controller.managed)
+        XCTAssertFalse(controller.presentsConversation)
+        controller.requestSwitch(to: .gui)
+        await settle()
+        let command = try XCTUnwrap(switchCommands().first)
+        XCTAssertEqual(command["mode"] as? String, "rpc")
+        // Core publishes worker_mode before the response to the same client.
+        controller.handleEvent(event(["type": "worker_mode", "mode": "rpc"]))
+        controller.handleEvent(event(["type": "response", "id": command["id"] as Any, "command": "switch_mode", "success": true, "data": ["mode": "rpc"]]))
+        await settle()
+        XCTAssertEqual(subscribes, 2, "start plus exactly one windowed resubscribe")
+        controller.handleReady(ready(view: "v9"))
+        await settle()
+        XCTAssertTrue(controller.presentsConversation)
+        XCTAssertNil(controller.modeSwitch)
+    }
+
+    func testDefaultModeAppliesOnceOnExplicitOpenAndBusyKeepsTheMode() async throws {
+        let controller = makeController()
+        controller.start()
+        controller.handleClosed(.exited)
+        controller.noteExplicitOpen(preferred: .gui)
+        await settle()
+        XCTAssertTrue(switchCommands().isEmpty, "nothing is written before the native mode is known")
+        controller.handleControlReady(mode: "tui", running: false)
+        await settle()
+        let command = try XCTUnwrap(switchCommands().first)
+        XCTAssertEqual(command["force"] as? Bool, false, "the preference never forces")
+        var consent = 0
+        controller.onConsentNeeded = { _ in consent += 1 }
+        controller.handleEvent(event(["type": "response", "id": command["id"] as Any, "command": "switch_mode", "success": false,
+                                      "error": "当前任务正在运行", "data": ["mode": "tui", "busy": true]]))
+        await settle()
+        XCTAssertEqual(consent, 0, "an automatic switch never interrupts work")
+        XCTAssertEqual(controller.headerState().notice, "Pi 正在运行任务，已保持终端")
+        controller.handleControlReady(mode: "tui", running: false)
+        await settle()
+        XCTAssertEqual(switchCommands().count, 1, "the preference is applied once per explicit open")
     }
 }

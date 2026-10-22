@@ -6,6 +6,12 @@ public enum ThemePreference: String, Codable, Sendable {
     case system
 }
 
+/// How Corral opens managed Pi sessions: the native structured GUI or Pi's own terminal TUI.
+public enum PiOpenMode: String, Codable, Sendable {
+    case gui
+    case tui
+}
+
 public struct UserPreferences: Codable, Equatable, Sendable {
     public static let defaultFontFamily = "Cascadia Code, Consolas, Fira Code, JetBrains Mono, Menlo, Monaco, \"AgentMirror Symbols\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font Mono\", \"JetBrainsMono NFM\", \"Apple Symbols\", \"Segoe UI Symbol\", monospace"
     public static let minimumFontSize = 11
@@ -16,19 +22,22 @@ public struct UserPreferences: Codable, Equatable, Sendable {
     public var fontSize: Int
     public var followDirectory: Bool
     public var sidebarCollapsed: Bool
+    public var piOpenMode: PiOpenMode
 
     public init(
         theme: ThemePreference = .system,
         fontFamily: String = Self.defaultFontFamily,
         fontSize: Int = 13,
         followDirectory: Bool = false,
-        sidebarCollapsed: Bool = false
+        sidebarCollapsed: Bool = false,
+        piOpenMode: PiOpenMode = .gui
     ) {
         self.theme = theme
         self.fontFamily = Self.normalizedFontFamily(fontFamily)
         self.fontSize = Self.clampedFontSize(fontSize)
         self.followDirectory = followDirectory
         self.sidebarCollapsed = sidebarCollapsed
+        self.piOpenMode = piOpenMode
     }
 
     private static func normalizedFontFamily(_ value: String) -> String {
@@ -39,7 +48,7 @@ public struct UserPreferences: Codable, Equatable, Sendable {
         min(maximumFontSize, max(minimumFontSize, value))
     }
 
-    private enum CodingKeys: String, CodingKey { case theme, fontFamily, fontSize, followDirectory, sidebarCollapsed }
+    private enum CodingKeys: String, CodingKey { case theme, fontFamily, fontSize, followDirectory, sidebarCollapsed, piOpenMode }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -51,7 +60,9 @@ public struct UserPreferences: Codable, Equatable, Sendable {
             fontFamily: fontFamily,
             fontSize: fontSize,
             followDirectory: (try? values.decode(Bool.self, forKey: .followDirectory)) ?? false,
-            sidebarCollapsed: (try? values.decode(Bool.self, forKey: .sidebarCollapsed)) ?? false
+            sidebarCollapsed: (try? values.decode(Bool.self, forKey: .sidebarCollapsed)) ?? false,
+            // Files written before this setting existed keep every other value and use the product default.
+            piOpenMode: (try? values.decode(PiOpenMode.self, forKey: .piOpenMode)) ?? .gui
         )
     }
 
@@ -62,6 +73,7 @@ public struct UserPreferences: Codable, Equatable, Sendable {
         try values.encode(fontSize, forKey: .fontSize)
         try values.encode(followDirectory, forKey: .followDirectory)
         try values.encode(sidebarCollapsed, forKey: .sidebarCollapsed)
+        try values.encode(piOpenMode, forKey: .piOpenMode)
     }
 }
 
@@ -94,7 +106,8 @@ public actor UserPreferencesStore {
             fontFamily: preferences.fontFamily,
             fontSize: preferences.fontSize,
             followDirectory: preferences.followDirectory,
-            sidebarCollapsed: preferences.sidebarCollapsed
+            sidebarCollapsed: preferences.sidebarCollapsed,
+            piOpenMode: preferences.piOpenMode
         ))
         return value
     }

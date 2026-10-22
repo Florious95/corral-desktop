@@ -492,6 +492,10 @@ public enum ClientCommand: Equatable, Sendable {
     case closeSession(CloseSessionRequest)
     /// Windowed structured view of one managed conversation pane; requires both conversation capabilities.
     case conversationSubscribe(reference: SessionReference)
+    /// Non-windowed stream used only as a mode-control lane (TUI panes have no windowed source); its replay is ignored.
+    case conversationSubscribeControl(reference: SessionReference)
+    /// Launches a managed structured agent (Pi RPC) next to the anchor pane.
+    case conversationCreate(CreateAgentRequest)
     case conversationUnsubscribe(reference: SessionReference)
     /// One whitelisted native command object; `id` correlates the native `response` and is 1...64 bytes.
     case conversationCommand(reference: SessionReference, id: String, command: Data)
@@ -514,6 +518,9 @@ public enum ControlMessage: Equatable, Sendable {
     case error(code: WireErrorCode, reason: String?)
     case paneModeChanged(reference: SessionReference, inCopyMode: Bool)
     case conversationReady(ConversationReady)
+    /// Ready of a control-lane (non-windowed) stream: the pane's native mode as the worker reports it.
+    case conversationControlReady(reference: SessionReference, mode: String, running: Bool)
+    case conversationCreated(ConversationCreatedResult)
     case conversationUpdate(ConversationUpdate)
     case conversationEvent(ConversationEvent)
     case conversationResync(reference: SessionReference, viewID: String, sourceEpoch: String, reason: String)

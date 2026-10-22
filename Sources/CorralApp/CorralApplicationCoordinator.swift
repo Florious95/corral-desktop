@@ -209,6 +209,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
     private let conversationHistoryClient = ConversationHistoryClient()
     private static let maximumConversationViews = 8
+    /// CLI providers whose managed structured launch follows the Pi default open mode.
+    private static let structuredCreateProviders: Set<String> = ["pi"]
 
     private struct PendingInput {
         let session: SessionKey
@@ -310,7 +312,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             self.applyTerminalStageAppearance()
             let isDark = self.isDarkTerminalTheme
             for (_, view) in self.terminalRegistry.allViews { view.applyTerminalTheme(isDark: isDark) }
-            for controller in self.conversations.values { controller.pane.refreshTheme() }
+            for controller in self.conversations.values { controller.pane.refreshTheme(); controller.header.refreshTheme() }
         }
         workspaceView.tabBar.onSelectTab = { [weak self] id in
             Task { @MainActor in await self?.selectWorkspaceTab(id: id) }
@@ -496,6 +498,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             guard let self else { return }
             if let tabID {
                 await self.focusWorkspacePane(sessionID, in: tabID)
+                self.noteExplicitOpen(key)
             } else {
                 await self.openSession(key, gesture: .singleClick)
             }
@@ -540,6 +543,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             }
             _ = try await workspaceStore.smartOpenSession(descriptor, gesture: gesture)
             await applyWorkspaceState(await workspaceStore.snapshot())
+            noteExplicitOpen(key)
             if targetTabWasStale {
                 lastConnectionError = "The requested workspace Tab no longer exists; opened in the active Tab."
                 showToast("目标标签页已失效，会话已在当前标签页打开", kind: .warning)
@@ -670,7 +674,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             view.setTerminalFont(family: preferences.fontFamily, size: preferences.fontSize)
             view.applyTerminalTheme(isDark: isDarkTerminalTheme)
         }
-        for controller in conversations.values { controller.pane.refreshTheme() }
+        for controller in conversations.values { controller.pane.refreshTheme(); controller.header.refreshTheme() }
     }
 
     private var workspaceAppearanceOverride: NSAppearance? {
@@ -858,15 +862,19 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             if let runtime = sessions[key] { views[runtime.descriptor.id] = view }
         }
         var conversationViews: [SessionID: CorralConversationPaneView] = [:]
-        for (key, controller) in conversations where controller.presentsConversation {
-            if let runtime = sessions[key] { conversationViews[runtime.descriptor.id] = controller.pane }
+        var headers: [SessionID: CorralViewportHeaderView] = [:]
+        for (key, controller) in conversations {
+            guard let runtime = sessions[key] else { continue }
+            if controller.presentsConversation { conversationViews[runtime.descriptor.id] = controller.pane }
+            if controller.presentsHeader { headers[runtime.descriptor.id] = controller.header }
         }
         terminalStageView.update(
             root: layoutPreview ?? workspaceState.visibleRoot,
             focusedSessionID: workspaceState.visibleSessionID,
             views: views,
             backgroundRoots: workspaceState.tabs.compactMap(\.root),
-            conversationViews: conversationViews
+            conversationViews: conversationViews,
+            headers: headers
         )
         applyTerminalStageAppearance()
     }
@@ -954,10 +962,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let requestID = try allocateRequestID()
         let request = CreateAgentRequest(requestID: requestID, workspace: workspace, anchorReference: anchorReference, provider: provider, name: name, bypass: bypass)
         pendingCreateAgentRequests[requestID] = PendingCreateAgent(request: request)
+        // The Pi default open mode decides how a new Pi starts: its structured RPC (native GUI) or its TUI.
+        let structured = Self.structuredCreateProviders.contains(provider) && userPreferences.piOpenMode == .gui && conversationEnabled && !bypass
         do {
-            let receipt = try await sessionLink.send(.createAgent(request))
+            let receipt = try await sessionLink.send(structured ? .conversationCreate(request) : .createAgent(request))
             guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
-            if pendingCreateAgentRequests[requestID] != nil { scheduleActionTimeout(requestID) }
+            // A structured launch confirms Pi's native I/O before answering (Core allows 35 s).
+            if pendingCreateAgentRequests[requestID] != nil { scheduleActionTimeout(requestID, seconds: structured ? 45 : 10) }
             return requestID
         } catch {
             pendingCreateAgentRequests.removeValue(forKey: requestID)
@@ -991,6 +1002,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     func terminalView(for key: SessionKey) -> CorralNativeTerminalView? { terminalRegistry.view(for: key) }
     var conversationControllers: [ConversationSessionController] { sessionOrder.compactMap { conversations[$0] } }
+    func sessionDescriptor(referenceID: String) -> SessionDescriptor? {
+        sessionOrder.first { $0.reference.rawValue == referenceID }.flatMap { sessions[$0]?.descriptor }
+    }
     func terminalKey(for view: TerminalView) -> SessionKey? { terminalRegistry.key(for: view) }
 
     func terminalView(for reference: SessionReference) -> CorralNativeTerminalView? {
@@ -1027,7 +1041,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             theme: CorralThemeMode(rawValue: userPreferences.theme.rawValue) ?? .system,
             fontFamily: userPreferences.fontFamily,
             fontSize: Double(userPreferences.fontSize),
-            directoryTracking: userPreferences.followDirectory
+            directoryTracking: userPreferences.followDirectory,
+            piOpenMode: userPreferences.piOpenMode
         )
         let dialog = SettingsDialogViewController(values: values, onChange: { [weak self] values in
             guard let self else { return }
@@ -1036,6 +1051,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             preferences.fontFamily = values.fontFamily
             preferences.fontSize = Int(values.fontSize.rounded())
             preferences.followDirectory = values.directoryTracking
+            preferences.piOpenMode = values.piOpenMode
             Task { @MainActor in
                 do { try await self.updateUserPreferences(preferences) }
                 catch { self.showToast("偏好设置保存失败：\(error)", kind: .error) }
@@ -1508,10 +1524,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
-    private func scheduleActionTimeout(_ requestID: UInt32) {
+    private func scheduleActionTimeout(_ requestID: UInt32, seconds: Double = 10) {
         actionTimeoutTasks[requestID]?.cancel()
         actionTimeoutTasks[requestID] = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled else { return }
             await self?.actionRequestTimedOut(requestID)
         }
@@ -1942,6 +1958,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 await writeTelemetry()
             case let .conversationReady(ready):
                 conversationController(for: ready.reference, origin: envelope.origin)?.handleReady(ready)
+            case let .conversationControlReady(reference, mode, running):
+                conversationController(for: reference, origin: envelope.origin)?.handleControlReady(mode: mode, running: running)
+            case let .conversationCreated(created):
+                let result = CreateAgentResult(requestID: created.requestID, ok: created.ok, reference: created.reference, name: created.name,
+                                               naming: created.ok ? .tmux : nil, reason: created.reason.flatMap(CreateAgentFailureReason.init(rawValue:)))
+                guard var pending = pendingCreateAgentRequests[result.requestID] else { return }
+                lastCreateAgentResult = result
+                guard result.ok, result.reference != nil else {
+                    pendingCreateAgentRequests.removeValue(forKey: result.requestID)
+                    cancelActionTimeout(result.requestID)
+                    let message = "原生 GUI 会话创建失败：\(created.reason ?? "missing reference")"
+                    lastConnectionError = message
+                    onAgentCreationFailed?(message)
+                    await writeTelemetry()
+                    return
+                }
+                pending.result = result
+                pendingCreateAgentRequests[result.requestID] = pending
+                await resolveCreatedAgents(in: sessions.keys)
+                await writeTelemetry()
             case let .conversationUpdate(update):
                 conversationController(for: update.reference, origin: envelope.origin)?.handleUpdate(update)
             case let .conversationEvent(event):
@@ -2141,14 +2177,48 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 return try await self.conversationHistoryClient.fetch(request, route: route, token: token)
             }
             controller.onPresentationChange = { [weak self] in self?.scheduleSubscriptionUpdate() }
-            controller.pane.onFocus = { [weak self] in
+            let focus: () -> Void = { [weak self] in
                 guard let self, let id = self.sessions[key]?.descriptor.id else { return }
                 if self.workspaceState.visibleSessionID != id { Task { @MainActor in await self.focusWorkspacePane(id) } }
                 else { self.focusVisibleTerminal() }
             }
+            controller.pane.onFocus = focus
+            controller.header.onFocus = focus
+            controller.header.onSelectMode = { [weak self, weak controller] mode in
+                // An unfinished input-method composition is never dropped or sent implicitly: finish it first.
+                if let view = self?.terminalRegistry.view(for: key), view.hasMarkedText() {
+                    controller?.showSwitchNotice("请先完成输入法组字，再切换模式", tone: .warning)
+                    return
+                }
+                controller?.requestSwitch(to: mode)
+            }
+            controller.onConsentNeeded = { [weak self, weak controller] target in
+                guard let self, let controller else { return }
+                self.presentSwitchConsent(for: controller, target: target)
+            }
             conversations[key] = controller
             controller.start()
         }
+    }
+
+    /// Busy work stops only after this explicit consent; cancelling writes nothing to the agent.
+    private func presentSwitchConsent(for controller: ConversationSessionController, target: CorralViewportHeaderState.Mode) {
+        let title = sessions[controller.key]?.descriptor.name ?? "Pi"
+        let message = target == .tui
+            ? "切换到终端会先停止当前任务并清空排队输入，会话内容会保留并在 Pi 终端中继续。"
+            : "Pi 终端中有任务可能仍在运行。切换到原生 GUI 会中断它，并恢复同一会话。"
+        let dialog = CorralConfirmDialogViewController(title: "Pi 正在运行任务", subject: "「\(title)」", message: message,
+                                                       confirmTitle: "停止任务并切换", kind: .danger)
+        dialog.onConfirm = { [weak self, weak controller] in self?.activeDialog = nil; controller?.confirmSwitch() }
+        dialog.onCancel = { [weak self, weak controller] in self?.activeDialog = nil; controller?.cancelSwitch() }
+        activeDialog = dialog
+        dialog.present(over: windowController.window)
+    }
+
+    /// An explicit open applies the Pi default open mode once, only to a managed pane that is idle.
+    private func noteExplicitOpen(_ key: SessionKey) {
+        let preferred: CorralViewportHeaderState.Mode = userPreferences.piOpenMode == .gui ? .gui : .tui
+        conversations[key]?.noteExplicitOpen(preferred: preferred)
     }
 
     private func rebindConversations() {
