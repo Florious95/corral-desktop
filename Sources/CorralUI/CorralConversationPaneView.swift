@@ -210,10 +210,11 @@ public struct CorralViewportHeaderState: Equatable, Sendable {
     public var switchHint: String?
     public var notice: String?
     public var noticeTone: Tone
+    public var hasActions: Bool
 
     public init(title: String, provider: String? = nil, modelLabel: String? = nil, phase: CorralConversationPaneState.Phase = .connecting,
                 running: Bool? = nil, queued: Int = 0, mode: Mode = .gui, pendingMode: Mode? = nil, canSwitch: Bool? = nil,
-                switchHint: String? = nil, notice: String? = nil, noticeTone: Tone = .info) {
+                switchHint: String? = nil, notice: String? = nil, noticeTone: Tone = .info, hasActions: Bool = false) {
         self.title = title
         self.provider = provider
         self.modelLabel = modelLabel
@@ -226,6 +227,7 @@ public struct CorralViewportHeaderState: Equatable, Sendable {
         self.switchHint = switchHint
         self.notice = notice
         self.noticeTone = noticeTone
+        self.hasActions = hasActions
     }
 }
 
@@ -235,6 +237,8 @@ public struct CorralViewportHeaderState: Equatable, Sendable {
 public final class CorralViewportHeaderView: NSView {
     public static let height: CGFloat = 40
     public var onSelectMode: ((CorralViewportHeaderState.Mode) -> Void)?
+    public var makeActionMenu: (() -> CorralActionMenu?)?
+    public let moreButton = NSButton()
     public var trailingInset: CGFloat = 0 { didSet { if oldValue != trailingInset { needsLayout = true } } }
     public private(set) var state = CorralViewportHeaderState(title: "")
     private var iconView: CorralProviderIconView?
@@ -266,16 +270,30 @@ public final class CorralViewportHeaderView: NSView {
         statusLabel.setAccessibilityIdentifier("corral.conversation.status")
         statusDot.fillsIdle = true
         separator.wantsLayer = true
+        moreButton.isBordered = false
+        moreButton.bezelStyle = .inline
+        moreButton.target = self
+        moreButton.action = #selector(showActions(_:))
+        moreButton.toolTip = "会话操作"
+        moreButton.setAccessibilityLabel("会话操作")
+        moreButton.setAccessibilityIdentifier("corral.viewport.actions")
+        moreButton.isHidden = true
         modeControl.onSelect = { [weak self] id in
             guard let mode = CorralViewportHeaderState.Mode(rawValue: id) else { return }
             self?.onFocus?()
             self?.onSelectMode?(mode)
         }
-        for view in [titleLabel, modelChip, statusDot, statusLabel, modeControl, separator] { addSubview(view) }
+        for view in [titleLabel, modelChip, statusDot, statusLabel, modeControl, moreButton, separator] { addSubview(view) }
         refreshTheme()
     }
 
     public required init?(coder: NSCoder) { fatalError("CorralViewportHeaderView is created programmatically") }
+
+    @objc private func showActions(_ sender: NSButton) {
+        onFocus?()
+        guard let menu = makeActionMenu?() else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.maxX, y: sender.bounds.maxY + 4), in: sender)
+    }
 
     /// Labels are decoration; a click anywhere except a real control focuses the pane.
     public override func hitTest(_ point: NSPoint) -> NSView? {
@@ -301,6 +319,7 @@ public final class CorralViewportHeaderView: NSView {
         modelChip.text = state.mode == .gui ? (state.modelLabel ?? "") : ""
         modelChip.toolTip = state.modelLabel
         applyStatus()
+        moreButton.isHidden = !state.hasActions
         modeControl.isHidden = state.canSwitch == nil
         modeControl.selectedID = state.mode.rawValue
         modeControl.pendingID = state.pendingMode?.rawValue
@@ -359,6 +378,7 @@ public final class CorralViewportHeaderView: NSView {
         statusDot.refreshTheme()
         iconView?.refreshTheme()
         modeControl.refreshTheme()
+        moreButton.image = CorralLegacyIcon.image(.more, size: 18)
         applyStatus()
     }
 
@@ -371,6 +391,10 @@ public final class CorralViewportHeaderView: NSView {
             x += 24
         }
         var right = bounds.width - 12 - trailingInset
+        if !moreButton.isHidden {
+            moreButton.frame = CGRect(x: max(0, right - 28), y: midY - 14, width: 28, height: 28)
+            right = moreButton.frame.minX - 8
+        }
         if !modeControl.isHidden {
             let size = modeControl.intrinsicContentSize
             modeControl.frame = CGRect(x: right - size.width, y: midY - size.height / 2, width: size.width, height: size.height)

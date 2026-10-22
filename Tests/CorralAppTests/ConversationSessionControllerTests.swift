@@ -72,6 +72,112 @@ final class ConversationSessionControllerTests: XCTestCase {
         return controller
     }
 
+    private func usageCommands() -> [(String, String)] {
+        sent.compactMap {
+            guard case let .conversationCommand(reference, id, body) = $0,
+                  String(decoding: body, as: UTF8.self) == #"{"type":"get_session_stats"}"# else { return nil }
+            return (reference.rawValue, id)
+        }
+    }
+
+    private var usageData: [String: Any] {
+        ["tokens": ["input": 1200, "output": 300, "cacheRead": 4000, "cacheWrite": 500, "total": 6000],
+         "cost": 0.1234, "contextUsage": ["tokens": 2500, "contextWindow": 10000, "percent": 25.0]]
+    }
+
+    func testUsageMenuQueriesNativeTotalsOnceWithoutTranscriptMutation() async throws {
+        let controller = try await readyController()
+        let rowsBefore = controller.paneState().rows
+        let menu = try XCTUnwrap(controller.header.makeActionMenu?())
+        XCTAssertEqual(menu.entries.map(\.spec.id), [.usage, .terminal])
+        XCTAssertTrue(menu.performAction(.usage))
+        XCTAssertTrue(menu.performAction(.usage))
+        controller.refreshUsage()
+        await settle()
+        XCTAssertEqual(usageCommands().count, 1)
+        XCTAssertEqual(usageCommands().first?.0, ref.rawValue)
+        let id = try XCTUnwrap(usageCommands().first?.1)
+        controller.handleEvent(event(["type": "response", "id": "unrelated", "success": true, "data": usageData]))
+        XCTAssertEqual(controller.usageDashboard?.state, .loading)
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": usageData], view: "wrong-view"))
+        XCTAssertEqual(controller.usageDashboard?.state, .loading)
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": usageData], view: "v1"))
+        guard case let .ready(usage, _) = controller.usageDashboard?.state else { return XCTFail("No native usage snapshot") }
+        XCTAssertEqual(usage.tokens.total, 6000)
+        XCTAssertEqual(usage.cost, 0.1234)
+        XCTAssertEqual(usage.contextUsage?.knownPercent, 25)
+        XCTAssertEqual(controller.paneState().rows, rowsBefore)
+        XCTAssertTrue(switchCommands().isEmpty)
+        controller.usageDashboard?.handleEscape()
+        XCTAssertNil(controller.usageDashboard)
+    }
+
+    func testUsageRefreshAndMalformedResponsesDoNotInventZero() async throws {
+        let controller = try await readyController()
+        XCTAssertTrue(controller.performAction(.usage))
+        await settle()
+        var id = try XCTUnwrap(usageCommands().last?.1)
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": ["cost": 0]]))
+        guard case .failed = controller.usageDashboard?.state else { return XCTFail("Incomplete totals accepted") }
+        controller.refreshUsage()
+        await settle()
+        id = try XCTUnwrap(usageCommands().last?.1)
+        var data = usageData
+        data["contextUsage"] = ["tokens": NSNull(), "contextWindow": 10000, "percent": NSNull()]
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": data]))
+        guard case let .ready(usage, _) = controller.usageDashboard?.state else { return XCTFail("Unknown context rejected") }
+        XCTAssertNil(usage.contextUsage?.knownPercent)
+        XCTAssertEqual(usage.tokens.total, 6000)
+        controller.stop()
+    }
+
+    func testStaleMenuAndLateUsageResponseCannotCrossRebind() async throws {
+        let controller = try await readyController()
+        let menu = try XCTUnwrap(controller.actionMenu())
+        XCTAssertTrue(menu.performAction(.usage))
+        await settle()
+        let id = try XCTUnwrap(usageCommands().first?.1)
+        controller.rebind(to: ConnectionEpoch(2))
+        guard case .unavailable = controller.usageDashboard?.state else { return XCTFail("Stale metrics survived reconnect") }
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": usageData]))
+        guard case .unavailable = controller.usageDashboard?.state else { return XCTFail("Late response adopted") }
+        XCTAssertFalse(controller.performAction(.usage))
+        _ = menu.performAction(.usage) // Cached enabled row rechecks the controller's current context.
+        await settle()
+        XCTAssertEqual(usageCommands().count, 1)
+        controller.stop()
+    }
+
+    func testMenuModeActionUsesExistingBusyConsentPath() async throws {
+        let controller = try await readyController()
+        XCTAssertTrue(controller.actionMenu()?.performAction(.terminal) == true)
+        await settle()
+        XCTAssertEqual(switchCommands().count, 1)
+        XCTAssertEqual(switchCommands().first?["mode"] as? String, "tui")
+        XCTAssertEqual(switchCommands().first?["force"] as? Bool, false)
+        XCTAssertFalse(controller.performAction(.usage))
+        controller.handleEvent(event(["type": "response", "id": switchCommands()[0]["id"]!, "success": false, "data": ["busy": true], "error": "busy"]))
+        XCTAssertTrue(controller.modeSwitch?.awaitingConsent == true)
+        controller.cancelSwitch()
+        controller.stop()
+    }
+
+    func testUsageSendFailureAndCloseDoNotAcceptLateReceipts() async throws {
+        let controller = try await readyController()
+        controller.send = { _ in throw URLError(.notConnectedToInternet) }
+        XCTAssertTrue(controller.performAction(.usage))
+        await settle()
+        guard case .failed = controller.usageDashboard?.state else { return XCTFail("Network failure not surfaced") }
+        controller.usageDashboard?.handleEscape()
+        controller.send = { [unowned self] in self.sent.append($0) }
+        XCTAssertTrue(controller.performAction(.usage))
+        await settle()
+        let id = try XCTUnwrap(usageCommands().last?.1)
+        controller.stop()
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": usageData]))
+        XCTAssertNil(controller.usageDashboard)
+    }
+
     func testInitialPageIsAdoptedBeforeBufferedLiveCommitsWhichAreAcknowledgedOnce() async throws {
         let controller = makeController()
         controller.start()

@@ -82,6 +82,10 @@ final class ConversationSessionController {
     private var bodyFailures: [String: (revision: UInt64, code: String)] = [:]
     private var requestSerial = 0
     private var stateCommandID: String?
+    private var usageCommandID: String?
+    private var usageTimeout: Task<Void, Never>?
+    private(set) var usageDashboard: CorralUsageDashboardController?
+    private let actions: [any CorralAtomicAction] = [CorralUsageAction(scopes: [.session]), CorralModeSwitchAction()]
     private var recoveries: [Date] = []
     private var publishScheduled = false
     private var pendingApplied: (viewID: String, sourceEpoch: String, commitSeq: UInt64)?
@@ -97,6 +101,7 @@ final class ConversationSessionController {
         pane.onNeedBodies = { [weak self] ids in self?.requestBodies(ids) }
         pane.onRetry = { [weak self] in self?.retry() }
         header.onSelectMode = { [weak self] mode in self?.requestSwitch(to: mode) }
+        header.makeActionMenu = { [weak self] in self?.actionMenu() }
     }
 
     /// Whether this pane should currently show the structured view instead of the terminal.
@@ -125,6 +130,7 @@ final class ConversationSessionController {
     /// A reconnect invalidates every view; the pane keeps its rows while the new view's history loads.
     func rebind(to epoch: ConnectionEpoch) {
         guard epoch != connectionEpoch else { return }
+        invalidateUsage("连接已改变，请关闭后重新打开用量面板")
         connectionEpoch = epoch
         if transcript?.initialAdopted == true { staleRows = rows() }
         transcript = nil
@@ -144,6 +150,7 @@ final class ConversationSessionController {
     }
 
     func stop() {
+        closeUsage()
         let reference = key.reference
         let send = self.send
         Task { @MainActor in try? await send(.conversationUnsubscribe(reference: reference)) }
@@ -152,6 +159,7 @@ final class ConversationSessionController {
     // MARK: Wire events
 
     func handleReady(_ value: ConversationReady) {
+        invalidateUsage("会话视图已改变，请关闭后重新打开用量面板")
         if let current = transcript, current.viewID == value.viewID { return }
         if transcript?.initialAdopted == true { staleRows = rows() }
         lane = .windowed
@@ -241,6 +249,7 @@ final class ConversationSessionController {
     }
 
     func handleEvent(_ event: ConversationEvent) {
+        guard event.reference == key.reference else { return }
         // A control lane replays retained native records; only our response and mode changes matter.
         if lane == .control, !Self.mentions(event.event, ["worker_mode", modeSwitch?.commandID].compactMap { $0 }) { return }
         guard event.viewID == nil || event.viewID == transcript?.viewID,
@@ -252,6 +261,11 @@ final class ConversationSessionController {
         guard object["type"] as? String == "response", let id = object["id"] as? String else { return }
         if id == modeSwitch?.commandID {
             handleSwitchResponse(success: object["success"] as? Bool == true, data: object["data"] as? [String: Any], error: object["error"] as? String)
+            return
+        }
+        if id == usageCommandID {
+            guard event.sourceEpoch == nil || event.sourceEpoch == transcript?.sourceEpoch else { return }
+            handleUsageResponse(object)
             return
         }
         guard id == stateCommandID else { return }
@@ -280,6 +294,7 @@ final class ConversationSessionController {
     func handleMalformed() { recover("malformed") }
 
     func handleClosed(_ reason: ConversationClosedReason) {
+        invalidateUsage("会话连接已结束，暂时无法读取用量")
         switch lane {
         case .windowed:
             if reason == .lost { phase = .closed(reason); recover("lost"); return }
@@ -327,6 +342,7 @@ final class ConversationSessionController {
             if !automatic { showNotice("会话尚未就绪，请稍后再切换", tone: .warning) }
             return
         }
+        closeUsage()
         notice = nil
         modeSwitch = ModeSwitch(target: target, force: false, automatic: automatic)
         sendSwitch()
@@ -407,6 +423,7 @@ final class ConversationSessionController {
     private func handleWorkerMode(_ mode: String) {
         let confirmed: NativeMode = mode == "tui" ? .tui : .rpc
         guard confirmed != nativeMode || modeSwitch != nil else { return }
+        if confirmed != nativeMode { closeUsage() }
         nativeMode = confirmed
         if confirmed == .rpc, lane == .control {
             // Another client (or our own control-lane switch) brought the pane back to RPC.
@@ -652,10 +669,103 @@ final class ConversationSessionController {
         }
     }
 
+    // MARK: Atomic actions and session usage
+
+    private func actionContext() -> CorralActionContext {
+        CorralActionContext(ready: managed && !unavailable && phase == .ready,
+                            mode: nativeMode == .tui ? .tui : .gui, running: liveState?.running,
+                            switching: modeSwitch != nil, implemented: [.metricsPanel, .modeSwitch])
+    }
+
+    func actionMenu() -> CorralActionMenu? {
+        guard managed, !unavailable else { return nil }
+        let context = actionContext()
+        let entries = actions.map { action in
+            CorralActionMenuEntry(spec: action.spec, availability: action.availability(in: context),
+                                  title: action.spec.id == .terminal && context.mode == .tui ? "切换到原生 GUI" : nil)
+        }
+        return CorralActionMenu(entries: entries) { [weak self] id in self?.performAction(id) }
+    }
+
+    @discardableResult
+    func performAction(_ id: CorralActionID) -> Bool {
+        guard let action = actions.first(where: { $0.spec.id == id }) else { return false }
+        return action.perform(in: actionContext()) { presentation in
+            switch presentation {
+            case .metricsPanel: openUsage()
+            case .modeSwitch: requestSwitch(to: nativeMode == .tui ? .gui : .tui)
+            default: break // Unimplemented presentations are excluded by the capability gate above.
+            }
+        }
+    }
+
+    private func openUsage() {
+        guard usageDashboard == nil else { return }
+        let dashboard = CorralUsageDashboardController(sessionTitle: nativeState.sessionName ?? title)
+        dashboard.onRefresh = { [weak self] in self?.refreshUsage() }
+        dashboard.onClose = { [weak self] in self?.closeUsage() }
+        usageDashboard = dashboard
+        // Never fall back to another pane/window, including when a late action targets a closed pane.
+        if let window = header.window { dashboard.present(over: window) }
+        refreshUsage()
+    }
+
+    func refreshUsage() {
+        guard let dashboard = usageDashboard, usageCommandID == nil else { return }
+        guard CorralUsageAction(scopes: [.session]).availability(in: actionContext()) == .enabled else {
+            invalidateUsage("当前会话不可读取用量，请关闭后重试")
+            return
+        }
+        let id = nextRequestID("usage")
+        usageCommandID = id
+        dashboard.apply(.loading)
+        let command = ClientCommand.conversationCommand(reference: key.reference, id: id, command: Data(#"{"type":"get_session_stats"}"#.utf8))
+        Task { @MainActor [weak self] in
+            guard let self, self.usageCommandID == id else { return }
+            do { try await self.send(command) }
+            catch { if self.usageCommandID == id { self.finishUsage(.failed("用量读取失败，请重试")) } }
+        }
+        usageTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, let self, self.usageCommandID == id else { return }
+            self.finishUsage(.failed("用量读取超时，请重试"))
+        }
+    }
+
+    private func handleUsageResponse(_ object: [String: Any]) {
+        guard object["success"] as? Bool == true else {
+            finishUsage(.failed("当前来源无法提供用量，请稍后重试"))
+            return
+        }
+        guard let data = object["data"] as? [String: Any],
+              let encoded = try? JSONSerialization.data(withJSONObject: data),
+              let usage = try? JSONDecoder().decode(CorralSessionUsage.self, from: encoded), usage.isValid else {
+            finishUsage(.failed("用量响应不完整，未显示估算数值"))
+            return
+        }
+        finishUsage(.ready(usage, Date()))
+    }
+
+    private func finishUsage(_ state: CorralUsageDashboardController.State) {
+        usageCommandID = nil
+        usageTimeout?.cancel(); usageTimeout = nil
+        usageDashboard?.apply(state)
+    }
+
+    private func invalidateUsage(_ reason: String) { finishUsage(.unavailable(reason)) }
+
+    private func closeUsage() {
+        usageCommandID = nil
+        usageTimeout?.cancel(); usageTimeout = nil
+        usageDashboard?.closeDialog()
+        usageDashboard = nil
+    }
+
     // MARK: Recovery
 
     /// One small-window resubscribe per loss episode, bounded to three a minute; never a WebSocket reconnect.
     private func recover(_ reason: String) {
+        invalidateUsage("会话正在重新连接，请关闭后重新打开用量面板")
         let now = Date()
         recoveries = recoveries.filter { now.timeIntervalSince($0) < 60 }
         buffered.removeAll()
@@ -716,7 +826,7 @@ final class ConversationSessionController {
             mode: nativeMode == .tui ? .tui : .gui, pendingMode: modeSwitch.flatMap { $0.awaitingConsent ? nil : $0.target },
             canSwitch: managed ? ready && modeSwitch?.awaitingConsent != true : nil,
             switchHint: ready ? nil : "会话尚未就绪",
-            notice: notice?.text, noticeTone: notice?.tone ?? .info)
+            notice: notice?.text, noticeTone: notice?.tone ?? .info, hasActions: managed && !unavailable)
     }
 
     func paneState() -> CorralConversationPaneState {

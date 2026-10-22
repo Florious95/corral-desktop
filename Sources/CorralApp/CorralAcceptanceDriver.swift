@@ -305,6 +305,13 @@ final class CorralAcceptanceDriver {
                 throw HitTestMismatch(description: String(describing: window.contentView?.hitTest(window.contentView!.convert(point, from: nil))))
             }
             try click(target)
+        case "conversation-action":
+            // Native menu item target/action, without entering NSMenu's modal pointer-tracking loop.
+            guard let ref = command["ref"] as? String, let raw = command["action"] as? String,
+                  let action = CorralActionID(rawValue: raw),
+                  let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }),
+                  !controller.header.moreButton.isHiddenOrHasHiddenAncestor,
+                  let menu = controller.header.makeActionMenu?(), menu.performAction(action) else { throw Failure.missingView }
         case "conversation-mode":
             // Presses the viewport header's GUI/terminal segment through the window, like a pointer click.
             guard let ref = command["ref"] as? String, let mode = command["mode"] as? String,
@@ -386,8 +393,17 @@ final class CorralAcceptanceDriver {
                     "mode": controller.header.state.mode.rawValue, "pendingMode": controller.header.state.pendingMode?.rawValue ?? NSNull(),
                     "canSwitch": controller.header.state.canSwitch.map { $0 as Any } ?? NSNull(),
                     "switcherVisible": !controller.header.modeControl.isHidden,
+                    "actionsVisible": !controller.header.moreButton.isHidden,
+                    "actions": controller.actionMenu()?.entries.map { ["id": $0.spec.id.rawValue, "title": $0.title, "availability": String(describing: $0.availability)] } ?? [],
                     "status": controller.header.statusLabel.stringValue, "notice": controller.header.state.notice ?? NSNull()
                 ] as [String: Any],
+                "usage": controller.usageDashboard.map { dashboard in
+                    ["visible": dashboard.presentedWindow != nil,
+                     "labels": dashboard.isViewLoaded ? descendants(dashboard.view).compactMap { view -> [String: String]? in
+                         guard let field = view as? NSTextField else { return nil }
+                         return ["id": field.accessibilityIdentifier() ?? "", "text": field.stringValue]
+                     } : []] as [String: Any]
+                } ?? [:],
                 "lane": controller.lane == .windowed ? "windowed" : "control", "nativeMode": String(describing: controller.nativeMode),
                 "managed": controller.managed, "unavailable": controller.unavailable,
                 "phase": String(describing: controller.phase), "viewID": controller.transcript?.viewID ?? "",
