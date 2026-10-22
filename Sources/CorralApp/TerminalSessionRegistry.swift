@@ -48,12 +48,15 @@ final class NativeTerminalStageView: NSView {
     private var layoutRoot: WorkspaceLayoutNode?
     private var focusedSessionID: SessionID?
     private var views: [SessionID: CorralNativeTerminalView] = [:]
+    /// Structured panes share the same split projection; they never get a PTY grid or terminal input.
+    private var conversationViews: [SessionID: CorralConversationPaneView] = [:]
     private var backgroundRoots: [WorkspaceLayoutNode] = []
     private var pendingBackgroundFrames: [SessionID: CGRect] = [:]
     private var backgroundLayoutTask: Task<Void, Never>?
     private var lastBackgroundLayoutSize: NSSize?
     var maximumVisiblePanes = Int.max
     private(set) var visibleSessionIDs = Set<SessionID>()
+    private(set) var visibleConversationIDs = Set<SessionID>()
 
     override var isFlipped: Bool { true }
 
@@ -61,9 +64,20 @@ final class NativeTerminalStageView: NSView {
         root: WorkspaceLayoutNode?,
         focusedSessionID: SessionID?,
         views: [SessionID: CorralNativeTerminalView],
-        backgroundRoots: [WorkspaceLayoutNode] = []
+        backgroundRoots: [WorkspaceLayoutNode] = [],
+        conversationViews: [SessionID: CorralConversationPaneView] = [:]
     ) {
         layoutRoot = root
+        for (id, view) in conversationViews where self.conversationViews[id] !== view {
+            self.conversationViews[id]?.removeFromSuperview()
+            self.conversationViews[id] = view
+            view.translatesAutoresizingMaskIntoConstraints = true
+            view.isHidden = true
+            addSubview(view)
+        }
+        for id in self.conversationViews.keys where conversationViews[id] == nil {
+            self.conversationViews.removeValue(forKey: id)?.removeFromSuperview()
+        }
         self.backgroundRoots = backgroundRoots
         self.focusedSessionID = focusedSessionID
         for (id, view) in views where self.views[id] !== view {
@@ -89,6 +103,14 @@ final class NativeTerminalStageView: NSView {
         let panes = Array(SplitLayout.project(layoutRoot, in: bounds).panes.prefix(maximumVisiblePanes))
         let visibleIDs = Set(panes.map(\.sessionID))
         visibleSessionIDs = visibleIDs
+        visibleConversationIDs = []
+        for (id, view) in conversationViews {
+            guard let pane = panes.first(where: { $0.sessionID == id }) else { view.isHidden = true; continue }
+            view.trailingChromeInset = panes.count > 1 ? 34 : 0
+            if view.frame != pane.frame { view.frame = pane.frame }
+            view.isHidden = false
+            visibleConversationIDs.insert(id)
+        }
         var backgroundFrames: [SessionID: CGRect] = [:]
         for root in backgroundRoots {
             let backgroundPanes = Array(SplitLayout.project(root, in: bounds).panes.prefix(maximumVisiblePanes))

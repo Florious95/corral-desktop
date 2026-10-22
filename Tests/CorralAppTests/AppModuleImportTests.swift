@@ -1762,7 +1762,7 @@ final class CorralApplicationCoordinatorTests: XCTestCase {
         let listSent = await waitUntil { await link.commands().contains { if case .list = $0 { true } else { false } } }
         XCTAssertTrue(listSent)
         let authAck = try codec.decodeControlMessage(Data(#"{"v":1,"type":"auth_ack","payload":{"ok":true,"agent_launchers":[{"provider":"pi","display_name":"Pi","supports_bypass":true,"naming":"cli"},{"provider":"codex","display_name":"Codex","supports_bypass":true,"naming":"cli"},{"provider":"cursor","display_name":"Cursor","supports_bypass":false,"naming":"cli"},{"provider":"grok","display_name":"Grok","supports_bypass":false,"naming":"cli"}]}}"#.utf8))
-        guard case let .authAck(ok, reason, launchers) = authAck else {
+        guard case let .authAck(ok, reason, launchers, _) = authAck else {
             return XCTFail("The real auth_ack fixture must decode with its advertised launchers")
         }
         XCTAssertTrue(ok)

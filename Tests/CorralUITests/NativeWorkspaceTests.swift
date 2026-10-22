@@ -212,7 +212,7 @@ final class NativeWorkspaceTests: XCTestCase {
     }
 
     func testAllExtractedLegacyIconsLoadAsNativeAppKitImages() {
-        XCTAssertEqual(CorralLegacyIcon.allCases.count, 32)
+        XCTAssertEqual(CorralLegacyIcon.allCases.count, 39)
         for icon in CorralLegacyIcon.allCases {
             XCTAssertNotNil(CorralLegacyIcon.image(icon, size: 16), "Missing native icon: \\(icon.rawValue)")
         }

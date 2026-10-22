@@ -6,6 +6,7 @@ public enum CorralLegacyIcon: String, CaseIterable {
     case layers, monitor, qr, gear, check, close, plus, split, closeLeft, closeRight
     case terminal, arrowUp, pin, reflow, edit, trash, gitBranch
     case radar, refresh, image, copy, download, chevronRight
+    case message, wrench, sparkles, more, arrowDown, alert, info
 
     public static func image(_ icon: Self, size: CGFloat = 16, tint: NSColor = CorralAestheticTokens.textSecondary) -> NSImage? {
         let (body, strokeWidth, fill, stroke): (String, String, String, String) = switch icon {
@@ -40,6 +41,13 @@ public enum CorralLegacyIcon: String, CaseIterable {
         case .copy: (#"<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>"#, "1.8", "none", "currentColor")
         case .download: (#"<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>"#, "1.8", "none", "currentColor")
         case .chevronRight: (#"<polyline points="9 18 15 12 9 6"/>"#, "2", "none", "currentColor")
+        case .message: (#"<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>"#, "1.8", "none", "currentColor")
+        case .wrench: (#"<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>"#, "1.8", "none", "currentColor")
+        case .sparkles: (#"<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>"#, "1.6", "none", "currentColor")
+        case .more: (#"<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>"#, "0", "currentColor", "none")
+        case .arrowDown: (#"<path d="M12 5v14m0 0 6-6m-6 6-6-6"/>"#, "2", "none", "currentColor")
+        case .alert: (#"<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>"#, "1.8", "none", "currentColor")
+        case .info: (#"<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>"#, "1.8", "none", "currentColor")
         case .gitBranch: (#"<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M6 12h3c4 0 7-1.8 7-4"/>"#, "2", "none", "currentColor")
         }
         let components = tint.usingColorSpace(.sRGB)

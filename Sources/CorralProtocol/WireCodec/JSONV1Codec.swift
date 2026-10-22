@@ -19,7 +19,7 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
 
     public func encodeAuthentication(_ token: AuthToken) throws -> Data {
         guard !token.rawValue.isEmpty else { throw V1ControlCodecError.invalidField("token") }
-        return try encodeEnvelope(type: "auth", payload: AuthPayload(token: token.rawValue))
+        return try encodeEnvelope(type: "auth", payload: AuthPayload(token: token.rawValue, capabilities: ConversationCapability.offered))
     }
 
     public func encodeClientCommand(_ command: ClientCommand) throws -> Data {
@@ -93,6 +93,25 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         case let .closeSession(request):
             guard request.requestID > 0 else { throw V1ControlCodecError.invalidField("close_session.req_id") }
             return try encodeEnvelope(type: "close_session", payload: CloseSessionPayload(request: request))
+        case let .conversationSubscribe(reference):
+            return try encodeEnvelope(type: "conversation_subscribe", payload: ConversationSubscribePayload(ref: reference.rawValue))
+        case let .conversationUnsubscribe(reference):
+            return try encodeEnvelope(type: "conversation_unsubscribe", payload: ReferencePayload(ref: reference.rawValue))
+        case let .conversationCommand(reference, id, command):
+            guard (1...ConversationWire.maximumCommandIDBytes).contains(id.utf8.count) else {
+                throw V1ControlCodecError.invalidField("conversation_command.id")
+            }
+            guard let object = try? JSONDecoder().decode(JSONValue.self, from: command), case .object = object else {
+                throw V1ControlCodecError.invalidField("conversation_command.command")
+            }
+            let data = try encodeEnvelope(type: "conversation_command",
+                                          payload: ConversationCommandPayload(ref: reference.rawValue, id: id, command: object))
+            guard data.count <= ConversationWire.liveFrameBytes else { throw V1ControlCodecError.payloadTooLarge }
+            return data
+        case let .conversationApplied(reference, viewID, sourceEpoch, commitSeq):
+            guard !viewID.isEmpty, !sourceEpoch.isEmpty else { throw V1ControlCodecError.invalidField("conversation_applied") }
+            return try encodeEnvelope(type: "conversation_applied", payload: ConversationAppliedPayload(
+                ref: reference.rawValue, viewID: viewID, sourceEpoch: sourceEpoch, commitSeq: commitSeq))
         }
     }
 
@@ -109,6 +128,14 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         guard let type = envelope.type, !type.isEmpty else { throw V1ControlCodecError.malformedEnvelope }
         guard let payload = envelope.payload else { throw V1ControlCodecError.invalidPayload }
 
+        if type.hasPrefix("conversation_") {
+            do { return try decodeConversation(type: type, payload: payload) }
+            catch {
+                var reference: SessionReference?
+                if case let .object(fields) = payload, case let .string(raw)? = fields["ref"] { reference = try? SessionReference(raw) }
+                return .conversationMalformed(reference: reference, type: type)
+            }
+        }
         switch type {
         case "auth_ack":
             let value = try decodePayload(AuthAckPayload.self, from: payload)
@@ -122,7 +149,7 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
                     throw V1ControlCodecError.invalidField("auth_ack.agent_launchers")
                 }
             }
-            return .authAck(ok: value.ok, reason: value.reason, launchers: launchers)
+            return .authAck(ok: value.ok, reason: value.reason, launchers: launchers, capabilities: value.capabilities ?? [])
         case "listing":
             let value = try decodePayload(ListingPayload.self, from: payload)
             let workspaces = try value.workspaces.map(decodeWorkspace)
@@ -202,6 +229,49 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
         }
     }
 
+    private func decodeConversation(type: String, payload: JSONValue) throws -> ControlMessage {
+        switch type {
+        case "conversation_ready":
+            let value = try decodePayload(ConversationReadyPayload.self, from: payload)
+            let reference = try SessionReference(value.ref)
+            // A legacy (non-windowed) replay is never adopted; it stays a negotiated, ignorable frame.
+            guard value.historyMode == "windowed" else { return .conversationIgnored(type: type) }
+            guard let sessionID = value.sessionID, !sessionID.isEmpty, let viewID = value.viewID, !viewID.isEmpty,
+                  let sourceEpoch = value.sourceEpoch, !sourceEpoch.isEmpty, let snapshot = value.snapshotSeq,
+                  let token = value.windowToken, !token.isEmpty,
+                  let support = value.historySupport, ["complete", "retained_window", "unsupported"].contains(support) else {
+                throw V1ControlCodecError.invalidField("conversation_ready")
+            }
+            return .conversationReady(ConversationReady(reference: reference, mode: value.mode ?? "", running: value.running ?? false,
+                sessionID: sessionID, viewID: viewID, sourceEpoch: sourceEpoch, snapshotSeq: snapshot, windowToken: token,
+                historySupport: support, sourceOmitted: value.sourceOmitted ?? false))
+        case "conversation_update":
+            let value = try decodePayload(ConversationUpdatePayload.self, from: payload)
+            guard !value.viewID.isEmpty, !value.sourceEpoch.isEmpty, value.commitSeq > value.baseSeq else {
+                throw V1ControlCodecError.invalidField("conversation_update")
+            }
+            return .conversationUpdate(ConversationUpdate(reference: try SessionReference(value.ref), viewID: value.viewID,
+                sourceEpoch: value.sourceEpoch, baseSeq: value.baseSeq, commitSeq: value.commitSeq,
+                upserts: value.upserts ?? [], removes: value.removes ?? [], state: value.state))
+        case "conversation_event":
+            let value = try decodePayload(ConversationEventPayload.self, from: payload)
+            guard case .object = value.event else { throw V1ControlCodecError.invalidField("conversation_event.event") }
+            return .conversationEvent(ConversationEvent(reference: try SessionReference(value.ref), viewID: value.viewID,
+                sourceEpoch: value.sourceEpoch, event: try JSONEncoder().encode(value.event)))
+        case "conversation_resync":
+            let value = try decodePayload(ConversationResyncPayload.self, from: payload)
+            guard !value.viewID.isEmpty, !value.sourceEpoch.isEmpty else { throw V1ControlCodecError.invalidField("conversation_resync") }
+            return .conversationResync(reference: try SessionReference(value.ref), viewID: value.viewID, sourceEpoch: value.sourceEpoch, reason: value.reason)
+        case "conversation_closed":
+            let value = try decodePayload(ConversationClosedPayload.self, from: payload)
+            guard let reason = ConversationClosedReason(rawValue: value.reason) else { throw V1ControlCodecError.invalidField("conversation_closed.reason") }
+            return .conversationClosed(reference: try SessionReference(value.ref), reason: reason)
+        default:
+            // Future conversation frames are additive; they must not break the terminal link.
+            return .conversationIgnored(type: type)
+        }
+    }
+
     private func encodeEnvelope<Payload: Encodable>(type: String, payload: Payload) throws -> Data {
         let data = try JSONEncoder().encode(OutgoingEnvelope(version: UInt16(ProtocolV1.version), type: type, payload: payload))
         guard data.count <= Self.maximumControlMessageBytes else { throw V1ControlCodecError.payloadTooLarge }
@@ -233,7 +303,8 @@ public struct JSONV1Codec: V1ControlCodecProtocol {
             title: payload.title ?? "",
             sessionName: payload.sessionName,
             health: payload.health ?? "",
-            status: payload.status ?? payload.activity
+            status: payload.status ?? payload.activity,
+            conversation: payload.conversation ?? false
         )
         guard record.isValid else { throw V1ControlCodecError.invalidField("session") }
         return record
@@ -342,7 +413,73 @@ private struct DynamicKey: CodingKey, Hashable {
 
 private struct AuthPayload: Encodable {
     let token: String
+    let capabilities: [String]
 }
+
+private struct ConversationSubscribePayload: Encodable {
+    let ref: String
+    let historyMode = "windowed"
+    enum CodingKeys: String, CodingKey { case ref, historyMode = "history_mode" }
+}
+private struct ConversationCommandPayload: Encodable {
+    let ref: String
+    let id: String
+    let command: JSONValue
+}
+private struct ConversationAppliedPayload: Encodable {
+    let ref: String
+    let viewID: String
+    let sourceEpoch: String
+    let commitSeq: UInt64
+    enum CodingKeys: String, CodingKey { case ref, viewID = "view_id", sourceEpoch = "source_epoch", commitSeq = "commit_seq" }
+}
+private struct ConversationReadyPayload: Decodable {
+    let ref: String
+    let running: Bool?
+    let mode: String?
+    let historyMode: String?
+    let sessionID: String?
+    let viewID: String?
+    let sourceEpoch: String?
+    let snapshotSeq: UInt64?
+    let windowToken: String?
+    let historySupport: String?
+    let sourceOmitted: Bool?
+    enum CodingKeys: String, CodingKey {
+        case ref, running, mode
+        case historyMode = "history_mode", sessionID = "session_id", viewID = "view_id", sourceEpoch = "source_epoch"
+        case snapshotSeq = "snapshot_seq", windowToken = "window_token", historySupport = "history_support", sourceOmitted = "source_omitted"
+    }
+}
+private struct ConversationUpdatePayload: Decodable {
+    let ref: String
+    let viewID: String
+    let sourceEpoch: String
+    let baseSeq: UInt64
+    let commitSeq: UInt64
+    let upserts: [ConversationItem]?
+    let removes: [String]?
+    let state: ConversationLiveState?
+    enum CodingKeys: String, CodingKey {
+        case ref, upserts, removes, state
+        case viewID = "view_id", sourceEpoch = "source_epoch", baseSeq = "base_seq", commitSeq = "commit_seq"
+    }
+}
+private struct ConversationEventPayload: Decodable {
+    let ref: String
+    let viewID: String?
+    let sourceEpoch: String?
+    let event: JSONValue
+    enum CodingKeys: String, CodingKey { case ref, event, viewID = "view_id", sourceEpoch = "source_epoch" }
+}
+private struct ConversationResyncPayload: Decodable {
+    let ref: String
+    let viewID: String
+    let sourceEpoch: String
+    let reason: String
+    enum CodingKeys: String, CodingKey { case ref, reason, viewID = "view_id", sourceEpoch = "source_epoch" }
+}
+private struct ConversationClosedPayload: Decodable { let ref: String; let reason: String }
 
 private struct ListPayload: Encodable {
     let requestID: UInt32
@@ -444,7 +581,8 @@ private struct AuthAckPayload: Decodable {
     let ok: Bool
     let reason: String?
     let agentLaunchers: [AgentLauncher]?
-    enum CodingKeys: String, CodingKey { case ok, reason, agentLaunchers = "agent_launchers" }
+    let capabilities: [String]?
+    enum CodingKeys: String, CodingKey { case ok, reason, capabilities, agentLaunchers = "agent_launchers" }
 }
 private struct CreateAgentResultPayload: Decodable {
     let requestID: UInt32
@@ -552,8 +690,9 @@ private struct WireSessionPayload: Decodable {
     let sessionName: String?
     let health: String?
     let status: String?
+    let conversation: Bool?
     enum CodingKeys: String, CodingKey {
-        case reference = "ref", name, workingDirectory = "cwd", state, rows, columns = "cols", provider, activity, title, health, status
+        case reference = "ref", name, workingDirectory = "cwd", state, rows, columns = "cols", provider, activity, title, health, status, conversation
         case windowName = "window_name"
         case windowIndex = "window_index"
         case sessionName = "session_name"

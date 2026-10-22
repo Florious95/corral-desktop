@@ -204,7 +204,7 @@ public final class CorralMVPCoordinator: @preconcurrency TerminalViewDelegate {
             switch control {
             case let .listing(listing): applyListing(listing)
             case let .listDelta(delta): applyListDelta(delta)
-            case let .authAck(ok, reason, _):
+            case let .authAck(ok, reason, _, _):
                 if !ok { lastConnectionError = reason ?? "Authentication failed" }
             case let .error(_, reason): lastConnectionError = reason
             default: break

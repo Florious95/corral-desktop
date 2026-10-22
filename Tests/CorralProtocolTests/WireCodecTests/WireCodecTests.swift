@@ -92,7 +92,7 @@ final class WireCodecTests: XCTestCase {
     func testAgentResultAndAuthAckMessagesDecodeLosslessly() throws {
         let codec = JSONV1Codec()
         let auth = Data(#"{"v":1,"type":"auth_ack","payload":{"ok":true,"agent_launchers":[{"provider":"codex","display_name":"Codex CLI","supports_bypass":true,"naming":"tmux"}]}}"#.utf8)
-        guard case let .authAck(ok, reason, launchers) = try codec.decodeControlMessage(auth) else {
+        guard case let .authAck(ok, reason, launchers, _) = try codec.decodeControlMessage(auth) else {
             return XCTFail("Expected auth_ack")
         }
         XCTAssertTrue(ok)

@@ -490,11 +490,18 @@ public enum ClientCommand: Equatable, Sendable {
     case overlayUnsubscribe
     case createAgent(CreateAgentRequest)
     case closeSession(CloseSessionRequest)
+    /// Windowed structured view of one managed conversation pane; requires both conversation capabilities.
+    case conversationSubscribe(reference: SessionReference)
+    case conversationUnsubscribe(reference: SessionReference)
+    /// One whitelisted native command object; `id` correlates the native `response` and is 1...64 bytes.
+    case conversationCommand(reference: SessionReference, id: String, command: Data)
+    /// Acknowledges a completely adopted, contiguous live commit and releases its credit.
+    case conversationApplied(reference: SessionReference, viewID: String, sourceEpoch: String, commitSeq: UInt64)
 }
 
 /// Server-to-client control messages only; these cases are decodable, never sendable by SessionLink.
 public enum ControlMessage: Equatable, Sendable {
-    case authAck(ok: Bool, reason: String?, launchers: [AgentLauncher] = [])
+    case authAck(ok: Bool, reason: String?, launchers: [AgentLauncher] = [], capabilities: [String] = [])
     case listing(SessionListing)
     case listDelta(SessionListDelta)
     case inputAck(seq: UInt32, ok: Bool, reason: InputFailureReason?)
@@ -506,6 +513,15 @@ public enum ControlMessage: Equatable, Sendable {
     case overlayFrame(sequence: UInt64, text: String, rows: UInt16, columns: UInt16)
     case error(code: WireErrorCode, reason: String?)
     case paneModeChanged(reference: SessionReference, inCopyMode: Bool)
+    case conversationReady(ConversationReady)
+    case conversationUpdate(ConversationUpdate)
+    case conversationEvent(ConversationEvent)
+    case conversationResync(reference: SessionReference, viewID: String, sourceEpoch: String, reason: String)
+    case conversationClosed(reference: SessionReference, reason: ConversationClosedReason)
+    /// A negotiated GUI frame this client does not consume (e.g. a legacy ready). It never breaks the terminal link.
+    case conversationIgnored(type: String)
+    /// A known GUI frame that failed validation: only that pane's view recovers; the terminal link stays up.
+    case conversationMalformed(reference: SessionReference?, type: String)
 }
 
 public struct CommandSendReceipt: Equatable, Sendable {

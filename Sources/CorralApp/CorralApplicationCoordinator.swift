@@ -92,6 +92,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         var catalogBaselineGrid: GridSize?
         /// A post-presence scan is authoritative even if the phone chose the previous catalog grid.
         var mobileGridRequestID: UInt32?
+        /// Core lists this pane as a managed structured conversation (`conversation_subscribe` allowed).
+        var conversationCapable = false
     }
 
     private struct ConnectionConfiguration {
@@ -202,6 +204,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var pendingUnsubscriptions = Set<SessionKey>()
     private var subscriptionSnapshotTimeout: Task<Void, Never>?
     private var activeSession: SessionKey?
+    /// Structured views of managed Pi panes, multiplexed over the same link. Core allows eight per connection.
+    private var conversations: [SessionKey: ConversationSessionController] = [:]
+    private var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
+    private let conversationHistoryClient = ConversationHistoryClient()
+    private static let maximumConversationViews = 8
 
     private struct PendingInput {
         let session: SessionKey
@@ -303,6 +310,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             self.applyTerminalStageAppearance()
             let isDark = self.isDarkTerminalTheme
             for (_, view) in self.terminalRegistry.allViews { view.applyTerminalTheme(isDark: isDark) }
+            for controller in self.conversations.values { controller.pane.refreshTheme() }
         }
         workspaceView.tabBar.onSelectTab = { [weak self] id in
             Task { @MainActor in await self?.selectWorkspaceTab(id: id) }
@@ -471,6 +479,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         subscriptionSnapshotTimeout = nil
         subscriptionUpdateRequested = false
         pendingUnsubscriptions.removeAll()
+        conversations.removeAll()
+        conversationCapabilities = nil
         await sessionLink.disconnect()
         connection = nil
         connected = false
@@ -660,6 +670,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             view.setTerminalFont(family: preferences.fontFamily, size: preferences.fontSize)
             view.applyTerminalTheme(isDark: isDarkTerminalTheme)
         }
+        for controller in conversations.values { controller.pane.refreshTheme() }
     }
 
     private var workspaceAppearanceOverride: NSAppearance? {
@@ -846,17 +857,29 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         for (key, view) in terminalRegistry.allViews {
             if let runtime = sessions[key] { views[runtime.descriptor.id] = view }
         }
+        var conversationViews: [SessionID: CorralConversationPaneView] = [:]
+        for (key, controller) in conversations where controller.presentsConversation {
+            if let runtime = sessions[key] { conversationViews[runtime.descriptor.id] = controller.pane }
+        }
         terminalStageView.update(
             root: layoutPreview ?? workspaceState.visibleRoot,
             focusedSessionID: workspaceState.visibleSessionID,
             views: views,
-            backgroundRoots: workspaceState.tabs.compactMap(\.root)
+            backgroundRoots: workspaceState.tabs.compactMap(\.root),
+            conversationViews: conversationViews
         )
         applyTerminalStageAppearance()
     }
 
     private func focusVisibleTerminal(force: Bool = false) {
         guard force || !workspaceView.tabBar.hasActiveTitleEditor else { return }
+        if let sessionID = workspaceState.visibleSessionID, let key = sessionKey(for: sessionID),
+           let controller = conversations[key], controller.presentsConversation {
+            let pane = controller.pane
+            if let responder = windowController.window?.firstResponder as? NSView, responder.isDescendant(of: pane), !force { return }
+            windowController.window?.makeFirstResponder(pane.preferredFirstResponder)
+            return
+        }
         guard let sessionID = workspaceState.visibleSessionID,
               let key = sessionKey(for: sessionID),
               let view = terminalRegistry.view(for: key), !view.isHidden else {
@@ -967,6 +990,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     var activeTerminalSessionKey: SessionKey? { activeSession }
 
     func terminalView(for key: SessionKey) -> CorralNativeTerminalView? { terminalRegistry.view(for: key) }
+    var conversationControllers: [ConversationSessionController] { sessionOrder.compactMap { conversations[$0] } }
     func terminalKey(for view: TerminalView) -> SessionKey? { terminalRegistry.key(for: view) }
 
     func terminalView(for reference: SessionReference) -> CorralNativeTerminalView? {
@@ -1769,6 +1793,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func receive(_ envelope: SessionEventEnvelope) async {
+        // A reconnect's auth_ack precedes its authenticatedReady; record what that epoch negotiated.
+        if case let .control(.authAck(true, _, _, capabilities)) = envelope.event,
+           let current = connection, envelope.origin.linkInstanceID == current.linkInstanceID,
+           envelope.origin.deviceID == current.deviceID, envelope.origin.connectionEpoch >= current.connectionEpoch {
+            conversationCapabilities = (envelope.origin.connectionEpoch, Set(capabilities))
+        }
         if case let .connectionChanged(state) = envelope.event,
            let current = connection,
            envelope.origin.linkInstanceID == current.linkInstanceID,
@@ -1785,6 +1815,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     connection = updated
                     listingRequestedEpoch = nil
                     listingSequence = 0
+                    rebindConversations()
                 }
                 connected = true
                 activeRoute = await sessionLink.activeEndpoint() ?? activeRoute
@@ -1815,7 +1846,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             await writeTelemetry()
         case let .control(control):
             switch control {
-            case let .authAck(ok, reason, launchers):
+            case let .authAck(ok, reason, launchers, _):
                 availableAgentLaunchers = ok ? launchers : []
                 lastConnectionError = ok ? nil : reason
                 await writeTelemetry()
@@ -1907,8 +1938,21 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 acknowledgeInput(sequence)
                 if !ok { lastConnectionError = "input_ack failed: \(reason?.rawValue ?? "unknown")" }
                 await writeTelemetry()
-            case .level2Frame, .level2Heartbeat, .overlayFrame, .paneModeChanged:
+            case .level2Frame, .level2Heartbeat, .overlayFrame, .paneModeChanged, .conversationIgnored:
                 await writeTelemetry()
+            case let .conversationReady(ready):
+                conversationController(for: ready.reference, origin: envelope.origin)?.handleReady(ready)
+            case let .conversationUpdate(update):
+                conversationController(for: update.reference, origin: envelope.origin)?.handleUpdate(update)
+            case let .conversationEvent(event):
+                conversationController(for: event.reference, origin: envelope.origin)?.handleEvent(event)
+            case let .conversationResync(reference, viewID, _, reason):
+                conversationController(for: reference, origin: envelope.origin)?.handleResync(viewID: viewID, reason: reason)
+            case let .conversationClosed(reference, reason):
+                conversationController(for: reference, origin: envelope.origin)?.handleClosed(reason)
+            case let .conversationMalformed(reference, type):
+                lastConnectionError = "Malformed \(type) frame; the structured view recovers locally."
+                if let reference { conversationController(for: reference, origin: envelope.origin)?.handleMalformed() }
             }
         case let .frame(frame): await applyFrame(frame, origin: envelope.origin)
         }
@@ -1925,6 +1969,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 }
             }
             sessions.removeValue(forKey: key)
+            conversations.removeValue(forKey: key)?.stop()
             _ = terminalRegistry.remove(key)
             let removedUIID = sessionUIIDs.removeValue(forKey: workspaceSessionID(for: key))
             if let removedUIID { uiSessionKeys.removeValue(forKey: removedUIID) }
@@ -2027,28 +2072,109 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             if descriptor.size == runtime.requestedGrid { runtime.catalogBaselineGrid = descriptor.size }
             runtime.descriptor = descriptor
             runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
+            runtime.conversationCapable = record.conversation
             sessions[key] = runtime
             // A phone that rotates or resizes reaches the desktop as a new catalog grid.
             applyGridOwnership(key)
         } else {
-            sessions[key] = RuntimeSession(descriptor: descriptor, lastAppliedReceiveOrdinal: origin.receiveOrdinal)
+            sessions[key] = RuntimeSession(descriptor: descriptor, lastAppliedReceiveOrdinal: origin.receiveOrdinal, conversationCapable: record.conversation)
         }
         _ = uiSessionID(for: descriptor.id)
         return key
+    }
+
+    // MARK: Structured conversations
+
+    /// GUI frames are used only when this epoch's auth_ack echoed both conversation capabilities.
+    private var conversationEnabled: Bool {
+        guard let connection, let negotiated = conversationCapabilities, negotiated.epoch == connection.connectionEpoch else { return false }
+        return ConversationCapability.offered.allSatisfy(negotiated.values.contains)
+    }
+
+    private func presentsConversation(_ key: SessionKey) -> Bool {
+        conversations[key]?.presentsConversation == true
+    }
+
+    private func conversationController(for reference: SessionReference, origin: SessionEventOrigin) -> ConversationSessionController? {
+        let key = SessionKey(deviceID: origin.deviceID, reference: reference)
+        guard let controller = conversations[key], controller.connectionEpoch == origin.connectionEpoch else { return nil }
+        return controller
+    }
+
+    /// Retained managed-conversation panes get one windowed view each: visible panes first, then Tab order.
+    private func synchronizeConversations() {
+        var desired: [SessionKey] = []
+        if conversationEnabled, let connection {
+            let retained = retainedSessionIDs
+            let visible = visibleSessionKeys()
+            for key in visible + sessionOrder.filter({ !visible.contains($0) }) where key.deviceID == connection.deviceID {
+                guard desired.count < Self.maximumConversationViews, !desired.contains(key), let runtime = sessions[key],
+                      runtime.conversationCapable, retained.contains(runtime.descriptor.id) else { continue }
+                desired.append(key)
+            }
+        }
+        for (key, controller) in conversations where !desired.contains(key) {
+            controller.stop()
+            conversations.removeValue(forKey: key)
+        }
+        guard let connection else { return }
+        for key in desired {
+            if let controller = conversations[key] {
+                controller.title = sessions[key]?.descriptor.name ?? controller.title
+                continue
+            }
+            let controller = ConversationSessionController(key: key, connectionEpoch: connection.connectionEpoch)
+            controller.title = sessions[key]?.descriptor.name ?? key.reference.rawValue
+            controller.provider = sessions[key]?.descriptor.provider
+            controller.send = { [weak self, weak controller] command in
+                guard let self, let controller, self.connection?.connectionEpoch == controller.connectionEpoch else {
+                    throw SessionLinkFailure.disconnected
+                }
+                let receipt = try await self.sessionLink.send(command)
+                guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
+            }
+            controller.fetch = { [weak self, weak controller] request in
+                guard let self, let controller, self.connection?.connectionEpoch == controller.connectionEpoch,
+                      let route = await self.sessionLink.activeEndpoint(), let token = self.activeConnectionConfiguration?.token else {
+                    throw ConversationHistoryFailure("network")
+                }
+                return try await self.conversationHistoryClient.fetch(request, route: route, token: token)
+            }
+            controller.onPresentationChange = { [weak self] in self?.scheduleSubscriptionUpdate() }
+            controller.pane.onFocus = { [weak self] in
+                guard let self, let id = self.sessions[key]?.descriptor.id else { return }
+                if self.workspaceState.visibleSessionID != id { Task { @MainActor in await self.focusWorkspacePane(id) } }
+                else { self.focusVisibleTerminal() }
+            }
+            conversations[key] = controller
+            controller.start()
+        }
+    }
+
+    private func rebindConversations() {
+        guard let connection else { return }
+        guard conversationEnabled else {
+            conversations.values.forEach { $0.stop() }
+            conversations.removeAll()
+            return
+        }
+        for controller in conversations.values { controller.rebind(to: connection.connectionEpoch) }
     }
 
     private func scheduleSubscriptionUpdate() {
         // UI identity and focus never wait for the WebSocket writer. Removed
         // previews leave a release intent even if their subscribe is still in flight.
         let retained = retainedSessionIDs
+        synchronizeConversations()
         for (key, view) in terminalRegistry.allViews {
+            // A pane presented as a structured conversation owns no terminal view, subscription, grid or input.
             guard let runtime = sessions[key],
-                  !retained.contains(runtime.descriptor.id),
+                  !retained.contains(runtime.descriptor.id) || presentsConversation(key),
                   terminalRegistry.view(for: key) === view else { continue }
             if runtime.subscribed || runtime.subscriptionPending { pendingUnsubscriptions.insert(key) }
             terminalRegistry.remove(key)
         }
-        for key in visibleSessionKeys() { _ = ensureTerminalView(for: key) }
+        for key in visibleSessionKeys() where !presentsConversation(key) { _ = ensureTerminalView(for: key) }
         updateTerminalStage()
         focusVisibleTerminal()
         subscriptionUpdateRequested = true

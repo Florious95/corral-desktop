@@ -88,6 +88,8 @@ public struct WireSessionRecord: Codable, Equatable, Sendable {
     public let sessionName: String?
     public let health: String
     public let status: String
+    /// Core marks a verified structured-agent pane that accepts `conversation_subscribe`. Absent means terminal only.
+    public let conversation: Bool
 
     public init(
         reference: SessionReference,
@@ -103,7 +105,8 @@ public struct WireSessionRecord: Codable, Equatable, Sendable {
         title: String = "",
         sessionName: String? = nil,
         health: String = "",
-        status: String? = nil
+        status: String? = nil,
+        conversation: Bool = false
     ) {
         self.reference = reference
         self.name = name
@@ -119,6 +122,7 @@ public struct WireSessionRecord: Codable, Equatable, Sendable {
         self.sessionName = sessionName
         self.health = health
         self.status = status ?? activity ?? ""
+        self.conversation = conversation
     }
 
     public init(from decoder: Decoder) throws {
@@ -139,6 +143,7 @@ public struct WireSessionRecord: Codable, Equatable, Sendable {
         self.sessionName = try values.decodeIfPresent(String.self, forKey: .sessionName)
         self.health = try values.decodeIfPresent(String.self, forKey: .health) ?? ""
         self.status = try values.decodeIfPresent(String.self, forKey: .status) ?? activity ?? ""
+        self.conversation = try values.decodeIfPresent(Bool.self, forKey: .conversation) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -156,10 +161,11 @@ public struct WireSessionRecord: Codable, Equatable, Sendable {
         try values.encode(status, forKey: .status)
         try values.encode(rows, forKey: .rows)
         try values.encode(columns, forKey: .columns)
+        if conversation { try values.encode(true, forKey: .conversation) }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case name, provider, activity, title, health, status, rows
+        case name, provider, activity, title, health, status, rows, conversation
         case reference = "ref"
         case workingDirectory = "cwd"
         case windowName = "window_name"

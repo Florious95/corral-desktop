@@ -397,7 +397,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
         let control: ControlMessage
         do { control = try codec.decodeControlMessage(Data(text.utf8)) }
         catch { throw SessionLinkFailure.protocolViolation("Invalid authentication acknowledgement: \(error)") }
-        guard case let .authAck(ok, _, _) = control else {
+        guard case let .authAck(ok, _, _, _) = control else {
             throw SessionLinkFailure.protocolViolation("Expected auth_ack before other controls")
         }
         guard ok else { throw SessionLinkFailure.unauthorized }
@@ -530,7 +530,7 @@ public actor URLSessionSessionLink: SessionLinkProtocol {
             let control: ControlMessage
             do { control = try codec.decodeControlMessage(bytes) }
             catch { throw SessionLinkFailure.protocolViolation("Invalid control message: \(error)") }
-            if case let .authAck(ok, _, _) = control {
+            if case let .authAck(ok, _, _, _) = control {
                 if !ok { throw SessionLinkFailure.unauthorized }
                 throw SessionLinkFailure.protocolViolation("Unexpected auth_ack after authentication")
             }

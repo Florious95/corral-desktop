@@ -265,6 +265,31 @@ final class CorralAcceptanceDriver {
             guard let name = command["button"] as? String, let content = window.contentView,
                   let button = descendants(content).compactMap({ $0 as? NSButton }).first(where: { $0.title == name || $0.identifier?.rawValue == name }) else { throw Failure.missingView }
             button.performClick(nil)
+        case "conversation-scroll":
+            // Scrolls the structured transcript's own clip view (not OS wheel input).
+            let pane = try conversationPane(command)
+            let clip = pane.transcript.scrollView.contentView
+            let target = command["to"] as? String
+            let y: CGFloat = target == "top" ? 0 : target == "bottom" ? max(0, (pane.transcript.scrollView.documentView?.frame.height ?? 0) - clip.bounds.height)
+                : clip.bounds.minY + (command["delta"] as? CGFloat ?? 0)
+            clip.scroll(to: NSPoint(x: 0, y: max(0, y)))
+            pane.transcript.scrollView.reflectScrolledClipView(clip)
+        case "conversation-click":
+            // Clicks a structured row control (disclosure, tool header, retry) through the window like a pointer.
+            let pane = try conversationPane(command)
+            guard let identifier = command["identifier"] as? String else { throw Failure.invalidCommand }
+            let index = command["index"] as? Int ?? 0
+            // Only controls actually on screen; overscan rows outside the clip view are not clickable.
+            let matches = descendants(pane).filter { $0.accessibilityIdentifier() == identifier && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty }
+                .sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
+            guard matches.indices.contains(index) else { throw Failure.missingView }
+            let target = matches[index]
+            let point = target.convert(CGPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
+            guard let content = window.contentView, let hit = content.hitTest(content.convert(point, from: nil)),
+                  hit === target || hit.isDescendant(of: target) else {
+                throw HitTestMismatch(description: String(describing: window.contentView?.hitTest(window.contentView!.convert(point, from: nil))))
+            }
+            try click(target)
         case "quit":
             await coordinator.stop()
             NSApp.terminate(nil)
@@ -302,6 +327,49 @@ final class CorralAcceptanceDriver {
         if events[0].type == .leftMouseDown { lastMouseDownDispatchUptime = ProcessInfo.processInfo.systemUptime }
         window.sendEvent(events[0])
         while let event = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantPast, inMode: .default, dequeue: true) { window.sendEvent(event) }
+    }
+
+    private func conversationPane(_ command: [String: Any]) throws -> CorralConversationPaneView {
+        guard let ref = command["ref"] as? String,
+              let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }) else { throw Failure.missingView }
+        return controller.pane
+    }
+
+    private func conversationSnapshot(window: NSWindow) -> [[String: Any]] {
+        coordinator.conversationControllers.map { controller in
+            let pane = controller.pane
+            let state = controller.paneState()
+            let rows: [[String: Any]] = state.rows.map { row in
+                var kind: String
+                switch row.kind {
+                case .user: kind = "user"
+                case .assistant: kind = "assistant"
+                case .reasoning: kind = "reasoning"
+                case .tool: kind = "tool"
+                case .notice: kind = "notice"
+                case let .other(value): kind = value
+                }
+                return ["id": row.id, "kind": kind, "revision": row.revision, "text": String(row.text.prefix(400)),
+                        "textBytes": row.text.utf8.count, "body": String(describing: row.body), "streaming": row.streaming,
+                        "toolName": row.toolName ?? "", "toolPhase": row.toolPhase ?? "", "expanded": pane.transcript.expanded.contains(row.id),
+                        "toolOutput": row.toolOutput.map { String($0.prefix(400)) } ?? NSNull()]
+            }
+            let frame = pane.convert(pane.bounds, to: nil)
+            let clip = pane.transcript.scrollView.contentView.bounds
+            return [
+                "ref": controller.key.reference.rawValue, "presented": controller.presentsConversation, "hidden": pane.isHiddenOrHasHiddenAncestor,
+                "phase": String(describing: controller.phase), "viewID": controller.transcript?.viewID ?? "",
+                "liveSeq": controller.transcript?.liveSeq ?? 0, "snapshotSeq": controller.ready?.snapshotSeq ?? 0,
+                "title": state.title, "model": state.modelLabel ?? "", "running": state.running.map { $0 as Any } ?? NSNull(),
+                "older": String(describing: state.older), "rows": rows, "rowCount": rows.count,
+                "focused": (window.firstResponder as? NSView)?.isDescendant(of: pane) == true,
+                "followsTail": pane.transcript.followsTail, "scrollY": clip.minY, "viewportHeight": clip.height,
+                "documentHeight": pane.transcript.scrollView.documentView?.frame.height ?? 0,
+                "frame": rect(frame), "pixelROI": rect(CGRect(x: frame.minX * window.backingScaleFactor,
+                    y: (window.frame.height - frame.maxY) * window.backingScaleFactor,
+                    width: frame.width * window.backingScaleFactor, height: frame.height * window.backingScaleFactor))
+            ]
+        }
     }
 
     private func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
@@ -352,7 +420,7 @@ final class CorralAcceptanceDriver {
             "inputAckSequence": coordinator.lastInputAcknowledgement?.sequence ?? 0,
             "inputAckSucceeded": coordinator.lastInputAcknowledgement?.succeeded ?? false,
             "workspace": try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)),
-            "subscribed": coordinator.subscribedSessionIDs, "panes": panes,
+            "subscribed": coordinator.subscribedSessionIDs, "panes": panes, "conversations": conversationSnapshot(window: window),
             "previewUID": state.previewUID?.rawValue ?? "",
             "visibleSessionID": state.visibleSessionID?.rawValue ?? "",
             "agents": workspace.sidebar.agents.map { ["name": $0.name, "id": $0.sessionID?.rawValue ?? ""] },
@@ -367,6 +435,8 @@ final class CorralAcceptanceDriver {
         ]
     }
 }
+
+private struct HitTestMismatch: Error, CustomStringConvertible { let description: String }
 
 @MainActor
 private final class AcceptanceScrollEvent: NSEvent {
