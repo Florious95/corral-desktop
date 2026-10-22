@@ -51,8 +51,9 @@ final class CorralAcceptanceDriver {
                 if FileManager.default.fileExists(atPath: commandURL.path) {
                     do {
                         let data = try Data(contentsOf: commandURL)
-                        try FileManager.default.removeItem(at: commandURL)
                         let command = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+                        try record("received", fields: ["command": command])
+                        try FileManager.default.removeItem(at: commandURL)
                         let origin = ["scroll": "hit-tested-scroll-handler", "ime": "NSTextInputClient",
                                       "hover": "drag-destination-handler", "drop": "drag-destination-handler"][command["op"] as? String ?? ""] ?? "appkit-synthetic"
                         var reply: [String: Any] = ["id": command["id"] ?? "", "origin": origin]
@@ -64,6 +65,7 @@ final class CorralAcceptanceDriver {
                             reply["ok"] = false
                             reply["error"] = String(describing: error)
                         }
+                        try record("completed", fields: ["id": command["id"] ?? "", "ok": reply["ok"] ?? false, "error": reply["error"] ?? NSNull()])
                         reply["state"] = try snapshot()
                         let output = try JSONSerialization.data(withJSONObject: reply, options: [.prettyPrinted, .sortedKeys])
                         try output.write(to: directory.appendingPathComponent("result.json"), options: .atomic)
@@ -74,6 +76,19 @@ final class CorralAcceptanceDriver {
                 try? await Task.sleep(for: .milliseconds(30))
             }
         }
+    }
+
+    private func record(_ stage: String, fields: [String: Any] = [:]) throws {
+        let url = directory.appendingPathComponent("command-receipts.jsonl")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw Failure.unsafeConfiguration }
+        }
+        var row = fields
+        row["stage"] = stage; row["pid"] = getpid(); row["time"] = Date().timeIntervalSince1970
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]) + Data([10]))
     }
 
     private func terminal(_ command: [String: Any]) throws -> CorralNativeTerminalView {
@@ -339,14 +354,16 @@ final class CorralAcceptanceDriver {
                   let panel = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref })?.operations.panel,
                   panel.selectChoice(choice) else { throw Failure.missingView }
         case "action-save":
-            // Actual NSSavePanel OK/cancel action, scoped to the private acceptance directory; no host keyboard/mouse.
+            // Native remote save button (not unimplemented NSSavePanel.ok:); no host keyboard/mouse.
             guard let ref = command["ref"] as? String,
                   let panel = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref })?.operations.panel?.savePanel else { throw Failure.missingView }
             if command["cancel"] as? Bool == true { panel.cancel(nil) }
             else {
-                panel.directoryURL = directory
-                panel.nameFieldStringValue = "exported-session.html"
-                panel.ok(nil)
+                guard panel.directoryURL?.resolvingSymlinksInPath() == directory, panel.nameFieldStringValue == "exported-session.html" else { throw Failure.unsafeConfiguration }
+                try record("save_press_requested", fields: ["id": command["id"] ?? ""])
+                guard let prompt = panel.prompt else { throw Failure.missingView }
+                try await Task.detached { try CorralAcceptanceSavePanel.press(prompt: prompt) }.value
+                try record("save_press_returned", fields: ["id": command["id"] ?? ""])
             }
         case "conversation-action":
             // Native menu item target/action, without entering NSMenu's modal pointer-tracking loop.
@@ -355,6 +372,20 @@ final class CorralAcceptanceDriver {
                   let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }),
                   !controller.header.moreButton.isHiddenOrHasHiddenAncestor,
                   let menu = controller.header.makeActionMenu?(), menu.performAction(action) else { throw Failure.missingView }
+            if action == .export {
+                controller.operations.panel?.savePanelPresenter = { [weak self] panel, window, completion in
+                    guard let self, let window else { completion(.cancel, nil); return }
+                    // Configure before presenting: post-presentation setters do not update the remote panel.
+                    panel.directoryURL = self.directory
+                    panel.nameFieldStringValue = "exported-session.html"
+                    panel.prompt = "保存 HTML"
+                    panel.beginSheetModal(for: window) { response in
+                        try? self.record("save_panel_completed", fields: ["response": response.rawValue, "filename": panel.url?.lastPathComponent ?? ""])
+                        completion(response, panel.url)
+                    }
+                    try? self.record("save_panel_presented")
+                }
+            }
         case "conversation-mode":
             // Presses the viewport header's GUI/terminal segment through the window, like a pointer click.
             guard let ref = command["ref"] as? String, let mode = command["mode"] as? String,
