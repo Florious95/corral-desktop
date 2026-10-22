@@ -280,6 +280,89 @@ final class ConversationSessionControllerTests: XCTestCase {
         controller.stop()
     }
 
+    func testRepeatedSourceChangesResubscribeWithoutSpendingNetworkRecoveryBudget() async throws {
+        let controller = try await readyController()
+        for index in 1...5 {
+            let old = try XCTUnwrap(controller.ready?.viewID)
+            let before = subscribes
+            controller.handleResync(viewID: old, reason: "source_changed")
+            controller.handleResync(viewID: old, reason: "source_changed")
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertEqual(subscribes, before + 1, "one replacement for each retired source, including after the third action")
+            controller.handleReady(ready(view: "replacement-\(index)"))
+            await settle()
+            let initial = pending.removeFirst()
+            initial.continuation.resume(returning: try page(for: initial.request, items: []))
+            await settle()
+            XCTAssertEqual(controller.phase, .ready)
+        }
+        controller.stop()
+    }
+
+    func testSourceChangeWaitsForMutationReceiptThenSubscribesToCommittedSession() async throws {
+        let controller = try await readyController()
+        XCTAssertTrue(controller.performAction(.newSession))
+        controller.operations.panel?.onSubmit?(nil, "")
+        await settle()
+        let id = try XCTUnwrap(inputCommands("new_session").last?.0)
+        let before = subscribes
+        controller.handleResync(viewID: "v1", reason: "source_changed")
+        await settle()
+        XCTAssertEqual(subscribes, before, "do not capture an intermediate source while Core is mutating")
+        controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": ["session_id": "committed"]]))
+        await settle()
+        XCTAssertEqual(subscribes, before + 1, "a receipt must resume a controller already recovering")
+        controller.handleReady(ready(view: "new-view", sid: "committed"))
+        await settle()
+        let initial = pending.removeFirst()
+        initial.continuation.resume(returning: try page(for: initial.request, items: []))
+        await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertTrue(controller.operations.panel?.completed == true)
+        controller.stop()
+    }
+
+    func testCatalogAndRenameRetirementWaitForReceiptAndRecoverOnSuccessOrRejection() async throws {
+        for action: CorralActionID in [.history, .fork, .rename] {
+            let controller = try await readyController()
+            XCTAssertTrue(controller.performAction(action))
+            if action == .rename { controller.operations.rename("new title") }
+            await settle()
+            let command = action == .history ? "list_sessions" : action == .fork ? "fork_points" : "rename_session"
+            let id = try XCTUnwrap(inputCommands(command).last?.0)
+            let before = subscribes
+            controller.handleResync(viewID: "v1", reason: "source_changed")
+            await settle()
+            XCTAssertEqual(subscribes, before)
+            let data: [String: Any] = action == .history ? ["sessions": []] : ["session_id": "sid", "points": []]
+            controller.handleEvent(event(["type": "response", "id": id, "success": action != .rename, "data": data, "error": "explicit native rejection"]))
+            await settle()
+            XCTAssertEqual(subscribes, before + 1, "even a rejected action must restore its retired source")
+            controller.handleReady(ready(view: "restored"))
+            await settle()
+            let initial = pending.removeFirst()
+            initial.continuation.resume(returning: try page(for: initial.request, items: []))
+            await settle()
+            XCTAssertEqual(controller.phase, .ready)
+            controller.stop()
+        }
+    }
+
+    func testRetiredInitialHTTPResponseCannotCancelSourceResubscription() async throws {
+        let controller = makeController()
+        controller.start()
+        controller.handleReady(ready(view: "retired"))
+        await settle()
+        let initial = pending.removeFirst()
+        let before = subscribes
+        controller.handleResync(viewID: "retired", reason: "source_changed")
+        initial.continuation.resume(returning: try page(for: initial.request, items: [row("obsolete", "a")]))
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNotEqual(controller.phase, .ready, "retired HTTP completion is not a ready source")
+        XCTAssertEqual(subscribes, before + 1)
+        controller.stop()
+    }
+
     private func usageCommands() -> [(String, String)] {
         sent.compactMap {
             guard case let .conversationCommand(reference, id, body) = $0,

@@ -49,6 +49,7 @@ final class ConversationActionsController {
     private var exportID: UUID?
     var isBusy: Bool { pending != nil || exportID != nil }
     var expectsSessionReplacement: Bool { pending?.changesSession == true }
+    var awaitingNativeReceipt: Bool { pending != nil && pending?.target == nil }
 
     init(reference: SessionReference, context: @escaping () -> Context) { self.reference = reference; self.context = context }
 

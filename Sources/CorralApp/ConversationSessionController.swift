@@ -127,16 +127,17 @@ final class ConversationSessionController {
         operations.send = { [weak self] command in guard let self else { throw SessionLinkFailure.disconnected }; try await self.send(command) }
         operations.download = { [weak self] sid in guard let self else { throw SessionLinkFailure.disconnected }; return try await self.exportDownload(sid) }
         operations.window = { [weak self] in self?.header.window }
-        operations.onStateChange = { [weak self] in self?.publish() }
+        operations.onStateChange = { [weak self] in
+            guard let self else { return }
+            self.publish()
+            if self.retiredViewID != nil { self.refreshMutationView() }
+        }
         operations.onBeginRename = { [weak self] in self?.header.beginRename($0) }
         operations.onRenameState = { [weak self] in self?.header.setRenamePending($0, error: $1) }
         operations.onEndRename = { [weak self] in self?.header.endRename() }
         operations.onRenamed = { [weak self] name in self?.nativeState.sessionName = name; self?.publish(); self?.requestNativeState() }
         operations.onNotice = { [weak self] in self?.showNotice($0, tone: .warning) }
-        operations.onNeedFreshView = { [weak self] in
-            guard let self, self.phase == .ready else { return }
-            self.refreshMutationView()
-        }
+        operations.onNeedFreshView = { [weak self] in self?.refreshMutationView() }
         operations.onTransition = { [weak self] sid, text in
             guard let self, self.ready?.sessionID == sid else { return }
             if let text { self.restoreDraft(Draft(text: text, sessionID: sid)); self.onDraftChange(self.draft) }
@@ -146,6 +147,7 @@ final class ConversationSessionController {
     }
     private var recoveries: [Date] = []
     private var mutationRefreshPending = false
+    private var retiredViewID: String?
     private var publishScheduled = false
     private var pendingApplied: (viewID: String, sourceEpoch: String, commitSeq: UInt64)?
     /// Rows of a retired view stay visible while its replacement loads, so recovery never blanks the reader.
@@ -176,6 +178,7 @@ final class ConversationSessionController {
     func start() {
         inputRetired = false
         mutationRefreshPending = false
+        retiredViewID = nil
         phase = .subscribing
         lane = .windowed
         publish()
@@ -242,6 +245,7 @@ final class ConversationSessionController {
         invalidateUsage("会话视图已改变，请关闭后重新打开用量面板")
         if let current = transcript, current.viewID == value.viewID { return }
         mutationRefreshPending = false
+        retiredViewID = nil
         invalidateInput()
         if draft.sessionID != value.sessionID {
             nativeState = NativeState()
@@ -319,7 +323,7 @@ final class ConversationSessionController {
     }
 
     func handleUpdate(_ update: ConversationUpdate) {
-        guard var transcript, update.viewID == transcript.viewID, update.sourceEpoch == transcript.sourceEpoch else { return }
+        guard var transcript, update.viewID != retiredViewID, update.viewID == transcript.viewID, update.sourceEpoch == transcript.sourceEpoch else { return }
         guard transcript.initialAdopted else {
             buffered.append(update)
             if buffered.count > Self.bufferedLimit { recover("credit_exhausted") }
@@ -378,10 +382,21 @@ final class ConversationSessionController {
 
     func handleResync(viewID: String, reason: String) {
         guard viewID == transcript?.viewID else { return }
-        if operations.expectsSessionReplacement { refreshMutationView(); return }
         // A requested switch to the TUI retires the windowed source; the control lane confirms the new mode.
         if modeSwitch?.target == .tui, modeSwitch?.commandID != nil {
             subscribe(.control)
+            return
+        }
+        if reason == "source_changed" {
+            retiredViewID = viewID
+            buffered.removeAll(); pendingApplied = nil
+            invalidateInput()
+            invalidateUsage("会话来源已改变，请在恢复后重新打开用量面板")
+            phase = .recovering(reason)
+            publish()
+            // Core retires the source at admission, before its native operation finishes.
+            // Opening a window before that receipt can race the marker/query capture fence.
+            refreshMutationView()
             return
         }
         recover(reason)
@@ -611,7 +626,7 @@ final class ConversationSessionController {
             guard let self else { return }
             do {
                 let page = try await self.fetch(request)
-                guard var transcript = self.transcript, transcript.viewID == viewID, transcript.adoptInitial(page) else { return }
+                guard viewID != self.retiredViewID, var transcript = self.transcript, transcript.viewID == viewID, transcript.adoptInitial(page) else { return }
                 for update in self.buffered {
                     switch transcript.apply(update) {
                     case .applied:
@@ -632,7 +647,7 @@ final class ConversationSessionController {
                 self.phase = .ready
                 self.publish()
             } catch {
-                guard self.transcript?.viewID == viewID else { return }
+                guard viewID != self.retiredViewID, self.transcript?.viewID == viewID else { return }
                 let failure = error as? ConversationHistoryFailure ?? ConversationHistoryFailure("network")
                 if failure.retiresView { self.recover(failure.code) } else { self.phase = .historyFailed(failure.code); self.publish() }
             }
@@ -659,11 +674,11 @@ final class ConversationSessionController {
             defer { if self.transcript?.viewID == viewID { self.olderInFlight = false } }
             do {
                 let page = try await self.fetch(request)
-                guard var transcript = self.transcript, transcript.viewID == viewID, transcript.adoptOlder(page, cursor: cursor) else { return }
+                guard viewID != self.retiredViewID, var transcript = self.transcript, transcript.viewID == viewID, transcript.adoptOlder(page, cursor: cursor) else { return }
                 self.transcript = transcript
                 self.olderState = Self.olderState(for: transcript)
             } catch {
-                guard self.transcript?.viewID == viewID else { return }
+                guard viewID != self.retiredViewID, self.transcript?.viewID == viewID else { return }
                 let failure = error as? ConversationHistoryFailure ?? ConversationHistoryFailure("network")
                 if failure.retiresView { self.olderInFlight = false; self.recover(failure.code); return }
                 self.olderState = .failed(failure.code)
@@ -718,7 +733,7 @@ final class ConversationSessionController {
                                                              operation: .body, cursor: cursor, bodyRef: bodyRef)
                     do {
                         let page = try await self.fetch(request)
-                        guard self.transcript?.viewID == viewID, page.bodyRef == nil || page.bodyRef == bodyRef else { return }
+                        guard viewID != self.retiredViewID, self.transcript?.viewID == viewID, page.bodyRef == nil || page.bodyRef == bodyRef else { return }
                         text += page.body ?? ""
                         if page.bodyComplete { complete = true; break }
                         guard let next = page.bodyCursor, !next.isEmpty, text.utf8.count <= ConversationTranscript.maximumBodyBytes else {
@@ -731,7 +746,7 @@ final class ConversationSessionController {
                         break
                     }
                 }
-                guard var transcript = self.transcript, transcript.viewID == viewID else { return }
+                guard viewID != self.retiredViewID, var transcript = self.transcript, transcript.viewID == viewID else { return }
                 self.bodyInFlight = nil
                 if complete, transcript.storeBody(id: id, revision: item.revision, text: text, complete: true) {
                     self.transcript = transcript
@@ -1000,7 +1015,8 @@ final class ConversationSessionController {
 
     /// A confirmed native session mutation retires its old window by design; it must not consume network-recovery credit.
     private func refreshMutationView() {
-        guard !mutationRefreshPending else { return }
+        guard !inputRetired, !mutationRefreshPending, !operations.awaitingNativeReceipt else { return }
+        retiredViewID = transcript?.viewID
         mutationRefreshPending = true
         phase = .recovering("session_changed")
         publish()
