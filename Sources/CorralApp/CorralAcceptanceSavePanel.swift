@@ -4,11 +4,11 @@ import Foundation
 
 /// Only the opt-in acceptance app's AX sheets; never global input or another application's UI.
 /// macOS 26's remote NSSavePanel.ok: raises NSGenericException ("not implemented").
-/// Run off the main actor so this process can service the real native AXPress request.
+/// Own-process AX queries synchronously invoke AppKit accessibility overrides; stay on the main actor.
 enum CorralAcceptanceSavePanel {
     enum Failure: Error { case permissionRequired, missingButton }
 
-    static func press(prompt: String) throws {
+    @MainActor static func press(prompt: String) throws {
         guard AXIsProcessTrusted(), !prompt.isEmpty else { throw Failure.permissionRequired }
         func value(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
             var result: CFTypeRef?

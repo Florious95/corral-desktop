@@ -362,7 +362,7 @@ final class CorralAcceptanceDriver {
                 guard panel.directoryURL?.resolvingSymlinksInPath() == directory, panel.nameFieldStringValue == "exported-session.html" else { throw Failure.unsafeConfiguration }
                 try record("save_press_requested", fields: ["id": command["id"] ?? ""])
                 guard let prompt = panel.prompt else { throw Failure.missingView }
-                try await Task.detached { try CorralAcceptanceSavePanel.press(prompt: prompt) }.value
+                try await MainActor.run { try CorralAcceptanceSavePanel.press(prompt: prompt) }
                 try record("save_press_returned", fields: ["id": command["id"] ?? ""])
             }
         case "conversation-action":

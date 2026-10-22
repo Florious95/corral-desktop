@@ -5,6 +5,15 @@
 import AppKit
 import UniformTypeIdentifiers
 
+/// Mirrors the delivery view's actor-isolated accessibility callback, which the old plain-window fixture missed.
+@MainActor
+private final class ActorCheckedAccessibilityView: NSView {
+    override func accessibilityChildren() -> [Any]? {
+        MainActor.preconditionIsolated()
+        return super.accessibilityChildren()
+    }
+}
+
 @MainActor
 private final class SavePanelFixture: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
@@ -16,6 +25,7 @@ private final class SavePanelFixture: NSObject, NSApplicationDelegate {
         do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]) }
         catch { finish(1, "private directory failed") }
         window = NSWindow(contentRect: NSRect(x: -8000, y: -8000, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = ActorCheckedAccessibilityView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
         window.orderBack(nil)
         panel = NSSavePanel()
         panel.allowedContentTypes = [.html]
@@ -29,10 +39,10 @@ private final class SavePanelFixture: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1))
             do {
-                try await Task.detached { try CorralAcceptanceSavePanel.press(prompt: "not the save button") }.value
+                try await MainActor.run { try CorralAcceptanceSavePanel.press(prompt: "not the save button") }
                 finish(1, "wrong button unexpectedly accepted")
             } catch { print("negative_unknown_button=PASS") }
-            do { try await Task.detached { try CorralAcceptanceSavePanel.press(prompt: "保存 HTML") }.value }
+            do { try await MainActor.run { try CorralAcceptanceSavePanel.press(prompt: "保存 HTML") } }
             catch { finish(1, "native press failed: \(error)") }
             try? await Task.sleep(for: .seconds(5))
             finish(1, "native callback timed out")
