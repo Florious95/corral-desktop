@@ -18,7 +18,7 @@ public struct ConversationHistoryClient: Sendable {
             configuration.connectionProxyDictionary = [:]
             configuration.urlCache = nil
             configuration.httpMaximumConnectionsPerHost = 4
-            let session = URLSession(configuration: configuration, delegate: RejectHistoryRedirects(), delegateQueue: nil)
+            let session = URLSession(configuration: configuration, delegate: RejectConversationRedirects(), delegateQueue: nil)
             defer { session.finishTasksAndInvalidate() }
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
@@ -64,7 +64,7 @@ public struct ConversationHistoryClient: Sendable {
 
 private struct HistoryErrorBody: Decodable { let error: String? }
 
-private final class RejectHistoryRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class RejectConversationRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)

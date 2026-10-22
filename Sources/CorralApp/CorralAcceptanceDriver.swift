@@ -320,6 +320,34 @@ final class CorralAcceptanceDriver {
         case "composer-action":
             let pane = try conversationPane(command)
             try click(pane.composer.actionButton)
+        case "action-edit":
+            guard let ref = command["ref"] as? String, let text = command["text"] as? String,
+                  let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }) else { throw Failure.missingView }
+            let editor: NSTextView
+            if controller.header.isRenaming {
+                window.makeFirstResponder(controller.header.renameField)
+                guard let fieldEditor = controller.header.renameField.currentEditor() as? NSTextView else { throw Failure.missingView }
+                editor = fieldEditor
+            } else {
+                guard let panel = controller.operations.panel, panel.action == .compact else { throw Failure.missingView }
+                editor = panel.instructions; window.makeFirstResponder(editor)
+            }
+            editor.setSelectedRange(NSRange(location: 0, length: (editor.string as NSString).length))
+            editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        case "action-select":
+            guard let ref = command["ref"] as? String, let choice = command["choice"] as? String,
+                  let panel = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref })?.operations.panel,
+                  panel.selectChoice(choice) else { throw Failure.missingView }
+        case "action-save":
+            // Actual NSSavePanel OK/cancel action, scoped to the private acceptance directory; no host keyboard/mouse.
+            guard let ref = command["ref"] as? String,
+                  let panel = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref })?.operations.panel?.savePanel else { throw Failure.missingView }
+            if command["cancel"] as? Bool == true { panel.cancel(nil) }
+            else {
+                panel.directoryURL = directory
+                panel.nameFieldStringValue = "exported-session.html"
+                panel.ok(nil)
+            }
         case "conversation-action":
             // Native menu item target/action, without entering NSMenu's modal pointer-tracking loop.
             guard let ref = command["ref"] as? String, let raw = command["action"] as? String,
@@ -412,6 +440,15 @@ final class CorralAcceptanceDriver {
                     "actions": controller.actionMenu()?.entries.map { ["id": $0.spec.id.rawValue, "title": $0.title, "availability": String(describing: $0.availability)] } ?? [],
                     "status": controller.header.statusLabel.stringValue, "notice": controller.header.state.notice ?? NSNull()
                 ] as [String: Any],
+                "actionPanel": controller.operations.panel.map { panel in
+                    ["action": panel.action.rawValue, "visible": panel.presentedWindow != nil, "busy": panel.busy,
+                     "status": panel.statusLabel.stringValue, "completed": panel.completed, "requiresForce": panel.requiresForce,
+                     "savePanelVisible": panel.savePanel?.isVisible ?? false,
+                     "choices": panel.choices.map { ["id": $0.id, "title": $0.title, "detail": $0.detail, "current": $0.current] as [String: Any] }
+                    ] as [String: Any]
+                } ?? [:],
+                "renaming": controller.header.isRenaming,
+                "nativeSessionID": controller.ready?.sessionID ?? "",
                 "composer": [
                     "text": pane.composer.draft, "marked": pane.composer.editor.hasMarkedText(),
                     "ready": pane.composer.state.ready, "sending": pane.composer.state.sending, "stopping": pane.composer.state.stopping,

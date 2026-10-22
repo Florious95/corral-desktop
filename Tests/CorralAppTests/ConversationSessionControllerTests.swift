@@ -20,8 +20,8 @@ final class ConversationSessionControllerTests: XCTestCase {
         return controller
     }
 
-    private func ready(view: String) -> ConversationReady {
-        ConversationReady(reference: ref, mode: "rpc", running: true, sessionID: "sid", viewID: view, sourceEpoch: "e",
+    private func ready(view: String, sid: String = "sid") -> ConversationReady {
+        ConversationReady(reference: ref, mode: "rpc", running: true, sessionID: sid, viewID: view, sourceEpoch: "e",
                           snapshotSeq: 4, windowToken: "tok-\(view)", historySupport: "complete", sourceOmitted: false)
     }
 
@@ -240,6 +240,46 @@ final class ConversationSessionControllerTests: XCTestCase {
         controller.stop()
     }
 
+    func testFourNativeSessionMutationsUseFreshViewsWithoutExhaustingRecoveryBudgetAndKeepPerSIDDrafts() async throws {
+        let controller = try await readyController()
+        var drafts: [String: ConversationSessionController.Draft] = [:]
+        controller.onLoadDraft = { drafts[$0] }
+        controller.onDraftChange = { value in if let sid = value.sessionID { drafts[sid] = value } }
+        controller.pane.composer.editor.insertText("original draft", replacementRange: NSRange(location: NSNotFound, length: 0))
+        for index in 1...4 {
+            XCTAssertTrue(controller.performAction(.newSession))
+            controller.operations.panel?.onSubmit?(nil, "")
+            await settle()
+            let id = try XCTUnwrap(inputCommands("new_session").last?.0)
+            let sid = "new-\(index)", view = "view-\(index)"
+            controller.handleEvent(event(["type": "response", "id": id, "success": true, "data": ["session_id": sid]]))
+            controller.handleClosed(.lost)
+            controller.handleReady(ready(view: view, sid: sid))
+            await settle()
+            let load = try XCTUnwrap(pending.first)
+            pending.removeFirst()
+            load.continuation.resume(returning: try page(for: load.request, items: []))
+            await settle()
+            controller.handleUpdate(.init(reference: ref, viewID: view, sourceEpoch: "e", baseSeq: 4, commitSeq: 5, upserts: [], removes: [], state: .init(running: false, queued: 0, mode: "rpc")))
+            controller.publishNow()
+            XCTAssertEqual(controller.phase, .ready)
+            XCTAssertEqual(controller.ready?.sessionID, sid)
+            XCTAssertTrue(controller.operations.panel?.completed == true)
+            XCTAssertEqual(controller.draft.text, "")
+            controller.pane.composer.editor.insertText("draft-\(index)", replacementRange: NSRange(location: NSNotFound, length: 0))
+            controller.operations.close()
+        }
+        XCTAssertEqual(drafts["sid"]?.text, "original draft")
+        XCTAssertEqual(drafts["new-1"]?.text, "draft-1")
+        controller.handleReady(ready(view: "back", sid: "sid"))
+        await settle()
+        let load = pending.removeFirst()
+        load.continuation.resume(returning: try page(for: load.request, items: []))
+        await settle()
+        XCTAssertEqual(controller.pane.composer.draft, "original draft")
+        controller.stop()
+    }
+
     private func usageCommands() -> [(String, String)] {
         sent.compactMap {
             guard case let .conversationCommand(reference, id, body) = $0,
@@ -257,7 +297,7 @@ final class ConversationSessionControllerTests: XCTestCase {
         let controller = try await readyController()
         let rowsBefore = controller.paneState().rows
         let menu = try XCTUnwrap(controller.header.makeActionMenu?())
-        XCTAssertEqual(menu.entries.map(\.spec.id), [.usage, .terminal])
+        XCTAssertEqual(menu.entries.map(\.spec.id), [.history, .newSession, .rename, .fork, .clone, .compact, .usage, .export, .terminal])
         XCTAssertTrue(menu.performAction(.usage))
         XCTAssertTrue(menu.performAction(.usage))
         controller.refreshUsage()

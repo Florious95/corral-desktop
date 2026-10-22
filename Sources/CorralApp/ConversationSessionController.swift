@@ -45,6 +45,7 @@ final class ConversationSessionController {
     struct Draft: Equatable {
         var text = ""
         var deliveryUncertain = false
+        var sessionID: String?
     }
     private struct PendingPrompt {
         let id: String
@@ -53,6 +54,7 @@ final class ConversationSessionController {
     }
     private(set) var draft = Draft()
     var onDraftChange: (Draft) -> Void = { _ in }
+    var onLoadDraft: (String) -> Draft? = { _ in nil }
     private var draftRevision: UInt64 = 0
     private var pendingPrompt: PendingPrompt?
     private var pendingAbort: String?
@@ -105,8 +107,45 @@ final class ConversationSessionController {
     private var usageCommandID: String?
     private var usageTimeout: Task<Void, Never>?
     private(set) var usageDashboard: CorralUsageDashboardController?
-    private let actions: [any CorralAtomicAction] = [CorralUsageAction(scopes: [.session]), CorralModeSwitchAction()]
+    private let actions: [any CorralAtomicAction] = [CorralSessionAction(.history), CorralSessionAction(.newSession),
+        CorralSessionAction(.rename), CorralSessionAction(.fork), CorralSessionAction(.clone), CorralSessionAction(.compact),
+        CorralUsageAction(scopes: [.session]), CorralSessionAction(.export), CorralModeSwitchAction()]
+    var exportDownload: (String) async throws -> ConversationExportArtifact = { _ in throw ConversationExportFailure("unavailable") }
+    private(set) lazy var operations = makeOperations()
+
+    private func makeOperations() -> ConversationActionsController {
+        let operations = ConversationActionsController(reference: key.reference) { [weak self] in
+            guard let self else {
+                return .init(epoch: ConnectionEpoch(0), sessionID: "", viewID: "", ready: false, running: nil, queued: 0,
+                             inputPending: false, markedText: false, title: "")
+            }
+            return .init(epoch: connectionEpoch, sessionID: ready?.sessionID ?? "", viewID: transcript?.viewID ?? "", ready: structuredReady,
+                  running: liveState?.running, queued: liveState?.queued ?? 0, inputPending: pendingPrompt != nil || pendingAbort != nil,
+                  markedText: pane.composer.editor.hasMarkedText() || (header.renameField.currentEditor() as? NSTextView)?.hasMarkedText() == true,
+                  title: nativeState.sessionName ?? title)
+        }
+        operations.send = { [weak self] command in guard let self else { throw SessionLinkFailure.disconnected }; try await self.send(command) }
+        operations.download = { [weak self] sid in guard let self else { throw SessionLinkFailure.disconnected }; return try await self.exportDownload(sid) }
+        operations.window = { [weak self] in self?.header.window }
+        operations.onStateChange = { [weak self] in self?.publish() }
+        operations.onBeginRename = { [weak self] in self?.header.beginRename($0) }
+        operations.onRenameState = { [weak self] in self?.header.setRenamePending($0, error: $1) }
+        operations.onEndRename = { [weak self] in self?.header.endRename() }
+        operations.onRenamed = { [weak self] name in self?.nativeState.sessionName = name; self?.publish(); self?.requestNativeState() }
+        operations.onNotice = { [weak self] in self?.showNotice($0, tone: .warning) }
+        operations.onNeedFreshView = { [weak self] in
+            guard let self, self.phase == .ready else { return }
+            self.refreshMutationView()
+        }
+        operations.onTransition = { [weak self] sid, text in
+            guard let self, self.ready?.sessionID == sid else { return }
+            if let text { self.restoreDraft(Draft(text: text, sessionID: sid)); self.onDraftChange(self.draft) }
+            self.requestNativeState()
+        }
+        return operations
+    }
     private var recoveries: [Date] = []
+    private var mutationRefreshPending = false
     private var publishScheduled = false
     private var pendingApplied: (viewID: String, sourceEpoch: String, commitSeq: UInt64)?
     /// Rows of a retired view stay visible while its replacement loads, so recovery never blanks the reader.
@@ -125,6 +164,8 @@ final class ConversationSessionController {
         pane.composer.onDraftChange = { [weak self] text in self?.editDraft(text) }
         pane.composer.onSubmit = { [weak self] in self?.submitPrompt() }
         pane.composer.onAbort = { [weak self] in self?.abortGeneration() }
+        header.onRenameSubmit = { [weak self] in self?.operations.rename($0) }
+        header.onRenameCancel = { [weak self] in self?.operations.close() }
     }
 
     /// Whether this pane should currently show the structured view instead of the terminal.
@@ -134,6 +175,7 @@ final class ConversationSessionController {
 
     func start() {
         inputRetired = false
+        mutationRefreshPending = false
         phase = .subscribing
         lane = .windowed
         publish()
@@ -155,6 +197,7 @@ final class ConversationSessionController {
     func rebind(to epoch: ConnectionEpoch) {
         guard epoch != connectionEpoch else { return }
         invalidateInput()
+        operations.invalidate("连接已改变，操作结果未确认；请核对会话后重新打开面板")
         invalidateUsage("连接已改变，请关闭后重新打开用量面板")
         connectionEpoch = epoch
         if transcript?.initialAdopted == true { staleRows = rows() }
@@ -177,6 +220,7 @@ final class ConversationSessionController {
     /// Transport loss is distinct from a source resync: wait for rebind, never write a recovery command offline.
     func connectionLost() {
         phase = .recovering("network")
+        operations.invalidate("连接已断开，操作结果未确认；不会自动重试")
         invalidateInput()
         invalidateUsage("连接已断开，请重连后重新打开用量面板")
         publish()
@@ -184,6 +228,7 @@ final class ConversationSessionController {
 
     func stop() {
         inputRetired = true
+        operations.stop()
         invalidateInput()
         closeUsage()
         let reference = key.reference
@@ -196,7 +241,15 @@ final class ConversationSessionController {
     func handleReady(_ value: ConversationReady) {
         invalidateUsage("会话视图已改变，请关闭后重新打开用量面板")
         if let current = transcript, current.viewID == value.viewID { return }
+        mutationRefreshPending = false
         invalidateInput()
+        if draft.sessionID != value.sessionID {
+            nativeState = NativeState()
+            if draft.sessionID != nil { onDraftChange(draft) }
+            var restored = onLoadDraft(value.sessionID) ?? (draft.sessionID == nil ? draft : Draft())
+            restored.sessionID = value.sessionID
+            restoreDraft(restored); onDraftChange(draft)
+        }
         if transcript?.initialAdopted == true { staleRows = rows() }
         lane = .windowed
         managed = true
@@ -286,6 +339,7 @@ final class ConversationSessionController {
 
     func handleEvent(_ event: ConversationEvent) {
         guard event.reference == key.reference else { return }
+        if let object = try? JSONSerialization.jsonObject(with: event.event) as? [String: Any], operations.handle(event, object: object) { return }
         // A control lane replays retained native records; only our response and mode changes matter.
         if lane == .control, !Self.mentions(event.event, ["worker_mode", modeSwitch?.commandID].compactMap { $0 }) { return }
         guard event.viewID == nil || event.viewID == transcript?.viewID,
@@ -324,6 +378,7 @@ final class ConversationSessionController {
 
     func handleResync(viewID: String, reason: String) {
         guard viewID == transcript?.viewID else { return }
+        if operations.expectsSessionReplacement { refreshMutationView(); return }
         // A requested switch to the TUI retires the windowed source; the control lane confirms the new mode.
         if modeSwitch?.target == .tui, modeSwitch?.commandID != nil {
             subscribe(.control)
@@ -336,10 +391,15 @@ final class ConversationSessionController {
 
     func handleClosed(_ reason: ConversationClosedReason) {
         invalidateInput()
+        if reason != .lost { operations.invalidate("会话连接已结束，操作结果未确认") }
         invalidateUsage("会话连接已结束，暂时无法读取用量")
         switch lane {
         case .windowed:
-            if reason == .lost { phase = .closed(reason); recover("lost"); return }
+            if reason == .lost {
+                if operations.expectsSessionReplacement { refreshMutationView() }
+                else { phase = .closed(reason); recover("lost") }
+                return
+            }
             // A managed Pi in its TUI has no windowed source; ask the worker itself before falling back.
             if modeSwitch?.target == .tui || !controlProbeAttempted {
                 controlProbeAttempted = true
@@ -376,11 +436,11 @@ final class ConversationSessionController {
     /// The viewport switcher and the default-mode preference share this one serial native operation.
     func requestSwitch(to target: CorralViewportHeaderState.Mode, automatic: Bool = false) {
         guard modeSwitch == nil, managed, !unavailable else { return }
-        guard !pane.composer.editor.hasMarkedText() else {
+        guard !pane.composer.editor.hasMarkedText(), (header.renameField.currentEditor() as? NSTextView)?.hasMarkedText() != true else {
             if !automatic { showNotice("请先完成输入法组字，再切换模式", tone: .warning) }
             return
         }
-        guard pendingPrompt == nil, pendingAbort == nil else {
+        guard pendingPrompt == nil, pendingAbort == nil, !operations.isBusy else {
             if !automatic { showNotice("请等待发送或停止确认，再切换模式", tone: .warning) }
             return
         }
@@ -392,6 +452,7 @@ final class ConversationSessionController {
             if !automatic { showNotice("会话尚未就绪，请稍后再切换", tone: .warning) }
             return
         }
+        operations.close()
         closeUsage()
         notice = nil
         modeSwitch = ModeSwitch(target: target, force: false, automatic: automatic)
@@ -473,7 +534,7 @@ final class ConversationSessionController {
     private func handleWorkerMode(_ mode: String) {
         let confirmed: NativeMode = mode == "tui" ? .tui : .rpc
         guard confirmed != nativeMode || modeSwitch != nil else { return }
-        if confirmed != nativeMode { closeUsage(); invalidateInput() }
+        if confirmed != nativeMode { closeUsage(); invalidateInput(); operations.invalidate("显示模式已改变，操作结果未确认") }
         nativeMode = confirmed
         if confirmed == .rpc, lane == .control {
             // Another client (or our own control-lane switch) brought the pane back to RPC.
@@ -738,7 +799,9 @@ final class ConversationSessionController {
         publishComposer()
     }
 
-    private var inputReady: Bool {
+    private var inputReady: Bool { structuredReady && !operations.isBusy }
+
+    private var structuredReady: Bool {
         !inputRetired && managed && !unavailable && lane == .windowed && nativeMode == .rpc && phase == .ready &&
         transcript?.initialAdopted == true && modeSwitch == nil
     }
@@ -847,7 +910,8 @@ final class ConversationSessionController {
     private func actionContext() -> CorralActionContext {
         CorralActionContext(ready: managed && !unavailable && phase == .ready,
                             mode: nativeMode == .tui ? .tui : .gui, running: liveState?.running,
-                            switching: modeSwitch != nil, implemented: [.metricsPanel, .modeSwitch])
+                            switching: modeSwitch != nil, implemented: Set(actions.map { $0.spec.presentation }),
+                            operationPending: operations.isBusy || pendingPrompt != nil || pendingAbort != nil)
     }
 
     func actionMenu() -> CorralActionMenu? {
@@ -867,7 +931,7 @@ final class ConversationSessionController {
             switch presentation {
             case .metricsPanel: openUsage()
             case .modeSwitch: requestSwitch(to: nativeMode == .tui ? .gui : .tui)
-            default: break // Unimplemented presentations are excluded by the capability gate above.
+            default: operations.open(id)
             }
         }
     }
@@ -934,6 +998,15 @@ final class ConversationSessionController {
         usageDashboard = nil
     }
 
+    /// A confirmed native session mutation retires its old window by design; it must not consume network-recovery credit.
+    private func refreshMutationView() {
+        guard !mutationRefreshPending else { return }
+        mutationRefreshPending = true
+        phase = .recovering("session_changed")
+        publish()
+        subscribe(.windowed)
+    }
+
     // MARK: Recovery
 
     /// One small-window resubscribe per loss episode, bounded to three a minute; never a WebSocket reconnect.
@@ -983,6 +1056,7 @@ final class ConversationSessionController {
             self.publishScheduled = false
             self.pane.apply(self.paneState())
             self.header.apply(self.headerState())
+            self.operations.update()
             self.publishComposer()
         }
     }
@@ -991,6 +1065,7 @@ final class ConversationSessionController {
         publishScheduled = false
         pane.apply(paneState())
         header.apply(headerState())
+        operations.update()
         publishComposer()
     }
 

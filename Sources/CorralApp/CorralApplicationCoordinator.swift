@@ -207,9 +207,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     /// Structured views of managed Pi panes, multiplexed over the same link. Core allows eight per connection.
     private var conversations: [SessionKey: ConversationSessionController] = [:]
     /// Drafts outlive viewport subscriptions (preview replacement / eight-view budget), scoped by device + ref.
-    private var conversationDrafts: [SessionKey: ConversationSessionController.Draft] = [:]
+    private var conversationDrafts: [SessionKey: [String: ConversationSessionController.Draft]] = [:]
     private var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
     private let conversationHistoryClient = ConversationHistoryClient()
+    private let conversationExportClient = ConversationExportClient()
     private static let maximumConversationViews = 8
     /// CLI providers whose managed structured launch follows the Pi default open mode.
     private static let structuredCreateProviders: Set<String> = ["pi"]
@@ -2168,9 +2169,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let controller = ConversationSessionController(key: key, connectionEpoch: connection.connectionEpoch)
             controller.title = sessions[key]?.descriptor.name ?? key.reference.rawValue
             controller.provider = sessions[key]?.descriptor.provider
-            controller.restoreDraft(conversationDrafts[key] ?? .init())
+            controller.restoreDraft(conversationDrafts[key]?[""] ?? .init())
+            controller.onLoadDraft = { [weak self] sid in self?.conversationDrafts[key]?[sid] }
             controller.onDraftChange = { [weak self] draft in
-                self?.conversationDrafts[key] = draft.text.isEmpty && !draft.deliveryUncertain ? nil : draft
+                guard let self else { return }
+                let sid = draft.sessionID ?? ""
+                if draft.sessionID != nil { self.conversationDrafts[key]?.removeValue(forKey: "") }
+                self.conversationDrafts[key, default: [:]][sid] = draft.text.isEmpty && !draft.deliveryUncertain ? nil : draft
+                if self.conversationDrafts[key]?.isEmpty == true { self.conversationDrafts.removeValue(forKey: key) }
+            }
+            controller.exportDownload = { [weak self, weak controller] sid in
+                guard let self, let controller, self.connected, controller.ready?.sessionID == sid,
+                      let token = self.activeConnectionConfiguration?.token else { throw ConversationExportFailure("unavailable") }
+                let epoch = controller.connectionEpoch
+                guard let route = await self.sessionLink.activeEndpoint(), self.connection?.connectionEpoch == epoch,
+                      controller.ready?.sessionID == sid else { throw ConversationExportFailure("stale_session") }
+                return try await self.conversationExportClient.download(reference: key.reference, sessionID: sid, route: route, token: token)
             }
             controller.send = { [weak self, weak controller] command in
                 guard let self, let controller, self.connected, self.connection?.connectionEpoch == controller.connectionEpoch else {

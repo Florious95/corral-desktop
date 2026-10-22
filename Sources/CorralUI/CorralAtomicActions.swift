@@ -66,14 +66,16 @@ public struct CorralActionContext: Equatable, Sendable {
     public var mode: Mode
     public var running: Bool?
     public var switching: Bool
+    public var operationPending: Bool
     public var implemented: Set<CorralActionPresentation>
 
-    public init(ready: Bool, mode: Mode, running: Bool?, switching: Bool, implemented: Set<CorralActionPresentation>) {
+    public init(ready: Bool, mode: Mode, running: Bool?, switching: Bool, implemented: Set<CorralActionPresentation>, operationPending: Bool = false) {
         self.ready = ready
         self.mode = mode
         self.running = running
         self.switching = switching
         self.implemented = implemented
+        self.operationPending = operationPending
     }
 }
 
@@ -100,9 +102,21 @@ public extension CorralAtomicAction {
     func baseAvailability(in context: CorralActionContext, needsStructuredView: Bool = true) -> CorralActionAvailability? {
         guard context.implemented.contains(spec.presentation) else { return .hidden }
         if context.switching { return .disabled("正在切换显示模式") }
+        if context.operationPending { return .disabled("另一个会话操作尚未完成") }
         if needsStructuredView, context.mode == .tui { return .disabled("终端模式下不可用，请先切换到原生 GUI") }
         if needsStructuredView, !context.ready { return .disabled("会话尚未就绪") }
         return nil
+    }
+}
+
+/// Session operations share identity and gates; native provider-specific commands live in the adapter.
+public struct CorralSessionAction: CorralAtomicAction {
+    public let spec: CorralActionSpec
+    public init(_ id: CorralActionID) { spec = .spec(id) }
+    public func availability(in context: CorralActionContext) -> CorralActionAvailability {
+        if let base = baseAvailability(in: context) { return base }
+        if spec.id == .compact, context.running != false { return .disabled("请先停止当前任务，再压缩上下文") }
+        return .enabled
     }
 }
 

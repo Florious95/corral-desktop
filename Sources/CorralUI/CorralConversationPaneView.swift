@@ -242,11 +242,17 @@ public struct CorralViewportHeaderState: Equatable, Sendable {
 /// 40pt viewport header for managed agent panes in either presentation: provider, native session title,
 /// model, authoritative run state or a switch notice, and the GUI/terminal segmented switcher.
 @MainActor
-public final class CorralViewportHeaderView: NSView {
+public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
     public static let height: CGFloat = 40
     public var onSelectMode: ((CorralViewportHeaderState.Mode) -> Void)?
     public var makeActionMenu: (() -> CorralActionMenu?)?
     public let moreButton = NSButton()
+    public let renameField = NSTextField()
+    public var onRenameSubmit: ((String) -> Void)?
+    public var onRenameCancel: (() -> Void)?
+    public private(set) var isRenaming = false
+    private var renameError: String?
+    private weak var renamePreviousResponder: NSResponder?
     public var trailingInset: CGFloat = 0 { didSet { if oldValue != trailingInset { needsLayout = true } } }
     public private(set) var state = CorralViewportHeaderState(title: "")
     private var iconView: CorralProviderIconView?
@@ -269,6 +275,12 @@ public final class CorralViewportHeaderView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.toolbar)
         setAccessibilityIdentifier("corral.conversation.header")
+        renameField.font = .systemFont(ofSize: 13, weight: .semibold)
+        renameField.isBezeled = true; renameField.bezelStyle = .roundedBezel
+        renameField.usesSingleLineMode = true; renameField.isHidden = true
+        renameField.delegate = self; renameField.target = self; renameField.action = #selector(submitRename)
+        renameField.setAccessibilityIdentifier("corral.action.rename.editor")
+        renameField.setAccessibilityLabel("会话名称，Enter 保存，Escape 取消")
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setAccessibilityIdentifier("corral.conversation.title")
@@ -291,11 +303,41 @@ public final class CorralViewportHeaderView: NSView {
             self?.onFocus?()
             self?.onSelectMode?(mode)
         }
-        for view in [titleLabel, modelChip, statusDot, statusLabel, modeControl, moreButton, separator] { addSubview(view) }
+        for view in [titleLabel, renameField, modelChip, statusDot, statusLabel, modeControl, moreButton, separator] { addSubview(view) }
         refreshTheme()
     }
 
     public required init?(coder: NSCoder) { fatalError("CorralViewportHeaderView is created programmatically") }
+
+    public func beginRename(_ name: String) {
+        renamePreviousResponder = window?.firstResponder
+        isRenaming = true; renameError = nil; renameField.isHidden = false; renameField.isEnabled = true
+        renameField.stringValue = name; renameField.toolTip = "Enter 保存 · Escape 取消"
+        needsLayout = true; layoutSubtreeIfNeeded()
+        window?.makeFirstResponder(renameField); renameField.selectText(nil)
+    }
+    public func endRename() {
+        isRenaming = false; renameError = nil; renameField.isHidden = true
+        titleLabel.isHidden = false; applyStatus(); needsLayout = true
+        if let previous = renamePreviousResponder as? NSView, previous.window === window { window?.makeFirstResponder(previous) }
+        renamePreviousResponder = nil
+    }
+    public func setRenamePending(_ pending: Bool, error: String? = nil) {
+        renameField.isEnabled = !pending
+        renameError = error
+        needsLayout = true
+        renameField.toolTip = error ?? (pending ? "正在确认原生会话名称…" : "Enter 保存 · Escape 取消")
+    }
+    @objc private func submitRename() {
+        guard isRenaming, renameField.isEnabled, !((renameField.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        onRenameSubmit?(renameField.stringValue)
+    }
+    public func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)), renameField.isEnabled {
+            endRename(); onRenameCancel?(); return true
+        }
+        return false
+    }
 
     @objc private func showActions(_ sender: NSButton) {
         onFocus?()
@@ -306,7 +348,7 @@ public final class CorralViewportHeaderView: NSView {
     /// Labels are decoration; a click anywhere except a real control focuses the pane.
     public override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, frame.contains(point) else { return nil }
-        if let hit = super.hitTest(point), hit is NSControl, !(hit is NSTextField) { return hit }
+        if let hit = super.hitTest(point), hit === renameField || hit is NSControl && !(hit is NSTextField) { return hit }
         return self
     }
     public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -409,6 +451,20 @@ public final class CorralViewportHeaderView: NSView {
             right = modeControl.frame.minX - 14
         }
         let available = max(0, right - x)
+        titleLabel.isHidden = isRenaming
+        if isRenaming {
+            modelChip.isHidden = true; statusLabel.isHidden = renameError == nil; statusDot.isHidden = true
+            let errorWidth = renameError == nil ? 0 : min(220, available * 0.5)
+            if let renameError {
+                statusLabel.stringValue = renameError; statusLabel.textColor = CorralAestheticTokens.warnText
+                statusLabel.toolTip = renameError
+                statusLabel.frame = CGRect(x: right - errorWidth, y: midY - 8, width: errorWidth, height: 16)
+            }
+            renameField.frame = CGRect(x: x, y: midY - 13, width: max(0, available - errorWidth - (errorWidth > 0 ? 8 : 0)), height: 26)
+            separator.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+            return
+        }
+        statusLabel.isHidden = false
         let statusWidth = min(max(60, available * 0.42), TranscriptRowView.width(of: statusLabel))
         statusLabel.frame = CGRect(x: right - statusWidth, y: midY - 8, width: statusWidth, height: 16)
         statusDot.frame = CGRect(x: statusLabel.frame.minX - 13, y: midY - 4, width: 8, height: 8)
