@@ -206,6 +206,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var activeSession: SessionKey?
     /// Structured views of managed Pi panes, multiplexed over the same link. Core allows eight per connection.
     private var conversations: [SessionKey: ConversationSessionController] = [:]
+    /// Drafts outlive viewport subscriptions (preview replacement / eight-view budget), scoped by device + ref.
+    private var conversationDrafts: [SessionKey: ConversationSessionController.Draft] = [:]
     private var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
     private let conversationHistoryClient = ConversationHistoryClient()
     private static let maximumConversationViews = 8
@@ -481,6 +483,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         subscriptionSnapshotTimeout = nil
         subscriptionUpdateRequested = false
         pendingUnsubscriptions.removeAll()
+        conversations.values.forEach { $0.stop() }
         conversations.removeAll()
         conversationCapabilities = nil
         await sessionLink.disconnect()
@@ -1840,6 +1843,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             case .disconnected, .failed:
                 resetPointerMotion()
                 connected = false
+                conversations.values.forEach { $0.connectionLost() }
                 activeRoute = nil
                 await deviceSessionLifecycle.markDisconnected()
             case .transportOpen, .authenticating:
@@ -1856,6 +1860,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         case let .failed(error):
             resetPointerMotion()
             connected = false
+            conversations.values.forEach { $0.connectionLost() }
             lastConnectionError = String(describing: error)
             await deviceSessionLifecycle.markDisconnected()
             updateSidebar(devices: cachedDevices)
@@ -2006,6 +2011,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             }
             sessions.removeValue(forKey: key)
             conversations.removeValue(forKey: key)?.stop()
+            conversationDrafts.removeValue(forKey: key)
             _ = terminalRegistry.remove(key)
             let removedUIID = sessionUIIDs.removeValue(forKey: workspaceSessionID(for: key))
             if let removedUIID { uiSessionKeys.removeValue(forKey: removedUIID) }
@@ -2162,8 +2168,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let controller = ConversationSessionController(key: key, connectionEpoch: connection.connectionEpoch)
             controller.title = sessions[key]?.descriptor.name ?? key.reference.rawValue
             controller.provider = sessions[key]?.descriptor.provider
+            controller.restoreDraft(conversationDrafts[key] ?? .init())
+            controller.onDraftChange = { [weak self] draft in
+                self?.conversationDrafts[key] = draft.text.isEmpty && !draft.deliveryUncertain ? nil : draft
+            }
             controller.send = { [weak self, weak controller] command in
-                guard let self, let controller, self.connection?.connectionEpoch == controller.connectionEpoch else {
+                guard let self, let controller, self.connected, self.connection?.connectionEpoch == controller.connectionEpoch else {
                     throw SessionLinkFailure.disconnected
                 }
                 let receipt = try await self.sessionLink.send(command)

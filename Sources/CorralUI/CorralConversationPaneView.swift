@@ -140,6 +140,7 @@ public final class CorralConversationPaneView: NSView {
 
     public private(set) var state = CorralConversationPaneState(title: "")
     public let transcript = CorralConversationTranscriptView()
+    public let composer = CorralConversationComposer()
     private let overlay = CorralConversationStateOverlay()
 
     public override var isFlipped: Bool { true }
@@ -155,6 +156,9 @@ public final class CorralConversationPaneView: NSView {
         setAccessibilityIdentifier("corral.conversation.pane")
         addSubview(transcript)
         addSubview(overlay)
+        addSubview(composer)
+        composer.onHeightChange = { [weak self] in self?.needsLayout = true }
+        composer.onFocus = { [weak self] in self?.onFocus?() }
         transcript.onLoadOlder = { [weak self] in self?.onLoadOlder?() }
         transcript.onNeedBodies = { [weak self] ids in self?.onNeedBodies?(ids) }
         transcript.onRetryOlder = { [weak self] in self?.onLoadOlder?() }
@@ -171,19 +175,23 @@ public final class CorralConversationPaneView: NSView {
         setAccessibilityLabel("\(state.title) 结构化会话")
     }
 
-    /// Keyboard focus for reading, copying and scrolling; never a terminal or PTY responder.
-    public var preferredFirstResponder: NSView { transcript.documentResponder }
+    /// Focus stays in this pane's native editor, never in the hidden terminal or a different session.
+    public var preferredFirstResponder: NSView { composer.editor }
 
     public func refreshTheme() {
         layer?.backgroundColor = CorralConversationStyle.paneBackground.cgColor
         overlay.refreshTheme()
         transcript.refreshTheme()
+        composer.refreshTheme()
     }
 
     public override func layout() {
         super.layout()
-        transcript.frame = bounds
-        overlay.frame = bounds
+        let composerHeight = min(bounds.height, composer.preferredHeight)
+        let history = CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - composerHeight))
+        transcript.frame = history
+        overlay.frame = history
+        composer.frame = CGRect(x: 0, y: history.maxY, width: bounds.width, height: composerHeight)
     }
 
     public override func mouseDown(with event: NSEvent) { onFocus?() }

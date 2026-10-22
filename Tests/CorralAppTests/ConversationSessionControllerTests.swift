@@ -72,6 +72,174 @@ final class ConversationSessionControllerTests: XCTestCase {
         return controller
     }
 
+    private func inputCommands(_ kind: String) -> [(String, [String: Any])] {
+        sent.compactMap {
+            guard case let .conversationCommand(reference, id, body) = $0, reference == ref,
+                  var object = try? JSONSerialization.jsonObject(with: body) as? [String: Any], object["type"] as? String == kind else { return nil }
+            object["id"] = id
+            return (id, object)
+        }
+    }
+
+    func testComposerSendsExactTextOnceAndOnlyNativeAcknowledgementConsumesDraft() async throws {
+        let controller = try await readyController()
+        controller.publishNow()
+        let text = "  你好 👨‍👩‍👧‍👦\nsecond line\t\"quote\"  "
+        controller.pane.composer.editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        let originalRows = controller.paneState().rows
+        controller.pane.composer.actionButton.performClick(nil)
+        controller.submitPrompt()
+        await settle()
+        let commands = inputCommands("prompt")
+        XCTAssertEqual(commands.count, 1)
+        XCTAssertEqual(commands.first?.1["message"] as? String, text)
+        XCTAssertEqual(controller.draft.text, text, "Socket write is not native acceptance")
+        XCTAssertTrue(controller.pane.composer.state.sending)
+        XCTAssertEqual(controller.paneState().rows, originalRows, "No fake optimistic conversation rows")
+        controller.handleEvent(event(["type": "response", "command": "prompt", "id": commands[0].0, "success": true, "data": ["disposition": "started"]]))
+        XCTAssertEqual(controller.draft.text, "")
+        XCTAssertEqual(controller.pane.composer.draft, "")
+        XCTAssertFalse(controller.draft.deliveryUncertain)
+        XCTAssertFalse(controller.pane.composer.state.sending)
+        controller.stop()
+    }
+
+    func testPromptRejectionPreservesDraftAndLateSuccessDoesNotClobberNewEdits() async throws {
+        let controller = try await readyController()
+        controller.restoreDraft(.init(text: "first"))
+        controller.submitPrompt()
+        await settle()
+        let first = try XCTUnwrap(inputCommands("prompt").last?.0)
+        controller.handleEvent(event(["type": "response", "id": first, "success": false, "error": "busy"]))
+        XCTAssertEqual(controller.draft.text, "first")
+        XCTAssertFalse(controller.draft.deliveryUncertain)
+        XCTAssertTrue(controller.pane.composer.statusLabel.stringValue.contains("busy"))
+        controller.submitPrompt()
+        await settle()
+        let second = try XCTUnwrap(inputCommands("prompt").last?.0)
+        XCTAssertNotEqual(first, second)
+        controller.pane.composer.editor.insertText(" edited", replacementRange: NSRange(location: NSNotFound, length: 0))
+        controller.handleEvent(event(["type": "response", "id": second, "success": true]))
+        XCTAssertEqual(controller.draft.text, "first edited")
+        XCTAssertEqual(controller.pane.composer.draft, "first edited")
+        controller.stop()
+    }
+
+    func testPendingPromptRebindKeepsUncertainDraftAndRejectsLateAcknowledgement() async throws {
+        let controller = try await readyController()
+        var saved = ConversationSessionController.Draft()
+        controller.onDraftChange = { saved = $0 }
+        controller.restoreDraft(.init(text: "keep me"))
+        controller.submitPrompt()
+        await settle()
+        let id = try XCTUnwrap(inputCommands("prompt").last?.0)
+        controller.rebind(to: ConnectionEpoch(2))
+        controller.handleEvent(event(["type": "response", "id": id, "success": true], view: "v1"))
+        XCTAssertEqual(saved.text, "keep me")
+        XCTAssertTrue(saved.deliveryUncertain)
+        XCTAssertEqual(controller.pane.composer.draft, "keep me")
+        controller.submitPrompt()
+        await settle()
+        XCTAssertEqual(inputCommands("prompt").count, 1)
+        let replacement = makeController()
+        replacement.restoreDraft(saved)
+        XCTAssertEqual(replacement.pane.composer.draft, "keep me")
+        XCTAssertTrue(replacement.pane.composer.statusLabel.stringValue.contains("未确认"))
+        controller.stop(); replacement.stop()
+    }
+
+    func testAbortUsesSameSessionLaneAndWaitsForAuthoritativeIdleWithoutTouchingDraft() async throws {
+        let controller = try await readyController()
+        controller.restoreDraft(.init(text: "next turn"))
+        controller.handleUpdate(ConversationUpdate(reference: ref, viewID: "v1", sourceEpoch: "e", baseSeq: 5, commitSeq: 6, upserts: [], removes: [], state: .init(running: true, queued: 0, mode: "rpc")))
+        controller.publishNow()
+        controller.pane.composer.actionButton.performClick(nil)
+        controller.abortGeneration()
+        controller.submitPrompt()
+        await settle()
+        XCTAssertEqual(inputCommands("abort").count, 1)
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        let id = try XCTUnwrap(inputCommands("abort").first?.0)
+        controller.handleEvent(event(["type": "response", "id": id, "success": true]))
+        XCTAssertTrue(controller.pane.composer.state.stopping)
+        XCTAssertEqual(controller.liveState?.running, true)
+        controller.handleUpdate(ConversationUpdate(reference: ref, viewID: "v1", sourceEpoch: "e", baseSeq: 6, commitSeq: 7, upserts: [], removes: [], state: .init(running: false, queued: 0, mode: "rpc")))
+        controller.publishNow()
+        XCTAssertFalse(controller.pane.composer.state.stopping)
+        XCTAssertEqual(controller.pane.composer.actionButton.accessibilityLabel(), "发送消息")
+        XCTAssertEqual(controller.draft.text, "next turn")
+        controller.stop()
+    }
+
+    func testPromptPayloadOverflowAndSendFailureNeverLoseOrReplayDraft() async throws {
+        let controller = try await readyController()
+        let huge = String(repeating: "中文\\\"", count: 8000)
+        controller.restoreDraft(.init(text: huge))
+        controller.submitPrompt()
+        await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        XCTAssertEqual(controller.draft.text, huge)
+        XCTAssertTrue(controller.pane.composer.statusLabel.stringValue.contains("上限"))
+        controller.restoreDraft(.init(text: "network failure"))
+        controller.send = { _ in throw URLError(.networkConnectionLost) }
+        controller.submitPrompt()
+        await settle()
+        XCTAssertEqual(controller.draft.text, "network failure")
+        XCTAssertTrue(controller.draft.deliveryUncertain)
+        XCTAssertFalse(controller.pane.composer.state.sending)
+        controller.stop()
+    }
+
+    func testOfflineBeforeWriterRunsCancelsSubmissionAndRetainsDraft() async throws {
+        let controller = try await readyController()
+        controller.restoreDraft(.init(text: "offline draft"))
+        controller.submitPrompt()
+        controller.connectionLost()
+        await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        XCTAssertEqual(controller.draft.text, "offline draft")
+        XCTAssertFalse(controller.pane.composer.state.ready)
+        controller.submitPrompt()
+        await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        controller.stop()
+    }
+
+    func testUnacknowledgedPromptTimesOutWithoutResendingOrConsumingDraft() async throws {
+        let controller = try await readyController()
+        controller.restoreDraft(.init(text: "timeout draft"))
+        controller.submitPrompt()
+        await settle()
+        let id = try XCTUnwrap(inputCommands("prompt").last?.0)
+        try await Task.sleep(for: .milliseconds(15_100))
+        XCTAssertEqual(inputCommands("prompt").count, 1)
+        XCTAssertFalse(controller.pane.composer.state.sending)
+        XCTAssertTrue(controller.draft.deliveryUncertain)
+        XCTAssertEqual(controller.draft.text, "timeout draft")
+        controller.handleEvent(event(["type": "response", "id": id, "success": true]))
+        XCTAssertEqual(controller.draft.text, "timeout draft")
+        XCTAssertTrue(controller.draft.deliveryUncertain)
+        controller.stop()
+    }
+
+    func testCompositionAndPendingPromptBlockModeMutation() async throws {
+        let controller = try await readyController()
+        controller.restoreDraft(.init(text: "draft"))
+        controller.pane.composer.editor.setMarkedText("拼音", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        controller.submitPrompt()
+        controller.requestSwitch(to: .tui)
+        await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        XCTAssertTrue(switchCommands().isEmpty)
+        controller.pane.composer.editor.unmarkText()
+        controller.submitPrompt()
+        controller.requestSwitch(to: .tui)
+        await settle()
+        XCTAssertEqual(inputCommands("prompt").count, 1)
+        XCTAssertTrue(switchCommands().isEmpty)
+        controller.stop()
+    }
+
     private func usageCommands() -> [(String, String)] {
         sent.compactMap {
             guard case let .conversationCommand(reference, id, body) = $0,

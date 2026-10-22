@@ -1,5 +1,6 @@
 import AppKit
 import CorralContracts
+import CorralProtocol
 import CorralServices
 import CorralUI
 import Foundation
@@ -40,6 +41,25 @@ final class ConversationSessionController {
         var model: String?
         var thinkingLevel: String?
     }
+
+    struct Draft: Equatable {
+        var text = ""
+        var deliveryUncertain = false
+    }
+    private struct PendingPrompt {
+        let id: String
+        let text: String
+        let revision: UInt64
+    }
+    private(set) var draft = Draft()
+    var onDraftChange: (Draft) -> Void = { _ in }
+    private var draftRevision: UInt64 = 0
+    private var pendingPrompt: PendingPrompt?
+    private var pendingAbort: String?
+    private var promptTimeout: Task<Void, Never>?
+    private var abortTimeout: Task<Void, Never>?
+    private var inputRetired = false
+    private var inputNotice: String?
 
     let key: SessionKey
     private(set) var connectionEpoch: ConnectionEpoch
@@ -102,6 +122,9 @@ final class ConversationSessionController {
         pane.onRetry = { [weak self] in self?.retry() }
         header.onSelectMode = { [weak self] mode in self?.requestSwitch(to: mode) }
         header.makeActionMenu = { [weak self] in self?.actionMenu() }
+        pane.composer.onDraftChange = { [weak self] text in self?.editDraft(text) }
+        pane.composer.onSubmit = { [weak self] in self?.submitPrompt() }
+        pane.composer.onAbort = { [weak self] in self?.abortGeneration() }
     }
 
     /// Whether this pane should currently show the structured view instead of the terminal.
@@ -110,6 +133,7 @@ final class ConversationSessionController {
     var presentsHeader: Bool { !unavailable }
 
     func start() {
+        inputRetired = false
         phase = .subscribing
         lane = .windowed
         publish()
@@ -130,6 +154,7 @@ final class ConversationSessionController {
     /// A reconnect invalidates every view; the pane keeps its rows while the new view's history loads.
     func rebind(to epoch: ConnectionEpoch) {
         guard epoch != connectionEpoch else { return }
+        invalidateInput()
         invalidateUsage("连接已改变，请关闭后重新打开用量面板")
         connectionEpoch = epoch
         if transcript?.initialAdopted == true { staleRows = rows() }
@@ -149,7 +174,17 @@ final class ConversationSessionController {
         start()
     }
 
+    /// Transport loss is distinct from a source resync: wait for rebind, never write a recovery command offline.
+    func connectionLost() {
+        phase = .recovering("network")
+        invalidateInput()
+        invalidateUsage("连接已断开，请重连后重新打开用量面板")
+        publish()
+    }
+
     func stop() {
+        inputRetired = true
+        invalidateInput()
         closeUsage()
         let reference = key.reference
         let send = self.send
@@ -161,6 +196,7 @@ final class ConversationSessionController {
     func handleReady(_ value: ConversationReady) {
         invalidateUsage("会话视图已改变，请关闭后重新打开用量面板")
         if let current = transcript, current.viewID == value.viewID { return }
+        invalidateInput()
         if transcript?.initialAdopted == true { staleRows = rows() }
         lane = .windowed
         managed = true
@@ -263,6 +299,11 @@ final class ConversationSessionController {
             handleSwitchResponse(success: object["success"] as? Bool == true, data: object["data"] as? [String: Any], error: object["error"] as? String)
             return
         }
+        if id == pendingPrompt?.id || id == pendingAbort {
+            guard event.sourceEpoch == nil || event.sourceEpoch == transcript?.sourceEpoch else { return }
+            handleInputResponse(object, id: id)
+            return
+        }
         if id == usageCommandID {
             guard event.sourceEpoch == nil || event.sourceEpoch == transcript?.sourceEpoch else { return }
             handleUsageResponse(object)
@@ -294,6 +335,7 @@ final class ConversationSessionController {
     func handleMalformed() { recover("malformed") }
 
     func handleClosed(_ reason: ConversationClosedReason) {
+        invalidateInput()
         invalidateUsage("会话连接已结束，暂时无法读取用量")
         switch lane {
         case .windowed:
@@ -334,6 +376,14 @@ final class ConversationSessionController {
     /// The viewport switcher and the default-mode preference share this one serial native operation.
     func requestSwitch(to target: CorralViewportHeaderState.Mode, automatic: Bool = false) {
         guard modeSwitch == nil, managed, !unavailable else { return }
+        guard !pane.composer.editor.hasMarkedText() else {
+            if !automatic { showNotice("请先完成输入法组字，再切换模式", tone: .warning) }
+            return
+        }
+        guard pendingPrompt == nil, pendingAbort == nil else {
+            if !automatic { showNotice("请等待发送或停止确认，再切换模式", tone: .warning) }
+            return
+        }
         let current: CorralViewportHeaderState.Mode = nativeMode == .tui ? .tui : .gui
         guard target != current else { return }
         // Each direction needs its own attached lane; otherwise nothing is written.
@@ -423,7 +473,7 @@ final class ConversationSessionController {
     private func handleWorkerMode(_ mode: String) {
         let confirmed: NativeMode = mode == "tui" ? .tui : .rpc
         guard confirmed != nativeMode || modeSwitch != nil else { return }
-        if confirmed != nativeMode { closeUsage() }
+        if confirmed != nativeMode { closeUsage(); invalidateInput() }
         nativeMode = confirmed
         if confirmed == .rpc, lane == .control {
             // Another client (or our own control-lane switch) brought the pane back to RPC.
@@ -650,6 +700,9 @@ final class ConversationSessionController {
     private func adoptLiveState(_ state: ConversationLiveState) {
         let modeChanged = state.mode != liveState?.mode
         liveState = state
+        if !state.running, pendingAbort != nil {
+            pendingAbort = nil; abortTimeout?.cancel(); abortTimeout = nil
+        }
         if modeChanged { onPresentationChange() }
     }
 
@@ -667,6 +720,126 @@ final class ConversationSessionController {
             let send = self.send
             Task { @MainActor in try? await send(command) }
         }
+    }
+
+    // MARK: Composer input
+
+    func restoreDraft(_ value: Draft) {
+        draft = value
+        pane.composer.restoreDraft(value.text)
+        publishComposer()
+    }
+
+    private func editDraft(_ text: String) {
+        draft.text = text
+        draftRevision &+= 1
+        inputNotice = nil
+        onDraftChange(draft)
+        publishComposer()
+    }
+
+    private var inputReady: Bool {
+        !inputRetired && managed && !unavailable && lane == .windowed && nativeMode == .rpc && phase == .ready &&
+        transcript?.initialAdopted == true && modeSwitch == nil
+    }
+
+    private func publishComposer() {
+        pane.composer.apply(CorralComposerState(ready: inputReady, running: liveState?.running,
+            sending: pendingPrompt != nil, stopping: pendingAbort != nil,
+            message: inputNotice ?? (draft.deliveryUncertain && pendingPrompt == nil ? "发送结果未确认，草稿保留；请核对会话后再发送" : nil),
+            isError: inputNotice != nil || draft.deliveryUncertain && pendingPrompt == nil))
+    }
+
+    func submitPrompt() {
+        guard inputReady, liveState?.running == false, pendingPrompt == nil, pendingAbort == nil,
+              !pane.composer.editor.hasMarkedText(), !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let id = "prompt-" + UUID().uuidString
+        let text = draft.text
+        guard let body = try? JSONSerialization.data(withJSONObject: ["type": "prompt", "message": text]) else { return }
+        let command = ClientCommand.conversationCommand(reference: key.reference, id: id, command: body)
+        // Validate the actual UTF-8 JSON envelope, including escaped text and ref/id overhead. Never truncate.
+        guard (try? JSONV1Codec().encodeClientCommand(command)) != nil else {
+            inputNotice = "消息超过单次传输上限，请缩短后发送；草稿未丢失"
+            publishComposer()
+            return
+        }
+        pendingPrompt = PendingPrompt(id: id, text: text, revision: draftRevision)
+        draft.deliveryUncertain = true
+        inputNotice = nil
+        onDraftChange(draft)
+        publishComposer()
+        Task { @MainActor [weak self] in
+            guard let self, self.pendingPrompt?.id == id, self.inputReady else { return }
+            do { try await self.send(command) }
+            catch {
+                guard self.pendingPrompt?.id == id else { return }
+                self.finishPrompt(error: "发送未确认，请核对会话后重试；草稿已保留", uncertain: true)
+            }
+        }
+        promptTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, let self, self.pendingPrompt?.id == id else { return }
+            self.finishPrompt(error: "发送确认超时，请核对会话后重试；草稿已保留", uncertain: true)
+        }
+    }
+
+    func abortGeneration() {
+        guard inputReady, liveState?.running == true, pendingAbort == nil else { return }
+        let id = "abort-" + UUID().uuidString
+        pendingAbort = id
+        inputNotice = nil
+        publishComposer()
+        let command = ClientCommand.conversationCommand(reference: key.reference, id: id, command: Data(#"{"type":"abort"}"#.utf8))
+        Task { @MainActor [weak self] in
+            guard let self, self.pendingAbort == id, self.inputReady else { return }
+            do { try await self.send(command) }
+            catch { if self.pendingAbort == id { self.finishAbort(error: "停止未确认，请核对运行状态后重试") } }
+        }
+        abortTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, let self, self.pendingAbort == id else { return }
+            self.finishAbort(error: "停止确认超时，请核对运行状态后重试")
+        }
+    }
+
+    private func handleInputResponse(_ object: [String: Any], id: String) {
+        let success = object["success"] as? Bool == true
+        if let pending = pendingPrompt, id == pending.id {
+            if success {
+                // A native preflight ACK, not socketWritten, consumes this exact draft. Never clobber later edits/IME.
+                if draftRevision == pending.revision, draft.text == pending.text, !pane.composer.editor.hasMarkedText() {
+                    draft.text = ""
+                    pane.composer.restoreDraft("")
+                }
+                finishPrompt(error: nil, uncertain: false)
+            } else {
+                let reason = (object["error"] as? String).map { String($0.prefix(160)) } ?? "原生会话拒绝了消息"
+                finishPrompt(error: "发送失败：\(reason) · 草稿已保留", uncertain: false)
+            }
+        } else if id == pendingAbort {
+            // The response confirms the request, not an invented idle state. Wait for the live state to stop.
+            if !success { finishAbort(error: "停止失败，请核对运行状态后重试") }
+            else if liveState?.running == false { finishAbort(error: nil) }
+        }
+    }
+
+    private func finishPrompt(error: String?, uncertain: Bool) {
+        pendingPrompt = nil; promptTimeout?.cancel(); promptTimeout = nil
+        draft.deliveryUncertain = uncertain
+        inputNotice = error
+        onDraftChange(draft)
+        publishComposer()
+    }
+
+    private func finishAbort(error: String?) {
+        pendingAbort = nil; abortTimeout?.cancel(); abortTimeout = nil
+        inputNotice = error
+        publishComposer()
+    }
+
+    private func invalidateInput() {
+        if pendingPrompt != nil { finishPrompt(error: "连接或视图已改变，发送结果未确认；草稿已保留", uncertain: true) }
+        if pendingAbort != nil { finishAbort(error: "连接或视图已改变，停止结果未确认") }
     }
 
     // MARK: Atomic actions and session usage
@@ -765,6 +938,7 @@ final class ConversationSessionController {
 
     /// One small-window resubscribe per loss episode, bounded to three a minute; never a WebSocket reconnect.
     private func recover(_ reason: String) {
+        invalidateInput()
         invalidateUsage("会话正在重新连接，请关闭后重新打开用量面板")
         let now = Date()
         recoveries = recoveries.filter { now.timeIntervalSince($0) < 60 }
@@ -809,6 +983,7 @@ final class ConversationSessionController {
             self.publishScheduled = false
             self.pane.apply(self.paneState())
             self.header.apply(self.headerState())
+            self.publishComposer()
         }
     }
 
@@ -816,6 +991,7 @@ final class ConversationSessionController {
         publishScheduled = false
         pane.apply(paneState())
         header.apply(headerState())
+        publishComposer()
     }
 
     func headerState() -> CorralViewportHeaderState {

@@ -305,6 +305,21 @@ final class CorralAcceptanceDriver {
                 throw HitTestMismatch(description: String(describing: window.contentView?.hitTest(window.contentView!.convert(point, from: nil))))
             }
             try click(target)
+        case "composer-edit", "composer-ime":
+            // App-local NSTextInputClient path; this does not certify the OS candidate-window UI.
+            let pane = try conversationPane(command)
+            let editor = pane.composer.editor
+            guard !editor.isHiddenOrHasHiddenAncestor, editor.window === window else { throw Failure.missingView }
+            window.makeFirstResponder(editor)
+            if command["replace"] as? Bool == true { editor.setSelectedRange(NSRange(location: 0, length: (editor.string as NSString).length)) }
+            if command["op"] as? String == "composer-ime" {
+                let marked = command["marked"] as? String ?? ""
+                editor.setMarkedText(marked, selectedRange: NSRange(location: (marked as NSString).length, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                if let text = command["commit"] as? String { editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+            } else { editor.insertText(command["text"] as? String ?? "", replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        case "composer-action":
+            let pane = try conversationPane(command)
+            try click(pane.composer.actionButton)
         case "conversation-action":
             // Native menu item target/action, without entering NSMenu's modal pointer-tracking loop.
             guard let ref = command["ref"] as? String, let raw = command["action"] as? String,
@@ -396,6 +411,15 @@ final class CorralAcceptanceDriver {
                     "actionsVisible": !controller.header.moreButton.isHidden,
                     "actions": controller.actionMenu()?.entries.map { ["id": $0.spec.id.rawValue, "title": $0.title, "availability": String(describing: $0.availability)] } ?? [],
                     "status": controller.header.statusLabel.stringValue, "notice": controller.header.state.notice ?? NSNull()
+                ] as [String: Any],
+                "composer": [
+                    "text": pane.composer.draft, "marked": pane.composer.editor.hasMarkedText(),
+                    "ready": pane.composer.state.ready, "sending": pane.composer.state.sending, "stopping": pane.composer.state.stopping,
+                    "actionEnabled": pane.composer.actionButton.isEnabled,
+                    "actionLabel": pane.composer.actionButton.accessibilityLabel() ?? "",
+                    "status": pane.composer.statusLabel.stringValue,
+                    "focused": window.firstResponder === pane.composer.editor,
+                    "frame": rect(pane.composer.convert(pane.composer.bounds, to: nil))
                 ] as [String: Any],
                 "usage": controller.usageDashboard.map { dashboard in
                     ["visible": dashboard.presentedWindow != nil,
