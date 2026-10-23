@@ -335,6 +335,44 @@ final class CorralAcceptanceDriver {
         case "composer-action":
             let pane = try conversationPane(command)
             try click(pane.composer.actionButton)
+        case "conversation-model-picker", "conversation-model-select", "conversation-thinking-select":
+            guard let ref = command["ref"] as? String,
+                  let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }) else { throw Failure.missingView }
+            if command["op"] as? String == "conversation-model-picker" { try click(controller.header.modelButton) }
+            else {
+                guard let picker = controller.modelPicker, let value = command["value"] as? String else { throw Failure.missingView }
+                let button: NSPopUpButton
+                let index: Int?
+                if command["op"] as? String == "conversation-model-select" {
+                    button = picker.modelButton
+                    index = controller.controls.models.firstIndex { $0.id == value && $0.provider == command["provider"] as? String }
+                } else { button = picker.thinkingButton; index = controller.controls.levels.firstIndex(of: value) }
+                guard button.isEnabled, let index, let action = button.action else { throw Failure.missingView }
+                button.selectItem(at: index + 1)
+                guard NSApp.sendAction(action, to: button.target, from: button) else { throw Failure.invalidCommand }
+            }
+        case "composer-attachment-fixture":
+            // Explicit post-picker callback fixture, NOT a claim of OS OpenPanel file selection.
+            guard let ref = command["ref"] as? String, let names = command["files"] as? [String],
+                  let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }) else { throw Failure.missingView }
+            let root = directory.resolvingSymlinksInPath()
+            let urls = try names.map { name -> URL in
+                let file = directory.appendingPathComponent(name).resolvingSymlinksInPath()
+                guard name == (name as NSString).lastPathComponent, file.deletingLastPathComponent() == root else { throw Failure.unsafeConfiguration }
+                return file
+            }
+            try record("attachment_selection_fixture", fields: ["files": names])
+            controller.addAttachments(urls)
+        case "composer-library-edit":
+            guard let content = window.contentView,
+                  let title = descendants(content).compactMap({ $0 as? NSTextField }).first(where: { $0.accessibilityIdentifier() == "corral.prompts.title" }),
+                  let editor = descendants(content).compactMap({ $0 as? NSTextView }).first(where: { $0.accessibilityIdentifier() == "corral.prompts.editor" }) else { throw Failure.missingView }
+            title.stringValue = command["title"] as? String ?? ""
+            window.makeFirstResponder(editor)
+            editor.insertText(command["text"] as? String ?? "", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        case "composer-attachment-cancel":
+            guard let ref = command["ref"] as? String, let panel = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref })?.attachmentPanel else { throw Failure.missingView }
+            panel.cancel(nil)
         case "action-edit":
             guard let ref = command["ref"] as? String, let text = command["text"] as? String,
                   let controller = coordinator.conversationControllers.first(where: { $0.key.reference.rawValue == ref }) else { throw Failure.missingView }
@@ -478,6 +516,10 @@ final class CorralAcceptanceDriver {
                      "choices": panel.choices.map { ["id": $0.id, "title": $0.title, "detail": $0.detail, "current": $0.current] as [String: Any] }
                     ] as [String: Any]
                 } ?? [:],
+                "modelPicker": ["visible": controller.modelPicker.map { $0.isViewLoaded && $0.view.window?.isVisible == true } ?? false,
+                    "models": controller.controls.models.map { ["id": $0.id, "provider": $0.provider, "name": $0.name] },
+                    "levels": controller.controls.levels, "pending": controller.controls.settingsPending,
+                    "status": controller.controls.modelStatus] as [String: Any],
                 "renaming": controller.header.isRenaming,
                 "nativeSessionID": controller.ready?.sessionID ?? "",
                 "composer": [
@@ -485,6 +527,10 @@ final class CorralAcceptanceDriver {
                     "ready": pane.composer.state.ready, "sending": pane.composer.state.sending, "stopping": pane.composer.state.stopping,
                     "actionEnabled": pane.composer.actionButton.isEnabled,
                     "actionLabel": pane.composer.actionButton.accessibilityLabel() ?? "",
+                    "stopVisible": !pane.composer.stopButton.isHidden, "stopEnabled": pane.composer.stopButton.isEnabled,
+                    "attachmentPanelVisible": controller.attachmentPanel?.isVisible ?? false,
+                    "attachments": pane.composer.attachments.map { ["id": $0.id.uuidString, "name": $0.url.lastPathComponent, "image": $0.isImage] as [String: Any] },
+                    "suggestions": pane.composer.suggestions.map { ["id": $0.id, "title": $0.title, "detail": $0.detail] },
                     "status": pane.composer.statusLabel.stringValue,
                     "focused": window.firstResponder === pane.composer.editor,
                     "frame": rect(pane.composer.convert(pane.composer.bounds, to: nil))

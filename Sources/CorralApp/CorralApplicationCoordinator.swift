@@ -136,6 +136,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private let deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle
     private let inputRouter: SessionLinkInputRouter
     private let environment: [String: String]
+    private let promptDefaults: UserDefaults
     private let telemetryURL: URL?
     private let telemetryWriter = AtomicTelemetryWriter()
     private let maximumVisiblePanes: Int
@@ -211,6 +212,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
     private let conversationHistoryClient = ConversationHistoryClient()
     private let conversationExportClient = ConversationExportClient()
+    private let conversationUploadClient = ConversationUploadClient()
     private static let maximumConversationViews = 8
     /// CLI providers whose managed structured launch follows the Pi default open mode.
     private static let structuredCreateProviders: Set<String> = ["pi"]
@@ -255,6 +257,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         userPreferencesStore: UserPreferencesStore,
         initialWorkspaceState: CorralWorkspaceState,
         initialUserPreferences: UserPreferences,
+        promptDefaults: UserDefaults = .standard,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         maximumVisiblePanes: Int = .max,
         hostIdentityProbe: HostIdentityProbe = HostIdentityProbe(),
@@ -274,6 +277,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         self.userPreferences = initialUserPreferences
         self.activeWorkspaceTabID = initialWorkspaceState.activeTabID
         self.environment = environment
+        self.promptDefaults = promptDefaults
         self.maximumVisiblePanes = maximumVisiblePanes
         self.noResizeMode = environment["CORRAL_NATIVE_NO_RESIZE"] == "1"
         self.backgroundMode = environment["CORRAL_NATIVE_BACKGROUND"] == "1"
@@ -2166,7 +2170,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 controller.title = sessions[key]?.descriptor.name ?? controller.title
                 continue
             }
-            let controller = ConversationSessionController(key: key, connectionEpoch: connection.connectionEpoch)
+            let controller = ConversationSessionController(key: key, connectionEpoch: connection.connectionEpoch, promptDefaults: promptDefaults)
             controller.title = sessions[key]?.descriptor.name ?? key.reference.rawValue
             controller.provider = sessions[key]?.descriptor.provider
             controller.restoreDraft(conversationDrafts[key]?[""] ?? .init())
@@ -2175,8 +2179,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 guard let self else { return }
                 let sid = draft.sessionID ?? ""
                 if draft.sessionID != nil { self.conversationDrafts[key]?.removeValue(forKey: "") }
-                self.conversationDrafts[key, default: [:]][sid] = draft.text.isEmpty && !draft.deliveryUncertain ? nil : draft
+                self.conversationDrafts[key, default: [:]][sid] = draft.text.isEmpty && draft.attachments.isEmpty && !draft.deliveryUncertain ? nil : draft
                 if self.conversationDrafts[key]?.isEmpty == true { self.conversationDrafts.removeValue(forKey: key) }
+            }
+            controller.upload = { [weak self, weak controller] file in
+                guard let self, let controller, self.connected, controller.controlReady,
+                      let token = self.activeConnectionConfiguration?.token else { throw ConversationUploadFailure("unavailable") }
+                let epoch = controller.connectionEpoch, sid = controller.ready?.sessionID
+                guard let route = await self.sessionLink.activeEndpoint(), self.connection?.connectionEpoch == epoch,
+                      controller.ready?.sessionID == sid else { throw ConversationUploadFailure("stale_session") }
+                return try await self.conversationUploadClient.upload(file: file, route: route, token: token)
             }
             controller.exportDownload = { [weak self, weak controller] sid in
                 guard let self, let controller, self.connected, controller.ready?.sessionID == sid,

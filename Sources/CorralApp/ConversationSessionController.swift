@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 import CorralContracts
 import CorralProtocol
 import CorralServices
@@ -39,6 +41,8 @@ final class ConversationSessionController {
     struct NativeState: Equatable {
         var sessionName: String?
         var model: String?
+        var modelID: String?
+        var modelProvider: String?
         var thinkingLevel: String?
     }
 
@@ -46,11 +50,14 @@ final class ConversationSessionController {
         var text = ""
         var deliveryUncertain = false
         var sessionID: String?
+        var attachments: [CorralComposerAttachment] = []
     }
     private struct PendingPrompt {
         let id: String
         let text: String
         let revision: UInt64
+        let attachments: [UUID]
+        var submitted = false
     }
     private(set) var draft = Draft()
     var onDraftChange: (Draft) -> Void = { _ in }
@@ -59,9 +66,30 @@ final class ConversationSessionController {
     private var pendingPrompt: PendingPrompt?
     private var pendingAbort: String?
     private var promptTimeout: Task<Void, Never>?
+    private var promptTask: Task<Void, Never>?
+    var upload: (URL) async throws -> String = { _ in throw ConversationUploadFailure("unavailable") }
+    private(set) var attachmentPanel: NSOpenPanel?
     private var abortTimeout: Task<Void, Never>?
     private var inputRetired = false
     private var inputNotice: String?
+    private enum CompletionMode { case none, slash, shortcuts }
+    private var completionMode: CompletionMode = .none
+    private var dismissedCompletion: String?
+    let promptStore: ConversationPromptStore
+    private(set) var modelPicker: CorralModelPickerController?
+    private var promptLibrary: CorralPromptLibraryController?
+    private(set) lazy var controls = makeControls()
+    private func makeControls() -> ConversationControlsController {
+        let value = ConversationControlsController(reference: key.reference) { [weak self] in
+            guard let self, self.controlReady, let ready = self.ready else { return nil }
+            return .init(epoch: self.connectionEpoch, viewID: ready.viewID, sourceEpoch: ready.sourceEpoch, sessionID: ready.sessionID)
+        }
+        value.send = { [weak self] command in guard let self else { throw SessionLinkFailure.disconnected }; try await self.send(command) }
+        value.canChangeSettings = { [weak self] in self?.inputReady == true && self?.pendingPrompt == nil && self?.pendingAbort == nil }
+        value.onChange = { [weak self] in self?.refreshControlsPresentation(); self?.updateSuggestions(); self?.publish() }
+        value.onSettingsChanged = { [weak self] in self?.requestNativeState() }
+        return value
+    }
 
     let key: SessionKey
     private(set) var connectionEpoch: ConnectionEpoch
@@ -155,7 +183,8 @@ final class ConversationSessionController {
     private static let bufferedLimit = 128
     private static let maximumBodyChunks = 256
 
-    init(key: SessionKey, connectionEpoch: ConnectionEpoch) {
+    init(key: SessionKey, connectionEpoch: ConnectionEpoch, promptDefaults: UserDefaults = .standard) {
+        promptStore = ConversationPromptStore(defaults: promptDefaults)
         self.key = key
         self.connectionEpoch = connectionEpoch
         pane.onLoadOlder = { [weak self] in self?.loadOlder() }
@@ -163,6 +192,14 @@ final class ConversationSessionController {
         pane.onRetry = { [weak self] in self?.retry() }
         header.onSelectMode = { [weak self] mode in self?.requestSwitch(to: mode) }
         header.makeActionMenu = { [weak self] in self?.actionMenu() }
+        header.onChooseModel = { [weak self] in self?.openModelPicker() }
+        pane.composer.onSlash = { [weak self] in self?.showCompletions(shortcuts: false) }
+        pane.composer.onShortcuts = { [weak self] in self?.showCompletions(shortcuts: true) }
+        pane.composer.onManageTemplates = { [weak self] in self?.openPromptLibrary() }
+        pane.composer.onAttach = { [weak self] in self?.chooseFiles() }
+        pane.composer.onRemoveAttachment = { [weak self] in self?.removeAttachment($0) }
+        pane.composer.onChooseSuggestion = { [weak self] in self?.chooseSuggestion($0) }
+        pane.composer.onDismissSuggestions = { [weak self] in self?.dismissSuggestions() }
         pane.composer.onDraftChange = { [weak self] text in self?.editDraft(text) }
         pane.composer.onSubmit = { [weak self] in self?.submitPrompt() }
         pane.composer.onAbort = { [weak self] in self?.abortGeneration() }
@@ -199,6 +236,7 @@ final class ConversationSessionController {
     /// A reconnect invalidates every view; the pane keeps its rows while the new view's history loads.
     func rebind(to epoch: ConnectionEpoch) {
         guard epoch != connectionEpoch else { return }
+        invalidateControls()
         invalidateInput()
         operations.invalidate("连接已改变，操作结果未确认；请核对会话后重新打开面板")
         invalidateUsage("连接已改变，请关闭后重新打开用量面板")
@@ -222,6 +260,7 @@ final class ConversationSessionController {
 
     /// Transport loss is distinct from a source resync: wait for rebind, never write a recovery command offline.
     func connectionLost() {
+        invalidateControls()
         phase = .recovering("network")
         operations.invalidate("连接已断开，操作结果未确认；不会自动重试")
         invalidateInput()
@@ -230,6 +269,7 @@ final class ConversationSessionController {
     }
 
     func stop() {
+        invalidateControls()
         inputRetired = true
         operations.stop()
         invalidateInput()
@@ -244,6 +284,7 @@ final class ConversationSessionController {
     func handleReady(_ value: ConversationReady) {
         invalidateUsage("会话视图已改变，请关闭后重新打开用量面板")
         if let current = transcript, current.viewID == value.viewID { return }
+        invalidateControls()
         mutationRefreshPending = false
         retiredViewID = nil
         invalidateInput()
@@ -325,7 +366,10 @@ final class ConversationSessionController {
     func handleUpdate(_ update: ConversationUpdate) {
         guard var transcript, update.viewID != retiredViewID, update.viewID == transcript.viewID, update.sourceEpoch == transcript.sourceEpoch else { return }
         guard transcript.initialAdopted else {
+            guard update.baseSeq == (buffered.last?.commitSeq ?? transcript.snapshotSeq) else { recover("gap"); return }
             buffered.append(update)
+            // Live control state is authoritative even while HTTP history is slow. No transcript credit yet.
+            if let state = update.state { adoptLiveState(state); publishComposer() }
             if buffered.count > Self.bufferedLimit { recover("credit_exhausted") }
             return
         }
@@ -343,7 +387,9 @@ final class ConversationSessionController {
 
     func handleEvent(_ event: ConversationEvent) {
         guard event.reference == key.reference else { return }
-        if let object = try? JSONSerialization.jsonObject(with: event.event) as? [String: Any], operations.handle(event, object: object) { return }
+        if let object = try? JSONSerialization.jsonObject(with: event.event) as? [String: Any] {
+            if operations.handle(event, object: object) || controls.handle(event, object: object) { return }
+        }
         // A control lane replays retained native records; only our response and mode changes matter.
         if lane == .control, !Self.mentions(event.event, ["worker_mode", modeSwitch?.commandID].compactMap { $0 }) { return }
         guard event.viewID == nil || event.viewID == transcript?.viewID,
@@ -369,11 +415,13 @@ final class ConversationSessionController {
         }
         guard id == stateCommandID else { return }
         stateCommandID = nil
-        guard object["success"] as? Bool == true, let data = object["data"] as? [String: Any] else { return }
+        guard object["success"] as? Bool == true, let data = object["data"] as? [String: Any],
+              data["sessionId"] == nil || data["sessionId"] as? String == ready?.sessionID else { return }
         var state = NativeState()
         state.sessionName = (data["sessionName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         if let model = data["model"] as? [String: Any] {
             state.model = (model["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? model["id"] as? String
+            state.modelID = model["id"] as? String; state.modelProvider = model["provider"] as? String
         }
         state.thinkingLevel = (data["thinkingLevel"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         nativeState = state
@@ -388,6 +436,7 @@ final class ConversationSessionController {
             return
         }
         if reason == "source_changed" {
+            invalidateControls()
             retiredViewID = viewID
             buffered.removeAll(); pendingApplied = nil
             invalidateInput()
@@ -405,6 +454,7 @@ final class ConversationSessionController {
     func handleMalformed() { recover("malformed") }
 
     func handleClosed(_ reason: ConversationClosedReason) {
+        invalidateControls()
         invalidateInput()
         if reason != .lost { operations.invalidate("会话连接已结束，操作结果未确认") }
         invalidateUsage("会话连接已结束，暂时无法读取用量")
@@ -455,7 +505,7 @@ final class ConversationSessionController {
             if !automatic { showNotice("请先完成输入法组字，再切换模式", tone: .warning) }
             return
         }
-        guard pendingPrompt == nil, pendingAbort == nil, !operations.isBusy else {
+        guard pendingPrompt == nil, pendingAbort == nil, !operations.isBusy, !controls.settingsPending else {
             if !automatic { showNotice("请等待发送或停止确认，再切换模式", tone: .warning) }
             return
         }
@@ -549,7 +599,7 @@ final class ConversationSessionController {
     private func handleWorkerMode(_ mode: String) {
         let confirmed: NativeMode = mode == "tui" ? .tui : .rpc
         guard confirmed != nativeMode || modeSwitch != nil else { return }
-        if confirmed != nativeMode { closeUsage(); invalidateInput(); operations.invalidate("显示模式已改变，操作结果未确认") }
+        if confirmed != nativeMode { invalidateControls(); closeUsage(); invalidateInput(); operations.invalidate("显示模式已改变，操作结果未确认") }
         nativeMode = confirmed
         if confirmed == .rpc, lane == .control {
             // Another client (or our own control-lane switch) brought the pane back to RPC.
@@ -798,11 +848,162 @@ final class ConversationSessionController {
         }
     }
 
+    // MARK: Native model/command catalogs and local prompt templates
+
+    func openModelPicker() {
+        guard controlReady else { showNotice("连接就绪后可选择模型", tone: .warning); return }
+        if modelPicker == nil {
+            let picker = CorralModelPickerController()
+            picker.onModel = { [weak self] in self?.controls.chooseModel($0) }
+            picker.onLevel = { [weak self] in self?.controls.chooseLevel($0) }
+            picker.onRefresh = { [weak self] in self?.controls.loadModels() }
+            modelPicker = picker
+        }
+        controls.loadModels(); refreshControlsPresentation()
+        modelPicker?.present(relativeTo: header.modelButton)
+    }
+
+    private func refreshControlsPresentation() {
+        modelPicker?.apply(models: controls.models, levels: controls.levels, currentProvider: nativeState.modelProvider,
+                           currentModel: nativeState.modelID, currentLevel: nativeState.thinkingLevel,
+                           enabled: inputReady && pendingPrompt == nil && pendingAbort == nil,
+                           pending: controls.settingsPending, status: controls.modelStatus)
+    }
+
+    private func invalidateControls() {
+        controls.invalidate(); modelPicker?.close(); attachmentPanel?.cancel(nil); attachmentPanel = nil
+        completionMode = .none; dismissedCompletion = nil
+        updateSuggestions()
+    }
+
+    static func slashQuery(_ text: String) -> String? {
+        guard text.hasPrefix("/"), !text.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains) else { return nil }
+        return String(text.dropFirst()).lowercased()
+    }
+
+    func showCompletions(shortcuts: Bool) {
+        guard !pane.composer.editor.hasMarkedText() else { return }
+        completionMode = shortcuts ? .shortcuts : .slash
+        dismissedCompletion = nil
+        controls.loadCommands(); updateSuggestions()
+        pane.composer.window?.makeFirstResponder(pane.composer.editor)
+    }
+
+    func dismissSuggestions() {
+        dismissedCompletion = draft.text; completionMode = .none; updateSuggestions()
+    }
+
+    private func updateSuggestions() {
+        let composer = pane.composer
+        guard completionMode != .none else { composer.setSuggestions([], title: "", visible: false); return }
+        var choices: [CorralComposerSuggestion] = []
+        if completionMode == .slash {
+            let query = Self.slashQuery(draft.text) ?? ""
+            let builtins = [CorralCommandChoice(name: "compact", detail: "打开压缩配置，不直接发送模型提示", source: "builtin"),
+                            CorralCommandChoice(name: "new", detail: "确认后开始新会话", source: "builtin")]
+            var seen = Set<String>()
+            let commands = (builtins + controls.commands).filter { seen.insert($0.name).inserted && (query.isEmpty || $0.name.lowercased().contains(query)) }
+                .sorted { a, b in
+                    let first = a.name.lowercased().hasPrefix(query), second = b.name.lowercased().hasPrefix(query)
+                    return first == second ? a.name.localizedStandardCompare(b.name) == .orderedAscending : first
+                }
+            choices = commands.map { .init(id: "slash:" + $0.name, title: "/" + $0.name, detail: $0.detail, text: "/" + $0.name + " ") }
+        } else {
+            choices = promptStore.load().map { .init(id: "local:" + $0.id.uuidString, title: $0.title, detail: "本地模板", text: $0.text) }
+            choices += controls.commands.filter { $0.source == "prompt" }.map { .init(id: "host:" + $0.name, title: "/" + $0.name, detail: $0.detail, text: "/" + $0.name + " ") }
+        }
+        let title = (completionMode == .shortcuts ? "快捷模板 · " : "斜杠命令 · ") + controls.commandStatus
+        composer.setSuggestions(choices, title: title, visible: true, canManage: completionMode == .shortcuts)
+    }
+
+    func chooseSuggestion(_ value: CorralComposerSuggestion) {
+        guard pane.composer.suggestions.contains(value), !pane.composer.editor.hasMarkedText() else { return }
+        let replace = completionMode == .slash && Self.slashQuery(draft.text) != nil
+        completionMode = .none
+        insertDraftText(value.text, replacingSlash: replace)
+        dismissSuggestions()
+    }
+
+    private func insertDraftText(_ text: String, replacingSlash: Bool = false) {
+        guard !pane.composer.editor.hasMarkedText() else { showNotice("请先完成输入法组字", tone: .warning); return }
+        let range = replacingSlash ? NSRange(location: 0, length: draft.text.utf16.count) : NSRange(location: draft.text.utf16.count, length: 0)
+        let insertion = !replacingSlash && !draft.text.isEmpty ? "\n" + text : text
+        pane.composer.editor.insertText(insertion, replacementRange: range)
+        pane.composer.window?.makeFirstResponder(pane.composer.editor)
+    }
+
+    func openPromptLibrary() {
+        guard !pane.composer.editor.hasMarkedText() else { return }
+        dismissSuggestions()
+        let library = CorralPromptLibraryController(templates: promptStore.load())
+        library.onSave = { [weak self] in self?.promptStore.save($0) ?? false }
+        library.onUse = { [weak self] in self?.insertDraftText($0) }
+        promptLibrary = library
+        if let window = header.window { library.present(over: window) }
+    }
+
+    // MARK: User-selected attachments
+
+    func chooseFiles() {
+        guard attachmentPanel == nil, let window = header.window, !pane.composer.editor.hasMarkedText() else { return }
+        let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
+        panel.prompt = "添加到草稿"; panel.message = "图片作为图片输入，其他文件以主机路径引用。最多5个、每个20MiB；主机另校验图片总量。点击发送才上传。"
+        let sid = draft.sessionID, epoch = connectionEpoch
+        attachmentPanel = panel
+        panel.beginSheetModal(for: window) { [weak self, weak panel] response in
+            let urls = panel?.urls
+            guard let self else { return }
+            self.attachmentPanel = nil
+            guard response == .OK, self.connectionEpoch == epoch, self.draft.sessionID == sid, let urls else { return }
+            self.addAttachments(urls)
+        }
+    }
+
+    func addAttachments(_ urls: [URL]) {
+        guard !inputRetired, !urls.isEmpty else { return }
+        guard draft.attachments.count + urls.count <= 5 else { inputNotice = "最多5个附件，此次选择未添加"; publishComposer(); return }
+        let sid = draft.sessionID, epoch = connectionEpoch
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let attachments = try await Task.detached(priority: .userInitiated) { try urls.map(Self.prepareAttachment) }.value
+                guard !self.inputRetired, self.connectionEpoch == epoch, self.draft.sessionID == sid else { return }
+                guard self.draft.attachments.count + attachments.count <= 5 else { self.inputNotice = "最多5个附件，此次选择未添加"; self.publishComposer(); return }
+                self.draft.attachments += attachments; self.draftRevision &+= 1; self.inputNotice = nil
+                self.onDraftChange(self.draft); self.pane.composer.setAttachments(self.draft.attachments)
+            } catch { self.inputNotice = "所选文件无法读取、为空或超过20MiB；此次选择未添加，原草稿保留" }
+            self.publishComposer()
+        }
+    }
+
+    nonisolated private static func prepareAttachment(_ url: URL) throws -> CorralComposerAttachment {
+        let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let info = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard info.isRegularFile == true, let size = info.fileSize, size > 0, size <= ConversationUploadClient.maximumFileBytes else { throw ConversationUploadFailure("file_size") }
+        var image = false, preview: Data?
+        if let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+           let type = CGImageSourceGetType(source), let mime = UTType(type as String)?.preferredMIMEType {
+            image = ["image/jpeg", "image/png", "image/gif", "image/webp"].contains(mime)
+            if image, let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 64, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary),
+               let bytes = CFDataCreateMutable(nil, 0), let destination = CGImageDestinationCreateWithData(bytes, UTType.png.identifier as CFString, 1, nil) {
+                CGImageDestinationAddImage(destination, thumbnail, nil)
+                if CGImageDestinationFinalize(destination) { preview = bytes as Data }
+            }
+        }
+        return .init(url: url, isImage: image, preview: preview)
+    }
+
+    func removeAttachment(_ id: UUID) {
+        draft.attachments.removeAll { $0.id == id }; draftRevision &+= 1
+        pane.composer.setAttachments(draft.attachments); onDraftChange(draft); publishComposer()
+    }
+
     // MARK: Composer input
 
     func restoreDraft(_ value: Draft) {
         draft = value
         pane.composer.restoreDraft(value.text)
+        pane.composer.setAttachments(value.attachments)
         publishComposer()
     }
 
@@ -810,11 +1011,26 @@ final class ConversationSessionController {
         draft.text = text
         draftRevision &+= 1
         inputNotice = nil
+        if dismissedCompletion != text { dismissedCompletion = nil }
+        if Self.slashQuery(text) != nil, dismissedCompletion != text, !pane.composer.editor.hasMarkedText() {
+            if completionMode != .slash { showCompletions(shortcuts: false) }
+        } else if completionMode == .slash { completionMode = .none }
+        updateSuggestions()
         onDraftChange(draft)
         publishComposer()
     }
 
-    private var inputReady: Bool { structuredReady && !operations.isBusy }
+    private var inputReady: Bool { controlReady && !operations.isBusy && !controls.settingsPending }
+
+    /// Ready owns a native command lane; the HTTP reading plane does not own user input.
+    var controlReady: Bool {
+        guard !inputRetired, managed, !unavailable, lane == .windowed, nativeMode == .rpc,
+              let ready, transcript?.viewID == ready.viewID, retiredViewID == nil, modeSwitch == nil else { return false }
+        switch phase {
+        case .loadingHistory, .historyFailed, .ready: return true
+        default: return false
+        }
+    }
 
     private var structuredReady: Bool {
         !inputRetired && managed && !unavailable && lane == .windowed && nativeMode == .rpc && phase == .ready &&
@@ -829,40 +1045,72 @@ final class ConversationSessionController {
     }
 
     func submitPrompt() {
-        guard inputReady, liveState?.running == false, pendingPrompt == nil, pendingAbort == nil,
-              !pane.composer.editor.hasMarkedText(), !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let id = "prompt-" + UUID().uuidString
-        let text = draft.text
-        guard let body = try? JSONSerialization.data(withJSONObject: ["type": "prompt", "message": text]) else { return }
-        let command = ClientCommand.conversationCommand(reference: key.reference, id: id, command: body)
-        // Validate the actual UTF-8 JSON envelope, including escaped text and ref/id overhead. Never truncate.
-        guard (try? JSONV1Codec().encodeClientCommand(command)) != nil else {
-            inputNotice = "消息超过单次传输上限，请缩短后发送；草稿未丢失"
-            publishComposer()
-            return
-        }
-        pendingPrompt = PendingPrompt(id: id, text: text, revision: draftRevision)
-        draft.deliveryUncertain = true
-        inputNotice = nil
-        onDraftChange(draft)
-        publishComposer()
-        Task { @MainActor [weak self] in
-            guard let self, self.pendingPrompt?.id == id, self.inputReady else { return }
-            do { try await self.send(command) }
-            catch {
-                guard self.pendingPrompt?.id == id else { return }
-                self.finishPrompt(error: "发送未确认，请核对会话后重试；草稿已保留", uncertain: true)
+        guard inputReady, liveState?.running != nil, pendingPrompt == nil, pendingAbort == nil,
+              !pane.composer.editor.hasMarkedText(), !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.attachments.isEmpty else { return }
+        let text = draft.text, attachments = draft.attachments
+        if attachments.isEmpty {
+            let action: CorralActionID? = switch text.trimmingCharacters(in: .whitespacesAndNewlines) {
+            case "/compact": .compact
+            case "/new", "/clear": .newSession
+            default: nil
+            }
+            if let action {
+                dismissSuggestions()
+                if !performAction(action) { inputNotice = "会话操作暂不可用；请等待就绪或先停止任务"; publishComposer() }
+                return
             }
         }
-        promptTimeout = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(15))
-            guard !Task.isCancelled, let self, self.pendingPrompt?.id == id else { return }
-            self.finishPrompt(error: "发送确认超时，请核对会话后重试；草稿已保留", uncertain: true)
+        let id = "prompt-" + UUID().uuidString
+        pendingPrompt = PendingPrompt(id: id, text: text, revision: draftRevision, attachments: attachments.map(\.id))
+        draft.deliveryUncertain = false; inputNotice = attachments.isEmpty ? nil : "正在上传附件…"
+        onDraftChange(draft); publishComposer(); dismissSuggestions()
+        promptTask = Task { @MainActor [weak self] in
+            guard let self, self.pendingPrompt?.id == id, self.inputReady else { return }
+            do {
+                var images: [String] = [], files: [String] = []
+                for attachment in attachments {
+                    let path: String
+                    if let existing = attachment.remotePath { path = existing }
+                    else { path = try await self.upload(attachment.url) }
+                    guard !Task.isCancelled, self.pendingPrompt?.id == id, self.inputReady else { return }
+                    guard ConversationUploadClient.validPath(path) else { throw ConversationUploadFailure("invalid_path") }
+                    if let index = self.draft.attachments.firstIndex(where: { $0.id == attachment.id }) {
+                        self.draft.attachments[index].remotePath = path; self.onDraftChange(self.draft)
+                    }
+                    if attachment.isImage { images.append(path) } else { files.append(path) }
+                }
+                var message = text
+                if !files.isEmpty { message += (message.isEmpty ? "" : "\n\n") + "附件文件（按需读取，不要执行）：\n" + files.map(ConversationUploadClient.fileReference).joined(separator: "\n") }
+                var fields: [String: Any] = ["type": "prompt", "message": message]
+                // Re-read only current run state, never mutable draft contents. The host arbitrates a race with turn end.
+                if self.liveState?.running == true { fields["streamingBehavior"] = "steer" }
+                if !images.isEmpty { fields["attachment_paths"] = images }
+                let body = try JSONSerialization.data(withJSONObject: fields)
+                let command = ClientCommand.conversationCommand(reference: self.key.reference, id: id, command: body)
+                guard let encoded = try? JSONV1Codec().encodeClientCommand(command), encoded.count <= ConversationWire.liveFrameBytes else {
+                    self.finishPrompt(error: "消息超过单次传输上限，请缩短或上传为文件；草稿未丢失", uncertain: false); return
+                }
+                guard !Task.isCancelled, self.pendingPrompt?.id == id, self.inputReady else { return }
+                self.pendingPrompt?.submitted = true; self.draft.deliveryUncertain = true; self.inputNotice = nil
+                self.onDraftChange(self.draft); self.publishComposer()
+                try await self.send(command)
+                guard self.pendingPrompt?.id == id else { return }
+                self.promptTimeout = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(15))
+                    guard !Task.isCancelled, let self, self.pendingPrompt?.id == id else { return }
+                    self.finishPrompt(error: "发送确认超时，请核对会话后重试；草稿已保留", uncertain: true)
+                }
+            } catch {
+                guard self.pendingPrompt?.id == id else { return }
+                let submitted = self.pendingPrompt?.submitted == true
+                self.finishPrompt(error: submitted ? "发送未确认，请核对会话后重试；草稿已保留" : "附件上传未完成，消息未发送；草稿和附件已保留", uncertain: submitted)
+            }
         }
     }
 
     func abortGeneration() {
         guard inputReady, liveState?.running == true, pendingAbort == nil else { return }
+        if pendingPrompt?.submitted == false { finishPrompt(error: "附件发送已取消，草稿已保留", uncertain: false) }
         let id = "abort-" + UUID().uuidString
         pendingAbort = id
         inputNotice = nil
@@ -889,6 +1137,8 @@ final class ConversationSessionController {
                     draft.text = ""
                     pane.composer.restoreDraft("")
                 }
+                draft.attachments.removeAll { pending.attachments.contains($0.id) }
+                pane.composer.setAttachments(draft.attachments)
                 finishPrompt(error: nil, uncertain: false)
             } else {
                 let reason = (object["error"] as? String).map { String($0.prefix(160)) } ?? "原生会话拒绝了消息"
@@ -902,7 +1152,7 @@ final class ConversationSessionController {
     }
 
     private func finishPrompt(error: String?, uncertain: Bool) {
-        pendingPrompt = nil; promptTimeout?.cancel(); promptTimeout = nil
+        pendingPrompt = nil; promptTimeout?.cancel(); promptTimeout = nil; promptTask?.cancel(); promptTask = nil
         draft.deliveryUncertain = uncertain
         inputNotice = error
         onDraftChange(draft)
@@ -916,7 +1166,7 @@ final class ConversationSessionController {
     }
 
     private func invalidateInput() {
-        if pendingPrompt != nil { finishPrompt(error: "连接或视图已改变，发送结果未确认；草稿已保留", uncertain: true) }
+        if let pendingPrompt { finishPrompt(error: "连接或视图已改变；草稿与附件已保留，请核对后重试", uncertain: pendingPrompt.submitted) }
         if pendingAbort != nil { finishAbort(error: "连接或视图已改变，停止结果未确认") }
     }
 
@@ -926,7 +1176,7 @@ final class ConversationSessionController {
         CorralActionContext(ready: managed && !unavailable && phase == .ready,
                             mode: nativeMode == .tui ? .tui : .gui, running: liveState?.running,
                             switching: modeSwitch != nil, implemented: Set(actions.map { $0.spec.presentation }),
-                            operationPending: operations.isBusy || pendingPrompt != nil || pendingAbort != nil)
+                            operationPending: operations.isBusy || pendingPrompt != nil || pendingAbort != nil || controls.settingsPending)
     }
 
     func actionMenu() -> CorralActionMenu? {
@@ -1074,6 +1324,7 @@ final class ConversationSessionController {
             self.header.apply(self.headerState())
             self.operations.update()
             self.publishComposer()
+            self.refreshControlsPresentation()
         }
     }
 
@@ -1083,6 +1334,7 @@ final class ConversationSessionController {
         header.apply(headerState())
         operations.update()
         publishComposer()
+        refreshControlsPresentation()
     }
 
     func headerState() -> CorralViewportHeaderState {

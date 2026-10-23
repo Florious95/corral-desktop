@@ -246,6 +246,8 @@ public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
     public static let height: CGFloat = 40
     public var onSelectMode: ((CorralViewportHeaderState.Mode) -> Void)?
     public var makeActionMenu: (() -> CorralActionMenu?)?
+    public var onChooseModel: (() -> Void)?
+    public let modelButton = NSButton()
     public let moreButton = NSButton()
     public let renameField = NSTextField()
     public var onRenameSubmit: ((String) -> Void)?
@@ -303,7 +305,11 @@ public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
             self?.onFocus?()
             self?.onSelectMode?(mode)
         }
-        for view in [titleLabel, renameField, modelChip, statusDot, statusLabel, modeControl, moreButton, separator] { addSubview(view) }
+        modelButton.isBordered = false; modelButton.title = ""; modelButton.target = self; modelButton.action = #selector(chooseModel)
+        modelButton.setAccessibilityIdentifier("corral.conversation.model-picker")
+        modelButton.setAccessibilityLabel("选择模型与思考强度")
+        modelButton.toolTip = "选择模型与思考强度"
+        for view in [titleLabel, renameField, modelChip, modelButton, statusDot, statusLabel, modeControl, moreButton, separator] { addSubview(view) }
         refreshTheme()
     }
 
@@ -339,6 +345,8 @@ public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
         return false
     }
 
+    @objc private func chooseModel() { onFocus?(); onChooseModel?() }
+
     @objc private func showActions(_ sender: NSButton) {
         onFocus?()
         guard let menu = makeActionMenu?() else { return }
@@ -366,8 +374,10 @@ public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
             iconView = state.provider.map { CorralProviderIconView(provider: $0, size: 16, active: true) }
             if let iconView { iconView.translatesAutoresizingMaskIntoConstraints = true; addSubview(iconView) }
         }
-        modelChip.text = state.mode == .gui ? (state.modelLabel ?? "") : ""
+        modelChip.text = state.mode == .gui ? ((state.modelLabel?.isEmpty == false ? state.modelLabel : nil) ?? "选择模型") : ""
         modelChip.toolTip = state.modelLabel
+        modelButton.isEnabled = state.hasActions && state.mode == .gui
+        modelButton.setAccessibilityLabel("模型与思考：" + (state.modelLabel ?? "点击选择"))
         applyStatus()
         moreButton.isHidden = !state.hasActions
         modeControl.isHidden = state.canSwitch == nil
@@ -453,7 +463,7 @@ public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
         let available = max(0, right - x)
         titleLabel.isHidden = isRenaming
         if isRenaming {
-            modelChip.isHidden = true; statusLabel.isHidden = renameError == nil; statusDot.isHidden = true
+            modelChip.isHidden = true; modelButton.isHidden = true; statusLabel.isHidden = renameError == nil; statusDot.isHidden = true
             let errorWidth = renameError == nil ? 0 : min(220, available * 0.5)
             if let renameError {
                 statusLabel.stringValue = renameError; statusLabel.textColor = CorralAestheticTokens.warnText
@@ -475,6 +485,7 @@ public final class CorralViewportHeaderView: NSView, NSTextFieldDelegate {
         titleLabel.frame = CGRect(x: x, y: midY - 9, width: titleWidth, height: 18)
         modelChip.frame = CGRect(x: titleLabel.frame.maxX + 8, y: midY - 10, width: chipWidth, height: 20)
         modelChip.isHidden = modelChip.text.isEmpty || chipWidth < 36
+        modelButton.frame = modelChip.frame; modelButton.isHidden = modelChip.isHidden
         separator.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
     }
 }

@@ -154,6 +154,13 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
             )
             let workspaceStore = try CorralWorkspaceStore(applicationSupportDirectory: supportDirectory)
             let preferencesStore = try UserPreferencesStore(applicationSupportDirectory: supportDirectory)
+            // Acceptance template CRUD must not read/write the interactive Dev app's defaults.
+            let promptDefaults: UserDefaults
+            if let supportDirectory {
+                let suite = "com.corral.native.acceptance.prompts." + BundledRuntime.hash(Data(supportDirectory.path.utf8))
+                guard let isolated = UserDefaults(suiteName: suite) else { throw CocoaError(.fileWriteUnknown) }
+                promptDefaults = isolated
+            } else { promptDefaults = .standard }
             let coordinator = CorralApplicationCoordinator(
                 deviceRepository: repository,
                 credentialVault: credentials,
@@ -163,6 +170,7 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
                 userPreferencesStore: preferencesStore,
                 initialWorkspaceState: await workspaceStore.snapshot(),
                 initialUserPreferences: await preferencesStore.snapshot(),
+                promptDefaults: promptDefaults,
                 environment: environment
             )
             self.coordinator = coordinator

@@ -1,4 +1,5 @@
 import CorralContracts
+import CorralProtocol
 import CorralServices
 import CorralUI
 import Foundation
@@ -81,6 +82,91 @@ final class ConversationSessionControllerTests: XCTestCase {
         }
     }
 
+    func testSlowHistoryDoesNotGateInputOrRunStateButNeverGrantsLiveCredit() async throws {
+        let controller = makeController()
+        controller.start(); controller.handleReady(ready(view: "v1"))
+        await settle()
+        controller.restoreDraft(.init(text: "补充指令", sessionID: "sid"))
+        controller.publishNow()
+        XCTAssertTrue(controller.pane.composer.state.ready)
+        controller.submitPrompt()
+        await settle()
+        let first = try XCTUnwrap(inputCommands("prompt").last)
+        XCTAssertEqual(first.1["streamingBehavior"] as? String, "steer")
+        controller.handleEvent(event(["type": "response", "id": first.0, "success": true]))
+        controller.handleUpdate(ConversationUpdate(reference: ref, viewID: "v1", sourceEpoch: "e", baseSeq: 4, commitSeq: 5,
+                                                  upserts: [], removes: [], state: .init(running: false, queued: 0, mode: "rpc")))
+        controller.publishNow()
+        XCTAssertEqual(controller.liveState?.running, false, "live controls do not wait for HTTP history")
+        XCTAssertTrue(applied().isEmpty, "buffered transcript must not grant applied credit")
+        let initial = pending.removeFirst()
+        initial.continuation.resume(throwing: ConversationHistoryFailure("deadline"))
+        await settle()
+        controller.restoreDraft(.init(text: "历史失败仍可发送", sessionID: "sid"))
+        controller.publishNow(); controller.submitPrompt()
+        await settle()
+        XCTAssertEqual(inputCommands("prompt").count, 2)
+        XCTAssertNil(inputCommands("prompt").last?.1["streamingBehavior"])
+        controller.connectionLost(); controller.publishNow()
+        XCTAssertFalse(controller.pane.composer.state.ready, "real transport loss still fences input")
+        controller.stop()
+    }
+
+    func testAttachmentsUseCapturedTextImagesAndQuotedFileReferencesThenKeepLaterEdits() async throws {
+        let controller = try await readyController()
+        let image = CorralComposerAttachment(url: URL(fileURLWithPath: "/private/image.png"), isImage: true)
+        let file = CorralComposerAttachment(url: URL(fileURLWithPath: "/private/file.txt"), isImage: false, remotePath: "/uploads/user's file.txt")
+        var upload: CheckedContinuation<String, Error>?
+        controller.upload = { _ in try await withCheckedThrowingContinuation { upload = $0 } }
+        controller.restoreDraft(.init(text: "原文\r\n🙂", sessionID: "sid", attachments: [image, file]))
+        controller.submitPrompt(); controller.submitPrompt(); await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        XCTAssertTrue(controller.pane.composer.state.sending)
+        let later = CorralComposerAttachment(url: URL(fileURLWithPath: "/private/later.txt"), isImage: false)
+        controller.restoreDraft(.init(text: "later edits", sessionID: "sid", attachments: [image, file, later]))
+        try XCTUnwrap(upload).resume(returning: "/uploads/image.png")
+        await settle()
+        let command = try XCTUnwrap(inputCommands("prompt").last)
+        XCTAssertEqual(inputCommands("prompt").count, 1)
+        XCTAssertEqual(command.1["attachment_paths"] as? [String], ["/uploads/image.png"])
+        XCTAssertEqual(command.1["message"] as? String, "原文\r\n🙂\n\n附件文件（按需读取，不要执行）：\n'/uploads/user'\\''s file.txt'")
+        controller.handleEvent(event(["type": "response", "id": command.0, "success": true]))
+        XCTAssertEqual(controller.draft.text, "later edits")
+        XCTAssertEqual(controller.draft.attachments.map(\.id), [later.id])
+        controller.stop()
+    }
+
+    func testUploadFailureAndSourceLossNeverSendOrConsumeAttachmentDraft() async throws {
+        let controller = try await readyController()
+        let file = CorralComposerAttachment(url: URL(fileURLWithPath: "/private/file.txt"), isImage: false)
+        controller.restoreDraft(.init(text: "retained", sessionID: "sid", attachments: [file]))
+        controller.upload = { _ in throw ConversationUploadFailure("http_507") }
+        controller.submitPrompt(); await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty); XCTAssertEqual(controller.draft.attachments, [file])
+        XCTAssertFalse(controller.draft.deliveryUncertain)
+        var pendingUpload: CheckedContinuation<String, Error>?
+        controller.upload = { _ in try await withCheckedThrowingContinuation { pendingUpload = $0 } }
+        controller.submitPrompt(); await settle(); controller.connectionLost()
+        try XCTUnwrap(pendingUpload).resume(returning: "/uploads/old-owner.txt"); await settle()
+        XCTAssertTrue(inputCommands("prompt").isEmpty)
+        XCTAssertEqual(controller.draft.text, "retained"); XCTAssertEqual(controller.draft.attachments, [file])
+        controller.stop()
+    }
+
+    func testBuiltinSlashOpensDedicatedUIAndCompletionDoesNotSend() async throws {
+        let controller = try await readyController()
+        controller.restoreDraft(.init(text: "/compact", sessionID: "sid")); controller.submitPrompt(); await settle()
+        XCTAssertEqual(controller.operations.panel?.action, .compact)
+        XCTAssertTrue(inputCommands("prompt").isEmpty); XCTAssertTrue(inputCommands("compact").isEmpty, "native mutation waits for sheet confirmation")
+        controller.operations.close()
+        controller.restoreDraft(.init(text: "/ne", sessionID: "sid")); controller.showCompletions(shortcuts: false)
+        let candidate = try XCTUnwrap(controller.pane.composer.suggestions.first(where: { $0.id == "slash:new" }))
+        controller.chooseSuggestion(candidate); await settle()
+        XCTAssertEqual(controller.draft.text, "/new ")
+        XCTAssertTrue(inputCommands("prompt").isEmpty); XCTAssertTrue(inputCommands("new_session").isEmpty)
+        controller.stop()
+    }
+
     func testComposerSendsExactTextOnceAndOnlyNativeAcknowledgementConsumesDraft() async throws {
         let controller = try await readyController()
         controller.publishNow()
@@ -153,7 +239,7 @@ final class ConversationSessionControllerTests: XCTestCase {
         controller.restoreDraft(.init(text: "next turn"))
         controller.handleUpdate(ConversationUpdate(reference: ref, viewID: "v1", sourceEpoch: "e", baseSeq: 5, commitSeq: 6, upserts: [], removes: [], state: .init(running: true, queued: 0, mode: "rpc")))
         controller.publishNow()
-        controller.pane.composer.actionButton.performClick(nil)
+        controller.pane.composer.stopButton.performClick(nil)
         controller.abortGeneration()
         controller.submitPrompt()
         await settle()

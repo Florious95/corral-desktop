@@ -61,21 +61,25 @@ final class ConversationComposerTests: XCTestCase {
         XCTAssertEqual(composer.draft, "你好")
     }
 
-    func testRunningEnterIsNotAbortAndStopButtonKeepsDraft() {
+    func testRunningEnterSteersAndSeparateStopKeepsDraft() {
         let (window, pane) = mount()
         let composer = pane.composer
         var sends = 0, aborts = 0
         composer.onSubmit = { sends += 1 }; composer.onAbort = { aborts += 1 }
         composer.restoreDraft("next turn")
         composer.apply(.init(ready: true, running: true))
-        XCTAssertEqual(composer.actionButton.accessibilityLabel(), "停止生成")
+        XCTAssertEqual(composer.actionButton.accessibilityLabel(), "发送中途指令")
+        XCTAssertFalse(composer.stopButton.isHidden)
         composer.editor.keyDown(with: enter(window))
-        XCTAssertEqual(sends, 0); XCTAssertEqual(aborts, 0)
-        composer.actionButton.performClick(nil)
+        XCTAssertEqual(sends, 1); XCTAssertEqual(aborts, 0)
+        composer.stopButton.performClick(nil)
         XCTAssertEqual(aborts, 1); XCTAssertEqual(composer.draft, "next turn")
         composer.apply(.init(ready: true, running: true, stopping: true))
-        composer.actionButton.performClick(nil)
+        composer.stopButton.performClick(nil)
         XCTAssertEqual(aborts, 1)
+        composer.restoreDraft("")
+        XCTAssertEqual(composer.actionButton.accessibilityLabel(), "停止生成")
+        XCTAssertTrue(composer.stopButton.isHidden)
         composer.apply(.init(ready: true, running: false))
         XCTAssertEqual(composer.actionButton.accessibilityLabel(), "发送消息")
     }
@@ -116,6 +120,36 @@ final class ConversationComposerTests: XCTestCase {
         composer.restoreDraft("")
         pane.layoutSubtreeIfNeeded()
         XCTAssertEqual(composer.preferredHeight, emptyHeight)
+    }
+
+    func testAccessoryButtonsCompletionAndAttachmentOnlyInputUseTheRealComposer() {
+        let (window, pane) = mount()
+        let composer = pane.composer
+        var opens: [String] = [], sends = 0, picked: [String] = []
+        composer.onSlash = { opens.append("slash") }; composer.onShortcuts = { opens.append("shortcuts") }; composer.onAttach = { opens.append("attach") }
+        composer.slashButton.performClick(nil); composer.shortcutsButton.performClick(nil); composer.attachButton.performClick(nil)
+        XCTAssertEqual(opens, ["slash", "shortcuts", "attach"])
+        composer.onSubmit = { sends += 1 }
+        composer.onChooseSuggestion = { entry in picked.append(entry.id); composer.restoreDraft(entry.text); composer.setSuggestions([], title: "", visible: false) }
+        composer.restoreDraft("/re")
+        composer.setSuggestions([.init(id: "review", title: "/review", detail: "native", text: "/review ")], title: "Commands", visible: true)
+        composer.editor.keyDown(with: enter(window))
+        XCTAssertEqual(picked, ["review"]); XCTAssertEqual(sends, 0); XCTAssertEqual(composer.draft, "/review ")
+        composer.editor.keyDown(with: enter(window)); XCTAssertEqual(sends, 1)
+        composer.restoreDraft("")
+        composer.setAttachments([.init(url: URL(fileURLWithPath: "/private/image.png"), isImage: true)])
+        XCTAssertTrue(composer.actionButton.isEnabled)
+        composer.actionButton.performClick(nil); XCTAssertEqual(sends, 2)
+        composer.setAttachments([]); XCTAssertFalse(composer.actionButton.isEnabled)
+    }
+
+    func testCompletionShelfKeepsInputAndSendVisibleInShortSplit() {
+        let (_, pane) = mount(); pane.frame.size = NSSize(width: 320, height: 180)
+        pane.composer.setSuggestions((0..<8).map { .init(id: String($0), title: "command", detail: "", text: "x") }, title: "Commands", visible: true)
+        pane.layoutSubtreeIfNeeded()
+        XCTAssertTrue(pane.composer.bounds.contains(pane.composer.actionButton.frame))
+        XCTAssertGreaterThanOrEqual(pane.composer.scrollView.frame.height, 26)
+        XCTAssertLessThanOrEqual(pane.transcript.frame.maxY, pane.composer.frame.minY)
     }
 
     func testNativeEditingReportsDraftAndStateUpdatesPreserveUndoSelection() {
