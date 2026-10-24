@@ -1255,6 +1255,10 @@ public final class CorralSidebarView: NSView {
     public private(set) var agents: [CorralSidebarAgent] = []
     public private(set) var devices: [CorralSidebarDevice] = []
     public private(set) var selectedSpaceID = CorralSidebarSpace.allSpacesID
+    /// All-devices mode lists every host's sessions without moving the selected directory row.
+    public var includesAgentsOutsideSelectedSpace = false {
+        didSet { if oldValue != includesAgentsOutsideSelectedSpace { refreshVisibleAgents() } }
+    }
     public private(set) var spacesExpanded = true
     public private(set) var agentsExpanded = true
     private let spaceData = SidebarTableData(.spaces)
@@ -1460,7 +1464,7 @@ public final class CorralSidebarView: NSView {
         let visible: [CorralSidebarAgent] = switch selectedKind {
         case .allSpaces: allAgents
         case .favorites: allAgents.filter(\.isFavorite)
-        case .workspace: allAgents.filter { $0.spaceID == selectedSpaceID }
+        case .workspace: includesAgentsOutsideSelectedSpace ? allAgents : allAgents.filter { $0.spaceID == selectedSpaceID }
         }
         let updated = visible.enumerated().sorted { lhs, rhs in
             if lhs.element.isFavorite != rhs.element.isFavorite { return lhs.element.isFavorite }
