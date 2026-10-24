@@ -1456,10 +1456,41 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
+    /// Clicks that arrive while a switch is still authenticating must not be dropped just because
+    /// `configuredDeviceID` has not caught up. Otherwise the second return to this Mac never connects.
+    private var desiredSingleDeviceID: DeviceID?
+    private var deviceSelectionPump: Task<Void, Never>?
+
+    private func applyDeviceSelection(_ ids: Set<DeviceID>) {
+        selectedDeviceIDs = ids
+        hasDeviceSelectionFilter = true
+        updateSidebar(devices: cachedDevices)
+        guard ids.count == 1, let id = ids.first else { return }
+        desiredSingleDeviceID = id
+        guard deviceSelectionPump == nil else { return }
+        deviceSelectionPump = Task { @MainActor [weak self] in
+            await self?.pumpDeviceSelection()
+        }
+    }
+
+    private func pumpDeviceSelection() async {
+        while let id = desiredSingleDeviceID {
+            desiredSingleDeviceID = nil
+            if id == configuredDeviceID, connected { continue }
+            await selectDevice(id)
+        }
+        deviceSelectionPump = nil
+        if desiredSingleDeviceID != nil {
+            deviceSelectionPump = Task { @MainActor [weak self] in
+                await self?.pumpDeviceSelection()
+            }
+        }
+    }
+
     private func selectDevice(_ id: DeviceID) async {
         guard let device = cachedDevices.first(where: { $0.id == id }) else { return }
         do {
-            guard let token = try await credentialVault.resolve(device.credential), !token.isEmpty else {
+            guard let token = try await credentialForDevice(device), !token.isEmpty else {
                 throw SessionLinkFailure.protocolViolation("device credential is unavailable")
             }
             let configuration = ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id,
@@ -1493,12 +1524,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             Task { @MainActor in await self?.devicesChanged(devices) }
         }
         controller.onSelectionChanged = { [weak self] ids in
-            guard let self else { return }
-            self.selectedDeviceIDs = ids
-            self.hasDeviceSelectionFilter = true
-            self.updateSidebar(devices: self.cachedDevices)
-            guard ids.count == 1, let id = ids.first, id != self.configuredDeviceID else { return }
-            Task { @MainActor in await self.selectDevice(id) }
+            self?.applyDeviceSelection(ids)
         }
         controller.onAddDevice = { [weak self] in
             self?.devicesCardPanel?.orderOut(nil)
@@ -1727,7 +1753,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let existing = devices.first(where: { $0.id == LocalDaemonTokenDiscovery.deviceID })
         var token = await LocalDaemonTokenDiscovery.token(environment: environment, credentialVault: credentialVault)
         if token == nil, let existing {
-            token = LocalDaemonTokenDiscovery.valid(try? await credentialVault.resolve(existing.credential))
+            token = try? await credentialForDevice(existing)
         }
         let credential = token == nil ? (existing?.credential ?? LocalDaemonTokenDiscovery.credentialHandle) : LocalDaemonTokenDiscovery.credentialHandle
         // The daemon-owned file is already durable; caching it through Keychain
@@ -1784,6 +1810,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return ConnectionConfiguration(endpoint: endpoint, token: token,
             deviceID: device?.id ?? DeviceID("corral-native-development-endpoint"),
             deviceName: device?.name ?? "Development endpoint")
+    }
+
+    /// `corral-local-host` is the local daemon even when its saved endpoint is not port 9900.
+    /// The production loopback port remains a second positive identification.
+    private func prefersDaemonFileToken(deviceID: DeviceID?, endpoint: ApprovedEndpoint) -> Bool {
+        if deviceID == LocalDaemonTokenDiscovery.deviceID { return true }
+        let host = endpoint.host
+        return (host == "127.0.0.1" || host == "::1") && endpoint.port == LocalDaemonTokenDiscovery.endpoint.port
+    }
+
+    /// The daemon file is the credential. When it exists, Keychain must not be consulted:
+    /// an ad-hoc signature cannot retain Always Allow, and `interactionNotAllowed` does not
+    /// suppress the classic ACL dialog. `CORRAL_NATIVE_TOKEN` is not used here because it may
+    /// belong to a different explicit endpoint.
+    private func credentialForDevice(_ device: DeviceRecord) async throws -> String? {
+        if prefersDaemonFileToken(deviceID: device.id, endpoint: device.endpoint),
+           let fileToken = LocalDaemonTokenDiscovery.fileToken(environment: environment) {
+            return fileToken
+        }
+        return LocalDaemonTokenDiscovery.valid(try await credentialVault.resolve(device.credential))
     }
 
     private func consume(_ stream: any SessionEventStream) async {
