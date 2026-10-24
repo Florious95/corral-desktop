@@ -55,7 +55,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     public private(set) var workspaceState: CorralWorkspaceState
     public private(set) var userPreferences: UserPreferences
-    public private(set) var connected = false
+    /// At least one selected host holds an authenticated link.
+    public var connected: Bool { deviceLinks.values.contains { $0.connected } }
     public private(set) var sessionCount = 0
     public private(set) var subscribedSessionIDs: [String] = []
     public private(set) var lastConnectionError: String?
@@ -106,8 +107,50 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         var dialRoutes: [ApprovedEndpoint] { routes.isEmpty ? [endpoint] : routes }
     }
 
+    /// A link and its one event consumer. A link's event stream can be claimed only once, so a
+    /// released host's link is disconnected and kept for the next host instead of being thrown away.
+    @MainActor
+    private final class LinkSlot {
+        let link: any SessionLinkProtocol
+        var streamClaimed = false
+        var consumer: Task<Void, Never>?
+        /// The stream ended: nothing can arrive through this link again.
+        var dead = false
+        init(link: any SessionLinkProtocol) { self.link = link }
+    }
+
+    /// One selected host's live connection. Its catalog, input sequence, launchers and conversation
+    /// capabilities belong to that host alone; nothing another host sends is applied here.
+    @MainActor
+    private final class DeviceLink {
+        let deviceID: DeviceID
+        let slot: LinkSlot
+        let inputRouter: SessionLinkInputRouter
+        var configuration: ConnectionConfiguration?
+        var connection: AuthenticatedConnection?
+        var connected = false
+        var activeRoute: ApprovedEndpoint?
+        var listingSequence: UInt64 = 0
+        var listingRequestedEpoch: ConnectionEpoch?
+        var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
+        var launchers: [AgentLauncher] = []
+        var highestAcknowledgedInputSequence: UInt32 = 0
+        var pendingConnects = 0
+        var connectGeneration = 0
+        /// Deselected while a connect was in flight; that connect returns the slot.
+        var released = false
+        var link: any SessionLinkProtocol { slot.link }
+
+        init(deviceID: DeviceID, slot: LinkSlot) {
+            self.deviceID = deviceID
+            self.slot = slot
+            self.inputRouter = SessionLinkInputRouter(sessionLink: slot.link)
+        }
+    }
+
     private struct PendingCreateAgent {
         let request: CreateAgentRequest
+        let deviceID: DeviceID
         var result: CreateAgentResult?
     }
 
@@ -125,16 +168,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private let deviceRepository: any DeviceRepositoryProtocol
     private let credentialVault: any DeviceCredentialVault
-    private let sessionLink: any SessionLinkProtocol
+    /// Links for further hosts. Without it only the injected link exists: one host at a time.
+    private let makeSessionLink: (@MainActor () -> any SessionLinkProtocol)?
+    /// Free links, the injected one first. A released host's link comes back here.
+    private var spareSlots: [LinkSlot]
+    /// Every selected host keeps its own authenticated link, concurrently.
+    private var deviceLinks: [DeviceID: DeviceLink] = [:]
+    /// The host most recently connected on purpose (startup, add, re-pair).
+    private var primaryDeviceID: DeviceID?
     private let hostIdentityProbe: HostIdentityProbe
     private let makeNearbyHostDiscovery: @MainActor () -> NearbyHostDiscovery
     private var nearbyHostDiscovery: NearbyHostDiscovery?
     private var nearbyHostsDialog: NearbyHostsDialogViewController?
     private var nearbyScanIndicator: Task<Void, Never>?
-    /// The route the live connection runs over (Tailscale, LAN or loopback).
-    public private(set) var activeRoute: ApprovedEndpoint?
+    /// The route the focused host's connection runs over (Tailscale, LAN or loopback).
+    public var activeRoute: ApprovedEndpoint? { focusedDeviceLink?.activeRoute }
     private let deviceSessionLifecycle: CoordinatorDeviceSessionLifecycle
-    private let inputRouter: SessionLinkInputRouter
     private let environment: [String: String]
     private let promptDefaults: UserDefaults
     private let telemetryURL: URL?
@@ -144,10 +193,6 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var sidebarDeviceIDs: [DeviceID: UUID] = [:]
     private var activeWorkspaceTabID: UUID
     private var lastActivatedWindowSizes: [UUID: NSSize] = [:]
-    private var connection: AuthenticatedConnection?
-    private var activeConnectionConfiguration: ConnectionConfiguration?
-    private var eventStreamTask: Task<Void, Never>?
-    private var eventStreamClaimed = false
     private var telemetryTask: Task<Void, Never>?
     private var lastTelemetryWrite: TimeInterval = -.infinity
     private var cachedDevices: [DeviceRecord] = []
@@ -176,9 +221,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var closingSessionKeys = Set<SessionKey>()
     private var started = false
     private var sequence = 0
-    private var listingSequence: UInt64 = 0
     private var hasReconciledInitialListing = false
-    private var listingRequestedEpoch: ConnectionEpoch?
     private var nextRequestID: UInt32 = 1
     private var pendingCreateAgentRequests: [UInt32: PendingCreateAgent] = [:]
     private var pendingCloseSessionRequests: [UInt32: PendingCloseSession] = [:]
@@ -189,12 +232,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     public var onAgentCloseFailed: ((SessionKey, String) -> Void)?
     public var onAgentRemoteCloseUnsupported: ((SessionKey) -> Void)?
     public private(set) var lastCreatedSessionKey: SessionKey?
-    public private(set) var availableAgentLaunchers: [AgentLauncher] = []
+    public var availableAgentLaunchers: [AgentLauncher] { focusedDeviceLink?.launchers ?? [] }
     public private(set) var lastCreateAgentResult: CreateAgentResult?
     public private(set) var lastCloseSessionResult: CloseSessionResult?
     private(set) var lastInputAcknowledgement: (sequence: UInt32, succeeded: Bool)?
-    private var configuredDeviceID: DeviceID?
-    private var configuredDeviceName = "Development endpoint"
     private var sessionOrder: [SessionKey] = []
     private var sessions: [SessionKey: RuntimeSession] = [:]
     private var uiSessionKeys: [UUID: SessionKey] = [:]
@@ -203,13 +244,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private var subscriptionTask: Task<Void, Never>?
     private var subscriptionUpdateRequested = false
     private var pendingUnsubscriptions = Set<SessionKey>()
-    private var subscriptionSnapshotTimeout: Task<Void, Never>?
+    /// One initial snapshot in flight per host: a slow host never holds back another host's panes.
+    private var subscriptionSnapshotTimeouts: [DeviceID: Task<Void, Never>] = [:]
     private var activeSession: SessionKey?
-    /// Structured views of managed Pi panes, multiplexed over the same link. Core allows eight per connection.
+    /// Structured views of managed Pi panes, multiplexed over their host's link. Core allows eight per connection.
     private var conversations: [SessionKey: ConversationSessionController] = [:]
     /// Drafts outlive viewport subscriptions (preview replacement / eight-view budget), scoped by device + ref.
     private var conversationDrafts: [SessionKey: [String: ConversationSessionController.Draft]] = [:]
-    private var conversationCapabilities: (epoch: ConnectionEpoch, values: Set<String>)?
     private let conversationHistoryClient = ConversationHistoryClient()
     private let conversationExportClient = ConversationExportClient()
     private let conversationUploadClient = ConversationUploadClient()
@@ -240,10 +281,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     /// queue stale positions that the PTY would replay after the hand stops.
     private var pendingPointerMotion: PendingInput?
     private var lastPointerMotion: (session: SessionKey, bytes: Data)?
-    private enum PointerMotionGate { case queued, sent(UInt32, ContinuousClock.Instant) }
+    /// Input sequences are per link: the gate waits for the ack of the host the motion went to.
+    private enum PointerMotionGate { case queued, sent(DeviceID, UInt32, ContinuousClock.Instant) }
     private var pointerMotionGate: PointerMotionGate?
     private var pointerMotionGateGeneration = 0
-    private var highestAcknowledgedInputSequence: UInt32 = 0
     public private(set) var pointerMotionStatistics = PointerMotionStatistics()
     // Keep the legacy dark terminal until a preference or system appearance change is applied.
     private var hasAppliedTerminalThemePreference = false
@@ -261,16 +302,17 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         environment: [String: String] = ProcessInfo.processInfo.environment,
         maximumVisiblePanes: Int = .max,
         hostIdentityProbe: HostIdentityProbe = HostIdentityProbe(),
-        nearbyHostDiscovery: (@MainActor () -> NearbyHostDiscovery)? = nil
+        nearbyHostDiscovery: (@MainActor () -> NearbyHostDiscovery)? = nil,
+        makeSessionLink: (@MainActor () -> any SessionLinkProtocol)? = nil
     ) {
         precondition(maximumVisiblePanes > 0)
         self.deviceRepository = deviceRepository
         self.credentialVault = credentialVault
-        self.sessionLink = sessionLink
+        self.spareSlots = [LinkSlot(link: sessionLink)]
+        self.makeSessionLink = makeSessionLink
         self.hostIdentityProbe = hostIdentityProbe
         self.makeNearbyHostDiscovery = nearbyHostDiscovery ?? { NearbyHostDiscovery() }
         self.deviceSessionLifecycle = deviceSessionLifecycle
-        self.inputRouter = SessionLinkInputRouter(sessionLink: sessionLink)
         self.workspaceStore = workspaceStore
         self.userPreferencesStore = userPreferencesStore
         self.workspaceState = initialWorkspaceState
@@ -427,11 +469,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         applyPreferences(await userPreferencesStore.snapshot())
         await applyWorkspaceState(await workspaceStore.snapshot())
         startTelemetryTimer()
+        let hasExplicitEndpoint = environment["CORRAL_NATIVE_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 } != nil
         do {
             var devices = try await deviceRepository.listDevices()
             var localToken = bootstrapToken
             let preferLocal = environment["CORRAL_NATIVE_PREFER_LOCAL"] == "1"
-            let hasExplicitEndpoint = environment["CORRAL_NATIVE_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 } != nil
             let selectedDevice = selectedDeviceIDs.count == 1
                 ? devices.first(where: { selectedDeviceIDs.contains($0.id) })
                 : nil
@@ -452,16 +494,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 return
             }
             try await connect(configuration: configuration)
+            primaryDeviceID = configuration.deviceID
             await writeTelemetry()
         } catch {
-            if connection != nil { await sessionLink.disconnect() }
-            connection = nil
-            connected = false
             lastConnectionError = String(describing: error)
-            await deviceSessionLifecycle.markDisconnected()
             updateSidebar(devices: cachedDevices)
             await writeTelemetry()
         }
+        // Until the Devices card narrows it, the selection is every saved host, and each one
+        // is dialed on its own link next to the one above. An explicit endpoint stays alone.
+        if !hasExplicitEndpoint { requestDeviceLinks(Set(cachedDevices.map(\.id)), announceFailures: false) }
     }
 
     public func stop() async {
@@ -480,21 +522,25 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         actionTimeoutTasks.removeAll()
         pendingCreateAgentRequests.removeAll()
         pendingCloseSessionRequests.removeAll()
-        eventStreamTask?.cancel()
-        eventStreamTask = nil
+        deviceSelectionPump?.cancel()
+        deviceSelectionPump = nil
+        desiredDeviceLinks = nil
         subscriptionTask?.cancel()
         subscriptionTask = nil
-        subscriptionSnapshotTimeout?.cancel()
-        subscriptionSnapshotTimeout = nil
+        subscriptionSnapshotTimeouts.values.forEach { $0.cancel() }
+        subscriptionSnapshotTimeouts.removeAll()
         subscriptionUpdateRequested = false
         pendingUnsubscriptions.removeAll()
         conversations.values.forEach { $0.stop() }
         conversations.removeAll()
-        conversationCapabilities = nil
-        await sessionLink.disconnect()
-        connection = nil
-        connected = false
-        await deviceSessionLifecycle.markDisconnected()
+        let links = Array(deviceLinks.values)
+        deviceLinks.removeAll()
+        for device in links {
+            device.slot.consumer?.cancel()
+            await device.link.disconnect()
+            await deviceSessionLifecycle.markDisconnected(device.deviceID)
+        }
+        spareSlots.forEach { $0.consumer?.cancel() }
         await writeTelemetry()
     }
 
@@ -961,19 +1007,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return "\(device.utf8.count):\(device)\(directory.utf8.count):\(directory)\(name.utf8.count):\(name)"
     }
 
+    /// The agent starts on the anchor's host; `deviceID` names it when references repeat across hosts.
     @discardableResult
-    public func createAgent(workspace: String, anchorReference: SessionReference?, provider: String, name: String, bypass: Bool) async throws -> UInt32 {
+    public func createAgent(workspace: String, anchorReference: SessionReference?, provider: String, name: String, bypass: Bool,
+                            deviceID: DeviceID? = nil) async throws -> UInt32 {
         guard connected else { throw SessionLinkFailure.disconnected }
-        guard anchorReference != nil else {
+        guard let anchorReference else {
             throw SessionLinkFailure.protocolViolation("create_agent requires an active anchor")
         }
+        let hostID = deviceID
+            ?? activeSession.flatMap { $0.reference == anchorReference ? $0.deviceID : nil }
+            ?? sessionOrder.first { $0.reference == anchorReference }?.deviceID
+            ?? focusedDeviceLink?.deviceID
+        guard let hostID, let device = deviceLinks[hostID], device.connected else { throw SessionLinkFailure.disconnected }
         let requestID = try allocateRequestID()
         let request = CreateAgentRequest(requestID: requestID, workspace: workspace, anchorReference: anchorReference, provider: provider, name: name, bypass: bypass)
-        pendingCreateAgentRequests[requestID] = PendingCreateAgent(request: request)
+        pendingCreateAgentRequests[requestID] = PendingCreateAgent(request: request, deviceID: hostID)
         // The Pi default open mode decides how a new Pi starts: its structured RPC (native GUI) or its TUI.
-        let structured = Self.structuredCreateProviders.contains(provider) && userPreferences.piOpenMode == .gui && conversationEnabled && !bypass
+        let structured = Self.structuredCreateProviders.contains(provider) && userPreferences.piOpenMode == .gui && conversationEnabled(on: device) && !bypass
         do {
-            let receipt = try await sessionLink.send(structured ? .conversationCreate(request) : .createAgent(request))
+            let receipt = try await device.link.send(structured ? .conversationCreate(request) : .createAgent(request))
             guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
             // A structured launch confirms Pi's native I/O before answering (Core allows 35 s).
             if pendingCreateAgentRequests[requestID] != nil { scheduleActionTimeout(requestID, seconds: structured ? 45 : 10) }
@@ -986,7 +1039,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     @discardableResult
     public func closeAgent(_ session: SessionKey) async throws -> UInt32 {
-        guard connected, connection?.deviceID == session.deviceID else { throw SessionLinkFailure.disconnected }
+        guard let device = deviceLinks[session.deviceID], device.connected else { throw SessionLinkFailure.disconnected }
         guard !pendingCloseSessionRequests.values.contains(where: { $0.session == session }) else {
             throw SessionLinkFailure.protocolViolation("close request already pending")
         }
@@ -994,7 +1047,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         let request = CloseSessionRequest(requestID: requestID, reference: session.reference)
         pendingCloseSessionRequests[requestID] = PendingCloseSession(request: request, session: session)
         do {
-            let receipt = try await sessionLink.send(.closeSession(request))
+            let receipt = try await device.link.send(.closeSession(request))
             guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
             if pendingCloseSessionRequests[requestID] != nil { scheduleActionTimeout(requestID) }
             return requestID
@@ -1080,19 +1133,27 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         presentNewAgentDialog(for: selectedSidebarSpaceID)
     }
 
+    /// A Space's agent starts on the host of a live session in that directory, else the active session's host.
+    private func newAgentAnchor(in directory: String?) -> SessionDescriptor? {
+        directory.flatMap { target in
+            sessionOrder.compactMap { sessions[$0]?.descriptor }.first {
+                $0.workingDirectory == target && deviceLinks[$0.key.deviceID]?.connected == true
+            }
+        } ?? activeSession.flatMap { sessions[$0]?.descriptor }
+    }
+
     private func presentNewAgentDialog(for spaceID: UUID?) {
         guard connected else { showToast("请先连接开发设备", kind: .warning); return }
-        guard !availableAgentLaunchers.isEmpty else { showToast("当前设备未提供可用 Agent 启动器", kind: .warning); return }
         let directory = spaceID.flatMap { directoriesBySpaceID[$0] }
+        let hostLaunchers = newAgentAnchor(in: directory).flatMap { deviceLinks[$0.key.deviceID]?.launchers } ?? availableAgentLaunchers
+        guard !hostLaunchers.isEmpty else { showToast("当前设备未提供可用 Agent 启动器", kind: .warning); return }
         let spaceName = directory.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "All Spaces"
-        let launchers = availableAgentLaunchers.map {
+        let launchers = hostLaunchers.map {
             CorralAgentLauncher(provider: $0.provider, displayName: $0.displayName, supportsBypass: $0.supportsBypass)
         }
         let dialog = NewAgentDialogViewController(spaceName: spaceName, launchers: launchers, onCreate: { [weak self] request in
             guard let self else { return }
-            let anchor = directory.flatMap { target in
-                self.sessionOrder.compactMap { self.sessions[$0]?.descriptor }.first { $0.workingDirectory == target }
-            } ?? self.activeSession.flatMap { self.sessions[$0]?.descriptor }
+            let anchor = self.newAgentAnchor(in: directory)
             guard let anchor else {
                 self.showToast("新建 Agent 需要先选择一个活动 Agent", kind: .warning)
                 return
@@ -1107,7 +1168,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                         anchorReference: anchor.key.reference,
                         provider: request.provider,
                         name: request.name,
-                        bypass: request.bypass
+                        bypass: request.bypass,
+                        deviceID: anchor.key.deviceID
                     )
                     self.showToast("正在创建 Agent…", kind: .info)
                 } catch {
@@ -1198,7 +1260,6 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         guard let dialog = nearbyHostsDialog else { return }
         if token == nil, let device = cachedDevices.first(where: { $0.endpoint.pairingHostID == host.hostID }) {
             dismissNearbyHostsDialog()
-            selectedDeviceIDs = [device.id]
             await selectDevice(device.id)
             return
         }
@@ -1237,7 +1298,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func presentPairingDialog() {
         Task { [weak self] in
             guard let self else { return }
-            let sourceConnection = self.connection
+            let sourceConnection = self.focusedDeviceLink?.connection
             do {
                 // Pair this Mac, never the remote host selected for the workspace.
                 let local = self.cachedDevices.first {
@@ -1296,7 +1357,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 self.activeDialog = dialog
                 dialog.present(over: self.windowController.window)
             } catch {
-                guard self.connection == sourceConnection else { return }
+                guard self.focusedDeviceLink?.connection == sourceConnection else { return }
                 self.showToast("无法获取配对信息，请确认本机服务已连接", kind: .warning)
             }
         }
@@ -1413,9 +1474,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             try? await credentialVault.delete(removed.credential)
         }
         cachedDevices = devices
-        if let configuredDeviceID, !devices.contains(where: { $0.id == configuredDeviceID }), configuredDeviceID.rawValue != "corral-native-development-endpoint" {
-            self.configuredDeviceID = nil
-            activeConnectionConfiguration = nil
+        // A deleted host keeps no link. The explicit development endpoint is not a saved host.
+        for id in deviceLinks.keys where !devices.contains(where: { $0.id == id }) && id != Self.developmentEndpointID {
+            await releaseDeviceLink(id)
         }
         updateSidebar(devices: devices)
     }
@@ -1449,46 +1510,69 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             addDeviceDialog?.dismiss()
             addDeviceDialog = nil
             activeDialog = nil
-            selectedDeviceIDs = [deviceID]
-            await selectDevice(deviceID)
+            await selectDevice(deviceID, redial: true)
         } catch {
             showToast("添加设备失败：\(error)", kind: .error)
         }
     }
 
-    /// Clicks that arrive while a switch is still authenticating must not be dropped just because
-    /// `configuredDeviceID` has not caught up. Otherwise the second return to this Mac never connects.
-    private var desiredSingleDeviceID: DeviceID?
+    private static let developmentEndpointID = DeviceID("corral-native-development-endpoint")
+
+    /// Selection changes made while hosts are still authenticating coalesce into the latest one;
+    /// none is dropped, so a host clicked back on during another host's handshake still connects.
+    private var desiredDeviceLinks: (ids: Set<DeviceID>, announceFailures: Bool)?
     private var deviceSelectionPump: Task<Void, Never>?
 
-    private func applyDeviceSelection(_ ids: Set<DeviceID>) {
+    /// `announceFailures` is for a selection the user just changed; opening the card only retries quietly.
+    private func applyDeviceSelection(_ ids: Set<DeviceID>, announceFailures: Bool = true) {
         selectedDeviceIDs = ids
         hasDeviceSelectionFilter = true
         updateSidebar(devices: cachedDevices)
-        guard ids.count == 1, let id = ids.first else { return }
-        desiredSingleDeviceID = id
+        requestDeviceLinks(ids, announceFailures: announceFailures)
+    }
+
+    private func requestDeviceLinks(_ ids: Set<DeviceID>, announceFailures: Bool) {
+        desiredDeviceLinks = (ids, announceFailures || desiredDeviceLinks?.announceFailures == true)
         guard deviceSelectionPump == nil else { return }
-        deviceSelectionPump = Task { @MainActor [weak self] in
-            await self?.pumpDeviceSelection()
-        }
+        deviceSelectionPump = Task { @MainActor [weak self] in await self?.pumpDeviceSelection() }
     }
 
     private func pumpDeviceSelection() async {
-        while let id = desiredSingleDeviceID {
-            desiredSingleDeviceID = nil
-            if id == configuredDeviceID, connected { continue }
-            await selectDevice(id)
+        while let desired = desiredDeviceLinks {
+            desiredDeviceLinks = nil
+            await reconcileDeviceLinks(desired.ids, announceFailures: desired.announceFailures)
         }
         deviceSelectionPump = nil
-        if desiredSingleDeviceID != nil {
-            deviceSelectionPump = Task { @MainActor [weak self] in
-                await self?.pumpDeviceSelection()
+    }
+
+    /// Every selected saved host gets its own authenticated link, dialed concurrently; a deselected
+    /// one is released. Hosts that are not saved (an explicit endpoint) are not the selection's to drop.
+    private func reconcileDeviceLinks(_ ids: Set<DeviceID>, announceFailures: Bool) async {
+        let saved = Set(cachedDevices.map(\.id))
+        for id in Array(deviceLinks.keys) where saved.contains(id) && !ids.contains(id) {
+            await releaseDeviceLink(id)
+        }
+        let pending = cachedDevices.map(\.id).filter { id in
+            ids.contains(id) && deviceLinks[id].map { !$0.connected && $0.pendingConnects == 0 } != false
+        }
+        await withTaskGroup(of: Void.self) { group in
+            for id in pending {
+                group.addTask { await self.connectDevice(id, announceFailure: announceFailures) }
             }
         }
     }
 
-    private func selectDevice(_ id: DeviceID) async {
+    /// Adding, re-pairing or picking a discovered host joins it to the selection and focuses it;
+    /// the other selected hosts stay connected.
+    private func selectDevice(_ id: DeviceID, redial: Bool = false) async {
+        if hasDeviceSelectionFilter { selectedDeviceIDs.insert(id) }
+        primaryDeviceID = id
+        await connectDevice(id, redial: redial, announceFailure: true, announceSuccess: true)
+    }
+
+    private func connectDevice(_ id: DeviceID, redial: Bool = false, announceFailure: Bool, announceSuccess: Bool = false) async {
         guard let device = cachedDevices.first(where: { $0.id == id }) else { return }
+        if !redial, let live = deviceLinks[id], live.connected || live.pendingConnects > 0 { return }
         do {
             guard let token = try await credentialForDevice(device), !token.isEmpty else {
                 throw SessionLinkFailure.protocolViolation("device credential is unavailable")
@@ -1496,14 +1580,71 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             let configuration = ConnectionConfiguration(endpoint: device.endpoint, token: token, deviceID: device.id,
                                                         deviceName: device.name, routes: device.endpoints)
             try await connect(configuration: configuration)
-            selectedDeviceIDs = [id]
             updateSidebar(devices: cachedDevices)
-            showToast("已连接设备：\(device.name)", kind: .success)
+            if announceSuccess { showToast("已连接设备：\(device.name)", kind: .success) }
+        } catch is CancellationError {
+            // Deselected or redialed meanwhile; the newer intent owns the outcome.
         } catch {
-            connected = false
             lastConnectionError = String(describing: error)
-            showToast("连接设备失败：\(error)", kind: .error)
+            updateSidebar(devices: cachedDevices)
+            if announceFailure { showToast("连接设备失败：\(device.name)：\(error)", kind: .error) }
         }
+    }
+
+    /// The host whose link answers app-wide questions (launchers, route): the visible pane's host,
+    /// else the host connected on purpose last, else any live host.
+    private var focusedDeviceLink: DeviceLink? {
+        if let id = activeSession?.deviceID, let device = deviceLinks[id], device.connected { return device }
+        if let id = primaryDeviceID, let device = deviceLinks[id], device.connected { return device }
+        return cachedDevices.lazy.compactMap { self.deviceLinks[$0.id] }.first(where: \.connected)
+            ?? deviceLinks.values.first(where: \.connected)
+    }
+
+    /// A free link: a released host's, then the injected one, then a new one.
+    private func acquireSlot() -> LinkSlot? {
+        spareSlots.removeAll(where: \.dead)
+        if !spareSlots.isEmpty { return spareSlots.removeFirst() }
+        return makeSessionLink.map { LinkSlot(link: $0()) }
+    }
+
+    /// Drops a host's link and its sessions. A connect still in flight finishes the release itself.
+    private func releaseDeviceLink(_ id: DeviceID) async {
+        guard let device = deviceLinks.removeValue(forKey: id) else { return }
+        device.released = true
+        device.connected = false
+        if primaryDeviceID == id { primaryDeviceID = nil }
+        subscriptionSnapshotTimeouts.removeValue(forKey: id)?.cancel()
+        pendingInput.removeAll { $0.session.deviceID == id }
+        pendingScrollWheelInput.removeAll { $0.session.deviceID == id }
+        pendingInputBytes = pendingInput.reduce(0) { $0 + $1.bytes.count } + pendingScrollWheelInput.reduce(0) { $0 + $1.bytes.count }
+        for (key, controller) in conversations where key.deviceID == id {
+            controller.stop()
+            conversations.removeValue(forKey: key)
+        }
+        let removed = Set(sessions.keys.filter { $0.deviceID == id })
+        sessionOrder.removeAll { $0.deviceID == id }
+        await discardSessionRuntimes(removed)
+        sessionCount = sessionOrder.count
+        subscribedSessionIDs = sessionOrder.compactMap { sessions[$0]?.subscribed == true ? $0.reference.rawValue : nil }
+        await deviceSessionLifecycle.markDisconnected(id)
+        if device.pendingConnects == 0 { await recycle(device.slot) }
+        updateWorkspaceTitle(count: sessionCount)
+        updateSidebar(devices: cachedDevices)
+        updateTerminalStage()
+        await writeTelemetry()
+    }
+
+    private func recycle(_ slot: LinkSlot) async {
+        await slot.link.disconnect()
+        if !slot.dead { spareSlots.append(slot) }
+    }
+
+    /// Each host's own live state and route, as its link reports it.
+    private func publishReadyDevices() {
+        guard let controller = devicesCardPanel?.contentViewController as? DevicesPopoverViewController else { return }
+        let live = deviceLinks.values.filter(\.connected)
+        controller.setReadyDevices(Set(live.map(\.deviceID)), activeRoutes: Dictionary(
+            live.compactMap { device in device.activeRoute.map { (device.deviceID, $0) } }, uniquingKeysWith: { first, _ in first }))
     }
 
     private func presentDevicesPopover() {
@@ -1547,10 +1688,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         Task { @MainActor in
             do {
                 try await controller.reloadDevices()
-                controller.setReadyDevices(connected ? Set([configuredDeviceID].compactMap { $0 }) : [], activeRoute: activeRoute)
-                self.selectedDeviceIDs = controller.selectedDeviceIDs
-                self.hasDeviceSelectionFilter = true
-                self.updateSidebar(devices: self.cachedDevices)
+                self.publishReadyDevices()
+                // The card opens with every host checked unless a selection was made: that is a
+                // selection too, and each checked host must be dialed, not just shown.
+                self.applyDeviceSelection(controller.selectedDeviceIDs, announceFailures: false)
                 panel.updateContentSizeAndPosition(anchoredTo: self.workspaceView.tabBar.devicesButton)
             } catch {
                 self.showToast("设备列表读取失败：\(error)", kind: .error)
@@ -1587,10 +1728,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private func resolveCreatedAgents<S: Sequence>(in sessions: S) async where S.Element == SessionKey {
         let available = Set(sessions)
-        guard let deviceID = connection?.deviceID else { return }
         for (requestID, pending) in Array(pendingCreateAgentRequests) {
             guard let reference = pending.result?.reference else { continue }
-            let key = SessionKey(deviceID: deviceID, reference: reference)
+            let key = SessionKey(deviceID: pending.deviceID, reference: reference)
             guard available.contains(key), let descriptor = self.sessions[key]?.descriptor else { continue }
             pendingCreateAgentRequests.removeValue(forKey: requestID)
             cancelActionTimeout(requestID)
@@ -1632,17 +1772,25 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return SessionID("\(deviceID.utf8.count):\(deviceID)\(key.reference.rawValue)")
     }
 
-    private func reconcileWorkspaceListing() async {
+    /// `deviceID` is the host whose catalog just changed; only its first session may be auto-opened.
+    private func reconcileWorkspaceListing(for deviceID: DeviceID) async {
         let descriptors = sessionOrder.compactMap { sessions[$0]?.descriptor }
         guard !descriptors.isEmpty else { return }
         do {
             var state = try await workspaceStore.reconcileListing(descriptors)
-            let visibleSessionIsLive = state.visibleSessionID.flatMap(sessionKey(for:)).map { $0.deviceID == configuredDeviceID } ?? false
+            let visibleKey = state.visibleSessionID.flatMap(sessionKey(for:))
+            let visibleSessionIsLive = visibleKey.map { deviceLinks[$0.deviceID]?.connected == true } ?? false
+            // A restored pane of another selected host waits for that host's own catalog.
+            let visibleHost = visibleKey?.deviceID ?? state.visibleSessionID.flatMap { id in
+                state.sessionBindings.first { $0.sessionID == id }?.identity.deviceID
+            }
+            let awaitsOtherHost = visibleKey == nil && visibleHost.map { $0 != deviceID && deviceLinks[$0] != nil } == true
             // A user-created empty Tab is waiting for a selection. Periodic catalog
             // updates must not fill it or jump to a previously opened first session.
             let shouldAutoOpen = !hasReconciledInitialListing || state.activeTab?.isImplicitBlank == true || state.visibleSessionID != nil
             hasReconciledInitialListing = true
-            if shouldAutoOpen, !visibleSessionIsLive, let firstSession = descriptors.first {
+            if shouldAutoOpen, !visibleSessionIsLive, !awaitsOtherHost,
+               let firstSession = descriptors.first(where: { $0.key.deviceID == deviceID }) {
                 state = try await workspaceStore.smartOpenSession(firstSession, gesture: .singleClick)
             }
             await applyWorkspaceState(state)
@@ -1658,34 +1806,35 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return requestID
     }
 
-    private func requestListing(for authenticated: AuthenticatedConnection) async {
-        guard listingRequestedEpoch != authenticated.connectionEpoch else { return }
+    private func requestListing(on device: DeviceLink) async {
+        guard let authenticated = device.connection, device.listingRequestedEpoch != authenticated.connectionEpoch else { return }
         let requestID: UInt32
         do { requestID = try allocateRequestID() }
         catch {
             lastConnectionError = String(describing: error)
             return
         }
-        listingRequestedEpoch = authenticated.connectionEpoch
-        listingSequence = 0
+        device.listingRequestedEpoch = authenticated.connectionEpoch
+        device.listingSequence = 0
         do {
-            let receipt = try await sessionLink.send(.list(requestID: requestID))
+            let receipt = try await device.link.send(.list(requestID: requestID))
             guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
         } catch {
-            listingRequestedEpoch = nil
-            connected = false
+            device.listingRequestedEpoch = nil
+            device.connected = false
             lastConnectionError = String(describing: error)
             updateSidebar(devices: cachedDevices)
         }
     }
 
     private func refreshMobileGrid(for key: SessionKey) async {
-        guard var runtime = sessions[key], runtime.hasMobile, runtime.mobileGridRequestID == nil else { return }
+        guard var runtime = sessions[key], runtime.hasMobile, runtime.mobileGridRequestID == nil,
+              let device = deviceLinks[key.deviceID] else { return }
         do {
             let requestID = try allocateRequestID()
             runtime.mobileGridRequestID = requestID
             sessions[key] = runtime
-            let receipt = try await sessionLink.send(.list(requestID: requestID))
+            let receipt = try await device.link.send(.list(requestID: requestID))
             guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
         } catch {
             sessions[key]?.mobileGridRequestID = nil
@@ -1693,39 +1842,85 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
     }
 
+    /// Dials one host on its own link. Other hosts' links are untouched.
     private func connect(configuration: ConnectionConfiguration) async throws {
+        let id = configuration.deviceID
+        let device: DeviceLink
+        if let existing = deviceLinks[id] { device = existing }
+        else {
+            guard let slot = acquireSlot() else {
+                throw SessionLinkFailure.transport("No free session link for another host")
+            }
+            device = DeviceLink(deviceID: id, slot: slot)
+            deviceLinks[id] = device
+        }
         resetPointerMotion()
-        listingRequestedEpoch = nil
-        listingSequence = 0
-        let authenticated = try await sessionLink.connect(
-            toAnyOf: configuration.dialRoutes,
-            deviceID: configuration.deviceID,
-            credential: CredentialHandle(configuration.token)
-        )
-        connection = authenticated
-        activeConnectionConfiguration = configuration
-        activeRoute = await sessionLink.activeEndpoint() ?? configuration.dialRoutes.first
+        device.connectGeneration += 1
+        let generation = device.connectGeneration
+        device.pendingConnects += 1
+        device.connected = false
+        device.listingRequestedEpoch = nil
+        device.listingSequence = 0
+        let authenticated: AuthenticatedConnection
+        do {
+            authenticated = try await device.link.connect(
+                toAnyOf: configuration.dialRoutes,
+                deviceID: id,
+                credential: CredentialHandle(configuration.token)
+            )
+        } catch {
+            device.pendingConnects -= 1
+            try await finishFailedConnect(device, generation: generation)
+            throw error
+        }
+        device.pendingConnects -= 1
+        // Deselected or redialed while authenticating: the newer intent owns this link.
+        if device.released {
+            if device.pendingConnects == 0 { await recycle(device.slot) }
+            throw CancellationError()
+        }
+        guard generation == device.connectGeneration else { throw CancellationError() }
+        device.connection = authenticated
+        device.configuration = configuration
+        device.activeRoute = await device.link.activeEndpoint() ?? configuration.dialRoutes.first
         Task { [weak self] in await self?.learnRoutes(for: configuration) }
-        configuredDeviceID = configuration.deviceID
-        configuredDeviceName = configuration.deviceName
-        connected = true
+        device.connected = true
         lastConnectionError = nil
         updateSidebar(devices: cachedDevices)
-        await deviceSessionLifecycle.markConnected(configuration.deviceID)
-        if !eventStreamClaimed {
-            let stream = try await sessionLink.eventStream()
-            eventStreamClaimed = true
-            eventStreamTask = Task { [weak self] in await self?.consume(stream) }
+        await deviceSessionLifecycle.markConnected(id)
+        if !device.slot.streamClaimed {
+            let stream = try await device.link.eventStream()
+            device.slot.streamClaimed = true
+            let slot = device.slot
+            slot.consumer = Task { [weak self] in await self?.consume(stream, on: slot) }
         }
-        await requestListing(for: authenticated)
+        await requestListing(on: device)
         await writeTelemetry()
+    }
+
+    /// A failed dial leaves no half-open host behind; the newest attempt decides when several overlap.
+    private func finishFailedConnect(_ device: DeviceLink, generation: Int) async throws {
+        if device.released {
+            if device.pendingConnects == 0 { await recycle(device.slot) }
+            throw CancellationError()
+        }
+        guard generation == device.connectGeneration else { throw CancellationError() }
+        device.connection = nil
+        device.connected = false
+        device.activeRoute = nil
+        guard deviceLinks[device.deviceID] === device else { return }
+        deviceLinks.removeValue(forKey: device.deviceID)
+        device.released = true
+        if device.pendingConnects == 0 { await recycle(device.slot) }
+        await deviceSessionLifecycle.markDisconnected(device.deviceID)
+        updateSidebar(devices: cachedDevices)
     }
 
     /// Learns routes the pairing QR could not carry (the daemon prints it before Tailscale is up): whoami on
     /// the live route lists the host's addresses, and identify must prove each one before it becomes a route.
     private func learnRoutes(for configuration: ConnectionConfiguration) async {
         guard let hostID = configuration.endpoint.pairingHostID,
-              let live = activeRoute,
+              let live = deviceLinks[configuration.deviceID]?.activeRoute,
               let identity = try? await hostIdentityProbe.whoami(at: live), identity.hostID == hostID,
               let known = cachedDevices.first(where: { $0.id == configuration.deviceID }) else { return }
         var learned: [ApprovedEndpoint] = []
@@ -1743,10 +1938,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                                    alternateEndpoints: current.alternateEndpoints + learned)
         do { try await deviceRepository.save(updated) } catch { return }
         cachedDevices = cachedDevices.map { $0.id == updated.id ? updated : $0 }
-        guard var active = activeConnectionConfiguration, active.deviceID == updated.id else { return }
+        guard let device = deviceLinks[updated.id], var active = device.configuration else { return }
         active.routes = updated.endpoints
-        activeConnectionConfiguration = active
-        await sessionLink.updateRoutes(updated.endpoints)
+        device.configuration = active
+        await device.link.updateRoutes(updated.endpoints)
     }
 
     private func prepareLocalDevice(in devices: [DeviceRecord]) async throws -> (devices: [DeviceRecord], token: String?) {
@@ -1832,47 +2027,64 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return LocalDaemonTokenDiscovery.valid(try await credentialVault.resolve(device.credential))
     }
 
-    private func consume(_ stream: any SessionEventStream) async {
+    /// One consumer per link. Each envelope is applied to the host the link currently serves; a
+    /// released host's late events are dropped, never applied to the host that reuses the link.
+    private func consume(_ stream: any SessionEventStream, on slot: LinkSlot) async {
         do {
             while !Task.isCancelled, let envelope = try await stream.next() {
-                await receive(envelope)
+                guard let device = deviceLinks[envelope.origin.deviceID], device.slot === slot else { continue }
+                await receive(envelope, on: device)
             }
+            // A finished stream is never handed to another host; its own host keeps its state.
+            if !Task.isCancelled { slot.dead = true }
+            return
         } catch {
             guard !Task.isCancelled else { return }
-            await sessionLink.disconnect()
-            connection = nil
-            connected = false
-            activeRoute = nil
-            subscriptionSnapshotTimeout?.cancel()
-            for key in sessions.keys {
-                sessions[key]?.subscribed = false
-                sessions[key]?.subscriptionPending = false
-                sessions[key]?.awaitingSnapshot = false
-                sessions[key]?.presenceKnown = false
-                applyGridOwnership(key)
-            }
-            subscribedSessionIDs = []
-            pendingInput.removeAll()
-            pendingInputBytes = 0
-            resetPointerMotion()
-            lastConnectionError = String(describing: error)
-            await deviceSessionLifecycle.markDisconnected()
-            updateSidebar(devices: cachedDevices)
-            await writeTelemetry()
+            slot.dead = true
+            guard let device = deviceLinks.values.first(where: { $0.slot === slot }) else { return }
+            await connectionLost(device, failure: error)
         }
     }
 
-    private func receive(_ envelope: SessionEventEnvelope) async {
+    /// The link's stream failed: that host is offline until it is selected again; others are untouched.
+    private func connectionLost(_ device: DeviceLink, failure: Error) async {
+        await device.link.disconnect()
+        deviceLinks.removeValue(forKey: device.deviceID)
+        device.released = true
+        device.connection = nil
+        device.connected = false
+        device.activeRoute = nil
+        subscriptionSnapshotTimeouts.removeValue(forKey: device.deviceID)?.cancel()
+        for key in sessions.keys where key.deviceID == device.deviceID {
+            sessions[key]?.subscribed = false
+            sessions[key]?.subscriptionPending = false
+            sessions[key]?.awaitingSnapshot = false
+            sessions[key]?.presenceKnown = false
+            applyGridOwnership(key)
+        }
+        subscribedSessionIDs = sessionOrder.compactMap { sessions[$0]?.subscribed == true ? $0.reference.rawValue : nil }
+        pendingInput.removeAll { $0.session.deviceID == device.deviceID }
+        pendingInputBytes = pendingInput.reduce(0) { $0 + $1.bytes.count } + pendingScrollWheelInput.reduce(0) { $0 + $1.bytes.count }
+        resetPointerMotion()
+        lastConnectionError = String(describing: failure)
+        await deviceSessionLifecycle.markDisconnected(device.deviceID)
+        updateSidebar(devices: cachedDevices)
+        await writeTelemetry()
+    }
+
+    private func receive(_ envelope: SessionEventEnvelope, on device: DeviceLink) async {
         // A reconnect's auth_ack precedes its authenticatedReady; record what that epoch negotiated.
-        if case let .control(.authAck(true, _, _, capabilities)) = envelope.event,
-           let current = connection, envelope.origin.linkInstanceID == current.linkInstanceID,
-           envelope.origin.deviceID == current.deviceID, envelope.origin.connectionEpoch >= current.connectionEpoch {
-            conversationCapabilities = (envelope.origin.connectionEpoch, Set(capabilities))
+        if case let .control(.authAck(ok, reason, launchers, capabilities)) = envelope.event,
+           device.connection.map({ envelope.origin.connectionEpoch >= $0.connectionEpoch }) ?? true {
+            if ok { device.conversationCapabilities = (envelope.origin.connectionEpoch, Set(capabilities)) }
+            device.launchers = ok ? launchers : []
+            lastConnectionError = ok ? nil : reason
+            await writeTelemetry()
+            return
         }
         if case let .connectionChanged(state) = envelope.event,
-           let current = connection,
-           envelope.origin.linkInstanceID == current.linkInstanceID,
-           envelope.origin.deviceID == current.deviceID {
+           let current = device.connection,
+           envelope.origin.linkInstanceID == current.linkInstanceID {
             switch state {
             case let .authenticatedReady(epoch):
                 if epoch != current.connectionEpoch,
@@ -1882,46 +2094,44 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     connectionEpoch: epoch
                    ) {
                     resetPointerMotion()
-                    connection = updated
-                    listingRequestedEpoch = nil
-                    listingSequence = 0
-                    rebindConversations()
+                    device.connection = updated
+                    device.listingRequestedEpoch = nil
+                    device.listingSequence = 0
+                    rebindConversations(on: device)
                 }
-                connected = true
-                activeRoute = await sessionLink.activeEndpoint() ?? activeRoute
-                await deviceSessionLifecycle.markConnected(envelope.origin.deviceID)
-                if let connection { await requestListing(for: connection) }
+                device.connected = true
+                device.activeRoute = await device.link.activeEndpoint() ?? device.activeRoute
+                await deviceSessionLifecycle.markConnected(device.deviceID)
+                await requestListing(on: device)
             case .disconnected, .failed:
                 resetPointerMotion()
-                connected = false
-                conversations.values.forEach { $0.connectionLost() }
-                activeRoute = nil
-                await deviceSessionLifecycle.markDisconnected()
+                device.connected = false
+                conversations.filter { $0.key.deviceID == device.deviceID }.values.forEach { $0.connectionLost() }
+                device.activeRoute = nil
+                await deviceSessionLifecycle.markDisconnected(device.deviceID)
             case .transportOpen, .authenticating:
-                if envelope.origin.connectionEpoch != current.connectionEpoch { connected = false }
+                if envelope.origin.connectionEpoch != current.connectionEpoch { device.connected = false }
             }
             updateSidebar(devices: cachedDevices)
             await writeTelemetry()
             return
         }
-        guard let connection, envelope.origin.belongs(to: connection) else { return }
+        guard let connection = device.connection, envelope.origin.belongs(to: connection) else { return }
         switch envelope.event {
         case .connectionChanged:
             break
         case let .failed(error):
             resetPointerMotion()
-            connected = false
-            conversations.values.forEach { $0.connectionLost() }
+            device.connected = false
+            conversations.filter { $0.key.deviceID == device.deviceID }.values.forEach { $0.connectionLost() }
             lastConnectionError = String(describing: error)
-            await deviceSessionLifecycle.markDisconnected()
+            await deviceSessionLifecycle.markDisconnected(device.deviceID)
             updateSidebar(devices: cachedDevices)
             await writeTelemetry()
         case let .control(control):
             switch control {
-            case let .authAck(ok, reason, launchers, _):
-                availableAgentLaunchers = ok ? launchers : []
-                lastConnectionError = ok ? nil : reason
-                await writeTelemetry()
+            case .authAck:
+                break
             case let .listing(listing): await applyListing(listing, origin: envelope.origin)
             case let .listDelta(delta): await applyListDelta(delta, origin: envelope.origin)
             case let .createAgentResult(result):
@@ -1982,17 +2192,20 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 }
                 await writeTelemetry()
             case .error(.unsupportedType, let reason):
-                if pendingCreateAgentRequests.isEmpty,
-                   pendingCloseSessionRequests.count == 1,
-                   let requestID = pendingCloseSessionRequests.keys.first {
-                    let session = pendingCloseSessionRequests[requestID]!.session
+                // The rejection answers this host's own pending request, never another host's.
+                let closes = pendingCloseSessionRequests.filter { $0.value.session.deviceID == device.deviceID }
+                let creates = pendingCreateAgentRequests.filter { $0.value.deviceID == device.deviceID }
+                if creates.isEmpty,
+                   closes.count == 1,
+                   let requestID = closes.keys.first {
+                    let session = closes[requestID]!.session
                     pendingCloseSessionRequests.removeValue(forKey: requestID)
                     cancelActionTimeout(requestID)
                     lastConnectionError = reason ?? "远端不支持关闭 Agent"
                     onAgentRemoteCloseUnsupported?(session)
-                } else if pendingCloseSessionRequests.isEmpty,
-                          pendingCreateAgentRequests.count == 1,
-                          let requestID = pendingCreateAgentRequests.keys.first {
+                } else if closes.isEmpty,
+                          creates.count == 1,
+                          let requestID = creates.keys.first {
                     pendingCreateAgentRequests.removeValue(forKey: requestID)
                     cancelActionTimeout(requestID)
                     let message = reason ?? "服务端不支持创建 Agent"
@@ -2007,7 +2220,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 await writeTelemetry()
             case let .inputAck(sequence, ok, reason):
                 lastInputAcknowledgement = (sequence, ok)
-                acknowledgeInput(sequence)
+                acknowledgeInput(sequence, on: device)
                 if !ok { lastConnectionError = "input_ack failed: \(reason?.rawValue ?? "unknown")" }
                 await writeTelemetry()
             case .level2Frame, .level2Heartbeat, .overlayFrame, .paneModeChanged, .conversationIgnored:
@@ -2052,9 +2265,9 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private func discardSessionRuntimes(_ keys: Set<SessionKey>) async {
         for key in keys {
-            if sessions[key]?.subscribed == true {
+            if sessions[key]?.subscribed == true, let device = deviceLinks[key.deviceID], device.connected {
                 do {
-                    let receipt = try await sessionLink.send(.unsubscribe(reference: key.reference))
+                    let receipt = try await device.link.send(.unsubscribe(reference: key.reference))
                     if !receipt.socketWritten { lastConnectionError = "unsubscribe was not written for \(key.reference.rawValue)" }
                 } catch {
                     lastConnectionError = String(describing: error)
@@ -2072,13 +2285,14 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         updateTerminalStage()
     }
 
+    /// A host's catalog replaces that host's sessions only; every other host's sessions stay.
     private func applyListing(_ listing: SessionListing, origin: SessionEventOrigin) async {
-        guard listing.isValid else { return }
-        let refreshedKey = sessions.first { $0.value.mobileGridRequestID == listing.requestID }?.key
+        guard listing.isValid, let device = deviceLinks[origin.deviceID] else { return }
+        let refreshedKey = sessions.first { $0.key.deviceID == origin.deviceID && $0.value.mobileGridRequestID == listing.requestID }?.key
         if let refreshedKey { sessions[refreshedKey]?.mobileGridRequestID = nil }
         // An explicit scan can legitimately retain its sequence when the grid matches the old catalog.
-        guard listing.sequence > listingSequence || (listing.sequence == listingSequence && refreshedKey != nil) else { return }
-        listingSequence = listing.sequence
+        guard listing.sequence > device.listingSequence || (listing.sequence == device.listingSequence && refreshedKey != nil) else { return }
+        device.listingSequence = listing.sequence
         var order: [SessionKey] = []
         for workspace in listing.workspaces {
             for record in workspace.sessions {
@@ -2091,13 +2305,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 if !order.contains(key) { order.append(key) }
             }
         }
-        let currentSessions = Set(order)
-        let removedSessions = Set(sessions.keys).subtracting(currentSessions)
+        let removedSessions = Set(sessions.keys.filter { $0.deviceID == origin.deviceID }).subtracting(order)
         await markCloseRequestsRemoved(removedSessions)
         await discardSessionRuntimes(removedSessions)
-        sessionOrder = order
-        sessionCount = order.count
-        await reconcileWorkspaceListing()
+        replaceSessionOrder(of: origin.deviceID, with: order)
+        sessionCount = sessionOrder.count
+        await reconcileWorkspaceListing(for: origin.deviceID)
         await resolveCreatedAgents(in: order)
         subscribedSessionIDs = sessionOrder.compactMap { sessions[$0]?.subscribed == true ? $0.reference.rawValue : nil }
         updateWorkspaceTitle(count: sessionCount)
@@ -2108,31 +2321,38 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func applyListDelta(_ delta: SessionListDelta, origin: SessionEventOrigin) async {
-        guard delta.isValid, delta.sequence > listingSequence else { return }
-        listingSequence = delta.sequence
+        guard delta.isValid, let device = deviceLinks[origin.deviceID], delta.sequence > device.listingSequence else { return }
+        device.listingSequence = delta.sequence
         let removed = Set(delta.removedReferences)
         let removedSessions = Set(removed.map { SessionKey(deviceID: origin.deviceID, reference: $0) })
-        sessionOrder.removeAll { $0.deviceID == origin.deviceID && removed.contains($0.reference) }
+        var order = sessionOrder.filter { $0.deviceID == origin.deviceID && !removed.contains($0.reference) }
+        replaceSessionOrder(of: origin.deviceID, with: order)
         await markCloseRequestsRemoved(removedSessions)
         await discardSessionRuntimes(removedSessions)
-        for record in delta.addedSessions + delta.changedSessions {
+        for record in delta.addedSessions + delta.changedSessions + delta.changedWorkspaces.flatMap(\.sessions) {
             let key = upsert(record, deviceID: origin.deviceID, origin: origin)
-            if !sessionOrder.contains(key) { sessionOrder.append(key) }
+            if !order.contains(key) { order.append(key) }
         }
-        for workspace in delta.changedWorkspaces {
-            for record in workspace.sessions {
-                let key = upsert(record, deviceID: origin.deviceID, origin: origin)
-                if !sessionOrder.contains(key) { sessionOrder.append(key) }
-            }
-        }
+        replaceSessionOrder(of: origin.deviceID, with: order)
         sessionCount = sessionOrder.count
-        await reconcileWorkspaceListing()
+        await reconcileWorkspaceListing(for: origin.deviceID)
         await resolveCreatedAgents(in: sessionOrder)
         updateWorkspaceTitle(count: sessionCount)
         scheduleSubscriptionUpdate()
         updateSidebar(devices: (try? await deviceRepository.listDevices()) ?? [])
         updateTerminalStage()
         await writeTelemetry()
+    }
+
+    /// Hosts keep their saved order in the sidebar; within a host, its catalog order.
+    private func replaceSessionOrder(of deviceID: DeviceID, with keys: [SessionKey]) {
+        var rank: [DeviceID: Int] = [:]
+        for (index, device) in cachedDevices.enumerated() where rank[device.id] == nil { rank[device.id] = index }
+        var grouped = Dictionary(grouping: sessionOrder.filter { $0.deviceID != deviceID }, by: \.deviceID)
+        grouped[deviceID] = keys
+        sessionOrder = grouped.keys.sorted {
+            (rank[$0] ?? .max, $0.rawValue) < (rank[$1] ?? .max, $1.rawValue)
+        }.flatMap { grouped[$0] ?? [] }
     }
 
     private func upsert(_ record: WireSessionRecord, deviceID: DeviceID, origin: SessionEventOrigin) -> SessionKey {
@@ -2178,9 +2398,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     // MARK: Structured conversations
 
-    /// GUI frames are used only when this epoch's auth_ack echoed both conversation capabilities.
-    private var conversationEnabled: Bool {
-        guard let connection, let negotiated = conversationCapabilities, negotiated.epoch == connection.connectionEpoch else { return false }
+    /// GUI frames are used only when this host's epoch auth_ack echoed both conversation capabilities.
+    private func conversationEnabled(on device: DeviceLink) -> Bool {
+        guard let connection = device.connection, let negotiated = device.conversationCapabilities,
+              negotiated.epoch == connection.connectionEpoch else { return false }
         return ConversationCapability.offered.allSatisfy(negotiated.values.contains)
     }
 
@@ -2194,24 +2415,26 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         return controller
     }
 
-    /// Retained managed-conversation panes get one windowed view each: visible panes first, then Tab order.
+    /// Retained managed-conversation panes get one windowed view each, up to eight per host
+    /// connection: visible panes first, then Tab order.
     private func synchronizeConversations() {
         var desired: [SessionKey] = []
-        if conversationEnabled, let connection {
-            let retained = retainedSessionIDs
-            let visible = visibleSessionKeys()
-            for key in visible + sessionOrder.filter({ !visible.contains($0) }) where key.deviceID == connection.deviceID {
-                guard desired.count < Self.maximumConversationViews, !desired.contains(key), let runtime = sessions[key],
-                      runtime.conversationCapable, retained.contains(runtime.descriptor.id) else { continue }
-                desired.append(key)
-            }
+        var perHost: [DeviceID: Int] = [:]
+        let retained = retainedSessionIDs
+        let visible = visibleSessionKeys()
+        for key in visible + sessionOrder.filter({ !visible.contains($0) }) {
+            guard let device = deviceLinks[key.deviceID], conversationEnabled(on: device),
+                  perHost[key.deviceID, default: 0] < Self.maximumConversationViews, !desired.contains(key), let runtime = sessions[key],
+                  runtime.conversationCapable, retained.contains(runtime.descriptor.id) else { continue }
+            desired.append(key)
+            perHost[key.deviceID, default: 0] += 1
         }
         for (key, controller) in conversations where !desired.contains(key) {
             controller.stop()
             conversations.removeValue(forKey: key)
         }
-        guard let connection else { return }
         for key in desired {
+            guard let device = deviceLinks[key.deviceID], let connection = device.connection else { continue }
             if let controller = conversations[key] {
                 controller.title = sessions[key]?.descriptor.name ?? controller.title
                 continue
@@ -2228,32 +2451,35 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 self.conversationDrafts[key, default: [:]][sid] = draft.text.isEmpty && draft.attachments.isEmpty && !draft.deliveryUncertain ? nil : draft
                 if self.conversationDrafts[key]?.isEmpty == true { self.conversationDrafts.removeValue(forKey: key) }
             }
+            // Every call goes to this pane's own host, on the epoch the controller is bound to.
             controller.upload = { [weak self, weak controller] file in
-                guard let self, let controller, self.connected, controller.controlReady,
-                      let token = self.activeConnectionConfiguration?.token else { throw ConversationUploadFailure("unavailable") }
+                guard let self, let controller, let device = self.deviceLinks[key.deviceID], device.connected, controller.controlReady,
+                      let token = device.configuration?.token else { throw ConversationUploadFailure("unavailable") }
                 let epoch = controller.connectionEpoch, sid = controller.ready?.sessionID
-                guard let route = await self.sessionLink.activeEndpoint(), self.connection?.connectionEpoch == epoch,
+                guard let route = await device.link.activeEndpoint(), self.deviceLinks[key.deviceID]?.connection?.connectionEpoch == epoch,
                       controller.ready?.sessionID == sid else { throw ConversationUploadFailure("stale_session") }
                 return try await self.conversationUploadClient.upload(file: file, route: route, token: token)
             }
             controller.exportDownload = { [weak self, weak controller] sid in
-                guard let self, let controller, self.connected, controller.ready?.sessionID == sid,
-                      let token = self.activeConnectionConfiguration?.token else { throw ConversationExportFailure("unavailable") }
+                guard let self, let controller, let device = self.deviceLinks[key.deviceID], device.connected, controller.ready?.sessionID == sid,
+                      let token = device.configuration?.token else { throw ConversationExportFailure("unavailable") }
                 let epoch = controller.connectionEpoch
-                guard let route = await self.sessionLink.activeEndpoint(), self.connection?.connectionEpoch == epoch,
+                guard let route = await device.link.activeEndpoint(), self.deviceLinks[key.deviceID]?.connection?.connectionEpoch == epoch,
                       controller.ready?.sessionID == sid else { throw ConversationExportFailure("stale_session") }
                 return try await self.conversationExportClient.download(reference: key.reference, sessionID: sid, route: route, token: token)
             }
             controller.send = { [weak self, weak controller] command in
-                guard let self, let controller, self.connected, self.connection?.connectionEpoch == controller.connectionEpoch else {
+                guard let self, let controller, let device = self.deviceLinks[key.deviceID], device.connected,
+                      device.connection?.connectionEpoch == controller.connectionEpoch else {
                     throw SessionLinkFailure.disconnected
                 }
-                let receipt = try await self.sessionLink.send(command)
+                let receipt = try await device.link.send(command)
                 guard receipt.socketWritten else { throw SessionLinkFailure.disconnected }
             }
             controller.fetch = { [weak self, weak controller] request in
-                guard let self, let controller, self.connection?.connectionEpoch == controller.connectionEpoch,
-                      let route = await self.sessionLink.activeEndpoint(), let token = self.activeConnectionConfiguration?.token else {
+                guard let self, let controller, let device = self.deviceLinks[key.deviceID],
+                      device.connection?.connectionEpoch == controller.connectionEpoch,
+                      let route = await device.link.activeEndpoint(), let token = device.configuration?.token else {
                     throw ConversationHistoryFailure("network")
                 }
                 return try await self.conversationHistoryClient.fetch(request, route: route, token: token)
@@ -2303,14 +2529,17 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         conversations[key]?.noteExplicitOpen(preferred: preferred)
     }
 
-    private func rebindConversations() {
-        guard let connection else { return }
-        guard conversationEnabled else {
-            conversations.values.forEach { $0.stop() }
-            conversations.removeAll()
+    private func rebindConversations(on device: DeviceLink) {
+        guard let connection = device.connection else { return }
+        let hosted = conversations.filter { $0.key.deviceID == device.deviceID }
+        guard conversationEnabled(on: device) else {
+            for (key, controller) in hosted {
+                controller.stop()
+                conversations.removeValue(forKey: key)
+            }
             return
         }
-        for controller in conversations.values { controller.rebind(to: connection.connectionEpoch) }
+        for controller in hosted.values { controller.rebind(to: connection.connectionEpoch) }
     }
 
     private func scheduleSubscriptionUpdate() {
@@ -2342,15 +2571,16 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func subscribeVisibleSessions() async {
-        guard let cleanupConnection = connection else { return }
         // A socket write is not a completed server subscription. There is only
-        // one initial snapshot in flight; intervening preview clicks replace the
-        // desired workspace instead of queuing obsolete server reflows.
-        guard !sessions.values.contains(where: { $0.awaitingSnapshot }) else { return }
+        // one initial snapshot in flight per host; intervening preview clicks replace the
+        // desired workspace instead of queuing obsolete server reflows. Each host's
+        // subscriptions go over that host's own link.
+        var waitingHosts = Set(sessions.filter { $0.value.awaitingSnapshot }.map(\.key.deviceID))
         // One reconciler owns all subscribe/unsubscribe ordering. The workspace
         // can advance while it is suspended; each pass reads the latest ownership.
-        for key in sessionOrder {
-            guard let runtime = sessions[key],
+        for key in sessionOrder where !waitingHosts.contains(key.deviceID) {
+            guard let device = deviceLinks[key.deviceID], let cleanupConnection = device.connection,
+                  let runtime = sessions[key],
                   pendingUnsubscriptions.contains(key) || !retainedSessionIDs.contains(runtime.descriptor.id) else { continue }
             pendingUnsubscriptions.remove(key)
             sessions[key]?.subscribed = false
@@ -2360,19 +2590,19 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
             sessions[key]?.mobileGridRequestID = nil
             if runtime.subscribed || runtime.subscriptionPending {
                 do {
-                    let receipt = try await sessionLink.send(.unsubscribe(reference: key.reference))
+                    let receipt = try await device.link.send(.unsubscribe(reference: key.reference))
                     if !receipt.socketWritten { lastConnectionError = "unsubscribe was not written for \(key.reference.rawValue)" }
                 } catch { lastConnectionError = String(describing: error) }
             }
-            guard connection == cleanupConnection else { return }
+            guard deviceLinks[key.deviceID]?.connection == cleanupConnection else { return }
         }
         let visible = visibleSessionKeys()
         let retained = retainedSessionIDs
         let candidates = visible + sessionOrder.filter { key in
             !visible.contains(key) && sessions[key].map { retained.contains($0.descriptor.id) } == true && terminalRegistry.view(for: key) != nil
         }
-        for key in candidates {
-            guard let connection, key.deviceID == connection.deviceID,
+        for key in candidates where !waitingHosts.contains(key.deviceID) {
+            guard let device = deviceLinks[key.deviceID], let connection = device.connection,
                   let runtime = sessions[key], !runtime.subscribed, !runtime.subscriptionPending,
                   let subscribingView = terminalRegistry.view(for: key) else { continue }
             do {
@@ -2385,8 +2615,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 sessions[key]?.presenceKnown = false
                 sessions[key]?.catalogBaselineGrid = runtime.descriptor.size
                 startSubscriptionSnapshotTimeout(for: key, connection: connection)
-                let receipt = try await sessionLink.send(.subscribe(reference: key.reference, size: initialGrid))
-                guard self.connection == connection,
+                let receipt = try await device.link.send(.subscribe(reference: key.reference, size: initialGrid))
+                guard deviceLinks[key.deviceID]?.connection == connection,
                       sessions[key]?.descriptor.freshness?.connectionEpoch == connection.connectionEpoch else { continue }
                 sessions[key]?.subscriptionPending = false
                 sessions[key]?.subscribed = receipt.socketWritten
@@ -2402,12 +2632,12 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 scheduleInputDrain()
                 guard receipt.socketWritten else { continue }
                 if !noResizeMode, let grid = sessions[key]?.desiredGrid { await resizeSessionIfNeeded(key, to: grid) }
-                if sessions[key]?.awaitingSnapshot == true { break }
+                if sessions[key]?.awaitingSnapshot == true { waitingHosts.insert(key.deviceID) }
             } catch {
-                guard self.connection == connection else { continue }
+                guard deviceLinks[key.deviceID]?.connection == connection else { continue }
                 sessions[key]?.subscriptionPending = false
                 sessions[key]?.awaitingSnapshot = false
-                subscriptionSnapshotTimeout?.cancel()
+                subscriptionSnapshotTimeouts.removeValue(forKey: key.deviceID)?.cancel()
                 scheduleInputDrain()
                 lastConnectionError = String(describing: error)
             }
@@ -2420,10 +2650,11 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func startSubscriptionSnapshotTimeout(for key: SessionKey, connection: AuthenticatedConnection) {
-        subscriptionSnapshotTimeout?.cancel()
-        subscriptionSnapshotTimeout = Task { @MainActor [weak self] in
+        subscriptionSnapshotTimeouts[key.deviceID]?.cancel()
+        subscriptionSnapshotTimeouts[key.deviceID] = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            guard let self, self.connection == connection, self.sessions[key]?.awaitingSnapshot == true else { return }
+            guard let self, self.deviceLinks[key.deviceID]?.connection == connection,
+                  self.sessions[key]?.awaitingSnapshot == true else { return }
             self.sessions[key]?.awaitingSnapshot = false
             self.pendingUnsubscriptions.insert(key)
             self.lastConnectionError = "Timed out waiting for the session snapshot."
@@ -2442,8 +2673,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
               runtime.lastAppliedReceiveOrdinal < origin.receiveOrdinal else { return }
         if case .snapshot = frame, runtime.awaitingSnapshot {
             runtime.awaitingSnapshot = false
-            subscriptionSnapshotTimeout?.cancel()
-            subscriptionSnapshotTimeout = nil
+            subscriptionSnapshotTimeouts.removeValue(forKey: origin.deviceID)?.cancel()
             subscriptionUpdateRequested = true
         }
         runtime.lastAppliedReceiveOrdinal = origin.receiveOrdinal
@@ -2486,7 +2716,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     private func resizeSessionIfNeeded(_ key: SessionKey, to grid: GridSize, force: Bool = false, relayout: Bool = false) async {
         guard !noResizeMode, layoutPreview == nil,
-              let connection, key.deviceID == connection.deviceID,
+              let device = deviceLinks[key.deviceID], let connection = device.connection,
               var runtime = sessions[key], runtime.subscribed, runtime.presenceKnown, !runtime.followsRemoteGrid,
               (force || runtime.requestedGrid != grid),
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id) else { return }
@@ -2500,18 +2730,18 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 // A same-size resize never reaches the program: the server skips it and the kernel raises SIGWINCH
                 // only on a real change. Step one column away first so the PTY settles on `grid` with a fresh layout.
                 let nudge = GridSize(rows: grid.rows, columns: grid.columns > 2 ? grid.columns - 1 : grid.columns + 1)
-                _ = try await sessionLink.send(.resize(reference: key.reference, size: nudge))
+                _ = try await device.link.send(.resize(reference: key.reference, size: nudge))
             }
-            guard self.connection == connection, sessions[key]?.presenceKnown == true,
+            guard deviceLinks[key.deviceID]?.connection == connection, sessions[key]?.presenceKnown == true,
                   sessions[key]?.followsRemoteGrid == false else { return }
-            let receipt = try await sessionLink.send(.resize(reference: key.reference, size: grid))
-            guard self.connection == connection else { return }
+            let receipt = try await device.link.send(.resize(reference: key.reference, size: grid))
+            guard deviceLinks[key.deviceID]?.connection == connection else { return }
             guard receipt.socketWritten else {
                 if sessions[key]?.requestedGrid == grid { sessions[key]?.requestedGrid = previous }
                 return
             }
         } catch {
-            guard self.connection == connection else { return }
+            guard deviceLinks[key.deviceID]?.connection == connection else { return }
             if sessions[key]?.requestedGrid == grid { sessions[key]?.requestedGrid = previous }
             lastConnectionError = String(describing: error)
         }
@@ -2534,9 +2764,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func scrollRemoteHistory(source: TerminalView, lines: Int) {
-        guard !noResizeMode, lines != 0, let connection,
-              let key = terminalRegistry.key(for: source), key.deviceID == connection.deviceID,
-              let runtime = sessions[key], connected,
+        guard !noResizeMode, lines != 0,
+              let key = terminalRegistry.key(for: source),
+              let device = deviceLinks[key.deviceID], let connection = device.connection, device.connected,
+              let runtime = sessions[key],
               runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden else { return }
         lastPointerMotion = nil
@@ -2554,9 +2785,10 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
 
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let isScrollWheelEvent = Self.isPointerScrollEvent(for: source) || Self.isMouseWheelReport(data)
-        guard !noResizeMode, !data.isEmpty, let connection,
-              let key = terminalRegistry.key(for: source), key.deviceID == connection.deviceID,
-              let runtime = sessions[key], connected,
+        guard !noResizeMode, !data.isEmpty,
+              let key = terminalRegistry.key(for: source),
+              let device = deviceLinks[key.deviceID], let connection = device.connection, device.connected,
+              let runtime = sessions[key],
               runtime.descriptor.freshness?.connectionEpoch == connection.connectionEpoch,
               terminalStageView.visibleSessionIDs.contains(runtime.descriptor.id), !source.isHidden,
               isScrollWheelEvent || source.window?.firstResponder === source else { return }
@@ -2650,12 +2882,13 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         lastPointerMotion = nil
         pointerMotionGate = nil
         pointerMotionGateGeneration += 1
-        highestAcknowledgedInputSequence = 0
+        for device in deviceLinks.values { device.highestAcknowledgedInputSequence = 0 }
     }
 
-    private func acknowledgeInput(_ sequence: UInt32) {
-        highestAcknowledgedInputSequence = max(highestAcknowledgedInputSequence, sequence)
-        guard case let .sent(motionSequence, sentAt) = pointerMotionGate, sequence >= motionSequence else { return }
+    private func acknowledgeInput(_ sequence: UInt32, on device: DeviceLink) {
+        device.highestAcknowledgedInputSequence = max(device.highestAcknowledgedInputSequence, sequence)
+        guard case let .sent(motionHost, motionSequence, sentAt) = pointerMotionGate,
+              motionHost == device.deviceID, sequence >= motionSequence else { return }
         let elapsed = ContinuousClock.now - sentAt
         let milliseconds = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
         pointerMotionStatistics.maximumAckMilliseconds = max(pointerMotionStatistics.maximumAckMilliseconds, milliseconds)
@@ -2749,15 +2982,18 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     private func drainInput() async {
         defer { drainingInput = false }
         while let input = pendingInput.first {
-            if input.connection == connection, connected,
+            // Each input goes to its own host's link, in the order it was typed.
+            let device = deviceLinks[input.session.deviceID]
+            let current = device?.connection == input.connection
+            if current, device?.connected == true,
                let runtime = sessions[input.session], retainedSessionIDs.contains(runtime.descriptor.id),
                !runtime.subscribed || runtime.subscriptionPending { return }
             pointerMotionStatistics.maximumQueuedInputs = max(pointerMotionStatistics.maximumQueuedInputs, pendingInput.count)
             pendingInput.removeFirst()
             pendingInputBytes -= input.bytes.count
-            guard input.connection == connection, sessions[input.session]?.subscribed == true else {
+            guard current, let device, sessions[input.session]?.subscribed == true else {
                 if input.isPointerMotion {
-                    if input.connection == connection, case .queued = pointerMotionGate {
+                    if current, case .queued = pointerMotionGate {
                         pointerMotionGate = nil
                         pumpPointerMotion()
                     }
@@ -2768,7 +3004,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 continue
             }
             if let delta = input.remoteScrollDelta {
-                do { _ = try await sessionLink.send(.scrollWheel(reference: input.session.reference, delta: delta)) }
+                do { _ = try await device.link.send(.scrollWheel(reference: input.session.reference, delta: delta)) }
                 catch {
                     lastConnectionError = String(describing: error)
                     showToast("终端历史滚动失败：\(error)", kind: .error)
@@ -2784,7 +3020,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                     wheelBytes.append(next.bytes)
                     wheelReportCount += 1
                 }
-                do { _ = try await inputRouter.routeBytes(wheelBytes, to: input.session) }
+                do { _ = try await device.inputRouter.routeBytes(wheelBytes, to: input.session) }
                 catch {
                     lastConnectionError = String(describing: error)
                     showToast("终端输入发送失败：\(error)", kind: .error)
@@ -2793,22 +3029,22 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 let generation = pointerMotionGateGeneration
                 let sentAt = ContinuousClock.now
                 do {
-                    let sequence = try await inputRouter.routeBytes(input.bytes, to: input.session)
+                    let sequence = try await device.inputRouter.routeBytes(input.bytes, to: input.session)
                     pointerMotionStatistics.sent += 1
-                    if input.connection == connection, generation == pointerMotionGateGeneration,
+                    if device.connection == input.connection, generation == pointerMotionGateGeneration,
                        case .queued = pointerMotionGate {
                         // The ack can overtake this resumption; then the gate is already clear.
-                        if highestAcknowledgedInputSequence >= sequence { pointerMotionGate = nil; pumpPointerMotion() }
-                        else { pointerMotionGate = .sent(sequence, sentAt) }
+                        if device.highestAcknowledgedInputSequence >= sequence { pointerMotionGate = nil; pumpPointerMotion() }
+                        else { pointerMotionGate = .sent(device.deviceID, sequence, sentAt) }
                     }
                 } catch {
-                    if input.connection == connection, generation == pointerMotionGateGeneration {
+                    if device.connection == input.connection, generation == pointerMotionGateGeneration {
                         resetPointerMotion()
                         lastConnectionError = String(describing: error)
                     }
                 }
             } else {
-                do { _ = try await inputRouter.routeBytes(input.bytes, to: input.session) }
+                do { _ = try await device.inputRouter.routeBytes(input.bytes, to: input.session) }
                 catch {
                     lastConnectionError = String(describing: error)
                     showToast("终端输入发送失败：\(error)", kind: .error)
@@ -2842,18 +3078,21 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 guard key.deviceID == device.id, let runtime = sessions[key] else { return nil }
                 return CorralSidebarSession(id: uiSessionID(for: runtime.descriptor.id), name: runtime.descriptor.name)
             }
-            let isOnline = connected && configuredDeviceID == device.id
+            let isOnline = deviceLinks[device.id]?.connected == true
             return CorralSidebarDevice(id: id, name: device.name, sessions: deviceSessions, isOnline: isOnline)
         }
-        if let configuredDeviceID, !devices.contains(where: { $0.id == configuredDeviceID }),
-           !hasDeviceSelectionFilter || selectedDeviceIDs.contains(configuredDeviceID) {
-            let id = sidebarDeviceIDs[configuredDeviceID] ?? UUID()
-            sidebarDeviceIDs[configuredDeviceID] = id
+        // A host dialed without a saved record (an explicit endpoint).
+        for device in deviceLinks.values.sorted(by: { $0.deviceID.rawValue < $1.deviceID.rawValue })
+        where !devices.contains(where: { $0.id == device.deviceID })
+            && (!hasDeviceSelectionFilter || selectedDeviceIDs.contains(device.deviceID)) {
+            let id = sidebarDeviceIDs[device.deviceID] ?? UUID()
+            sidebarDeviceIDs[device.deviceID] = id
             let deviceSessions = sessionOrder.compactMap { key -> CorralSidebarSession? in
-                guard key.deviceID == configuredDeviceID, let runtime = sessions[key] else { return nil }
+                guard key.deviceID == device.deviceID, let runtime = sessions[key] else { return nil }
                 return CorralSidebarSession(id: uiSessionID(for: runtime.descriptor.id), name: runtime.descriptor.name)
             }
-            sidebarDevices.append(CorralSidebarDevice(id: id, name: configuredDeviceName, sessions: deviceSessions, isOnline: connected))
+            sidebarDevices.append(CorralSidebarDevice(id: id, name: device.configuration?.deviceName ?? "Development endpoint",
+                                                      sessions: deviceSessions, isOnline: device.connected))
         }
         workspaceView.sidebar.setDeviceMetadata(sidebarDevices)
 
@@ -2881,7 +3120,8 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
                 name: descriptor.name,
                 status: statusIndicator(for: descriptor),
                 provider: descriptor.provider,
-                deviceName: devices.first(where: { $0.id == descriptor.key.deviceID })?.name ?? (descriptor.key.deviceID == configuredDeviceID ? configuredDeviceName : nil),
+                deviceName: devices.first(where: { $0.id == descriptor.key.deviceID })?.name
+                    ?? deviceLinks[descriptor.key.deviceID]?.configuration?.deviceName,
                 spaceID: spaceID,
                 isFavorite: workspaceState.favorites.contains(favoriteKey(for: descriptor)),
                 isOpen: isOpen,
@@ -2898,6 +3138,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
         }
         workspaceView.sidebar.selectSpace(id: selectedSidebarSpaceID)
         synchronizeSidebarSelectionIfNeeded()
+        publishReadyDevices()
     }
 
     private func synchronizeSidebarSelectionIfNeeded() {
@@ -2974,13 +3215,7 @@ public final class CorralApplicationCoordinator: @preconcurrency TerminalViewDel
     }
 
     private func disconnectSessions(on deviceID: DeviceID) async throws {
-        guard connection?.deviceID == deviceID else { return }
-        await sessionLink.disconnect()
-        connection = nil
-        connected = false
-        await deviceSessionLifecycle.markDisconnected()
-        updateSidebar(devices: cachedDevices)
-        await writeTelemetry()
+        await releaseDeviceLink(deviceID)
     }
 
     private func removeSessions(on deviceID: DeviceID) async throws {
@@ -3048,7 +3283,7 @@ actor SessionLinkInputRouter {
 
 public actor CoordinatorDeviceSessionLifecycle: DeviceSessionLifecycle {
     private let sessionLink: any SessionLinkProtocol
-    private var connectedDeviceID: DeviceID?
+    private var connectedDeviceIDs = Set<DeviceID>()
     private var disconnectAction: (@Sendable (DeviceID) async throws -> Void)?
     private var removeAction: (@Sendable (DeviceID) async throws -> Void)?
 
@@ -3062,14 +3297,14 @@ public actor CoordinatorDeviceSessionLifecycle: DeviceSessionLifecycle {
         removeAction = remove
     }
 
-    func markConnected(_ deviceID: DeviceID) { connectedDeviceID = deviceID }
-    func markDisconnected() { connectedDeviceID = nil }
+    func markConnected(_ deviceID: DeviceID) { connectedDeviceIDs.insert(deviceID) }
+    func markDisconnected(_ deviceID: DeviceID) { connectedDeviceIDs.remove(deviceID) }
 
     public func disconnectSessions(on deviceID: DeviceID) async throws {
-        guard connectedDeviceID == deviceID else { return }
+        guard connectedDeviceIDs.contains(deviceID) else { return }
         if let disconnectAction { try await disconnectAction(deviceID) }
         else { await sessionLink.disconnect() }
-        connectedDeviceID = nil
+        connectedDeviceIDs.remove(deviceID)
     }
 
     public func removeSessions(on deviceID: DeviceID) async throws {

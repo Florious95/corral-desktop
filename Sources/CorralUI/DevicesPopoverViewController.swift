@@ -12,8 +12,8 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     public private(set) var selectedDeviceIDs = Set<DeviceID>()
     private var selectionInitialized = false
     public private(set) var readyDeviceIDs = Set<DeviceID>()
-    /// The route the connected device currently runs over; its chip is lit.
-    public private(set) var activeRoute: ApprovedEndpoint?
+    /// The route each connected device currently runs over; that chip is lit on its row.
+    public private(set) var activeRoutes: [DeviceID: ApprovedEndpoint] = [:]
     public var onDevicesChanged: (([DeviceRecord]) -> Void)?
     public var onSelectionChanged: ((Set<DeviceID>) -> Void)?
     public var onAddDevice: (() -> Void)?
@@ -164,7 +164,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
             deleting: deletionInProgressDeviceID == record.id,
             selected: selectedDeviceIDs.contains(record.id),
             online: readyDeviceIDs.contains(record.id),
-            activeRoute: readyDeviceIDs.contains(record.id) ? activeRoute : nil
+            activeRoute: activeRoutes[record.id]
         )
         rowView.nameField.delegate = self
         rowView.onSelection = { [weak self] id, selected in self?.setDevice(id, selected: selected) }
@@ -222,7 +222,7 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
         do {
             try await repository.delete(id: id)
             devices.removeAll { $0.id == id }
-            selectedDeviceIDs.remove(id); readyDeviceIDs.remove(id)
+            selectedDeviceIDs.remove(id); readyDeviceIDs.remove(id); activeRoutes.removeValue(forKey: id)
             deletionConfirmationDeviceID = nil
             deletionInProgressDeviceID = nil
             tableView.reloadData()
@@ -313,8 +313,16 @@ public final class DevicesPopoverViewController: NSViewController, NSTableViewDa
     }
 
     public func setReadyDevices(_ ids: Set<DeviceID>, activeRoute: ApprovedEndpoint? = nil) {
-        readyDeviceIDs = ids.intersection(Set(devices.map(\.id)))
-        self.activeRoute = activeRoute
+        setReadyDevices(ids, activeRoutes: Dictionary(uniqueKeysWithValues: activeRoute.map { route in ids.map { ($0, route) } } ?? []))
+    }
+
+    /// Every host reports its own state; rows reload only when one actually changed.
+    public func setReadyDevices(_ ids: Set<DeviceID>, activeRoutes: [DeviceID: ApprovedEndpoint]) {
+        let ready = ids.intersection(Set(devices.map(\.id)))
+        let routes = activeRoutes.filter { ready.contains($0.key) }
+        guard ready != readyDeviceIDs || routes != self.activeRoutes else { return }
+        readyDeviceIDs = ready
+        self.activeRoutes = routes
         tableView.reloadData(); updateSelectionSummary()
     }
 

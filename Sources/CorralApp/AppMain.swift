@@ -171,7 +171,8 @@ final class CorralAppDelegate: NSObject, NSApplicationDelegate {
                 initialWorkspaceState: await workspaceStore.snapshot(),
                 initialUserPreferences: await preferencesStore.snapshot(),
                 promptDefaults: promptDefaults,
-                environment: environment
+                environment: environment,
+                makeSessionLink: { URLSessionSessionLink(codec: ProtocolV1Codec()) }
             )
             self.coordinator = coordinator
             if background {
