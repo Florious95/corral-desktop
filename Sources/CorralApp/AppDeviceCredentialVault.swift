@@ -22,18 +22,11 @@ struct SystemKeychainCredentialStorage: KeychainCredentialStorage {
     private let service = CorralAppIdentity.bundleIdentifier
 
     func store(_ secret: String, for handle: CredentialHandle) async throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: handle.rawValue
-        ]
+        let query = noUIQuery(for: handle)
         let attributes: [String: Any] = [kSecValueData as String: Data(secret.utf8)]
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        let noUIQuery = query.merging([kSecUseAuthenticationContext as String: context]) { _, new in new }
-        let status = SecItemAdd(noUIQuery.merging(attributes) { _, new in new } as CFDictionary, nil)
+        let status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
         if status == errSecDuplicateItem {
-            let updateStatus = SecItemUpdate(noUIQuery as CFDictionary, attributes as CFDictionary)
+            let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
             guard updateStatus == errSecSuccess else { throw KeychainCredentialError(status: updateStatus) }
         } else if status != errSecSuccess {
             throw KeychainCredentialError(status: status)
@@ -41,16 +34,10 @@ struct SystemKeychainCredentialStorage: KeychainCredentialStorage {
     }
 
     func resolve(_ handle: CredentialHandle) async throws -> String? {
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: handle.rawValue,
+        let query = noUIQuery(for: handle, extra: [
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationContext as String: context
-        ]
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ])
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -62,18 +49,27 @@ struct SystemKeychainCredentialStorage: KeychainCredentialStorage {
     }
 
     func delete(_ handle: CredentialHandle) async throws {
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: handle.rawValue,
-            kSecUseAuthenticationContext as String: context
-        ]
-        let status = SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(noUIQuery(for: handle) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainCredentialError(status: status)
         }
+    }
+
+    /// `interactionNotAllowed` does not suppress the classic Keychain ACL dialog.
+    /// `kSecUseAuthenticationUIFail` makes that dialog a silent error so the caller
+    /// can use the 0600 file instead. An ad-hoc signature cannot keep Always Allow.
+    private func noUIQuery(for handle: CredentialHandle, extra: [String: Any] = [:]) -> [String: Any] {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: handle.rawValue,
+            kSecUseAuthenticationContext as String: context,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
+        ]
+        query.merge(extra) { _, new in new }
+        return query
     }
 }
 
