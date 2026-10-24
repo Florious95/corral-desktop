@@ -282,7 +282,7 @@ final class CorralAcceptanceDriver {
                   let anchor = command["anchor"] as? String,
                   let descriptor = coordinator.sessionDescriptor(referenceID: anchor) else { throw Failure.invalidCommand }
             _ = try await coordinator.createAgent(workspace: descriptor.workingDirectory, anchorReference: descriptor.key.reference,
-                                                  provider: provider, name: name, bypass: false)
+                                                  provider: provider, name: name, bypass: false, deviceID: descriptor.key.deviceID)
         case "close-agent-dialog":
             // The sidebar row's real "关闭 agent-cli" menu item, as a right-click would offer it.
             guard let session = command["session"] as? String,
