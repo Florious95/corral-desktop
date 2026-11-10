@@ -107,6 +107,22 @@ final class RuntimeBundlePolicyTests: XCTestCase {
         XCTAssertTrue(pathLine?.contains("/usr/local/bin") == true)
     }
 
+    /// A valid hash-addressed bundle must also carry the Claude activity channel;
+    /// static ✳ titles cannot distinguish a busy Claude session from an idle one.
+    func testRuntimeIncludesClaudeSessionRegistryCapability() throws {
+        let runtime = appBundleURL()
+            .appendingPathComponent("Contents/Resources/Runtime", isDirectory: true)
+        try BundledRuntime.verify(runtime)
+        let capability = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: runtime.appendingPathComponent("core-capability.json"))
+            ) as? [String: Any]
+        )
+        let sources = try XCTUnwrap(capability["sources"] as? [String: String])
+        XCTAssertNotNil(sources["src/claude_activity.rs"], "Bundled nodeprobe must read Claude's session registry")
+        XCTAssertNotNil(sources["tests/claude_registry.rs"], "The accepted capability must include registry regression coverage")
+    }
+
     private func appBundleURL() -> URL {
         if let raw = ProcessInfo.processInfo.environment["CORRAL_NATIVE_APP_BUNDLE"], !raw.isEmpty {
             return URL(fileURLWithPath: raw).standardizedFileURL
